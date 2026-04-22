@@ -169,6 +169,79 @@ class SessionMessage {
   );
 }
 
+class SessionActivityChange {
+  const SessionActivityChange({
+    required this.path,
+    required this.kind,
+    required this.diff,
+    this.movePath,
+  });
+
+  final String path;
+  final String kind;
+  final String diff;
+  final String? movePath;
+
+  factory SessionActivityChange.fromJson(Map<String, dynamic> json) =>
+      SessionActivityChange(
+        path: _stringValue(json['path']),
+        kind: _stringValue(json['kind']),
+        diff: _stringValue(json['diff']),
+        movePath: _stringOrNull(json['movePath']),
+      );
+}
+
+class SessionActivity {
+  const SessionActivity({
+    required this.id,
+    required this.type,
+    required this.createdAt,
+    required this.status,
+    required this.turnId,
+    required this.command,
+    required this.cwd,
+    required this.output,
+    required this.exitCode,
+    required this.durationMs,
+    required this.changes,
+  });
+
+  final String id;
+  final String type;
+  final DateTime createdAt;
+  final String status;
+  final String? turnId;
+  final String? command;
+  final String? cwd;
+  final String? output;
+  final int? exitCode;
+  final int? durationMs;
+  final List<SessionActivityChange> changes;
+
+  bool get isCommand => type == 'command';
+  bool get isFileChange => type == 'file_change';
+
+  factory SessionActivity.fromJson(Map<String, dynamic> json) =>
+      SessionActivity(
+        id: _stringValue(json['id']),
+        type: _stringValue(json['type']),
+        createdAt: _dateValue(json['createdAt']),
+        status: _stringValue(json['status']),
+        turnId: _stringOrNull(json['turnId']),
+        command: _stringOrNull(json['command']),
+        cwd: _stringOrNull(json['cwd']),
+        output: _stringOrNull(json['output']),
+        exitCode: _intOrNull(json['exitCode']),
+        durationMs: _intOrNull(json['durationMs']),
+        changes: (json['changes'] as List<dynamic>? ?? [])
+            .map(
+              (item) =>
+                  SessionActivityChange.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(),
+      );
+}
+
 class PendingAction {
   const PendingAction({
     required this.id,
@@ -215,17 +288,22 @@ class SessionLog {
   const SessionLog({
     required this.session,
     required this.messages,
+    required this.activities,
     required this.pendingAction,
   });
 
   final SessionSummary session;
   final List<SessionMessage> messages;
+  final List<SessionActivity> activities;
   final PendingAction? pendingAction;
 
   factory SessionLog.fromJson(Map<String, dynamic> json) => SessionLog(
     session: SessionSummary.fromJson(json['session'] as Map<String, dynamic>),
     messages: (json['messages'] as List<dynamic>? ?? [])
         .map((item) => SessionMessage.fromJson(item as Map<String, dynamic>))
+        .toList(),
+    activities: (json['activities'] as List<dynamic>? ?? [])
+        .map((item) => SessionActivity.fromJson(item as Map<String, dynamic>))
         .toList(),
     pendingAction: json['pendingAction'] == null
         ? null
@@ -267,6 +345,7 @@ class LiveEvent {
     this.actionId,
     this.message,
     this.messageItem,
+    this.activity,
   });
 
   final String type;
@@ -278,6 +357,7 @@ class LiveEvent {
   final String? actionId;
   final String? message;
   final SessionMessage? messageItem;
+  final SessionActivity? activity;
 
   factory LiveEvent.fromJson(Map<String, dynamic> json) => LiveEvent(
     type: _stringValue(json['type']),
@@ -293,10 +373,18 @@ class LiveEvent {
     messageItem: json['messageItem'] == null
         ? null
         : SessionMessage.fromJson(json['messageItem'] as Map<String, dynamic>),
+    activity: json['activity'] == null
+        ? null
+        : SessionActivity.fromJson(json['activity'] as Map<String, dynamic>),
   );
 }
 
 String _stringValue(Object? value) => value is String ? value : '';
+
+String? _stringOrNull(Object? value) {
+  final normalized = _stringValue(value);
+  return normalized.isEmpty ? null : normalized;
+}
 
 int _intValue(Object? value) {
   if (value is int) {
@@ -306,6 +394,16 @@ int _intValue(Object? value) {
     return value.toInt();
   }
   return 0;
+}
+
+int? _intOrNull(Object? value) {
+  if (value is int) {
+    return value;
+  }
+  if (value is num) {
+    return value.toInt();
+  }
+  return null;
 }
 
 bool _boolValue(Object? value) => value == true;

@@ -25,8 +25,9 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 
 - [ ] Show account/auth state from `account/read`.
 - [ ] Show model choices from `model/list`.
-- [ ] Expose per-session runtime settings such as model, sandbox mode, and approval policy.
-- [ ] Add typed activity cards for command execution, file edits, review mode, and reconnecting.
+- [x] Expose per-session runtime settings such as model, sandbox mode, and approval policy.
+- [x] Add typed activity cards for command execution and file edits.
+- [ ] Add activity cards for review mode and reconnecting.
 - [ ] Add a lightweight file browser using `fs/readDirectory`, `fs/readFile`, and `fs/getMetadata`.
 - [ ] Add quick shell utilities with `thread/shellCommand` or `command/exec`.
 - [ ] Add Git context cards on the host and session screens.

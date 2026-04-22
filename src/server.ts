@@ -9,6 +9,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type {
   ActiveTurnState,
   LiveEvent,
+  SessionActivity,
   NodeConfig,
   PendingAction,
   PendingActionRecord,
@@ -19,6 +20,14 @@ import type {
   TurnRecord,
   WorkspaceSummary,
 } from "./types.js";
+import {
+  appendCommandActivityOutput,
+  buildActivityFromThreadItem,
+  buildFileChangeChanges,
+  extractSessionActivities,
+  mergeActivity,
+  mergeSessionActivities,
+} from "./activity.js";
 import { CodexBridge } from "./codex-client.js";
 import { loadRolloutLog, loadSessionRuntime } from "./history.js";
 
@@ -38,6 +47,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const socketsBySession = new Map<string, Set<WebSocket>>();
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, PendingActionRecord>();
+  const liveActivities = new Map<string, Map<string, SessionActivity>>();
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
   let codexVersion = "unknown";
 
@@ -77,11 +87,78 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return;
     }
 
+    if (method === "item/started" || method === "item/completed") {
+      const item = (params as any)?.item;
+      const turnId = asString((params as any)?.turnId);
+      if (item && typeof item === "object") {
+        const activity = buildActivityFromThreadItem(item as any, {
+          turnId,
+          createdAt: Date.now(),
+        });
+        if (activity) {
+          const next = upsertLiveActivity(liveActivities, sessionId, activity);
+          broadcast(socketsBySession, sessionId, {
+            type: "activity_updated",
+            sessionId,
+            turnId: turnId || undefined,
+            activity: next,
+          });
+        }
+      }
+      return;
+    }
+
+    if (method === "item/commandExecution/outputDelta") {
+      const delta = asString((params as any)?.delta);
+      const itemId = asString((params as any)?.itemId);
+      const turnId = asString((params as any)?.turnId);
+      if (!delta || !itemId) {
+        return;
+      }
+
+      const next = updateLiveCommandActivity(liveActivities, sessionId, itemId, delta);
+      if (next) {
+        broadcast(socketsBySession, sessionId, {
+          type: "activity_updated",
+          sessionId,
+          turnId: turnId || undefined,
+          activity: next,
+        });
+      }
+      return;
+    }
+
+    if (method === "item/fileChange/patchUpdated") {
+      const itemId = asString((params as any)?.itemId);
+      const turnId = asString((params as any)?.turnId);
+      if (!itemId) {
+        return;
+      }
+
+      const next = updateLiveFileChangeActivity(
+        liveActivities,
+        sessionId,
+        itemId,
+        turnId,
+        (params as any)?.changes,
+      );
+      if (next) {
+        broadcast(socketsBySession, sessionId, {
+          type: "activity_updated",
+          sessionId,
+          turnId: turnId || undefined,
+          activity: next,
+        });
+      }
+      return;
+    }
+
     if (method === "turn/completed") {
       const turn = (params as any)?.turn;
       const turnId = asString(turn?.id);
       if (turnId) {
         activeTurns.delete(sessionId);
+        liveActivities.delete(sessionId);
         clearActionsForSession(pendingActions, socketsBySession, sessionId);
         broadcast(socketsBySession, sessionId, {
           type: "turn_completed",
@@ -167,8 +244,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   app.get("/api/sessions/:sessionId/log", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
-    const session = await readSession(bridge, sessionId, false);
+    const session = await readSessionForLog(bridge, sessionId);
     const log = await loadRolloutLog(sessionId, session.path, bridge.codexHome);
+    const activities = mergeSessionActivities(
+      extractSessionActivities(session),
+      liveActivities.get(sessionId)?.values() || [],
+    );
     runtimeCache.set(session.id, {
       threadUpdatedAt: session.updatedAt,
       runtime: log.runtime,
@@ -176,6 +257,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     response.json({
       session: mapSession(session, log.runtime),
       messages: log.messages,
+      activities,
       pendingAction: findPendingActionForSession(pendingActions, sessionId),
     });
   }));
@@ -495,6 +577,18 @@ async function readSession(
   return result.thread as ThreadRecord;
 }
 
+async function readSessionForLog(bridge: CodexBridge, sessionId: string): Promise<ThreadRecord> {
+  try {
+    return await readSession(bridge, sessionId, true);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("includeTurns is unavailable before first user message")) {
+      return readSession(bridge, sessionId, false);
+    }
+    throw error;
+  }
+}
+
 async function loadRunState(
   bridge: CodexBridge,
   sessionId: string,
@@ -534,6 +628,66 @@ async function isThreadLoaded(bridge: CodexBridge, sessionId: string): Promise<b
   const result = (await bridge.request("thread/loaded/list", {})) as any;
   const data = Array.isArray(result.data) ? result.data : [];
   return data.includes(sessionId);
+}
+
+function upsertLiveActivity(
+  liveActivities: Map<string, Map<string, SessionActivity>>,
+  sessionId: string,
+  activity: SessionActivity,
+): SessionActivity {
+  const sessionActivities = liveActivities.get(sessionId) || new Map<string, SessionActivity>();
+  const merged = mergeActivity(sessionActivities.get(activity.id), activity);
+  sessionActivities.set(activity.id, merged);
+  liveActivities.set(sessionId, sessionActivities);
+  return merged;
+}
+
+function updateLiveCommandActivity(
+  liveActivities: Map<string, Map<string, SessionActivity>>,
+  sessionId: string,
+  itemId: string,
+  delta: string,
+): SessionActivity | null {
+  const sessionActivities = liveActivities.get(sessionId);
+  if (!sessionActivities) {
+    return null;
+  }
+
+  const existing = sessionActivities.get(itemId);
+  if (!existing || existing.type !== "command") {
+    return null;
+  }
+
+  const updated = appendCommandActivityOutput(existing, delta);
+  if (!updated) {
+    return null;
+  }
+
+  sessionActivities.set(itemId, updated);
+  return updated;
+}
+
+function updateLiveFileChangeActivity(
+  liveActivities: Map<string, Map<string, SessionActivity>>,
+  sessionId: string,
+  itemId: string,
+  turnId: string | null,
+  rawChanges: unknown,
+): SessionActivity {
+  const sessionActivities = liveActivities.get(sessionId) || new Map<string, SessionActivity>();
+  const existing = sessionActivities.get(itemId);
+  const next: SessionActivity = {
+    id: itemId,
+    type: "file_change",
+    turnId,
+    createdAt: existing?.createdAt || Date.now(),
+    status: existing?.type === "file_change" ? existing.status : "in_progress",
+    changes: buildFileChangeChanges(rawChanges),
+  };
+  const merged = mergeActivity(existing, next);
+  sessionActivities.set(itemId, merged);
+  liveActivities.set(sessionId, sessionActivities);
+  return merged;
 }
 
 function mapSession(
