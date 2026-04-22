@@ -20,8 +20,15 @@ class ApiClient {
     return _decodeList(response).map(WorkspaceSummary.fromJson).toList();
   }
 
-  Future<List<SessionSummary>> fetchSessions(HostProfile host) async {
-    final response = await _get(host, '/api/sessions');
+  Future<List<SessionSummary>> fetchSessions(
+    HostProfile host, {
+    int? limit,
+  }) async {
+    final response = await _get(
+      host,
+      '/api/sessions',
+      queryParameters: limit == null ? null : {'limit': '$limit'},
+    );
     return _decodeList(response).map(SessionSummary.fromJson).toList();
   }
 
@@ -136,8 +143,15 @@ class ApiClient {
     );
   }
 
-  Future<http.Response> _get(HostProfile host, String path) {
-    return _client.get(_uri(host, path), headers: _headers(host));
+  Future<http.Response> _get(
+    HostProfile host,
+    String path, {
+    Map<String, String>? queryParameters,
+  }) {
+    return _client.get(
+      _uri(host, path, queryParameters: queryParameters),
+      headers: _headers(host),
+    );
   }
 
   Future<http.Response> _post(
@@ -152,9 +166,13 @@ class ApiClient {
     );
   }
 
-  Uri _uri(HostProfile host, String path) {
+  Uri _uri(
+    HostProfile host,
+    String path, {
+    Map<String, String>? queryParameters,
+  }) {
     final base = Uri.parse(host.baseUrl);
-    return base.replace(path: path);
+    return base.replace(path: path, queryParameters: queryParameters);
   }
 
   Map<String, String> _headers(HostProfile host) => {

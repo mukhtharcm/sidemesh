@@ -36,9 +36,13 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   }
 
   Future<_HostOverview> _load() async {
-    final node = await widget.api.fetchNode(widget.host);
-    final workspaces = await widget.api.fetchWorkspaces(widget.host);
-    final sessions = await widget.api.fetchSessions(widget.host);
+    final results = await Future.wait<Object>([
+      widget.api.fetchNode(widget.host),
+      widget.api.fetchSessions(widget.host),
+    ]);
+    final node = results[0] as NodeInfo;
+    final sessions = results[1] as List<SessionSummary>;
+    final workspaces = _buildWorkspaces(sessions);
     return _HostOverview(
       node: node,
       workspaces: workspaces,
@@ -62,6 +66,38 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
       return right.updatedAt.compareTo(left.updatedAt);
     });
     return sorted;
+  }
+
+  List<WorkspaceSummary> _buildWorkspaces(List<SessionSummary> sessions) {
+    final grouped = <String, WorkspaceSummary>{};
+    for (final session in sessions) {
+      final parts = session.cwd.split('/').where((part) => part.isNotEmpty);
+      final label = parts.isEmpty ? session.cwd : parts.last;
+      final existing = grouped[session.cwd];
+      if (existing == null) {
+        grouped[session.cwd] = WorkspaceSummary(
+          cwd: session.cwd,
+          label: label.isEmpty ? session.cwd : label,
+          sessionCount: 1,
+          lastUsedAt: session.updatedAt,
+        );
+        continue;
+      }
+      grouped[session.cwd] = WorkspaceSummary(
+        cwd: existing.cwd,
+        label: existing.label,
+        sessionCount: existing.sessionCount + 1,
+        lastUsedAt: existing.lastUsedAt.isAfter(session.updatedAt)
+            ? existing.lastUsedAt
+            : session.updatedAt,
+      );
+    }
+
+    final workspaces = grouped.values.toList();
+    workspaces.sort(
+      (left, right) => right.lastUsedAt.compareTo(left.lastUsedAt),
+    );
+    return workspaces;
   }
 
   Future<void> _startSession({String? prefilledCwd}) async {
