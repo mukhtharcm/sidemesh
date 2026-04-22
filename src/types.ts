@@ -51,6 +51,7 @@ export interface PendingAction {
 export interface LiveEvent {
   type:
     | "hello"
+    | "user_message_submitted"
     | "turn_started"
     | "assistant_delta"
     | "turn_completed"
@@ -64,6 +65,7 @@ export interface LiveEvent {
   action?: PendingAction;
   actionId?: string;
   message?: string;
+  messageItem?: SessionMessage;
 }
 
 export interface JsonRpcMessage {

@@ -32,10 +32,12 @@ class _SessionScreenState extends State<SessionScreen> {
 
   SessionSummary? _session;
   List<SessionMessage> _messages = const [];
+  List<SessionMessage> _optimisticMessages = const [];
   PendingAction? _pendingAction;
   bool _running = false;
   bool _loading = true;
   bool _sending = false;
+  bool _awaitingAssistantReply = false;
   String _liveAssistantText = '';
   IOWebSocketChannel? _channel;
   StreamSubscription? _subscription;
@@ -67,12 +69,18 @@ class _SessionScreenState extends State<SessionScreen> {
       if (!mounted) {
         return;
       }
+      final pendingAction = status.pendingAction ?? log.pendingAction;
       setState(() {
         _session = log.session;
         _messages = log.messages;
-        _pendingAction = status.pendingAction ?? log.pendingAction;
+        _optimisticMessages = _reconcileOptimisticMessages(log.messages);
+        _pendingAction = pendingAction;
         _running = status.isRunning;
         _loading = false;
+        _awaitingAssistantReply =
+            status.isRunning &&
+            _liveAssistantText.isEmpty &&
+            pendingAction == null;
         if (!_running) {
           _liveAssistantText = '';
         }
@@ -110,29 +118,45 @@ class _SessionScreenState extends State<SessionScreen> {
     }
 
     switch (event.type) {
+      case 'user_message_submitted':
+        final message = event.messageItem;
+        if (message == null) {
+          return;
+        }
+        setState(() {
+          _upsertOptimisticMessage(message);
+          _running = true;
+          _awaitingAssistantReply = true;
+        });
+        unawaited(_scrollToBottom(animated: true));
       case 'turn_started':
         setState(() {
           _running = true;
-          _liveAssistantText = '';
+          _awaitingAssistantReply =
+              _liveAssistantText.isEmpty && _pendingAction == null;
         });
       case 'assistant_delta':
         setState(() {
           _running = true;
+          _awaitingAssistantReply = false;
           _liveAssistantText += event.delta ?? '';
         });
         unawaited(_scrollToBottom(animated: true));
       case 'turn_completed':
         setState(() {
           _running = false;
+          _awaitingAssistantReply = false;
         });
         unawaited(_loadSnapshot());
       case 'action_opened':
         setState(() {
           _pendingAction = event.action;
+          _awaitingAssistantReply = false;
         });
       case 'action_resolved':
         setState(() {
           _pendingAction = null;
+          _awaitingAssistantReply = _running && _liveAssistantText.isEmpty;
         });
       case 'hello':
       case 'error':
@@ -146,30 +170,54 @@ class _SessionScreenState extends State<SessionScreen> {
       return;
     }
 
+    final wasRunning = _running;
+    final optimisticMessage = SessionMessage(
+      id: 'local-${DateTime.now().microsecondsSinceEpoch}',
+      role: 'user',
+      text: text,
+      createdAt: DateTime.now(),
+    );
+
+    _composerController.clear();
     setState(() {
       _sending = true;
+      _running = true;
+      _awaitingAssistantReply = true;
+      _liveAssistantText = '';
+      _upsertOptimisticMessage(optimisticMessage);
     });
+    unawaited(_scrollToBottom(animated: true));
+
     try {
       await widget.api.sendInput(
         widget.host,
         sessionId: widget.session.id,
         text: text,
+        clientMessageId: optimisticMessage.id,
       );
       if (!mounted) {
         return;
       }
-      _composerController.clear();
-      setState(() {
-        _running = true;
-        _liveAssistantText = '';
-      });
     } catch (error) {
       if (!mounted) {
         return;
       }
+      _composerController.text = text;
+      _composerController.selection = TextSelection.collapsed(
+        offset: _composerController.text.length,
+      );
+      final stillHasPending = _pendingAction != null;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Failed to send input: $error')));
+      setState(() {
+        _optimisticMessages = _optimisticMessages
+            .where((message) => message.id != optimisticMessage.id)
+            .toList();
+        _running = wasRunning;
+        _awaitingAssistantReply =
+            wasRunning && _liveAssistantText.isEmpty && !stillHasPending;
+      });
     } finally {
       if (mounted) {
         setState(() {
@@ -250,9 +298,46 @@ class _SessionScreenState extends State<SessionScreen> {
     }
   }
 
+  void _upsertOptimisticMessage(SessionMessage message) {
+    final existingIndex = _optimisticMessages.indexWhere(
+      (item) => item.id == message.id,
+    );
+    if (existingIndex == -1) {
+      _optimisticMessages = [..._optimisticMessages, message];
+      return;
+    }
+
+    final updated = [..._optimisticMessages];
+    updated[existingIndex] = message;
+    _optimisticMessages = updated;
+  }
+
+  List<SessionMessage> _reconcileOptimisticMessages(
+    List<SessionMessage> persistedMessages,
+  ) {
+    return _optimisticMessages.where((optimistic) {
+      return !persistedMessages.any(
+        (persisted) => _matchesPersistedMessage(persisted, optimistic),
+      );
+    }).toList();
+  }
+
+  bool _matchesPersistedMessage(
+    SessionMessage persisted,
+    SessionMessage optimistic,
+  ) {
+    return persisted.role == optimistic.role &&
+        persisted.text.trim() == optimistic.text.trim() &&
+        (persisted.createdAt.difference(optimistic.createdAt).inSeconds)
+                .abs() <=
+            90;
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = _session ?? widget.session;
+    final visibleMessages = [..._messages, ..._optimisticMessages]
+      ..sort((left, right) => left.createdAt.compareTo(right.createdAt));
     return Scaffold(
       appBar: AppBar(
         title: Text(session.title),
@@ -362,9 +447,14 @@ class _SessionScreenState extends State<SessionScreen> {
                     controller: _scrollController,
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     children: [
-                      ..._messages.map(
+                      ...visibleMessages.map(
                         (message) => _MessageBubble(message: message),
                       ),
+                      if (_running &&
+                          _awaitingAssistantReply &&
+                          _liveAssistantText.isEmpty &&
+                          _pendingAction == null)
+                        const _ThinkingBubble(),
                       if (_liveAssistantText.isNotEmpty)
                         _MessageBubble(
                           message: SessionMessage(
@@ -427,6 +517,24 @@ class _SessionScreenState extends State<SessionScreen> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+class _ThinkingBubble extends StatelessWidget {
+  const _ThinkingBubble();
+
+  @override
+  Widget build(BuildContext context) {
+    return _MessageBubble(
+      message: SessionMessage(
+        id: 'thinking',
+        role: 'assistant',
+        text: 'Thinking...',
+        createdAt: DateTime.now(),
+        phase: 'commentary',
+      ),
+      live: true,
     );
   }
 }

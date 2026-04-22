@@ -266,6 +266,7 @@ class LiveEvent {
     this.action,
     this.actionId,
     this.message,
+    this.messageItem,
   });
 
   final String type;
@@ -276,6 +277,7 @@ class LiveEvent {
   final PendingAction? action;
   final String? actionId;
   final String? message;
+  final SessionMessage? messageItem;
 
   factory LiveEvent.fromJson(Map<String, dynamic> json) => LiveEvent(
     type: _stringValue(json['type']),
@@ -288,6 +290,9 @@ class LiveEvent {
         : PendingAction.fromJson(json['action'] as Map<String, dynamic>),
     actionId: json['actionId'] as String?,
     message: json['message'] as String?,
+    messageItem: json['messageItem'] == null
+        ? null
+        : SessionMessage.fromJson(json['messageItem'] as Map<String, dynamic>),
   );
 }
 

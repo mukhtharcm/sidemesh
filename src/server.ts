@@ -12,6 +12,7 @@ import type {
   NodeConfig,
   PendingAction,
   PendingActionRecord,
+  SessionMessage,
   SessionRuntimeSummary,
   SessionSummary,
   ThreadRecord,
@@ -227,11 +228,13 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.post("/api/sessions/:sessionId/input", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
     const text = asString(request.body?.text);
+    const clientMessageId = asString(request.body?.clientMessageId);
     if (!text) {
       response.status(400).json({ error: "text is required" });
       return;
     }
 
+    const submittedMessage = buildSubmittedUserMessage(text, clientMessageId);
     const state = await loadRunState(bridge, sessionId, activeTurns);
     if (state.turnId) {
       const steer = (await bridge.request("turn/steer", {
@@ -239,9 +242,16 @@ export async function startServer(config: NodeConfig): Promise<void> {
         input: [{ type: "text", text, text_elements: [] }],
         expectedTurnId: state.turnId,
       })) as any;
+      broadcast(socketsBySession, sessionId, {
+        type: "user_message_submitted",
+        sessionId,
+        turnId: state.turnId,
+        messageItem: submittedMessage,
+      });
       response.json({
         mode: "steer",
         turnId: asString(steer.turnId),
+        messageId: submittedMessage.id,
       });
       return;
     }
@@ -260,9 +270,16 @@ export async function startServer(config: NodeConfig): Promise<void> {
     if (turnId) {
       activeTurns.set(sessionId, { turnId, startedAt: Date.now() });
     }
+    broadcast(socketsBySession, sessionId, {
+      type: "user_message_submitted",
+      sessionId,
+      turnId: turnId || undefined,
+      messageItem: submittedMessage,
+    });
     response.json({
       mode: "turn",
       turnId,
+      messageId: submittedMessage.id,
     });
   }));
 
@@ -543,6 +560,15 @@ function sanitizeTitle(raw: string): string {
     return "Untitled session";
   }
   return compact.length > 90 ? `${compact.slice(0, 87)}...` : compact;
+}
+
+function buildSubmittedUserMessage(text: string, clientMessageId: string | null): SessionMessage {
+  return {
+    id: clientMessageId || randomUUID(),
+    role: "user",
+    text,
+    createdAt: Date.now(),
+  };
 }
 
 async function loadCachedSessionRuntime(
