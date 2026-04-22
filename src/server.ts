@@ -584,13 +584,14 @@ function buildPendingAction(
     sessionId,
     kind: "permissions",
     title: "Permission request",
-    detail: asString(typed.reason) || "Codex requested additional permissions.",
+    detail: formatPermissionRequestDetail(typed.reason, typed.permissions),
     requestedAt,
-    canApprove: false,
-    canApproveForSession: false,
+    canApprove: true,
+    canApproveForSession: true,
     canDecline: true,
     jsonRpcId,
     requestMethod: method,
+    requestedPermissions: typed.permissions,
   };
 }
 
@@ -614,8 +615,20 @@ function buildActionResponse(action: PendingActionRecord, decision: string | nul
   }
 
   if (action.requestMethod === "item/permissions/requestApproval") {
+    if (decision === "accept") {
+      return {
+        scope: "turn",
+        permissions: action.requestedPermissions || {},
+      };
+    }
+    if (decision === "acceptForSession") {
+      return {
+        scope: "session",
+        permissions: action.requestedPermissions || {},
+      };
+    }
     if (decision === "decline" || decision === "cancel") {
-      return { permissions: { network: { mode: "deny" } }, scope: "turn" };
+      return { scope: "turn", permissions: {} };
     }
     return null;
   }
@@ -673,4 +686,55 @@ function sendEvent(socket: WebSocket, event: LiveEvent): void {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function formatPermissionRequestDetail(reason: unknown, permissions: unknown): string {
+  const parts = [asString(reason) || "Codex requested additional permissions."];
+  const summary = summarizePermissions(permissions);
+  if (summary) {
+    parts.push(summary);
+  }
+  return parts.join("\n\n");
+}
+
+function summarizePermissions(permissions: unknown): string | null {
+  if (!permissions || typeof permissions !== "object") {
+    return null;
+  }
+
+  const typed = permissions as Record<string, any>;
+  const lines: string[] = [];
+
+  const fileSystem = typed.fileSystem as Record<string, any> | undefined;
+  if (fileSystem) {
+    appendPermissionPaths(lines, "File read", fileSystem.read);
+    appendPermissionPaths(lines, "File write", fileSystem.write);
+  }
+
+  const network = typed.network as Record<string, any> | undefined;
+  if (network) {
+    if (typeof network.mode === "string") {
+      lines.push(`Network: ${network.mode}`);
+    } else if (network.enabled === true) {
+      lines.push("Network: enabled");
+    }
+  }
+
+  if (lines.length === 0) {
+    const fallback = JSON.stringify(permissions, null, 2);
+    return fallback === "{}" ? null : fallback;
+  }
+
+  return lines.join("\n");
+}
+
+function appendPermissionPaths(lines: string[], label: string, paths: unknown): void {
+  if (!Array.isArray(paths) || paths.length === 0) {
+    return;
+  }
+  const normalized = paths.filter((path): path is string => typeof path === "string" && path.length > 0);
+  if (normalized.length === 0) {
+    return;
+  }
+  lines.push(`${label}: ${normalized.join(", ")}`);
 }
