@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:sidemesh_mobile/main.dart';
+import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
 
 void main() {
   testWidgets('renders app shell', (tester) async {
-    await tester.pumpWidget(const SidemeshApp());
+    final controller = await ThemeController.load();
+    await tester.pumpWidget(SidemeshApp(themeController: controller));
+    await tester.pump();
 
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.text('Recent'), findsWidgets);
