@@ -1,0 +1,676 @@
+import { createServer } from "node:http";
+import { hostname, platform } from "node:os";
+import { randomUUID } from "node:crypto";
+
+import cors from "cors";
+import express, { type Request, type Response, type NextFunction } from "express";
+import { WebSocketServer, type WebSocket } from "ws";
+
+import type {
+  ActiveTurnState,
+  LiveEvent,
+  NodeConfig,
+  PendingAction,
+  PendingActionRecord,
+  SessionSummary,
+  ThreadRecord,
+  TurnRecord,
+  WorkspaceSummary,
+} from "./types.js";
+import { CodexBridge } from "./codex-client.js";
+import { loadRolloutLog } from "./history.js";
+
+const DEFAULT_SOURCES = ["cli", "vscode", "exec", "appServer"];
+
+export async function startServer(config: NodeConfig): Promise<void> {
+  const bridge = new CodexBridge(config.codexBin);
+  await bridge.start();
+
+  const app = express();
+  const server = createServer(app);
+  const socketsBySession = new Map<string, Set<WebSocket>>();
+  const activeTurns = new Map<string, ActiveTurnState>();
+  const pendingActions = new Map<string, PendingActionRecord>();
+  let codexVersion = "unknown";
+
+  bridge.on("stderr", (line) => {
+    process.stderr.write(line);
+  });
+
+  bridge.on("notification", ({ method, params }) => {
+    const sessionId = extractSessionId(method, params);
+    if (!sessionId) {
+      return;
+    }
+
+    if (method === "turn/started") {
+      const turnId = asString((params as any)?.turn?.id);
+      if (turnId) {
+        activeTurns.set(sessionId, { turnId, startedAt: Date.now() });
+        broadcast(socketsBySession, sessionId, {
+          type: "turn_started",
+          sessionId,
+          turnId,
+        });
+      }
+      return;
+    }
+
+    if (method === "item/agentMessage/delta") {
+      const delta = asString((params as any)?.delta);
+      if (delta) {
+        broadcast(socketsBySession, sessionId, {
+          type: "assistant_delta",
+          sessionId,
+          delta,
+          turnId: asString((params as any)?.turnId) || undefined,
+        });
+      }
+      return;
+    }
+
+    if (method === "turn/completed") {
+      const turn = (params as any)?.turn;
+      const turnId = asString(turn?.id);
+      if (turnId) {
+        activeTurns.delete(sessionId);
+        clearActionsForSession(pendingActions, socketsBySession, sessionId);
+        broadcast(socketsBySession, sessionId, {
+          type: "turn_completed",
+          sessionId,
+          turnId,
+          status: asString(turn?.status) || "completed",
+        });
+      }
+    }
+  });
+
+  bridge.on("serverRequest", ({ id, method, params }) => {
+    if (
+      method !== "item/commandExecution/requestApproval" &&
+      method !== "item/fileChange/requestApproval" &&
+      method !== "item/permissions/requestApproval"
+    ) {
+      return;
+    }
+
+    const sessionId = extractSessionId(method, params);
+    if (!sessionId) {
+      return;
+    }
+
+    const action = buildPendingAction(method, params, id);
+    pendingActions.set(action.id, action);
+    broadcast(socketsBySession, sessionId, {
+      type: "action_opened",
+      sessionId,
+      action,
+    });
+  });
+
+  try {
+    const version = await import("node:child_process").then(({ execFileSync }) =>
+      execFileSync(config.codexBin, ["--version"], { encoding: "utf8" }).trim(),
+    );
+    codexVersion = version;
+  } catch {
+    codexVersion = "unknown";
+  }
+
+  app.use(cors());
+  app.use(express.json({ limit: "1mb" }));
+
+  app.get("/healthz", (_request, response) => {
+    response.json({ ok: true, label: config.label });
+  });
+
+  app.use((request, response, next) => {
+    if (request.path === "/healthz") {
+      next();
+      return;
+    }
+    authenticate(request, response, next, config.token);
+  });
+
+  app.get("/api/node", (_request, response) => {
+    response.json({
+      label: config.label,
+      hostname: hostname(),
+      platform: platform(),
+      codexVersion,
+      startedAt: process.uptime(),
+      tokenSource: config.tokenSource,
+    });
+  });
+
+  app.get("/api/sessions", asyncRoute(async (_request, response) => {
+    const sessions = await listSessions(bridge);
+    response.json(sessions);
+  }));
+
+  app.get("/api/workspaces", asyncRoute(async (_request, response) => {
+    const sessions = await listSessions(bridge);
+    response.json(buildWorkspaces(sessions));
+  }));
+
+  app.get("/api/actions", asyncRoute(async (_request, response) => {
+    response.json(await listPendingActions(bridge, pendingActions));
+  }));
+
+  app.get("/api/sessions/:sessionId/log", asyncRoute(async (request, response) => {
+    const sessionId = pathParam(request.params.sessionId);
+    const session = await readSession(bridge, sessionId, false);
+    const log = await loadRolloutLog(sessionId, session.path, bridge.codexHome);
+    response.json({
+      session: mapSession(session),
+      messages: log.messages,
+      pendingAction: findPendingActionForSession(pendingActions, sessionId),
+    });
+  }));
+
+  app.get("/api/sessions/:sessionId/status", asyncRoute(async (request, response) => {
+    const sessionId = pathParam(request.params.sessionId);
+    const state = await loadRunState(bridge, sessionId, activeTurns);
+    response.json({
+      sessionId,
+      isRunning: Boolean(state.turnId),
+      activeTurnId: state.turnId,
+      pendingAction: findPendingActionForSession(pendingActions, sessionId),
+    });
+  }));
+
+  app.post("/api/sessions/create", asyncRoute(async (request, response) => {
+    const cwd = asString(request.body?.cwd);
+    const prompt = asString(request.body?.prompt);
+    if (!cwd) {
+      response.status(400).json({ error: "cwd is required" });
+      return;
+    }
+
+    const started = (await bridge.request("thread/start", {
+      cwd,
+      approvalPolicy: "never",
+      experimentalRawEvents: false,
+      persistExtendedHistory: true,
+    })) as any;
+    const thread = started.thread as ThreadRecord;
+
+    let turnId: string | null = null;
+    if (prompt) {
+      const turn = (await bridge.request("turn/start", {
+        threadId: thread.id,
+        input: [{ type: "text", text: prompt, text_elements: [] }],
+      })) as any;
+      turnId = asString(turn.turn?.id) || null;
+      if (turnId) {
+        activeTurns.set(thread.id, { turnId, startedAt: Date.now() });
+      }
+    }
+
+    response.status(201).json({
+      session: mapSession(thread),
+      activeTurnId: turnId,
+    });
+  }));
+
+  app.post("/api/sessions/:sessionId/input", asyncRoute(async (request, response) => {
+    const sessionId = pathParam(request.params.sessionId);
+    const text = asString(request.body?.text);
+    if (!text) {
+      response.status(400).json({ error: "text is required" });
+      return;
+    }
+
+    const state = await loadRunState(bridge, sessionId, activeTurns);
+    if (state.turnId) {
+      const steer = (await bridge.request("turn/steer", {
+        threadId: sessionId,
+        input: [{ type: "text", text, text_elements: [] }],
+        expectedTurnId: state.turnId,
+      })) as any;
+      response.json({
+        mode: "steer",
+        turnId: asString(steer.turnId),
+      });
+      return;
+    }
+
+    if (!(await isThreadLoaded(bridge, sessionId))) {
+      await bridge.request("thread/resume", {
+        threadId: sessionId,
+        persistExtendedHistory: true,
+      });
+    }
+    const turn = (await bridge.request("turn/start", {
+      threadId: sessionId,
+      input: [{ type: "text", text, text_elements: [] }],
+    })) as any;
+    const turnId = asString(turn.turn?.id);
+    if (turnId) {
+      activeTurns.set(sessionId, { turnId, startedAt: Date.now() });
+    }
+    response.json({
+      mode: "turn",
+      turnId,
+    });
+  }));
+
+  app.post("/api/sessions/:sessionId/stop", asyncRoute(async (request, response) => {
+    const sessionId = pathParam(request.params.sessionId);
+    const state = await loadRunState(bridge, sessionId, activeTurns);
+    if (!state.turnId) {
+      response.json({ stopped: false });
+      return;
+    }
+    await bridge.request("turn/interrupt", {
+      threadId: sessionId,
+      turnId: state.turnId,
+    });
+    activeTurns.delete(sessionId);
+    response.json({ stopped: true, turnId: state.turnId });
+  }));
+
+  app.post("/api/actions/:actionId/respond", asyncRoute(async (request, response) => {
+    const actionId = pathParam(request.params.actionId);
+    const decision = asString(request.body?.decision);
+    const action = pendingActions.get(actionId);
+    if (!action) {
+      response.status(404).json({ error: "action not found" });
+      return;
+    }
+
+    const result = buildActionResponse(action, decision);
+    if (!result) {
+      response.status(400).json({ error: "unsupported decision" });
+      return;
+    }
+
+    bridge.respond(action.jsonRpcId, result);
+    pendingActions.delete(actionId);
+    broadcast(socketsBySession, action.sessionId, {
+      type: "action_resolved",
+      sessionId: action.sessionId,
+      actionId,
+    });
+    response.json({ ok: true });
+  }));
+
+  const wsServer = new WebSocketServer({ noServer: true });
+  server.on("upgrade", (request, socket, head) => {
+    const [pathOnly, queryString] = (request.url || "").split("?");
+    if (pathOnly !== "/api/live") {
+      socket.destroy();
+      return;
+    }
+
+    const authHeader = request.headers.authorization;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : "";
+    if (token !== config.token) {
+      socket.destroy();
+      return;
+    }
+
+    const params = new URLSearchParams(queryString || "");
+    const sessionId = params.get("sessionId");
+    if (!sessionId) {
+      socket.destroy();
+      return;
+    }
+
+    wsServer.handleUpgrade(request, socket, head, (ws) => {
+      const set = socketsBySession.get(sessionId) || new Set<WebSocket>();
+      set.add(ws);
+      socketsBySession.set(sessionId, set);
+      sendEvent(ws, {
+        type: "hello",
+        sessionId,
+      });
+      ws.on("close", () => {
+        const current = socketsBySession.get(sessionId);
+        if (!current) {
+          return;
+        }
+        current.delete(ws);
+        if (current.size === 0) {
+          socketsBySession.delete(sessionId);
+        }
+      });
+    });
+  });
+
+  app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
+    const message = error instanceof Error ? error.message : "Internal server error";
+    response.status(500).json({ error: message });
+  });
+
+  server.listen(config.port, () => {
+    console.log(`[sidemesh] ${config.label} listening on port ${config.port}`);
+    console.log(`[sidemesh] codex: ${config.codexBin}`);
+    console.log(`[sidemesh] token (${config.tokenSource}): ${config.token}`);
+  });
+}
+
+function asyncRoute(
+  handler: (request: Request, response: Response, next: NextFunction) => Promise<void>,
+): (request: Request, response: Response, next: NextFunction) => void {
+  return (request, response, next) => {
+    void handler(request, response, next).catch(next);
+  };
+}
+
+function pathParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) {
+    return value[0] || "";
+  }
+  return value || "";
+}
+
+function authenticate(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+  token: string,
+): void {
+  const auth = request.headers.authorization;
+  if (!auth || !auth.startsWith("Bearer ") || auth.slice("Bearer ".length) !== token) {
+    response.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  next();
+}
+
+async function listSessions(bridge: CodexBridge): Promise<SessionSummary[]> {
+  const result = (await bridge.request("thread/list", {
+    limit: 100,
+    sortKey: "updated_at",
+    sortDirection: "desc",
+    sourceKinds: DEFAULT_SOURCES,
+    archived: false,
+  })) as any;
+  const threads = Array.isArray(result.data) ? (result.data as ThreadRecord[]) : [];
+  return threads.map(mapSession);
+}
+
+function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
+  const grouped = new Map<string, WorkspaceSummary>();
+  for (const session of sessions) {
+    const label = session.cwd.split("/").filter(Boolean).pop() || session.cwd;
+    const existing = grouped.get(session.cwd);
+    if (!existing) {
+      grouped.set(session.cwd, {
+        cwd: session.cwd,
+        label,
+        sessionCount: 1,
+        lastUsedAt: session.updatedAt,
+      });
+      continue;
+    }
+    existing.sessionCount += 1;
+    existing.lastUsedAt = Math.max(existing.lastUsedAt, session.updatedAt);
+  }
+  return [...grouped.values()].sort((left, right) => right.lastUsedAt - left.lastUsedAt);
+}
+
+async function listPendingActions(
+  bridge: CodexBridge,
+  pendingActions: Map<string, PendingActionRecord>,
+): Promise<PendingAction[]> {
+  const actions = [...pendingActions.values()].sort((left, right) => right.requestedAt - left.requestedAt);
+  const sessionsById = new Map<string, Promise<ThreadRecord | null>>();
+
+  return Promise.all(
+    actions.map(async (action) => {
+      if (!action.sessionId || action.sessionId === "unknown") {
+        return action;
+      }
+
+      let sessionPromise = sessionsById.get(action.sessionId);
+      if (!sessionPromise) {
+        sessionPromise = readSession(bridge, action.sessionId, false).catch(() => null);
+        sessionsById.set(action.sessionId, sessionPromise);
+      }
+
+      const session = await sessionPromise;
+      if (!session) {
+        return action;
+      }
+
+      const mapped = mapSession(session);
+      return {
+        ...action,
+        sessionTitle: mapped.title,
+        cwd: mapped.cwd,
+      };
+    }),
+  );
+}
+
+async function readSession(
+  bridge: CodexBridge,
+  sessionId: string,
+  includeTurns: boolean,
+): Promise<ThreadRecord> {
+  const result = (await bridge.request("thread/read", {
+    threadId: sessionId,
+    includeTurns,
+  })) as any;
+  return result.thread as ThreadRecord;
+}
+
+async function loadRunState(
+  bridge: CodexBridge,
+  sessionId: string,
+  activeTurns: Map<string, ActiveTurnState>,
+): Promise<{ turnId: string | null }> {
+  const known = activeTurns.get(sessionId);
+  if (known) {
+    return { turnId: known.turnId };
+  }
+
+  let session: ThreadRecord;
+  try {
+    session = await readSession(bridge, sessionId, true);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("includeTurns is unavailable before first user message")) {
+      return { turnId: null };
+    }
+    throw error;
+  }
+  const turns = Array.isArray(session.turns) ? session.turns : [];
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index] as TurnRecord;
+    if (turn.status === "inProgress") {
+      activeTurns.set(sessionId, {
+        turnId: turn.id,
+        startedAt: Date.now(),
+      });
+      return { turnId: turn.id };
+    }
+  }
+
+  return { turnId: null };
+}
+
+async function isThreadLoaded(bridge: CodexBridge, sessionId: string): Promise<boolean> {
+  const result = (await bridge.request("thread/loaded/list", {})) as any;
+  const data = Array.isArray(result.data) ? result.data : [];
+  return data.includes(sessionId);
+}
+
+function mapSession(thread: ThreadRecord): SessionSummary {
+  return {
+    id: thread.id,
+    title: sanitizeTitle(thread.name || thread.preview),
+    preview: thread.preview,
+    cwd: thread.cwd,
+    createdAt: thread.createdAt * 1000,
+    updatedAt: thread.updatedAt * 1000,
+    source: typeof thread.source === "string" ? thread.source : JSON.stringify(thread.source),
+    status: thread.status?.type || "notLoaded",
+    rolloutPath: thread.path,
+  };
+}
+
+function sanitizeTitle(raw: string): string {
+  const compact = raw.replace(/\s+/g, " ").trim();
+  if (!compact) {
+    return "Untitled session";
+  }
+  return compact.length > 90 ? `${compact.slice(0, 87)}...` : compact;
+}
+
+function extractSessionId(method: string, params: unknown): string | null {
+  if (!params || typeof params !== "object") {
+    return null;
+  }
+  const typed = params as Record<string, any>;
+  if (typeof typed.threadId === "string") {
+    return typed.threadId;
+  }
+  if (method === "turn/started" && typeof typed.turn?.threadId === "string") {
+    return typed.turn.threadId;
+  }
+  if (method === "turn/completed" && typeof typed.threadId === "string") {
+    return typed.threadId;
+  }
+  return null;
+}
+
+function buildPendingAction(
+  method: string,
+  params: unknown,
+  jsonRpcId: number | string,
+): PendingActionRecord {
+  const typed = (params || {}) as Record<string, any>;
+  const sessionId = asString(typed.threadId) || "unknown";
+  const requestedAt = Date.now();
+
+  if (method === "item/commandExecution/requestApproval") {
+    const command = asString(typed.command) || "Command approval";
+    return {
+      id: asString(typed.approvalId) || randomUUID(),
+      sessionId,
+      kind: "command",
+      title: "Command approval",
+      detail: command,
+      requestedAt,
+      canApprove: true,
+      canApproveForSession: true,
+      canDecline: true,
+      jsonRpcId,
+      requestMethod: method,
+    };
+  }
+
+  if (method === "item/fileChange/requestApproval") {
+    return {
+      id: randomUUID(),
+      sessionId,
+      kind: "file_change",
+      title: "File change approval",
+      detail: asString(typed.reason) || "Codex wants to modify files.",
+      requestedAt,
+      canApprove: true,
+      canApproveForSession: true,
+      canDecline: true,
+      jsonRpcId,
+      requestMethod: method,
+    };
+  }
+
+  return {
+    id: randomUUID(),
+    sessionId,
+    kind: "permissions",
+    title: "Permission request",
+    detail: asString(typed.reason) || "Codex requested additional permissions.",
+    requestedAt,
+    canApprove: false,
+    canApproveForSession: false,
+    canDecline: true,
+    jsonRpcId,
+    requestMethod: method,
+  };
+}
+
+function buildActionResponse(action: PendingActionRecord, decision: string | null): unknown | null {
+  if (!decision) {
+    return null;
+  }
+
+  if (action.requestMethod === "item/commandExecution/requestApproval") {
+    if (decision === "accept" || decision === "acceptForSession" || decision === "decline" || decision === "cancel") {
+      return { decision };
+    }
+    return null;
+  }
+
+  if (action.requestMethod === "item/fileChange/requestApproval") {
+    if (decision === "accept" || decision === "acceptForSession" || decision === "decline" || decision === "cancel") {
+      return { decision };
+    }
+    return null;
+  }
+
+  if (action.requestMethod === "item/permissions/requestApproval") {
+    if (decision === "decline" || decision === "cancel") {
+      return { permissions: { network: { mode: "deny" } }, scope: "turn" };
+    }
+    return null;
+  }
+
+  return null;
+}
+
+function clearActionsForSession(
+  pendingActions: Map<string, PendingActionRecord>,
+  socketsBySession: Map<string, Set<WebSocket>>,
+  sessionId: string,
+): void {
+  const toDelete = [...pendingActions.values()].filter((action) => action.sessionId === sessionId);
+  for (const action of toDelete) {
+    pendingActions.delete(action.id);
+    broadcast(socketsBySession, sessionId, {
+      type: "action_resolved",
+      sessionId,
+      actionId: action.id,
+    });
+  }
+}
+
+function findPendingActionForSession(
+  pendingActions: Map<string, PendingActionRecord>,
+  sessionId: string,
+): PendingAction | null {
+  for (const action of pendingActions.values()) {
+    if (action.sessionId === sessionId) {
+      return action;
+    }
+  }
+  return null;
+}
+
+function broadcast(
+  socketsBySession: Map<string, Set<WebSocket>>,
+  sessionId: string,
+  event: LiveEvent,
+): void {
+  const sockets = socketsBySession.get(sessionId);
+  if (!sockets) {
+    return;
+  }
+  for (const socket of sockets) {
+    sendEvent(socket, event);
+  }
+}
+
+function sendEvent(socket: WebSocket, event: LiveEvent): void {
+  if (socket.readyState === socket.OPEN) {
+    socket.send(JSON.stringify(event));
+  }
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
