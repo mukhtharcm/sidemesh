@@ -13,10 +13,10 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 
 - [ ] Fully support `item/permissions/requestApproval`, including partial grants and turn vs session scope.
 - [ ] Show richer approval detail: requested permissions, cwd, reason, and available decisions.
-- [ ] Add badges for pending approvals and active sessions in the tab bar.
-- [ ] Add session rename via `thread/name/set`.
+- [x] Add badges for pending approvals and active sessions in the tab bar.
+- [x] Add session rename via `thread/name/set`.
 - [ ] Add session fork via `thread/fork`.
-- [ ] Add archive and unarchive via `thread/archive` and `thread/unarchive`.
+- [x] Add archive and unarchive via `thread/archive` and `thread/unarchive`.
 - [ ] Add rollback and manual compaction via `thread/rollback` and `thread/compact/start`.
 - [ ] Add review flows via `review/start` for uncommitted changes, branch diff, and commit review.
 - [ ] Add queue and steering UX for follow-ups while a run is active.
@@ -37,7 +37,7 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 
 ## Security And Onboarding
 
-- [ ] Move host tokens from `SharedPreferences` to secure storage.
+- [x] Move host tokens from `SharedPreferences` to secure storage.
 - [ ] Replace manual URL/token entry with pairing.
 - [ ] Add host revocation and token rotation.
 - [ ] Investigate device enrollment using Codex device-key APIs instead of static bearer tokens.
