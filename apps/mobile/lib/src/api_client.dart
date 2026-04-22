@@ -58,8 +58,13 @@ class ApiClient {
     HostProfile host, {
     required String sessionId,
     required String text,
+    String? clientMessageId,
   }) async {
-    await _post(host, '/api/sessions/$sessionId/input', body: {'text': text});
+    await _post(
+      host,
+      '/api/sessions/$sessionId/input',
+      body: {'text': text, 'clientMessageId': clientMessageId},
+    );
   }
 
   Future<void> stopSession(HostProfile host, String sessionId) async {
