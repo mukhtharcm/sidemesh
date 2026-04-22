@@ -318,6 +318,10 @@ class _SessionScreenState extends State<SessionScreen> {
     );
   }
 
+  void _dismissKeyboard() {
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
   Future<void> _scrollToBottom({bool animated = false}) async {
     for (var attempt = 0; attempt < 3; attempt += 1) {
       await WidgetsBinding.instance.endOfFrame;
@@ -449,192 +453,199 @@ class _SessionScreenState extends State<SessionScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              widget.host.label,
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                          TextButton.icon(
-                            onPressed: () => _showSessionDetailsSheet(session),
-                            icon: const Icon(Icons.tune, size: 18),
-                            label: const Text('Details'),
-                            style: TextButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        session.cwd,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _StatusPill(
-                            label: _running ? 'Running' : 'Idle',
-                            color: _running
-                                ? const Color(0xFFD7F2D3)
-                                : const Color(0xFFE7E1D8),
-                          ),
-                          _StatusPill(
-                            label: session.source,
-                            color: const Color(0xFFEBC8A1),
-                          ),
-                          if ((session.runtime?.model ?? '').isNotEmpty)
-                            _StatusPill(
-                              label: session.runtime!.model!,
-                              color: const Color(0xFFF4E6CF),
-                            ),
-                          if ((session.runtime?.approvalPolicy ?? '')
-                              .isNotEmpty)
-                            _StatusPill(
-                              label: session.runtime!.approvalPolicy!,
-                              color: const Color(0xFFF6E6C5),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                if (_pendingAction != null)
+          : GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _dismissKeyboard,
+              child: Column(
+                children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Card(
-                      color: const Color(0xFFFFE2C7),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           children: [
-                            Text(
-                              _pendingAction!.title,
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            Expanded(
+                              child: Text(
+                                widget.host.label,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
                             ),
-                            const SizedBox(height: 8),
-                            Text(_pendingAction!.detail),
-                            const SizedBox(height: 14),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                if (_pendingAction!.canApprove)
-                                  FilledButton(
-                                    onPressed: () => _respondAction('accept'),
-                                    child: const Text('Approve'),
-                                  ),
-                                if (_pendingAction!.canApproveForSession)
-                                  FilledButton.tonal(
-                                    onPressed: () =>
-                                        _respondAction('acceptForSession'),
-                                    child: const Text('Approve for session'),
-                                  ),
-                                if (_pendingAction!.canDecline)
-                                  OutlinedButton(
-                                    onPressed: () => _respondAction('decline'),
-                                    child: const Text('Decline'),
-                                  ),
-                              ],
+                            TextButton.icon(
+                              onPressed: () => _showSessionDetailsSheet(session),
+                              icon: const Icon(Icons.tune, size: 18),
+                              label: const Text('Details'),
+                              style: TextButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
                             ),
                           ],
                         ),
-                      ),
-                    ),
-                  ),
-                Expanded(
-                  child: ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    itemCount: timelineEntries.length,
-                    itemBuilder: (context, index) =>
-                        switch (timelineEntries[index].kind) {
-                          _TimelineEntryKind.message => _MessageBubble(
-                            message: timelineEntries[index].message!,
-                          ),
-                          _TimelineEntryKind.activity => _ActivityCard(
-                            activity: timelineEntries[index].activity!,
-                            sessionCwd: session.cwd,
-                          ),
-                          _TimelineEntryKind.thinking =>
-                            const _ThinkingBubble(),
-                          _TimelineEntryKind.liveAssistant => _MessageBubble(
-                            message: SessionMessage(
-                              id: 'live',
-                              role: 'assistant',
-                              text: _liveAssistantText,
-                              createdAt: DateTime.now(),
-                              phase: 'commentary',
-                            ),
-                            live: true,
-                          ),
-                        },
-                  ),
-                ),
-                SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _composerController,
-                            minLines: 1,
-                            maxLines: 5,
-                            decoration: const InputDecoration(
-                              hintText: 'Message this session',
-                              filled: true,
-                              fillColor: Color(0xFFFFFBF5),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.all(
-                                  Radius.circular(20),
-                                ),
-                              ),
-                            ),
-                          ),
+                        const SizedBox(height: 4),
+                        Text(
+                          session.cwd,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
-                        const SizedBox(width: 10),
-                        FilledButton(
-                          onPressed: _sending ? null : _sendInput,
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size(56, 56),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(18),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _StatusPill(
+                              label: _running ? 'Running' : 'Idle',
+                              color: _running
+                                  ? const Color(0xFFD7F2D3)
+                                  : const Color(0xFFE7E1D8),
                             ),
-                          ),
-                          child: _sending
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.send_rounded),
+                            _StatusPill(
+                              label: session.source,
+                              color: const Color(0xFFEBC8A1),
+                            ),
+                            if ((session.runtime?.model ?? '').isNotEmpty)
+                              _StatusPill(
+                                label: session.runtime!.model!,
+                                color: const Color(0xFFF4E6CF),
+                              ),
+                            if ((session.runtime?.approvalPolicy ?? '')
+                                .isNotEmpty)
+                              _StatusPill(
+                                label: session.runtime!.approvalPolicy!,
+                                color: const Color(0xFFF6E6C5),
+                              ),
+                          ],
                         ),
                       ],
                     ),
                   ),
-                ),
-              ],
+                  if (_pendingAction != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: Card(
+                        color: const Color(0xFFFFE2C7),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _pendingAction!.title,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(_pendingAction!.detail),
+                              const SizedBox(height: 14),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  if (_pendingAction!.canApprove)
+                                    FilledButton(
+                                      onPressed: () => _respondAction('accept'),
+                                      child: const Text('Approve'),
+                                    ),
+                                  if (_pendingAction!.canApproveForSession)
+                                    FilledButton.tonal(
+                                      onPressed: () =>
+                                          _respondAction('acceptForSession'),
+                                      child: const Text('Approve for session'),
+                                    ),
+                                  if (_pendingAction!.canDecline)
+                                    OutlinedButton(
+                                      onPressed: () => _respondAction('decline'),
+                                      child: const Text('Decline'),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  Expanded(
+                    child: ListView.builder(
+                      controller: _scrollController,
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      itemCount: timelineEntries.length,
+                      itemBuilder: (context, index) =>
+                          switch (timelineEntries[index].kind) {
+                            _TimelineEntryKind.message => _MessageBubble(
+                              message: timelineEntries[index].message!,
+                            ),
+                            _TimelineEntryKind.activity => _ActivityCard(
+                              activity: timelineEntries[index].activity!,
+                              sessionCwd: session.cwd,
+                            ),
+                            _TimelineEntryKind.thinking =>
+                              const _ThinkingBubble(),
+                            _TimelineEntryKind.liveAssistant => _MessageBubble(
+                              message: SessionMessage(
+                                id: 'live',
+                                role: 'assistant',
+                                text: _liveAssistantText,
+                                createdAt: DateTime.now(),
+                                phase: 'commentary',
+                              ),
+                              live: true,
+                            ),
+                          },
+                    ),
+                  ),
+                  SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _composerController,
+                              minLines: 1,
+                              maxLines: 5,
+                              onTapOutside: (_) => _dismissKeyboard(),
+                              decoration: const InputDecoration(
+                                hintText: 'Message this session',
+                                filled: true,
+                                fillColor: Color(0xFFFFFBF5),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.all(
+                                    Radius.circular(20),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          FilledButton(
+                            onPressed: _sending ? null : _sendInput,
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size(56, 56),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                            ),
+                            child: _sending
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.send_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
     );
   }
