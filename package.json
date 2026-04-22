@@ -1,0 +1,27 @@
+{
+  "name": "sidemesh",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fleet-first Codex session node and Flutter client.",
+  "type": "module",
+  "scripts": {
+    "daemon": "tsx src/index.ts",
+    "daemon:dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "mobile:get": "cd apps/mobile && flutter pub get",
+    "mobile:analyze": "cd apps/mobile && flutter analyze"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.6.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}
