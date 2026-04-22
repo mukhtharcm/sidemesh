@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../api_client.dart';
 import '../host_store.dart';
 import '../models.dart';
+import '../session_favorites_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -144,10 +145,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
         bottom: false,
         child: Column(
           children: [
-            _TopBar(
-              tab: tab,
-              onRefresh: _refreshHosts,
-            ),
+            _TopBar(tab: tab, onRefresh: _refreshHosts),
             Expanded(
               child: _loading
                   ? const MeshLoader()
@@ -249,8 +247,11 @@ class _TopBar extends StatelessWidget {
               ],
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.graphic_eq_rounded,
-                color: colors.accentOn, size: 20),
+            child: Icon(
+              Icons.graphic_eq_rounded,
+              color: colors.accentOn,
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -282,18 +283,16 @@ class _TopBar extends StatelessWidget {
                   tab.subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
                 ),
               ],
             ),
           ),
           const SizedBox(width: 8),
           MeshIconButton(
-            icon: isDark
-                ? Icons.light_mode_rounded
-                : Icons.dark_mode_rounded,
+            icon: isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
             tooltip: isDark ? 'Light mode' : 'Dark mode',
             onTap: () => controller.toggle(context),
           ),
@@ -461,11 +460,13 @@ class _RecentPane extends StatefulWidget {
 }
 
 class _RecentPaneState extends State<_RecentPane> {
+  final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
   late Future<List<_RemoteSessionEntry>> _future;
 
   @override
   void initState() {
     super.initState();
+    _favorites.ensureLoaded();
     _future = _loadRecent();
   }
 
@@ -485,15 +486,18 @@ class _RecentPaneState extends State<_RecentPane> {
         merged.addAll(
           sessions
               .take(20)
-              .map((session) =>
-                  _RemoteSessionEntry(host: host, session: session)),
+              .map(
+                (session) => _RemoteSessionEntry(host: host, session: session),
+              ),
         );
       } catch (_) {
         continue;
       }
     }
-    merged.sort((left, right) =>
-        right.session.updatedAt.compareTo(left.session.updatedAt));
+    merged.sort(
+      (left, right) =>
+          right.session.updatedAt.compareTo(left.session.updatedAt),
+    );
     final activeCount = merged.where((entry) => entry.session.isActive).length;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -502,13 +506,27 @@ class _RecentPaneState extends State<_RecentPane> {
     return merged;
   }
 
+  List<_RemoteSessionEntry> _sortEntries(List<_RemoteSessionEntry> entries) {
+    final sorted = [...entries];
+    sorted.sort((left, right) {
+      final leftFavorite = _favorites.isFavorite(left.host, left.session.id);
+      final rightFavorite = _favorites.isFavorite(right.host, right.session.id);
+      if (leftFavorite != rightFavorite) {
+        return leftFavorite ? -1 : 1;
+      }
+      return right.session.updatedAt.compareTo(left.session.updatedAt);
+    });
+    return sorted;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.hosts.isEmpty) {
       return const MeshEmptyState(
         icon: Icons.schedule_rounded,
         title: 'No sessions yet',
-        body: 'Add a host first — your most recent Codex sessions will land here.',
+        body:
+            'Add a host first — your most recent Codex sessions will land here.',
       );
     }
 
@@ -540,25 +558,39 @@ class _RecentPaneState extends State<_RecentPane> {
             ),
           );
         }
-        return RefreshIndicator(
-          color: context.colors.accent,
-          onRefresh: () async {
-            setState(() => _future = _loadRecent());
-            await _future;
+        return ListenableBuilder(
+          listenable: _favorites,
+          builder: (context, _) {
+            final sortedEntries = _sortEntries(entries);
+            return RefreshIndicator(
+              color: context.colors.accent,
+              onRefresh: () async {
+                setState(() => _future = _loadRecent());
+                await _future;
+              },
+              child: ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                itemCount: sortedEntries.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final entry = sortedEntries[index];
+                  return _SessionRowCard(
+                    host: entry.host,
+                    session: entry.session,
+                    favorite: _favorites.isFavorite(
+                      entry.host,
+                      entry.session.id,
+                    ),
+                    onTap: () =>
+                        widget.onOpenSession(entry.host, entry.session),
+                    onToggleFavorite: () {
+                      _favorites.toggleFavorite(entry.host, entry.session.id);
+                    },
+                  );
+                },
+              ),
+            );
           },
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            itemCount: entries.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              final entry = entries[index];
-              return _SessionRowCard(
-                host: entry.host,
-                session: entry.session,
-                onTap: () => widget.onOpenSession(entry.host, entry.session),
-              );
-            },
-          ),
         );
       },
     );
@@ -569,12 +601,16 @@ class _SessionRowCard extends StatelessWidget {
   const _SessionRowCard({
     required this.host,
     required this.session,
+    required this.favorite,
     required this.onTap,
+    required this.onToggleFavorite,
   });
 
   final HostProfile host;
   final SessionSummary session;
+  final bool favorite;
   final VoidCallback onTap;
+  final VoidCallback onToggleFavorite;
 
   @override
   Widget build(BuildContext context) {
@@ -595,8 +631,20 @@ class _SessionRowCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: onToggleFavorite,
+                tooltip: favorite ? 'Remove favorite' : 'Add favorite',
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                splashRadius: 18,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                icon: Icon(
+                  favorite ? Icons.star_rounded : Icons.star_outline_rounded,
+                  color: favorite ? colors.warning : colors.textTertiary,
                 ),
               ),
               Icon(Icons.chevron_right_rounded, color: colors.textTertiary),
@@ -609,10 +657,7 @@ class _SessionRowCard extends StatelessWidget {
               const SizedBox(width: 4),
               Text(
                 host.label,
-                style: monoStyle(
-                  color: colors.textSecondary,
-                  fontSize: 11.5,
-                ),
+                style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -620,10 +665,7 @@ class _SessionRowCard extends StatelessWidget {
                   session.cwd,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: monoStyle(
-                    color: colors.textTertiary,
-                    fontSize: 11.5,
-                  ),
+                  style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
                 ),
               ),
             ],
@@ -639,9 +681,9 @@ class _SessionRowCard extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.35,
-                  ),
+                color: colors.textSecondary,
+                height: 1.35,
+              ),
             ),
           ],
         ],
@@ -698,8 +740,10 @@ class _InboxPaneState extends State<_InboxPane> {
         continue;
       }
     }
-    merged.sort((left, right) =>
-        right.action.requestedAt.compareTo(left.action.requestedAt));
+    merged.sort(
+      (left, right) =>
+          right.action.requestedAt.compareTo(left.action.requestedAt),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       widget.onInboxCountChanged(merged.length);
@@ -828,8 +872,8 @@ class _InboxCard extends StatelessWidget {
                 child: Text(
                   action.title,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -867,10 +911,10 @@ class _InboxCard extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             action.detail,
-            style: Theme.of(context)
-                .textTheme
-                .bodyMedium
-                ?.copyWith(color: colors.textSecondary, height: 1.4),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: colors.textSecondary,
+              height: 1.4,
+            ),
           ),
           const SizedBox(height: 14),
           Wrap(
@@ -896,10 +940,15 @@ class _InboxCard extends StatelessWidget {
               if (action.canDecline)
                 OutlinedButton.icon(
                   onPressed: () => onRespond('decline'),
-                  icon: Icon(Icons.close_rounded,
-                      size: 18, color: colors.danger),
-                  label: Text('Decline',
-                      style: TextStyle(color: colors.danger)),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: colors.danger,
+                  ),
+                  label: Text(
+                    'Decline',
+                    style: TextStyle(color: colors.danger),
+                  ),
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(
                       color: colors.danger.withValues(alpha: 0.5),
@@ -1022,16 +1071,15 @@ class _HostRowCard extends StatelessWidget {
                 Text(
                   host.label,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   host.baseUrl,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style:
-                      monoStyle(color: colors.textSecondary, fontSize: 11.5),
+                  style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
                 ),
               ],
             ),
@@ -1039,14 +1087,20 @@ class _HostRowCard extends StatelessWidget {
           IconButton(
             tooltip: 'Edit host',
             onPressed: onEdit,
-            icon: Icon(Icons.edit_outlined,
-                size: 20, color: colors.textSecondary),
+            icon: Icon(
+              Icons.edit_outlined,
+              size: 20,
+              color: colors.textSecondary,
+            ),
           ),
           IconButton(
             tooltip: 'Remove host',
             onPressed: onRemove,
-            icon: Icon(Icons.delete_outline,
-                size: 20, color: colors.textSecondary),
+            icon: Icon(
+              Icons.delete_outline,
+              size: 20,
+              color: colors.textSecondary,
+            ),
           ),
         ],
       ),
@@ -1071,12 +1125,15 @@ class _HostEditorSheetState extends State<_HostEditorSheet> {
   @override
   void initState() {
     super.initState();
-    _labelController =
-        TextEditingController(text: widget.initialHost?.label ?? '');
-    _baseUrlController =
-        TextEditingController(text: widget.initialHost?.baseUrl ?? '');
-    _tokenController =
-        TextEditingController(text: widget.initialHost?.token ?? '');
+    _labelController = TextEditingController(
+      text: widget.initialHost?.label ?? '',
+    );
+    _baseUrlController = TextEditingController(
+      text: widget.initialHost?.baseUrl ?? '',
+    );
+    _tokenController = TextEditingController(
+      text: widget.initialHost?.token ?? '',
+    );
   }
 
   @override
@@ -1120,9 +1177,9 @@ class _HostEditorSheetState extends State<_HostEditorSheet> {
                 const SizedBox(width: 12),
                 Text(
                   isEditing ? 'Edit host' : 'Add host',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ],
             ),

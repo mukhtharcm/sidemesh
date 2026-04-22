@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../session_favorites_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -24,11 +25,13 @@ class HostDetailScreen extends StatefulWidget {
 }
 
 class _HostDetailScreenState extends State<HostDetailScreen> {
+  final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
   late Future<_HostOverview> _future;
 
   @override
   void initState() {
     super.initState();
+    _favorites.ensureLoaded();
     _future = _load();
   }
 
@@ -46,6 +49,19 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   Future<void> _refresh() async {
     setState(() => _future = _load());
     await _future;
+  }
+
+  List<SessionSummary> _sortSessions(List<SessionSummary> sessions) {
+    final sorted = [...sessions];
+    sorted.sort((left, right) {
+      final leftFavorite = _favorites.isFavorite(widget.host, left.id);
+      final rightFavorite = _favorites.isFavorite(widget.host, right.id);
+      if (leftFavorite != rightFavorite) {
+        return leftFavorite ? -1 : 1;
+      }
+      return right.updatedAt.compareTo(left.updatedAt);
+    });
+    return sorted;
   }
 
   Future<void> _startSession({String? prefilledCwd}) async {
@@ -99,63 +115,80 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
             );
           }
           final data = snapshot.data!;
-          return RefreshIndicator(
-            color: colors.accent,
-            onRefresh: _refresh,
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
-              children: [
-                _NodeCard(host: widget.host, node: data.node),
-                const SizedBox(height: 18),
-                _SectionHeader(
-                  icon: Icons.folder_open_rounded,
-                  title: 'Workspaces',
-                  subtitle:
-                      '${data.workspaces.length} ${data.workspaces.length == 1 ? "entry" : "entries"}',
-                ),
-                const SizedBox(height: 8),
-                if (data.workspaces.isEmpty)
-                  const MeshEmptyState(
-                    icon: Icons.folder_off_outlined,
-                    title: 'No workspaces',
-                    body: 'Start a session and this host will remember it.',
-                  )
-                else
-                  ...data.workspaces.map(
-                    (workspace) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _WorkspaceCard(
-                        workspace: workspace,
-                        onTap: () => _startSession(prefilledCwd: workspace.cwd),
-                      ),
+          return ListenableBuilder(
+            listenable: _favorites,
+            builder: (context, _) {
+              final sortedSessions = _sortSessions(data.sessions);
+              return RefreshIndicator(
+                color: colors.accent,
+                onRefresh: _refresh,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+                  children: [
+                    _NodeCard(host: widget.host, node: data.node),
+                    const SizedBox(height: 18),
+                    _SectionHeader(
+                      icon: Icons.folder_open_rounded,
+                      title: 'Workspaces',
+                      subtitle:
+                          '${data.workspaces.length} ${data.workspaces.length == 1 ? "entry" : "entries"}',
                     ),
-                  ),
-                const SizedBox(height: 18),
-                _SectionHeader(
-                  icon: Icons.history_rounded,
-                  title: 'Recent sessions',
-                  subtitle:
-                      '${data.sessions.length} ${data.sessions.length == 1 ? "session" : "sessions"}',
-                ),
-                const SizedBox(height: 8),
-                if (data.sessions.isEmpty)
-                  const MeshEmptyState(
-                    icon: Icons.chat_bubble_outline_rounded,
-                    title: 'No sessions yet',
-                    body: 'Tap "New session" to start one on this host.',
-                  )
-                else
-                  ...data.sessions.map(
-                    (session) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _SessionRow(
-                        session: session,
-                        onTap: () => widget.onOpenSession(session),
+                    const SizedBox(height: 8),
+                    if (data.workspaces.isEmpty)
+                      const MeshEmptyState(
+                        icon: Icons.folder_off_outlined,
+                        title: 'No workspaces',
+                        body: 'Start a session and this host will remember it.',
+                      )
+                    else
+                      ...data.workspaces.map(
+                        (workspace) => Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _WorkspaceCard(
+                            workspace: workspace,
+                            onTap: () =>
+                                _startSession(prefilledCwd: workspace.cwd),
+                          ),
+                        ),
                       ),
+                    const SizedBox(height: 18),
+                    _SectionHeader(
+                      icon: Icons.history_rounded,
+                      title: 'Recent sessions',
+                      subtitle:
+                          '${data.sessions.length} ${data.sessions.length == 1 ? "session" : "sessions"}',
                     ),
-                  ),
-              ],
-            ),
+                    const SizedBox(height: 8),
+                    if (sortedSessions.isEmpty)
+                      const MeshEmptyState(
+                        icon: Icons.chat_bubble_outline_rounded,
+                        title: 'No sessions yet',
+                        body: 'Tap "New session" to start one on this host.',
+                      )
+                    else
+                      ...sortedSessions.map(
+                        (session) => Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _SessionRow(
+                            session: session,
+                            favorite: _favorites.isFavorite(
+                              widget.host,
+                              session.id,
+                            ),
+                            onTap: () => widget.onOpenSession(session),
+                            onToggleFavorite: () {
+                              _favorites.toggleFavorite(
+                                widget.host,
+                                session.id,
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
           );
         },
       ),
@@ -337,10 +370,17 @@ class _WorkspaceCard extends StatelessWidget {
 }
 
 class _SessionRow extends StatelessWidget {
-  const _SessionRow({required this.session, required this.onTap});
+  const _SessionRow({
+    required this.session,
+    required this.favorite,
+    required this.onTap,
+    required this.onToggleFavorite,
+  });
 
   final SessionSummary session;
+  final bool favorite;
   final VoidCallback onTap;
+  final VoidCallback onToggleFavorite;
 
   @override
   Widget build(BuildContext context) {
@@ -363,6 +403,18 @@ class _SessionRow extends StatelessWidget {
                   style: Theme.of(
                     context,
                   ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              IconButton(
+                onPressed: onToggleFavorite,
+                tooltip: favorite ? 'Remove favorite' : 'Add favorite',
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                splashRadius: 18,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                icon: Icon(
+                  favorite ? Icons.star_rounded : Icons.star_outline_rounded,
+                  color: favorite ? colors.warning : colors.textTertiary,
                 ),
               ),
               Icon(Icons.chevron_right_rounded, color: colors.textTertiary),
