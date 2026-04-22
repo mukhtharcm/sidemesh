@@ -260,6 +260,97 @@ class _SessionScreenState extends State<SessionScreen> {
     }
   }
 
+  Future<void> _renameSession() async {
+    final current = (_session ?? widget.session).title;
+    final controller = TextEditingController(text: current);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Rename session'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Session name'),
+          textInputAction: TextInputAction.done,
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final trimmed = newName?.trim();
+    if (trimmed == null || trimmed.isEmpty || trimmed == current) {
+      return;
+    }
+    try {
+      final updated = await widget.api.renameSession(
+        widget.host,
+        sessionId: widget.session.id,
+        name: trimmed,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _session = updated);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to rename: $error')),
+      );
+    }
+  }
+
+  Future<void> _archiveSession() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Archive session?'),
+        content: const Text(
+          'Archived sessions are hidden from Recent. You can unarchive them from the host.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Archive'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    try {
+      await widget.api.archiveSession(widget.host, widget.session.id);
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to archive: $error')),
+      );
+    }
+  }
+
   Future<void> _respondAction(String decision) async {
     final action = _pendingAction;
     if (action == null) {
@@ -474,6 +565,43 @@ class _SessionScreenState extends State<SessionScreen> {
               onTap: _loadSnapshot,
             ),
           ),
+          PopupMenuButton<String>(
+            tooltip: 'Session actions',
+            icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
+            onSelected: (value) {
+              switch (value) {
+                case 'rename':
+                  _renameSession();
+                  break;
+                case 'archive':
+                  _archiveSession();
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem<String>(
+                value: 'rename',
+                child: Row(
+                  children: [
+                    Icon(Icons.drive_file_rename_outline, size: 18),
+                    SizedBox(width: 10),
+                    Text('Rename'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'archive',
+                child: Row(
+                  children: [
+                    Icon(Icons.archive_outlined, size: 18),
+                    SizedBox(width: 10),
+                    Text('Archive'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 4),
         ],
       ),
       body: _loading

@@ -426,6 +426,41 @@ export async function startServer(config: NodeConfig): Promise<void> {
     response.json({ stopped: true, turnId: state.turnId });
   }));
 
+  app.post("/api/sessions/:sessionId/name", asyncRoute(async (request, response) => {
+    const sessionId = pathParam(request.params.sessionId);
+    const name = asString(request.body?.name);
+    if (!name) {
+      response.status(400).json({ error: "name is required" });
+      return;
+    }
+    if (!(await isThreadLoaded(bridge, sessionId))) {
+      await bridge.request("thread/resume", {
+        threadId: sessionId,
+        persistExtendedHistory: true,
+      });
+    }
+    await bridge.request("thread/name/set", {
+      threadId: sessionId,
+      name,
+    });
+    const thread = await readSession(bridge, sessionId, false);
+    response.json({ session: mapSession(thread) });
+  }));
+
+  app.post("/api/sessions/:sessionId/archive", asyncRoute(async (request, response) => {
+    const sessionId = pathParam(request.params.sessionId);
+    await bridge.request("thread/archive", { threadId: sessionId });
+    activeTurns.delete(sessionId);
+    liveActivities.delete(sessionId);
+    response.json({ archived: true });
+  }));
+
+  app.post("/api/sessions/:sessionId/unarchive", asyncRoute(async (request, response) => {
+    const sessionId = pathParam(request.params.sessionId);
+    await bridge.request("thread/unarchive", { threadId: sessionId });
+    response.json({ unarchived: true });
+  }));
+
   app.post("/api/actions/:actionId/respond", asyncRoute(async (request, response) => {
     const actionId = pathParam(request.params.actionId);
     const decision = asString(request.body?.decision);
