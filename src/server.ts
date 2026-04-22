@@ -34,9 +34,17 @@ import { CodexBridge } from "./codex-client.js";
 import { loadRolloutLog, loadSessionRuntime } from "./history.js";
 
 const DEFAULT_SOURCES = ["cli", "vscode", "exec", "appServer"];
+const SESSION_LOG_CACHE_LIMIT = 24;
 
 interface SessionRuntimeCacheEntry {
   threadUpdatedAt: number;
+  runtime: SessionRuntimeSummary | null;
+}
+
+interface SessionLogCacheEntry {
+  threadUpdatedAt: number;
+  messages: SessionMessage[];
+  activities: SessionActivity[];
   runtime: SessionRuntimeSummary | null;
 }
 
@@ -63,6 +71,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const pendingActions = new Map<string, PendingActionRecord>();
   const liveActivities = new Map<string, Map<string, SessionActivity>>();
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
+  const logCache = new Map<string, SessionLogCacheEntry>();
   let codexVersion = "unknown";
 
   bridge.on("stderr", (line) => {
@@ -217,6 +226,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       if (turnId) {
         activeTurns.delete(sessionId);
         liveActivities.delete(sessionId);
+        logCache.delete(sessionId);
         clearActionsForSession(pendingActions, socketsBySession, sessionId);
         broadcast(socketsBySession, sessionId, {
           type: "turn_completed",
@@ -287,7 +297,8 @@ export async function startServer(config: NodeConfig): Promise<void> {
   });
 
   app.get("/api/sessions", asyncRoute(async (_request, response) => {
-    const sessions = await listSessions(bridge, runtimeCache);
+    const requestedLimit = asInteger((_request.query as Record<string, unknown>)?.limit);
+    const sessions = await listSessions(bridge, runtimeCache, requestedLimit);
     response.json(sessions);
   }));
 
@@ -302,12 +313,42 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   app.get("/api/sessions/:sessionId/log", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
+    const cached = logCache.get(sessionId);
+
+    if (cached) {
+      const session = await readSession(bridge, sessionId, false);
+      if (cached.threadUpdatedAt === session.updatedAt) {
+        runtimeCache.set(session.id, {
+          threadUpdatedAt: session.updatedAt,
+          runtime: cached.runtime,
+        });
+        response.json({
+          session: mapSession(session, cached.runtime),
+          messages: cached.messages,
+          activities: mergeSessionActivities(
+            cached.activities,
+            liveActivities.get(sessionId)?.values() || [],
+          ),
+          pendingAction: findPendingActionForSession(pendingActions, sessionId),
+        });
+        return;
+      }
+    }
+
     const session = await readSessionForLog(bridge, sessionId);
     const log = await loadRolloutLog(sessionId, session.path, bridge.codexHome);
+    const baseActivities = extractSessionActivities(session);
     const activities = mergeSessionActivities(
-      extractSessionActivities(session),
+      baseActivities,
       liveActivities.get(sessionId)?.values() || [],
     );
+
+    setSessionLogCacheEntry(logCache, session.id, {
+      threadUpdatedAt: session.updatedAt,
+      messages: log.messages,
+      activities: baseActivities,
+      runtime: log.runtime,
+    });
     runtimeCache.set(session.id, {
       threadUpdatedAt: session.updatedAt,
       runtime: log.runtime,
@@ -480,6 +521,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     await bridge.request("thread/archive", { threadId: sessionId });
     activeTurns.delete(sessionId);
     liveActivities.delete(sessionId);
+    logCache.delete(sessionId);
     response.json({ archived: true });
   }));
 
@@ -601,9 +643,11 @@ function authenticate(
 async function listSessions(
   bridge: CodexBridge,
   runtimeCache: Map<string, SessionRuntimeCacheEntry>,
+  limitOverride: number | null = null,
 ): Promise<SessionSummary[]> {
+  const limit = Math.max(1, Math.min(limitOverride ?? 100, 100));
   const result = (await bridge.request("thread/list", {
-    limit: 100,
+    limit,
     sortKey: "updated_at",
     sortDirection: "desc",
     sourceKinds: DEFAULT_SOURCES,
@@ -869,6 +913,17 @@ function sanitizeTitle(raw: string): string {
   return compact.length > 90 ? `${compact.slice(0, 87)}...` : compact;
 }
 
+function asInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 function buildSubmittedUserMessage(text: string, clientMessageId: string | null): SessionMessage {
   return {
     id: clientMessageId || randomUUID(),
@@ -894,6 +949,25 @@ async function loadCachedSessionRuntime(
     runtime,
   });
   return runtime;
+}
+
+function setSessionLogCacheEntry(
+  logCache: Map<string, SessionLogCacheEntry>,
+  sessionId: string,
+  entry: SessionLogCacheEntry,
+): void {
+  if (logCache.has(sessionId)) {
+    logCache.delete(sessionId);
+  }
+  logCache.set(sessionId, entry);
+
+  while (logCache.size > SESSION_LOG_CACHE_LIMIT) {
+    const oldest = logCache.keys().next().value;
+    if (!oldest) {
+      return;
+    }
+    logCache.delete(oldest);
+  }
 }
 
 function extractSessionId(method: string, params: unknown): string | null {

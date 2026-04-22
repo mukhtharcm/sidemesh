@@ -70,24 +70,20 @@ class _SessionScreenState extends State<SessionScreen> {
   Future<void> _loadSnapshot() async {
     try {
       final log = await widget.api.fetchLog(widget.host, widget.session.id);
-      final status = await widget.api.fetchStatus(
-        widget.host,
-        widget.session.id,
-      );
       if (!mounted) {
         return;
       }
-      final pendingAction = status.pendingAction ?? log.pendingAction;
+      final pendingAction = log.pendingAction;
       setState(() {
         _session = log.session;
         _messages = log.messages;
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
         _activities = _sortActivities(log.activities);
         _pendingAction = pendingAction;
-        _running = status.isRunning;
+        _running = log.session.isActive;
         _loading = false;
         _awaitingAssistantReply =
-            status.isRunning &&
+            log.session.isActive &&
             _liveAssistantText.isEmpty &&
             pendingAction == null;
         if (!_running) {

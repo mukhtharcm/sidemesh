@@ -479,21 +479,23 @@ class _RecentPaneState extends State<_RecentPane> {
   }
 
   Future<List<_RemoteSessionEntry>> _loadRecent() async {
-    final merged = <_RemoteSessionEntry>[];
-    for (final host in widget.hosts) {
-      try {
-        final sessions = await widget.api.fetchSessions(host);
-        merged.addAll(
-          sessions
+    final results = await Future.wait(
+      widget.hosts.map((host) async {
+        try {
+          final sessions = await widget.api.fetchSessions(host, limit: 40);
+          return sessions
               .take(20)
               .map(
                 (session) => _RemoteSessionEntry(host: host, session: session),
-              ),
-        );
-      } catch (_) {
-        continue;
-      }
-    }
+              )
+              .toList();
+        } catch (_) {
+          return const <_RemoteSessionEntry>[];
+        }
+      }),
+    );
+
+    final merged = results.expand((entries) => entries).toList();
     merged.sort(
       (left, right) =>
           right.session.updatedAt.compareTo(left.session.updatedAt),
@@ -727,19 +729,20 @@ class _InboxPaneState extends State<_InboxPane> {
   }
 
   Future<List<_PendingActionEntry>> _loadInbox() async {
-    final merged = <_PendingActionEntry>[];
-    for (final host in widget.hosts) {
-      try {
-        final actions = await widget.api.fetchPendingActions(host);
-        merged.addAll(
-          actions.map(
-            (action) => _PendingActionEntry(host: host, action: action),
-          ),
-        );
-      } catch (_) {
-        continue;
-      }
-    }
+    final results = await Future.wait(
+      widget.hosts.map((host) async {
+        try {
+          final actions = await widget.api.fetchPendingActions(host);
+          return actions
+              .map((action) => _PendingActionEntry(host: host, action: action))
+              .toList();
+        } catch (_) {
+          return const <_PendingActionEntry>[];
+        }
+      }),
+    );
+
+    final merged = results.expand((entries) => entries).toList();
     merged.sort(
       (left, right) =>
           right.action.requestedAt.compareTo(left.action.requestedAt),
