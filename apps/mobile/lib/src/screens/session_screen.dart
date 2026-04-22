@@ -835,13 +835,29 @@ class _ActivityCard extends StatelessWidget {
         activity.changes.length == 1
             ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
             : 'Edited ${activity.changes.length} files',
+      'turn_diff' => 'Live turn diff',
       _ => 'Activity',
     };
 
     final subtitle = switch (activity.type) {
       'command' => _relativeSessionPath(activity.cwd ?? sessionCwd, sessionCwd),
       'file_change' => _activityFileSummary(activity.changes, sessionCwd),
+      'turn_diff' => 'Aggregated patch snapshot for this turn',
       _ => null,
+    };
+
+    final activityLabel = switch (activity.type) {
+      'command' => 'Command',
+      'file_change' => 'File change',
+      'turn_diff' => 'Turn diff',
+      _ => 'Activity',
+    };
+
+    final activityIcon = switch (activity.type) {
+      'command' => Icons.terminal_rounded,
+      'file_change' => Icons.description_outlined,
+      'turn_diff' => Icons.data_object_rounded,
+      _ => Icons.bolt_outlined,
     };
 
     return Align(
@@ -867,9 +883,7 @@ class _ActivityCard extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Icon(
-                          activity.isCommand
-                              ? Icons.terminal_rounded
-                              : Icons.description_outlined,
+                          activityIcon,
                           size: 18,
                           color: const Color(0xFF8E4A15),
                         ),
@@ -880,7 +894,7 @@ class _ActivityCard extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              activity.isCommand ? 'Command' : 'File change',
+                              activityLabel,
                               style: Theme.of(context).textTheme.labelSmall
                                   ?.copyWith(
                                     color: const Color(0xFF8E4A15),
@@ -918,19 +932,65 @@ class _ActivityCard extends StatelessWidget {
                     children: [
                       if (activity.turnId != null)
                         _InfoTag(label: 'turn ${_shortId(activity.turnId!)}'),
-                      if (activity.exitCode != null)
+                      if (activity.isCommand && activity.exitCode != null)
                         _InfoTag(label: 'exit ${activity.exitCode}'),
-                      if (activity.durationMs != null)
+                      if (activity.isCommand && activity.durationMs != null)
                         _InfoTag(label: _formatDuration(activity.durationMs!)),
+                      if (activity.isCommand &&
+                          (activity.source ?? '').isNotEmpty)
+                        _InfoTag(label: _commandSourceLabel(activity.source!)),
+                      if (activity.isCommand &&
+                          (activity.processId ?? '').isNotEmpty)
+                        _InfoTag(label: 'pty ${activity.processId}'),
+                      if (activity.isCommand &&
+                          activity.terminalStatus == 'input')
+                        const _InfoTag(label: 'stdin'),
+                      if (activity.isCommand &&
+                          activity.terminalStatus == 'waiting')
+                        const _InfoTag(label: 'interactive'),
+                      if (activity.isCommand)
+                        ...activity.commandActions.map(
+                          (action) => _InfoTag(label: action.label),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   if (activity.isCommand) ...[
+                    if ((activity.terminalInput ?? '').isNotEmpty) ...[
+                      Text(
+                        'Sent to terminal',
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
+                              color: const Color(0xFF6D5B49),
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      _CodeBlock(text: activity.terminalInput!),
+                      const SizedBox(height: 12),
+                    ],
                     if ((activity.output ?? '').isNotEmpty)
                       _CodeBlock(text: activity.output!)
+                    else if (activity.terminalStatus == 'waiting')
+                      Text(
+                        'Interactive command is running.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFF6D5B49),
+                        ),
+                      )
                     else
                       Text(
                         'Waiting for command output.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFF6D5B49),
+                        ),
+                      ),
+                  ] else if (activity.isTurnDiff) ...[
+                    if ((activity.diff ?? '').isNotEmpty)
+                      _CodeBlock(text: activity.diff!)
+                    else
+                      Text(
+                        'Waiting for turn diff.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: const Color(0xFF6D5B49),
                         ),
@@ -1134,6 +1194,16 @@ String _formatDuration(int durationMs) {
     return '${seconds.toStringAsFixed(seconds >= 10 ? 0 : 1)}s';
   }
   return '${durationMs}ms';
+}
+
+String _commandSourceLabel(String source) {
+  return switch (source) {
+    'agent' => 'agent',
+    'userShell' => 'shell',
+    'unifiedExecStartup' => 'exec start',
+    'unifiedExecInteraction' => 'exec input',
+    _ => source,
+  };
 }
 
 String _shortId(String value) {

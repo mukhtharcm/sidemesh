@@ -1,14 +1,19 @@
+import path from "node:path";
+
 import type {
   CommandActivity,
   FileChangeActivity,
   SessionActivity,
+  SessionCommandActionSummary,
   SessionActivityChange,
   ThreadItemRecord,
   ThreadRecord,
+  TurnDiffActivity,
 } from "./types.js";
 
 const MAX_COMMAND_OUTPUT_CHARS = 12_000;
 const MAX_DIFF_CHARS = 8_000;
+const MAX_TERMINAL_INPUT_CHARS = 2_000;
 
 export function extractSessionActivities(thread: ThreadRecord): SessionActivity[] {
   const turns = Array.isArray(thread.turns) ? thread.turns : [];
@@ -37,17 +42,25 @@ export function buildActivityFromThreadItem(
   context: { turnId: string | null; createdAt: number },
 ): SessionActivity | null {
   if (item.type === "commandExecution") {
+    const source = normalizeCommandSource(item.source);
+    const status = normalizeStatus(item.status);
     return {
       id: item.id,
       type: "command",
       turnId: context.turnId,
       createdAt: context.createdAt,
-      status: normalizeStatus(item.status),
+      status,
       command: asString(item.command) || "",
       cwd: asString(item.cwd) || "",
       output: truncateNullableText(asString(item.aggregatedOutput), MAX_COMMAND_OUTPUT_CHARS),
       exitCode: asNumber(item.exitCode),
       durationMs: asNumber(item.durationMs),
+      source,
+      processId: asString(item.processId),
+      commandActions: summarizeCommandActions(item.commandActions),
+      terminalStatus:
+        status === "in_progress" && isInteractiveCommandSource(source) ? "waiting" : null,
+      terminalInput: null,
     };
   }
 
@@ -81,6 +94,26 @@ export function mergeActivity(
       output: incoming.output ?? existingCommand.output,
       exitCode: incoming.exitCode ?? existingCommand.exitCode,
       durationMs: incoming.durationMs ?? existingCommand.durationMs,
+      source: incoming.source ?? existingCommand.source,
+      processId: incoming.processId ?? existingCommand.processId,
+      commandActions:
+        incoming.commandActions.length > 0
+          ? incoming.commandActions
+          : existingCommand.commandActions,
+      terminalStatus:
+        incoming.status === "in_progress"
+          ? incoming.terminalStatus ?? existingCommand.terminalStatus
+          : incoming.terminalStatus,
+      terminalInput: incoming.terminalInput ?? existingCommand.terminalInput,
+    };
+  }
+
+  if (incoming.type === "turn_diff") {
+    const existingTurnDiff = existing as TurnDiffActivity;
+    return {
+      ...incoming,
+      createdAt: existing.createdAt,
+      diff: incoming.diff ?? existingTurnDiff.diff,
     };
   }
 
@@ -120,6 +153,44 @@ export function appendCommandActivityOutput(
   return {
     ...activity,
     output: truncateNullableText(`${activity.output || ""}${delta}`, MAX_COMMAND_OUTPUT_CHARS),
+  };
+}
+
+export function applyCommandTerminalInteraction(
+  activity: CommandActivity | undefined,
+  stdin: string,
+): CommandActivity | null {
+  if (!activity || !stdin) {
+    return null;
+  }
+
+  return {
+    ...activity,
+    terminalStatus: "input",
+    terminalInput: truncateNullableText(
+      `${activity.terminalInput || ""}${stdin}`,
+      MAX_TERMINAL_INPUT_CHARS,
+    ),
+  };
+}
+
+export function buildTurnDiffActivity(
+  turnId: string | null,
+  diff: string,
+  createdAt: number,
+): TurnDiffActivity | null {
+  const normalized = truncateNullableText(diff, MAX_DIFF_CHARS);
+  if (!turnId || !normalized) {
+    return null;
+  }
+
+  return {
+    id: `turn-diff:${turnId}`,
+    type: "turn_diff",
+    turnId,
+    createdAt,
+    status: "in_progress",
+    diff: normalized,
   };
 }
 
@@ -192,6 +263,102 @@ function normalizeChangeKind(value: unknown): SessionActivityChange["kind"] | nu
   return null;
 }
 
+function normalizeCommandSource(value: unknown): string | null {
+  switch (value) {
+    case "agent":
+    case "userShell":
+    case "unifiedExecStartup":
+    case "unifiedExecInteraction":
+      return value;
+    default:
+      return asString(value);
+  }
+}
+
+function isInteractiveCommandSource(source: string | null): boolean {
+  return (
+    source === "userShell" ||
+    source === "unifiedExecStartup" ||
+    source === "unifiedExecInteraction"
+  );
+}
+
+function summarizeCommandActions(raw: unknown): SessionCommandActionSummary[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  const summaries: SessionCommandActionSummary[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    const typed = entry as Record<string, unknown>;
+    const summary = summarizeCommandAction(typed);
+    if (!summary) {
+      continue;
+    }
+
+    const key = `${summary.kind}:${summary.label}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    summaries.push(summary);
+
+    if (summaries.length >= 4) {
+      break;
+    }
+  }
+
+  return summaries;
+}
+
+function summarizeCommandAction(
+  action: Record<string, unknown>,
+): SessionCommandActionSummary | null {
+  switch (action.type) {
+    case "read": {
+      const targetPath = asString(action.path) || asString(action.name);
+      if (!targetPath) {
+        return { kind: "read", label: "Read file" };
+      }
+      return { kind: "read", label: `Read ${path.basename(targetPath)}` };
+    }
+    case "listFiles": {
+      const targetPath = asString(action.path);
+      if (!targetPath) {
+        return { kind: "list_files", label: "List files" };
+      }
+      return { kind: "list_files", label: `List ${path.basename(targetPath) || targetPath}` };
+    }
+    case "search": {
+      const query = asString(action.query);
+      if (query) {
+        return { kind: "search", label: `Search "${truncateLabel(query, 28)}"` };
+      }
+      const targetPath = asString(action.path);
+      if (!targetPath) {
+        return { kind: "search", label: "Search files" };
+      }
+      return { kind: "search", label: `Search ${path.basename(targetPath) || targetPath}` };
+    }
+    case "unknown": {
+      const command = asString(action.command);
+      if (!command) {
+        return { kind: "unknown", label: "Run command" };
+      }
+      return { kind: "unknown", label: truncateLabel(command, 34) };
+    }
+    default:
+      return null;
+  }
+}
+
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -212,4 +379,11 @@ function truncateNullableText(value: string | null, maxChars: number): string | 
   const head = value.slice(0, Math.floor(maxChars * 0.65));
   const tail = value.slice(-Math.floor(maxChars * 0.25));
   return `${head}\n\n... output truncated ...\n\n${tail}`;
+}
+
+function truncateLabel(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, maxChars - 3)}...`;
 }
