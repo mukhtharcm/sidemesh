@@ -34,6 +34,37 @@ export interface SessionMessage {
   phase?: "commentary" | "final_answer";
 }
 
+export interface SessionActivityChange {
+  path: string;
+  kind: "add" | "delete" | "update";
+  movePath?: string | null;
+  diff: string;
+}
+
+export interface SessionActivityBase {
+  id: string;
+  type: "command" | "file_change";
+  turnId: string | null;
+  createdAt: number;
+  status: "in_progress" | "completed" | "failed" | "declined";
+}
+
+export interface CommandActivity extends SessionActivityBase {
+  type: "command";
+  command: string;
+  cwd: string;
+  output: string | null;
+  exitCode: number | null;
+  durationMs: number | null;
+}
+
+export interface FileChangeActivity extends SessionActivityBase {
+  type: "file_change";
+  changes: SessionActivityChange[];
+}
+
+export type SessionActivity = CommandActivity | FileChangeActivity;
+
 export interface PendingAction {
   id: string;
   sessionId: string;
@@ -55,6 +86,7 @@ export interface LiveEvent {
     | "turn_started"
     | "assistant_delta"
     | "turn_completed"
+    | "activity_updated"
     | "action_opened"
     | "action_resolved"
     | "error";
@@ -66,6 +98,7 @@ export interface LiveEvent {
   actionId?: string;
   message?: string;
   messageItem?: SessionMessage;
+  activity?: SessionActivity;
 }
 
 export interface JsonRpcMessage {
@@ -99,6 +132,13 @@ export interface TurnRecord {
   status: string;
   startedAt: number | null;
   completedAt: number | null;
+  items?: ThreadItemRecord[];
+}
+
+export interface ThreadItemRecord {
+  id: string;
+  type: string;
+  [key: string]: unknown;
 }
 
 export interface ActiveTurnState {

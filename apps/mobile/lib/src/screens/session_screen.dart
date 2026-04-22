@@ -10,6 +10,8 @@ import '../api_client.dart';
 import '../models.dart';
 import '../session_runtime.dart';
 
+enum _SessionPane { chat, activity }
+
 class SessionScreen extends StatefulWidget {
   const SessionScreen({
     super.key,
@@ -29,16 +31,19 @@ class SessionScreen extends StatefulWidget {
 class _SessionScreenState extends State<SessionScreen> {
   final _composerController = TextEditingController();
   final _scrollController = ScrollController();
+  final _activityScrollController = ScrollController();
 
   SessionSummary? _session;
   List<SessionMessage> _messages = const [];
   List<SessionMessage> _optimisticMessages = const [];
+  List<SessionActivity> _activities = const [];
   PendingAction? _pendingAction;
   bool _running = false;
   bool _loading = true;
   bool _sending = false;
   bool _awaitingAssistantReply = false;
   String _liveAssistantText = '';
+  _SessionPane _pane = _SessionPane.chat;
   IOWebSocketChannel? _channel;
   StreamSubscription? _subscription;
 
@@ -54,6 +59,7 @@ class _SessionScreenState extends State<SessionScreen> {
   void dispose() {
     _composerController.dispose();
     _scrollController.dispose();
+    _activityScrollController.dispose();
     _subscription?.cancel();
     _channel?.sink.close();
     super.dispose();
@@ -74,6 +80,7 @@ class _SessionScreenState extends State<SessionScreen> {
         _session = log.session;
         _messages = log.messages;
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
+        _activities = _sortActivities(log.activities);
         _pendingAction = pendingAction;
         _running = status.isRunning;
         _loading = false;
@@ -85,7 +92,11 @@ class _SessionScreenState extends State<SessionScreen> {
           _liveAssistantText = '';
         }
       });
-      await _scrollToBottom();
+      if (_pane == _SessionPane.chat) {
+        await _scrollToBottom();
+      } else {
+        await _scrollActivityToBottom();
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -148,6 +159,17 @@ class _SessionScreenState extends State<SessionScreen> {
           _awaitingAssistantReply = false;
         });
         unawaited(_loadSnapshot());
+      case 'activity_updated':
+        final activity = event.activity;
+        if (activity == null) {
+          return;
+        }
+        setState(() {
+          _upsertActivity(activity);
+        });
+        if (_pane == _SessionPane.activity) {
+          unawaited(_scrollActivityToBottom(animated: true));
+        }
       case 'action_opened':
         setState(() {
           _pendingAction = event.action;
@@ -308,26 +330,40 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   Future<void> _scrollToBottom({bool animated = false}) async {
+    await _scrollControllerToBottom(_scrollController, animated: animated);
+  }
+
+  Future<void> _scrollActivityToBottom({bool animated = false}) async {
+    await _scrollControllerToBottom(
+      _activityScrollController,
+      animated: animated,
+    );
+  }
+
+  Future<void> _scrollControllerToBottom(
+    ScrollController controller, {
+    bool animated = false,
+  }) async {
     for (var attempt = 0; attempt < 3; attempt += 1) {
       await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || !_scrollController.hasClients) {
+      if (!mounted || !controller.hasClients) {
         continue;
       }
 
-      final targetOffset = _scrollController.position.maxScrollExtent;
-      final distance = (_scrollController.offset - targetOffset).abs();
+      final targetOffset = controller.position.maxScrollExtent;
+      final distance = (controller.offset - targetOffset).abs();
       if (distance < 1) {
         return;
       }
 
       if (animated && attempt == 2) {
-        await _scrollController.animateTo(
+        await controller.animateTo(
           targetOffset,
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOut,
         );
       } else {
-        _scrollController.jumpTo(targetOffset);
+        controller.jumpTo(targetOffset);
       }
     }
   }
@@ -356,6 +392,26 @@ class _SessionScreenState extends State<SessionScreen> {
     }).toList();
   }
 
+  void _upsertActivity(SessionActivity activity) {
+    final existingIndex = _activities.indexWhere(
+      (item) => item.id == activity.id,
+    );
+    if (existingIndex == -1) {
+      _activities = _sortActivities([..._activities, activity]);
+      return;
+    }
+
+    final updated = [..._activities];
+    updated[existingIndex] = activity;
+    _activities = _sortActivities(updated);
+  }
+
+  List<SessionActivity> _sortActivities(List<SessionActivity> activities) {
+    final sorted = [...activities];
+    sorted.sort((left, right) => left.createdAt.compareTo(right.createdAt));
+    return sorted;
+  }
+
   bool _matchesPersistedMessage(
     SessionMessage persisted,
     SessionMessage optimistic,
@@ -372,6 +428,7 @@ class _SessionScreenState extends State<SessionScreen> {
     final session = _session ?? widget.session;
     final visibleMessages = [..._messages, ..._optimisticMessages]
       ..sort((left, right) => left.createdAt.compareTo(right.createdAt));
+    final visibleActivities = _sortActivities(_activities);
     return Scaffold(
       appBar: AppBar(
         title: Text(session.title),
@@ -501,32 +558,83 @@ class _SessionScreenState extends State<SessionScreen> {
                       ),
                     ),
                   ),
-                Expanded(
-                  child: ListView(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    children: [
-                      ...visibleMessages.map(
-                        (message) => _MessageBubble(message: message),
-                      ),
-                      if (_running &&
-                          _awaitingAssistantReply &&
-                          _liveAssistantText.isEmpty &&
-                          _pendingAction == null)
-                        const _ThinkingBubble(),
-                      if (_liveAssistantText.isNotEmpty)
-                        _MessageBubble(
-                          message: SessionMessage(
-                            id: 'live',
-                            role: 'assistant',
-                            text: _liveAssistantText,
-                            createdAt: DateTime.now(),
-                            phase: 'commentary',
-                          ),
-                          live: true,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: SegmentedButton<_SessionPane>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment<_SessionPane>(
+                          value: _SessionPane.chat,
+                          icon: Icon(Icons.chat_bubble_outline),
+                          label: Text('Chat'),
                         ),
-                    ],
+                        ButtonSegment<_SessionPane>(
+                          value: _SessionPane.activity,
+                          icon: Icon(Icons.terminal_rounded),
+                          label: Text('Activity'),
+                        ),
+                      ],
+                      selected: {_pane},
+                      onSelectionChanged: (selection) {
+                        final next = selection.isEmpty ? null : selection.first;
+                        if (next == null || next == _pane) {
+                          return;
+                        }
+                        setState(() {
+                          _pane = next;
+                        });
+                        if (next == _SessionPane.chat) {
+                          unawaited(_scrollToBottom());
+                        } else {
+                          unawaited(_scrollActivityToBottom());
+                        }
+                      },
+                    ),
                   ),
+                ),
+                Expanded(
+                  child: _pane == _SessionPane.chat
+                      ? ListView(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          children: [
+                            ...visibleMessages.map(
+                              (message) => _MessageBubble(message: message),
+                            ),
+                            if (_running &&
+                                _awaitingAssistantReply &&
+                                _liveAssistantText.isEmpty &&
+                                _pendingAction == null)
+                              const _ThinkingBubble(),
+                            if (_liveAssistantText.isNotEmpty)
+                              _MessageBubble(
+                                message: SessionMessage(
+                                  id: 'live',
+                                  role: 'assistant',
+                                  text: _liveAssistantText,
+                                  createdAt: DateTime.now(),
+                                  phase: 'commentary',
+                                ),
+                                live: true,
+                              ),
+                          ],
+                        )
+                      : visibleActivities.isEmpty
+                      ? const Padding(
+                          padding: EdgeInsets.fromLTRB(24, 12, 24, 24),
+                          child: _ActivityEmptyState(),
+                        )
+                      : ListView.builder(
+                          controller: _activityScrollController,
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          itemCount: visibleActivities.length,
+                          itemBuilder: (context, index) => _ActivityCard(
+                            activity: visibleActivities[index],
+                            sessionCwd: session.cwd,
+                          ),
+                        ),
                 ),
                 SafeArea(
                   top: false,
@@ -722,6 +830,317 @@ class _MarkdownMessageBody extends StatelessWidget {
       styleSheet: styleSheet,
     );
   }
+}
+
+class _ActivityEmptyState extends StatelessWidget {
+  const _ActivityEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF4E7),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'No activity yet',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'When Codex runs commands or edits files, the trace will show up here.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActivityCard extends StatelessWidget {
+  const _ActivityCard({required this.activity, required this.sessionCwd});
+
+  final SessionActivity activity;
+  final String sessionCwd;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = switch (activity.type) {
+      'command' =>
+        (activity.command ?? '').trim().isEmpty ? 'Command' : activity.command!,
+      'file_change' =>
+        activity.changes.length == 1
+            ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
+            : 'Edited ${activity.changes.length} files',
+      _ => 'Activity',
+    };
+
+    final subtitle = switch (activity.type) {
+      'command' => _relativeSessionPath(activity.cwd ?? sessionCwd, sessionCwd),
+      'file_change' => _activityFileSummary(activity.changes, sessionCwd),
+      _ => null,
+    };
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          leading: Icon(
+            activity.isCommand
+                ? Icons.terminal_rounded
+                : Icons.description_outlined,
+            color: const Color(0xFF8E4A15),
+          ),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _ActivityStatusPill(status: activity.status),
+            ],
+          ),
+          subtitle: subtitle == null || subtitle.isEmpty
+              ? null
+              : Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF6D5B49),
+                    ),
+                  ),
+                ),
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (activity.turnId != null)
+                  _InfoTag(label: 'turn ${_shortId(activity.turnId!)}'),
+                if (activity.exitCode != null)
+                  _InfoTag(label: 'exit ${activity.exitCode}'),
+                if (activity.durationMs != null)
+                  _InfoTag(label: _formatDuration(activity.durationMs!)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (activity.isCommand) ...[
+              if ((activity.output ?? '').isNotEmpty)
+                _CodeBlock(text: activity.output!)
+              else
+                Text(
+                  'Waiting for command output.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: const Color(0xFF6D5B49),
+                  ),
+                ),
+            ] else ...[
+              ...activity.changes.map(
+                (change) => Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _relativeSessionPath(change.path, sessionCwd),
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          _InfoTag(label: change.kind),
+                        ],
+                      ),
+                      if ((change.movePath ?? '').isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6, bottom: 8),
+                          child: Text(
+                            'Moved from ${_relativeSessionPath(change.movePath!, sessionCwd)}',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: const Color(0xFF6D5B49)),
+                          ),
+                        )
+                      else
+                        const SizedBox(height: 8),
+                      _CodeBlock(text: change.diff),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActivityStatusPill extends StatelessWidget {
+  const _ActivityStatusPill({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: _activityStatusColor(status),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        _activityStatusLabel(status),
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          fontWeight: FontWeight.w700,
+          color: const Color(0xFF221C15),
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoTag extends StatelessWidget {
+  const _InfoTag({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5E6D1),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: const Color(0xFF6D5B49),
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _CodeBlock extends StatelessWidget {
+  const _CodeBlock({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF4E3),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SelectableText(
+            text,
+            style: GoogleFonts.ibmPlexMono(
+              fontSize: 12.5,
+              height: 1.45,
+              color: const Color(0xFF221C15),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _relativeSessionPath(String fullPath, String sessionCwd) {
+  if (fullPath.isEmpty) {
+    return fullPath;
+  }
+  if (fullPath == sessionCwd) {
+    return '.';
+  }
+  final prefix = '$sessionCwd/';
+  if (fullPath.startsWith(prefix)) {
+    return fullPath.substring(prefix.length);
+  }
+  return fullPath;
+}
+
+String _activityFileSummary(
+  List<SessionActivityChange> changes,
+  String sessionCwd,
+) {
+  if (changes.isEmpty) {
+    return 'Waiting for patch details.';
+  }
+
+  final labels = changes
+      .take(3)
+      .map((change) => _relativeSessionPath(change.path, sessionCwd))
+      .toList();
+  final remainder = changes.length - labels.length;
+  if (remainder > 0) {
+    labels.add('+$remainder more');
+  }
+  return labels.join('  •  ');
+}
+
+String _activityStatusLabel(String status) {
+  return switch (status) {
+    'completed' => 'Done',
+    'failed' => 'Failed',
+    'declined' => 'Declined',
+    _ => 'Running',
+  };
+}
+
+Color _activityStatusColor(String status) {
+  return switch (status) {
+    'completed' => const Color(0xFFD7F2D3),
+    'failed' => const Color(0xFFFFD3CC),
+    'declined' => const Color(0xFFE7E1D8),
+    _ => const Color(0xFFFFE2C7),
+  };
+}
+
+String _formatDuration(int durationMs) {
+  if (durationMs >= 1000) {
+    final seconds = durationMs / 1000;
+    return '${seconds.toStringAsFixed(seconds >= 10 ? 0 : 1)}s';
+  }
+  return '${durationMs}ms';
+}
+
+String _shortId(String value) {
+  if (value.length <= 8) {
+    return value;
+  }
+  return value.substring(value.length - 8);
 }
 
 class _StatusPill extends StatelessWidget {
