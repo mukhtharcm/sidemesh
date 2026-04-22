@@ -27,7 +27,10 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 - [ ] Show model choices from `model/list`.
 - [x] Expose per-session runtime settings such as model, sandbox mode, and approval policy.
 - [x] Add typed activity cards for command execution and file edits.
+- [x] Show live command action summaries, terminal stdin, and turn-level diff cards.
 - [ ] Add activity cards for review mode and reconnecting.
+- [ ] Add activity cards for plan updates, reasoning summaries, web search, MCP calls, and context compaction.
+- [ ] Surface model reroutes and token usage updates while a turn is running.
 - [ ] Add a lightweight file browser using `fs/readDirectory`, `fs/readFile`, and `fs/getMetadata`.
 - [ ] Add quick shell utilities with `thread/shellCommand` or `command/exec`.
 - [ ] Add Git context cards on the host and session screens.

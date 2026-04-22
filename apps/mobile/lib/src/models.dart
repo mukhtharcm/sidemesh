@@ -191,6 +191,22 @@ class SessionActivityChange {
       );
 }
 
+class SessionCommandActionSummary {
+  const SessionCommandActionSummary({
+    required this.kind,
+    required this.label,
+  });
+
+  final String kind;
+  final String label;
+
+  factory SessionCommandActionSummary.fromJson(Map<String, dynamic> json) =>
+      SessionCommandActionSummary(
+        kind: _stringValue(json['kind']),
+        label: _stringValue(json['label']),
+      );
+}
+
 class SessionActivity {
   const SessionActivity({
     required this.id,
@@ -203,7 +219,13 @@ class SessionActivity {
     required this.output,
     required this.exitCode,
     required this.durationMs,
+    required this.source,
+    required this.processId,
+    required this.commandActions,
+    required this.terminalStatus,
+    required this.terminalInput,
     required this.changes,
+    required this.diff,
   });
 
   final String id;
@@ -216,10 +238,17 @@ class SessionActivity {
   final String? output;
   final int? exitCode;
   final int? durationMs;
+  final String? source;
+  final String? processId;
+  final List<SessionCommandActionSummary> commandActions;
+  final String? terminalStatus;
+  final String? terminalInput;
   final List<SessionActivityChange> changes;
+  final String? diff;
 
   bool get isCommand => type == 'command';
   bool get isFileChange => type == 'file_change';
+  bool get isTurnDiff => type == 'turn_diff';
 
   factory SessionActivity.fromJson(Map<String, dynamic> json) =>
       SessionActivity(
@@ -233,12 +262,24 @@ class SessionActivity {
         output: _stringOrNull(json['output']),
         exitCode: _intOrNull(json['exitCode']),
         durationMs: _intOrNull(json['durationMs']),
+        source: _stringOrNull(json['source']),
+        processId: _stringOrNull(json['processId']),
+        commandActions: (json['commandActions'] as List<dynamic>? ?? [])
+            .map(
+              (item) => SessionCommandActionSummary.fromJson(
+                item as Map<String, dynamic>,
+              ),
+            )
+            .toList(),
+        terminalStatus: _stringOrNull(json['terminalStatus']),
+        terminalInput: _stringOrNull(json['terminalInput']),
         changes: (json['changes'] as List<dynamic>? ?? [])
             .map(
               (item) =>
                   SessionActivityChange.fromJson(item as Map<String, dynamic>),
             )
             .toList(),
+        diff: _stringOrNull(json['diff']),
       );
 }
 

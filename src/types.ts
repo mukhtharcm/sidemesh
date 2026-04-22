@@ -43,10 +43,15 @@ export interface SessionActivityChange {
 
 export interface SessionActivityBase {
   id: string;
-  type: "command" | "file_change";
+  type: "command" | "file_change" | "turn_diff";
   turnId: string | null;
   createdAt: number;
   status: "in_progress" | "completed" | "failed" | "declined";
+}
+
+export interface SessionCommandActionSummary {
+  kind: "read" | "list_files" | "search" | "unknown";
+  label: string;
 }
 
 export interface CommandActivity extends SessionActivityBase {
@@ -56,6 +61,11 @@ export interface CommandActivity extends SessionActivityBase {
   output: string | null;
   exitCode: number | null;
   durationMs: number | null;
+  source: string | null;
+  processId: string | null;
+  commandActions: SessionCommandActionSummary[];
+  terminalStatus: "waiting" | "input" | null;
+  terminalInput: string | null;
 }
 
 export interface FileChangeActivity extends SessionActivityBase {
@@ -63,7 +73,12 @@ export interface FileChangeActivity extends SessionActivityBase {
   changes: SessionActivityChange[];
 }
 
-export type SessionActivity = CommandActivity | FileChangeActivity;
+export interface TurnDiffActivity extends SessionActivityBase {
+  type: "turn_diff";
+  diff: string | null;
+}
+
+export type SessionActivity = CommandActivity | FileChangeActivity | TurnDiffActivity;
 
 export interface PendingAction {
   id: string;

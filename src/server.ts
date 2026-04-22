@@ -21,9 +21,11 @@ import type {
   WorkspaceSummary,
 } from "./types.js";
 import {
+  applyCommandTerminalInteraction,
   appendCommandActivityOutput,
   buildActivityFromThreadItem,
   buildFileChangeChanges,
+  buildTurnDiffActivity,
   extractSessionActivities,
   mergeActivity,
   mergeSessionActivities,
@@ -128,6 +130,31 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return;
     }
 
+    if (method === "item/commandExecution/terminalInteraction") {
+      const stdin = asString((params as any)?.stdin);
+      const itemId = asString((params as any)?.itemId);
+      const turnId = asString((params as any)?.turnId);
+      if (!stdin || !itemId) {
+        return;
+      }
+
+      const next = updateLiveCommandTerminalInteraction(
+        liveActivities,
+        sessionId,
+        itemId,
+        stdin,
+      );
+      if (next) {
+        broadcast(socketsBySession, sessionId, {
+          type: "activity_updated",
+          sessionId,
+          turnId: turnId || undefined,
+          activity: next,
+        });
+      }
+      return;
+    }
+
     if (method === "item/fileChange/patchUpdated") {
       const itemId = asString((params as any)?.itemId);
       const turnId = asString((params as any)?.turnId);
@@ -147,6 +174,25 @@ export async function startServer(config: NodeConfig): Promise<void> {
           type: "activity_updated",
           sessionId,
           turnId: turnId || undefined,
+          activity: next,
+        });
+      }
+      return;
+    }
+
+    if (method === "turn/diff/updated") {
+      const turnId = asString((params as any)?.turnId);
+      const diff = asString((params as any)?.diff);
+      if (!turnId || !diff) {
+        return;
+      }
+
+      const next = updateLiveTurnDiffActivity(liveActivities, sessionId, turnId, diff);
+      if (next) {
+        broadcast(socketsBySession, sessionId, {
+          type: "activity_updated",
+          sessionId,
+          turnId,
           activity: next,
         });
       }
@@ -667,6 +713,31 @@ function updateLiveCommandActivity(
   return updated;
 }
 
+function updateLiveCommandTerminalInteraction(
+  liveActivities: Map<string, Map<string, SessionActivity>>,
+  sessionId: string,
+  itemId: string,
+  stdin: string,
+): SessionActivity | null {
+  const sessionActivities = liveActivities.get(sessionId);
+  if (!sessionActivities) {
+    return null;
+  }
+
+  const existing = sessionActivities.get(itemId);
+  if (!existing || existing.type !== "command") {
+    return null;
+  }
+
+  const updated = applyCommandTerminalInteraction(existing, stdin);
+  if (!updated) {
+    return null;
+  }
+
+  sessionActivities.set(itemId, updated);
+  return updated;
+}
+
 function updateLiveFileChangeActivity(
   liveActivities: Map<string, Map<string, SessionActivity>>,
   sessionId: string,
@@ -686,6 +757,25 @@ function updateLiveFileChangeActivity(
   };
   const merged = mergeActivity(existing, next);
   sessionActivities.set(itemId, merged);
+  liveActivities.set(sessionId, sessionActivities);
+  return merged;
+}
+
+function updateLiveTurnDiffActivity(
+  liveActivities: Map<string, Map<string, SessionActivity>>,
+  sessionId: string,
+  turnId: string,
+  diff: string,
+): SessionActivity | null {
+  const sessionActivities = liveActivities.get(sessionId) || new Map<string, SessionActivity>();
+  const incoming = buildTurnDiffActivity(turnId, diff, Date.now());
+  if (!incoming) {
+    return null;
+  }
+
+  const existing = sessionActivities.get(incoming.id);
+  const merged = mergeActivity(existing, incoming);
+  sessionActivities.set(incoming.id, merged);
   liveActivities.set(sessionId, sessionActivities);
   return merged;
 }
