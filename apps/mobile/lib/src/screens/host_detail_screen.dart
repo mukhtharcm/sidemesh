@@ -592,41 +592,6 @@ class _CreateSessionSheetState extends State<_CreateSessionSheet> {
                 ),
               ),
               const SizedBox(height: 14),
-              DropdownButtonFormField<_SessionLaunchMode>(
-                initialValue: _launchMode,
-                decoration: const InputDecoration(labelText: 'Runtime mode'),
-                items: _SessionLaunchMode.values
-                    .map(
-                      (mode) => DropdownMenuItem<_SessionLaunchMode>(
-                        value: mode,
-                        child: Text(mode.label),
-                      ),
-                    )
-                    .toList(),
-                onChanged: _submitting
-                    ? null
-                    : (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() => _launchMode = value);
-                      },
-              ),
-              const SizedBox(height: 8),
-              Text(_launchMode.description, style: helperStyle),
-              const SizedBox(height: 8),
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                value: _enableSearch,
-                onChanged: _submitting
-                    ? null
-                    : (value) => setState(() => _enableSearch = value),
-                title: const Text('Enable live web search'),
-                subtitle: Text(
-                  'Matches Codex TUI `--search` and sets `web_search="live"` for this thread.',
-                  style: helperStyle,
-                ),
-              ),
               TextButton.icon(
                 onPressed: _submitting
                     ? null
@@ -639,6 +604,42 @@ class _CreateSessionSheetState extends State<_CreateSessionSheet> {
                 label: Text(_showAdvanced ? 'Hide advanced' : 'Show advanced'),
               ),
               if (_showAdvanced) ...[
+                const SizedBox(height: 6),
+                DropdownButtonFormField<_SessionLaunchMode>(
+                  initialValue: _launchMode,
+                  decoration: const InputDecoration(labelText: 'Runtime mode'),
+                  items: _SessionLaunchMode.values
+                      .map(
+                        (mode) => DropdownMenuItem<_SessionLaunchMode>(
+                          value: mode,
+                          child: Text(mode.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _submitting
+                      ? null
+                      : (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setState(() => _launchMode = value);
+                        },
+                ),
+                const SizedBox(height: 8),
+                Text(_launchMode.description, style: helperStyle),
+                const SizedBox(height: 8),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  value: _enableSearch,
+                  onChanged: _submitting
+                      ? null
+                      : (value) => setState(() => _enableSearch = value),
+                  title: const Text('Enable live web search'),
+                  subtitle: Text(
+                    'Matches Codex TUI `--search` and sets `web_search="live"` for this thread.',
+                    style: helperStyle,
+                  ),
+                ),
                 const SizedBox(height: 6),
                 TextField(
                   controller: _modelController,
