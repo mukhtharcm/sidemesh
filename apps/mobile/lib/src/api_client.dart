@@ -37,8 +37,24 @@ class ApiClient {
     return _decodeList(response).map(PendingAction.fromJson).toList();
   }
 
-  Future<SessionLog> fetchLog(HostProfile host, String sessionId) async {
-    final response = await _get(host, '/api/sessions/$sessionId/log');
+  Future<SessionLog> fetchLog(
+    HostProfile host,
+    String sessionId, {
+    int? messageLimit,
+    int? activityLimit,
+  }) async {
+    final queryParameters = <String, String>{};
+    if (messageLimit != null) {
+      queryParameters['messageLimit'] = '$messageLimit';
+    }
+    if (activityLimit != null) {
+      queryParameters['activityLimit'] = '$activityLimit';
+    }
+    final response = await _get(
+      host,
+      '/api/sessions/$sessionId/log',
+      queryParameters: queryParameters.isEmpty ? null : queryParameters,
+    );
     return SessionLog.fromJson(_decodeObject(response));
   }
 

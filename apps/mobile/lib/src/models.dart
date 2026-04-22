@@ -196,10 +196,7 @@ class SessionActivityChange {
 }
 
 class SessionCommandActionSummary {
-  const SessionCommandActionSummary({
-    required this.kind,
-    required this.label,
-  });
+  const SessionCommandActionSummary({required this.kind, required this.label});
 
   final String kind;
   final String label;
@@ -335,12 +332,14 @@ class SessionLog {
     required this.messages,
     required this.activities,
     required this.pendingAction,
+    required this.history,
   });
 
   final SessionSummary session;
   final List<SessionMessage> messages;
   final List<SessionActivity> activities;
   final PendingAction? pendingAction;
+  final SessionLogHistorySummary? history;
 
   factory SessionLog.fromJson(Map<String, dynamic> json) => SessionLog(
     session: SessionSummary.fromJson(json['session'] as Map<String, dynamic>),
@@ -353,7 +352,37 @@ class SessionLog {
     pendingAction: json['pendingAction'] == null
         ? null
         : PendingAction.fromJson(json['pendingAction'] as Map<String, dynamic>),
+    history: json['history'] == null
+        ? null
+        : SessionLogHistorySummary.fromJson(
+            json['history'] as Map<String, dynamic>,
+          ),
   );
+}
+
+class SessionLogHistorySummary {
+  const SessionLogHistorySummary({
+    required this.isTruncated,
+    required this.totalMessages,
+    required this.returnedMessages,
+    required this.totalActivities,
+    required this.returnedActivities,
+  });
+
+  final bool isTruncated;
+  final int totalMessages;
+  final int returnedMessages;
+  final int totalActivities;
+  final int returnedActivities;
+
+  factory SessionLogHistorySummary.fromJson(Map<String, dynamic> json) =>
+      SessionLogHistorySummary(
+        isTruncated: _boolValue(json['isTruncated']),
+        totalMessages: _intValue(json['totalMessages']),
+        returnedMessages: _intValue(json['returnedMessages']),
+        totalActivities: _intValue(json['totalActivities']),
+        returnedActivities: _intValue(json['returnedActivities']),
+      );
 }
 
 class SessionStatus {
