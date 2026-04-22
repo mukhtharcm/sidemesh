@@ -71,6 +71,28 @@ class ApiClient {
     await _post(host, '/api/sessions/$sessionId/stop', body: const {});
   }
 
+  Future<SessionSummary> renameSession(
+    HostProfile host, {
+    required String sessionId,
+    required String name,
+  }) async {
+    final response = await _post(
+      host,
+      '/api/sessions/$sessionId/name',
+      body: {'name': name},
+    );
+    final payload = _decodeObject(response);
+    return SessionSummary.fromJson(payload['session'] as Map<String, dynamic>);
+  }
+
+  Future<void> archiveSession(HostProfile host, String sessionId) async {
+    await _post(host, '/api/sessions/$sessionId/archive', body: const {});
+  }
+
+  Future<void> unarchiveSession(HostProfile host, String sessionId) async {
+    await _post(host, '/api/sessions/$sessionId/unarchive', body: const {});
+  }
+
   Future<void> respondToAction(
     HostProfile host, {
     required String actionId,
