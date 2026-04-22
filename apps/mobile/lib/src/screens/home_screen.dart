@@ -47,6 +47,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
   List<HostProfile> _hosts = const [];
   bool _loading = true;
   int _tabIndex = 0;
+  int _activeCount = 0;
+  int _inboxCount = 0;
 
   @override
   void initState() {
@@ -148,12 +150,24 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
                           hosts: _hosts,
                           api: _api,
                           onOpenSession: _openSession,
+                          onActiveCountChanged: (count) {
+                            if (!mounted || _activeCount == count) {
+                              return;
+                            }
+                            setState(() => _activeCount = count);
+                          },
                         ),
                         _InboxPane(
                           hosts: _hosts,
                           api: _api,
                           onOpenSession: (host, action) =>
                               _openSession(host, _sessionFromAction(action)),
+                          onInboxCountChanged: (count) {
+                            if (!mounted || _inboxCount == count) {
+                              return;
+                            }
+                            setState(() => _inboxCount = count);
+                          },
                         ),
                         _HostsPane(
                           hosts: _hosts,
@@ -180,6 +194,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
         tabs: _tabs,
         currentIndex: _tabIndex,
         onTap: (index) => setState(() => _tabIndex = index),
+        badges: [_activeCount, _inboxCount, 0],
       ),
     );
   }
@@ -295,11 +310,13 @@ class _MeshNavBar extends StatelessWidget {
     required this.tabs,
     required this.currentIndex,
     required this.onTap,
+    required this.badges,
   });
 
   final List<_TabDef> tabs;
   final int currentIndex;
   final ValueChanged<int> onTap;
+  final List<int> badges;
 
   @override
   Widget build(BuildContext context) {
@@ -316,6 +333,7 @@ class _MeshNavBar extends StatelessWidget {
           children: List.generate(tabs.length, (index) {
             final tab = tabs[index];
             final selected = index == currentIndex;
+            final badge = index < badges.length ? badges[index] : 0;
             return Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 3),
@@ -342,12 +360,10 @@ class _MeshNavBar extends StatelessWidget {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            selected ? tab.selectedIcon : tab.icon,
-                            size: 22,
-                            color: selected
-                                ? colors.accent
-                                : colors.textSecondary,
+                          _NavIconWithBadge(
+                            icon: selected ? tab.selectedIcon : tab.icon,
+                            selected: selected,
+                            badge: badge,
                           ),
                           const SizedBox(height: 4),
                           Text(
@@ -374,16 +390,67 @@ class _MeshNavBar extends StatelessWidget {
   }
 }
 
+class _NavIconWithBadge extends StatelessWidget {
+  const _NavIconWithBadge({
+    required this.icon,
+    required this.selected,
+    required this.badge,
+  });
+
+  final IconData icon;
+  final bool selected;
+  final int badge;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final iconColor = selected ? colors.accent : colors.textSecondary;
+    final label = badge > 99 ? '99+' : '$badge';
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.center,
+      children: [
+        Icon(icon, size: 22, color: iconColor),
+        if (badge > 0)
+          Positioned(
+            top: -6,
+            right: -10,
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: colors.danger,
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: colors.canvas, width: 2),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                label,
+                style: monoStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ).copyWith(height: 1.1),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _RecentPane extends StatefulWidget {
   const _RecentPane({
     required this.hosts,
     required this.api,
     required this.onOpenSession,
+    required this.onActiveCountChanged,
   });
 
   final List<HostProfile> hosts;
   final ApiClient api;
   final void Function(HostProfile host, SessionSummary session) onOpenSession;
+  final ValueChanged<int> onActiveCountChanged;
 
   @override
   State<_RecentPane> createState() => _RecentPaneState();
@@ -423,6 +490,11 @@ class _RecentPaneState extends State<_RecentPane> {
     }
     merged.sort((left, right) =>
         right.session.updatedAt.compareTo(left.session.updatedAt));
+    final activeCount =
+        merged.where((entry) => entry.session.status == 'running').length;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.onActiveCountChanged(activeCount);
+    });
     return merged;
   }
 
@@ -579,11 +651,13 @@ class _InboxPane extends StatefulWidget {
     required this.hosts,
     required this.api,
     required this.onOpenSession,
+    required this.onInboxCountChanged,
   });
 
   final List<HostProfile> hosts;
   final ApiClient api;
   final void Function(HostProfile host, PendingAction action) onOpenSession;
+  final ValueChanged<int> onInboxCountChanged;
 
   @override
   State<_InboxPane> createState() => _InboxPaneState();
@@ -622,6 +696,9 @@ class _InboxPaneState extends State<_InboxPane> {
     }
     merged.sort((left, right) =>
         right.action.requestedAt.compareTo(left.action.requestedAt));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.onInboxCountChanged(merged.length);
+    });
     return merged;
   }
 
