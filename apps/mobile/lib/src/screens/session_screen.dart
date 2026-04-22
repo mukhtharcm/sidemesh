@@ -273,6 +273,40 @@ class _SessionScreenState extends State<SessionScreen> {
     }
   }
 
+  Future<void> _showSessionDetailsSheet(SessionSummary session) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Session details',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 16),
+              _SheetDetailRow(label: 'Host', value: widget.host.label),
+              _SheetDetailRow(label: 'Working dir', value: session.cwd),
+              _SheetDetailRow(
+                label: 'Status',
+                value: _running ? 'Running' : 'Idle',
+              ),
+              _SheetDetailRow(label: 'Source', value: session.source),
+              if (session.runtime != null) ...[
+                const SizedBox(height: 12),
+                _SessionRuntimeDetails(runtime: session.runtime!),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _scrollToBottom({bool animated = false}) async {
     for (var attempt = 0; attempt < 3; attempt += 1) {
       await WidgetsBinding.instance.endOfFrame;
@@ -364,19 +398,37 @@ class _SessionScreenState extends State<SessionScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        widget.host.label,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              widget.host.label,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () => _showSessionDetailsSheet(session),
+                            icon: const Icon(Icons.tune, size: 18),
+                            label: const Text('Details'),
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 4),
                       Text(
                         session.cwd,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
+                        runSpacing: 8,
                         children: [
                           _StatusPill(
                             label: _running ? 'Running' : 'Idle',
@@ -388,12 +440,19 @@ class _SessionScreenState extends State<SessionScreen> {
                             label: session.source,
                             color: const Color(0xFFEBC8A1),
                           ),
+                          if ((session.runtime?.model ?? '').isNotEmpty)
+                            _StatusPill(
+                              label: session.runtime!.model!,
+                              color: const Color(0xFFF4E6CF),
+                            ),
+                          if ((session.runtime?.approvalPolicy ?? '')
+                              .isNotEmpty)
+                            _StatusPill(
+                              label: session.runtime!.approvalPolicy!,
+                              color: const Color(0xFFF6E6C5),
+                            ),
                         ],
                       ),
-                      if (session.runtime != null) ...[
-                        const SizedBox(height: 12),
-                        _SessionRuntimeDetails(runtime: session.runtime!),
-                      ],
                     ],
                   ),
                 ),
@@ -680,6 +739,34 @@ class _StatusPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(label),
+    );
+  }
+}
+
+class _SheetDetailRow extends StatelessWidget {
+  const _SheetDetailRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: const Color(0xFF7A6246),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(value, style: Theme.of(context).textTheme.bodyMedium),
+        ],
+      ),
     );
   }
 }
