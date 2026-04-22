@@ -57,6 +57,7 @@ class SessionSummary {
     required this.updatedAt,
     required this.source,
     required this.status,
+    required this.runtime,
   });
 
   final String id;
@@ -67,6 +68,7 @@ class SessionSummary {
   final DateTime updatedAt;
   final String source;
   final String status;
+  final SessionRuntimeSummary? runtime;
 
   factory SessionSummary.fromJson(Map<String, dynamic> json) => SessionSummary(
     id: _stringValue(json['id']),
@@ -77,7 +79,48 @@ class SessionSummary {
     updatedAt: _dateValue(json['updatedAt']),
     source: _stringValue(json['source']),
     status: _stringValue(json['status']),
+    runtime: json['runtime'] is Map<String, dynamic>
+        ? SessionRuntimeSummary.fromJson(
+            json['runtime'] as Map<String, dynamic>,
+          )
+        : null,
   );
+}
+
+class SessionRuntimeSummary {
+  const SessionRuntimeSummary({
+    this.model,
+    this.reasoningEffort,
+    this.approvalPolicy,
+    this.sandboxMode,
+    this.networkAccess,
+    this.summaryMode,
+    this.personality,
+    this.updatedAt,
+  });
+
+  final String? model;
+  final String? reasoningEffort;
+  final String? approvalPolicy;
+  final String? sandboxMode;
+  final bool? networkAccess;
+  final String? summaryMode;
+  final String? personality;
+  final DateTime? updatedAt;
+
+  factory SessionRuntimeSummary.fromJson(Map<String, dynamic> json) =>
+      SessionRuntimeSummary(
+        model: json['model'] as String?,
+        reasoningEffort: json['reasoningEffort'] as String?,
+        approvalPolicy: json['approvalPolicy'] as String?,
+        sandboxMode: json['sandboxMode'] as String?,
+        networkAccess: json['networkAccess'] as bool?,
+        summaryMode: json['summaryMode'] as String?,
+        personality: json['personality'] as String?,
+        updatedAt: json['updatedAt'] == null
+            ? null
+            : _dateValue(json['updatedAt']),
+      );
 }
 
 class WorkspaceSummary {

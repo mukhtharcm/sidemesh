@@ -12,15 +12,21 @@ import type {
   NodeConfig,
   PendingAction,
   PendingActionRecord,
+  SessionRuntimeSummary,
   SessionSummary,
   ThreadRecord,
   TurnRecord,
   WorkspaceSummary,
 } from "./types.js";
 import { CodexBridge } from "./codex-client.js";
-import { loadRolloutLog } from "./history.js";
+import { loadRolloutLog, loadSessionRuntime } from "./history.js";
 
 const DEFAULT_SOURCES = ["cli", "vscode", "exec", "appServer"];
+
+interface SessionRuntimeCacheEntry {
+  threadUpdatedAt: number;
+  runtime: SessionRuntimeSummary | null;
+}
 
 export async function startServer(config: NodeConfig): Promise<void> {
   const bridge = new CodexBridge(config.codexBin);
@@ -31,6 +37,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const socketsBySession = new Map<string, Set<WebSocket>>();
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, PendingActionRecord>();
+  const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
   let codexVersion = "unknown";
 
   bridge.on("stderr", (line) => {
@@ -144,12 +151,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
   });
 
   app.get("/api/sessions", asyncRoute(async (_request, response) => {
-    const sessions = await listSessions(bridge);
+    const sessions = await listSessions(bridge, runtimeCache);
     response.json(sessions);
   }));
 
   app.get("/api/workspaces", asyncRoute(async (_request, response) => {
-    const sessions = await listSessions(bridge);
+    const sessions = await listSessions(bridge, runtimeCache);
     response.json(buildWorkspaces(sessions));
   }));
 
@@ -161,8 +168,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const sessionId = pathParam(request.params.sessionId);
     const session = await readSession(bridge, sessionId, false);
     const log = await loadRolloutLog(sessionId, session.path, bridge.codexHome);
+    runtimeCache.set(session.id, {
+      threadUpdatedAt: session.updatedAt,
+      runtime: log.runtime,
+    });
     response.json({
-      session: mapSession(session),
+      session: mapSession(session, log.runtime),
       messages: log.messages,
       pendingAction: findPendingActionForSession(pendingActions, sessionId),
     });
@@ -379,7 +390,10 @@ function authenticate(
   next();
 }
 
-async function listSessions(bridge: CodexBridge): Promise<SessionSummary[]> {
+async function listSessions(
+  bridge: CodexBridge,
+  runtimeCache: Map<string, SessionRuntimeCacheEntry>,
+): Promise<SessionSummary[]> {
   const result = (await bridge.request("thread/list", {
     limit: 100,
     sortKey: "updated_at",
@@ -388,7 +402,14 @@ async function listSessions(bridge: CodexBridge): Promise<SessionSummary[]> {
     archived: false,
   })) as any;
   const threads = Array.isArray(result.data) ? (result.data as ThreadRecord[]) : [];
-  return threads.map(mapSession);
+  return Promise.all(
+    threads.map(async (thread) =>
+      mapSession(
+        thread,
+        await loadCachedSessionRuntime(bridge, thread, runtimeCache),
+      ),
+    ),
+  );
 }
 
 function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
@@ -498,7 +519,10 @@ async function isThreadLoaded(bridge: CodexBridge, sessionId: string): Promise<b
   return data.includes(sessionId);
 }
 
-function mapSession(thread: ThreadRecord): SessionSummary {
+function mapSession(
+  thread: ThreadRecord,
+  runtime: SessionRuntimeSummary | null = null,
+): SessionSummary {
   return {
     id: thread.id,
     title: sanitizeTitle(thread.name || thread.preview),
@@ -509,6 +533,7 @@ function mapSession(thread: ThreadRecord): SessionSummary {
     source: typeof thread.source === "string" ? thread.source : JSON.stringify(thread.source),
     status: thread.status?.type || "notLoaded",
     rolloutPath: thread.path,
+    runtime,
   };
 }
 
@@ -518,6 +543,24 @@ function sanitizeTitle(raw: string): string {
     return "Untitled session";
   }
   return compact.length > 90 ? `${compact.slice(0, 87)}...` : compact;
+}
+
+async function loadCachedSessionRuntime(
+  bridge: CodexBridge,
+  thread: ThreadRecord,
+  runtimeCache: Map<string, SessionRuntimeCacheEntry>,
+): Promise<SessionRuntimeSummary | null> {
+  const cached = runtimeCache.get(thread.id);
+  if (cached && cached.threadUpdatedAt === thread.updatedAt) {
+    return cached.runtime;
+  }
+
+  const runtime = await loadSessionRuntime(thread.id, thread.path, bridge.codexHome);
+  runtimeCache.set(thread.id, {
+    threadUpdatedAt: thread.updatedAt,
+    runtime,
+  });
+  return runtime;
 }
 
 function extractSessionId(method: string, params: unknown): string | null {
