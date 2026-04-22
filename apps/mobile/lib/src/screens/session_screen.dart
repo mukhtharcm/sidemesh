@@ -1168,14 +1168,24 @@ class _MarkdownMessageBody extends StatelessWidget {
   }
 }
 
-class _ActivityCard extends StatelessWidget {
+class _ActivityCard extends StatefulWidget {
   const _ActivityCard({required this.activity, required this.sessionCwd});
 
   final SessionActivity activity;
   final String sessionCwd;
 
   @override
+  State<_ActivityCard> createState() => _ActivityCardState();
+}
+
+class _ActivityCardState extends State<_ActivityCard> {
+  static const _collapsedLineLimit = 15;
+  bool _outputExpanded = false;
+
+  @override
   Widget build(BuildContext context) {
+    final activity = widget.activity;
+    final sessionCwd = widget.sessionCwd;
     final colors = context.colors;
     final title = switch (activity.type) {
       'command' =>
@@ -1414,7 +1424,21 @@ class _ActivityCard extends StatelessWidget {
     }
 
     if ((activity.output ?? '').isNotEmpty) {
-      widgets.add(SyntaxCodeBlock(text: activity.output!, language: 'bash'));
+      final output = activity.output!;
+      final lines = output.split('\n');
+      final isLong = lines.length > _collapsedLineLimit;
+      final displayText = isLong && !_outputExpanded
+          ? lines.take(_collapsedLineLimit).join('\n')
+          : output;
+      widgets.add(SyntaxCodeBlock(text: displayText, language: 'bash'));
+      if (isLong) {
+        widgets.add(const SizedBox(height: 6));
+        widgets.add(_ExpandToggle(
+          expanded: _outputExpanded,
+          hiddenCount: lines.length - _collapsedLineLimit,
+          onToggle: () => setState(() => _outputExpanded = !_outputExpanded),
+        ));
+      }
     } else if (activity.terminalStatus == 'waiting') {
       widgets.add(_waitingText(context, 'Interactive command is running.'));
     } else {
@@ -1439,6 +1463,55 @@ class _ActivityCard extends StatelessWidget {
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colors.textSecondary,
             ),
+      ),
+    );
+  }
+}
+
+class _ExpandToggle extends StatelessWidget {
+  const _ExpandToggle({
+    required this.expanded,
+    required this.hiddenCount,
+    required this.onToggle,
+  });
+
+  final bool expanded;
+  final int hiddenCount;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return GestureDetector(
+      onTap: onToggle,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: colors.accentMuted,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              expanded
+                  ? Icons.unfold_less_rounded
+                  : Icons.unfold_more_rounded,
+              size: 16,
+              color: colors.accent,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              expanded ? 'Show less' : '+$hiddenCount lines',
+              style: monoStyle(
+                color: colors.accent,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

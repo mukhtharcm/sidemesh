@@ -151,9 +151,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
                           api: _api,
                           onOpenSession: _openSession,
                           onActiveCountChanged: (count) {
-                            if (!mounted || _activeCount == count) {
-                              return;
-                            }
+                            if (!mounted) return;
                             setState(() => _activeCount = count);
                           },
                         ),
@@ -163,9 +161,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
                           onOpenSession: (host, action) =>
                               _openSession(host, _sessionFromAction(action)),
                           onInboxCountChanged: (count) {
-                            if (!mounted || _inboxCount == count) {
-                              return;
-                            }
+                            if (!mounted) return;
                             setState(() => _inboxCount = count);
                           },
                         ),
@@ -493,6 +489,7 @@ class _RecentPaneState extends State<_RecentPane> {
     final activeCount =
         merged.where((entry) => entry.session.status == 'running').length;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       widget.onActiveCountChanged(activeCount);
     });
     return merged;
@@ -697,6 +694,7 @@ class _InboxPaneState extends State<_InboxPane> {
     merged.sort((left, right) =>
         right.action.requestedAt.compareTo(left.action.requestedAt));
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       widget.onInboxCountChanged(merged.length);
     });
     return merged;
