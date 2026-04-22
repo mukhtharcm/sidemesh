@@ -346,7 +346,7 @@ class _SessionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final running = session.status == 'running';
+    final running = session.isActive;
     return MeshCard(
       onTap: onTap,
       accentStrip: running ? colors.success : null,
