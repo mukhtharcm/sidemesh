@@ -106,6 +106,7 @@ export interface ActiveTurnState {
 export interface PendingActionRecord extends PendingAction {
   jsonRpcId: number | string;
   requestMethod: string;
+  requestedPermissions?: unknown;
 }
 
 export interface RolloutLog {
