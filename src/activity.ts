@@ -244,6 +244,128 @@ export function buildTurnDiffActivity(
   };
 }
 
+export function buildCommandActivityFromRolloutEvent(
+  payload: unknown,
+  createdAt: number,
+): CommandActivity | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const typed = payload as Record<string, unknown>;
+  const id = asString(typed.call_id) || asString(typed.callId);
+  const cwd = asString(typed.cwd) || "";
+  if (!id || !cwd) {
+    return null;
+  }
+
+  const command = normalizeCommandText(typed.command);
+  const output = truncateNullableText(
+    resolveCommandOutput(typed),
+    MAX_COMMAND_OUTPUT_CHARS,
+  );
+  const source = normalizeCommandSource(typed.source);
+  const status = normalizeStatus(typed.status);
+
+  return {
+    id,
+    type: "command",
+    turnId: asString(typed.turn_id) || asString(typed.turnId),
+    createdAt,
+    status,
+    command,
+    cwd,
+    output,
+    exitCode: asNumber(typed.exit_code) ?? asNumber(typed.exitCode),
+    durationMs: parseDurationMs(typed.duration) ?? asNumber(typed.duration_ms),
+    source,
+    processId: asString(typed.process_id) || asString(typed.processId),
+    commandActions: summarizeCommandActions(typed.parsed_cmd ?? typed.parsedCmd),
+    terminalStatus:
+      status === "in_progress" && isInteractiveCommandSource(source) ? "waiting" : null,
+    terminalInput: truncateNullableText(
+      asString(typed.interaction_input) || asString(typed.interactionInput),
+      MAX_TERMINAL_INPUT_CHARS,
+    ),
+  };
+}
+
+export function buildCommandActivityFromGuardianAssessment(
+  payload: unknown,
+  createdAt: number,
+): CommandActivity | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const typed = payload as Record<string, unknown>;
+  const status = normalizeGuardianStatus(typed.status);
+  if (!status) {
+    return null;
+  }
+
+  const id = asString(typed.target_item_id) || asString(typed.targetItemId);
+  const action =
+    typed.action && typeof typed.action === "object"
+      ? (typed.action as Record<string, unknown>)
+      : null;
+  if (!id || !action) {
+    return null;
+  }
+
+  const cwd = asString(action.cwd) || "";
+  if (!cwd) {
+    return null;
+  }
+
+  const command = normalizeGuardianCommandText(action);
+  if (!command) {
+    return null;
+  }
+
+  return {
+    id,
+    type: "command",
+    turnId: asString(typed.turn_id) || asString(typed.turnId),
+    createdAt,
+    status,
+    command,
+    cwd,
+    output: null,
+    exitCode: null,
+    durationMs: null,
+    source: "agent",
+    processId: null,
+    commandActions: summarizeGuardianCommandActions(action, command),
+    terminalStatus: status === "in_progress" ? "waiting" : null,
+    terminalInput: null,
+  };
+}
+
+export function buildFileChangeActivityFromRolloutEvent(
+  payload: unknown,
+  createdAt: number,
+): FileChangeActivity | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const typed = payload as Record<string, unknown>;
+  const id = asString(typed.call_id) || asString(typed.callId);
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    type: "file_change",
+    turnId: asString(typed.turn_id) || asString(typed.turnId),
+    createdAt,
+    status: normalizeStatus(typed.status),
+    changes: buildFileChangeChangesFromPatchMap(typed.changes),
+  };
+}
+
 export function buildFileChangeChanges(raw: unknown): SessionActivityChange[] {
   if (!Array.isArray(raw)) {
     return [];
@@ -279,6 +401,44 @@ export function buildFileChangeChanges(raw: unknown): SessionActivityChange[] {
       change.movePath = movePath;
     }
     changes.push(change);
+  }
+
+  return changes;
+}
+
+export function buildFileChangeChangesFromPatchMap(raw: unknown): SessionActivityChange[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return [];
+  }
+
+  const typed = raw as Record<string, unknown>;
+  const changes: SessionActivityChange[] = [];
+
+  for (const pathValue of Object.keys(typed).sort()) {
+    const change =
+      typed[pathValue] && typeof typed[pathValue] === "object"
+        ? (typed[pathValue] as Record<string, unknown>)
+        : null;
+    if (!change) {
+      continue;
+    }
+
+    const kind = normalizeChangeKind(change.type);
+    const diff = truncateNullableText(formatPatchMapDiff(change), MAX_DIFF_CHARS);
+    if (!kind || !diff) {
+      continue;
+    }
+
+    const next: SessionActivityChange = {
+      path: pathValue,
+      kind,
+      diff,
+    };
+    const movePath = asString(change.move_path) || asString(change.movePath);
+    if (movePath) {
+      next.movePath = movePath;
+    }
+    changes.push(next);
   }
 
   return changes;
@@ -324,6 +484,12 @@ function normalizeCommandSource(value: unknown): string | null {
     case "unifiedExecStartup":
     case "unifiedExecInteraction":
       return value;
+    case "user_shell":
+      return "userShell";
+    case "unified_exec_startup":
+      return "unifiedExecStartup";
+    case "unified_exec_interaction":
+      return "unifiedExecInteraction";
     default:
       return asString(value);
   }
@@ -419,6 +585,140 @@ function asString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function normalizeCommandText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  const command = asStringArray(value);
+  if (command.length === 0) {
+    return "";
+  }
+
+  return command.map(quoteShellArg).join(" ");
+}
+
+function normalizeGuardianCommandText(action: Record<string, unknown>): string | null {
+  switch (action.type) {
+    case "command":
+      return asString(action.command);
+    case "execve": {
+      const argv = asStringArray(action.argv);
+      if (argv.length > 0) {
+        return normalizeCommandText(argv);
+      }
+      const program = asString(action.program);
+      return program ? quoteShellArg(program) : null;
+    }
+    default:
+      return null;
+  }
+}
+
+function summarizeGuardianCommandActions(
+  action: Record<string, unknown>,
+  command: string,
+): SessionCommandActionSummary[] {
+  switch (action.type) {
+    case "command":
+      return [{ kind: "unknown", label: truncateLabel(command, 34) || "Run command" }];
+    case "execve": {
+      const argv = asStringArray(action.argv);
+      const normalized = argv.length > 0 ? normalizeCommandText(argv) : command;
+      return [{ kind: "unknown", label: truncateLabel(normalized, 34) || "Run command" }];
+    }
+    default:
+      return [];
+  }
+}
+
+function normalizeGuardianStatus(value: unknown): SessionActivity["status"] | null {
+  switch (value) {
+    case "in_progress":
+      return "in_progress";
+    case "denied":
+    case "aborted":
+      return "declined";
+    case "timed_out":
+      return "failed";
+    default:
+      return null;
+  }
+}
+
+function resolveCommandOutput(payload: Record<string, unknown>): string | null {
+  return (
+    asString(payload.aggregated_output) ||
+    asString(payload.aggregatedOutput) ||
+    mergeStreams(asString(payload.stdout), asString(payload.stderr))
+  );
+}
+
+function mergeStreams(stdout: string | null, stderr: string | null): string | null {
+  const parts = [stdout, stderr].filter((value): value is string => Boolean(value));
+  if (parts.length === 0) {
+    return null;
+  }
+  return parts.join(stdout && stderr ? "\n" : "");
+}
+
+function parseDurationMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const numeric = Number.parseFloat(value);
+    if (Number.isFinite(numeric)) {
+      return Math.round(numeric);
+    }
+  }
+
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const typed = value as Record<string, unknown>;
+  const secs = asNumber(typed.secs) ?? 0;
+  const nanos = asNumber(typed.nanos) ?? 0;
+  return Math.round(secs * 1000 + nanos / 1_000_000);
+}
+
+function formatPatchMapDiff(change: Record<string, unknown>): string | null {
+  switch (change.type) {
+    case "add":
+    case "delete":
+      return asString(change.content);
+    case "update": {
+      const diff = asString(change.unified_diff) || asString(change.unifiedDiff);
+      const movePath = asString(change.move_path) || asString(change.movePath);
+      if (!diff) {
+        return null;
+      }
+      return movePath ? `${diff}\n\nMoved to: ${movePath}` : diff;
+    }
+    default:
+      return null;
+  }
+}
+
+function quoteShellArg(value: string): string {
+  if (!value) {
+    return "''";
+  }
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function truncateNullableText(value: string | null, maxChars: number): string | null {

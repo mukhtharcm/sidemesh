@@ -26,7 +26,6 @@ import {
   buildActivityFromThreadItem,
   buildFileChangeChanges,
   buildTurnDiffActivity,
-  extractSessionActivities,
   mergeActivity,
   mergeSessionActivities,
 } from "./activity.js";
@@ -349,30 +348,29 @@ export async function startServer(config: NodeConfig): Promise<void> {
       }
     }
 
-    const session = await readSessionForLog(bridge, sessionId);
+    const session = await readSession(bridge, sessionId, false);
     const log = await loadRolloutLog(
       sessionId,
       session.path,
       bridge.codexHome,
       messageLimit,
+      activityLimit,
     );
-    const extractedActivities = extractSessionActivities(session, activityLimit);
-    const baseActivities = extractedActivities.activities;
     const activities = mergeSessionActivities(
-      baseActivities,
+      log.activities,
       liveActivities.get(sessionId)?.values() || [],
     );
     const history = buildSessionHistorySummary(
       log.totalMessages,
       log.messages.length,
-      extractedActivities.totalCount,
-      baseActivities.length,
+      log.totalActivities,
+      log.activities.length,
     );
 
     setSessionLogCacheEntry(logCache, cacheKey, {
       threadUpdatedAt: session.updatedAt,
       messages: log.messages,
-      activities: baseActivities,
+      activities: log.activities,
       runtime: log.runtime,
       history,
     });
@@ -756,18 +754,6 @@ async function readSession(
     includeTurns,
   })) as any;
   return result.thread as ThreadRecord;
-}
-
-async function readSessionForLog(bridge: CodexBridge, sessionId: string): Promise<ThreadRecord> {
-  try {
-    return await readSession(bridge, sessionId, true);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    if (message.includes("includeTurns is unavailable before first user message")) {
-      return readSession(bridge, sessionId, false);
-    }
-    throw error;
-  }
 }
 
 async function loadRunState(
