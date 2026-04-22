@@ -169,8 +169,10 @@ export interface PendingActionRecord extends PendingAction {
 
 export interface RolloutLog {
   messages: SessionMessage[];
+  activities: SessionActivity[];
   runtime: SessionRuntimeSummary | null;
   totalMessages: number;
+  totalActivities: number;
 }
 
 export interface SessionRuntimeSummary {

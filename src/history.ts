@@ -3,20 +3,42 @@ import { access } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 
-import type { RolloutLog, SessionMessage, SessionRuntimeSummary } from "./types.js";
+import {
+  buildCommandActivityFromGuardianAssessment,
+  buildCommandActivityFromRolloutEvent,
+  buildFileChangeActivityFromRolloutEvent,
+} from "./activity.js";
+import type {
+  RolloutLog,
+  SessionActivity,
+  SessionMessage,
+  SessionRuntimeSummary,
+} from "./types.js";
 
 export async function loadRolloutLog(
   sessionId: string,
   rolloutPath: string | null,
   codexHomePath: string | null,
   messageLimit: number | null = null,
+  activityLimit: number | null = null,
 ): Promise<RolloutLog> {
   const resolvedPath = await resolveRolloutPath(sessionId, rolloutPath, codexHomePath);
   if (!resolvedPath) {
-    return { messages: [], runtime: null, totalMessages: 0 };
+    return {
+      messages: [],
+      activities: [],
+      runtime: null,
+      totalMessages: 0,
+      totalActivities: 0,
+    };
   }
 
-  return scanRolloutFile(resolvedPath, true, messageLimit);
+  return scanRolloutFile(resolvedPath, {
+    includeMessages: true,
+    messageLimit,
+    includeActivities: true,
+    activityLimit,
+  });
 }
 
 export async function loadSessionRuntime(
@@ -29,7 +51,10 @@ export async function loadSessionRuntime(
     return null;
   }
 
-  const parsed = await scanRolloutFile(resolvedPath, false);
+  const parsed = await scanRolloutFile(resolvedPath, {
+    includeMessages: false,
+    includeActivities: false,
+  });
   return parsed.runtime;
 }
 
@@ -43,40 +68,50 @@ async function resolveRolloutPath(
 
 async function scanRolloutFile(
   rolloutPath: string,
-  includeMessages: boolean,
-  messageLimit: number | null = null,
+  options: {
+    includeMessages: boolean;
+    messageLimit?: number | null;
+    includeActivities: boolean;
+    activityLimit?: number | null;
+  },
 ): Promise<RolloutLog> {
   const messages: SessionMessage[] = [];
+  const activities: SessionActivity[] = [];
   let runtime: SessionRuntimeSummary | null = null;
   let totalMessages = 0;
+  let totalActivities = 0;
   const file = createReadStream(rolloutPath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: file, crlfDelay: Infinity });
 
   for await (const line of lines) {
-    const nextRuntime = parseRuntime(line);
+    const parsed = parseJsonLine(line);
+    if (!parsed) {
+      continue;
+    }
+
+    const nextRuntime = parseRuntime(parsed);
     if (nextRuntime) {
       runtime = nextRuntime;
     }
 
-    if (!includeMessages) {
-      continue;
+    if (options.includeMessages) {
+      const entry = parseMessage(parsed);
+      if (entry) {
+        totalMessages += 1;
+        appendBounded(messages, entry, options.messageLimit ?? null);
+      }
     }
 
-    const entry = parseLine(line);
-    if (entry) {
-      totalMessages += 1;
-      if (messageLimit && messageLimit > 0) {
-        messages.push(entry);
-        if (messages.length > messageLimit) {
-          messages.shift();
-        }
-      } else {
-        messages.push(entry);
+    if (options.includeActivities) {
+      const activity = parseActivity(parsed);
+      if (activity) {
+        totalActivities += 1;
+        appendBounded(activities, activity, options.activityLimit ?? null);
       }
     }
   }
 
-  return { messages, runtime, totalMessages };
+  return { messages, activities, runtime, totalMessages, totalActivities };
 }
 
 async function findRolloutPath(sessionId: string, codexHomePath: string | null): Promise<string | null> {
@@ -117,12 +152,7 @@ async function walkDirectories(root: string, depth: number): Promise<string[]> {
   return files;
 }
 
-function parseLine(line: string): SessionMessage | null {
-  const parsed = parseJsonLine(line);
-  if (!parsed) {
-    return null;
-  }
-
+function parseMessage(parsed: any): SessionMessage | null {
   const createdAt = parseTimestamp(parsed.timestamp);
   if (parsed.type === "event_msg") {
     const payloadType = parsed.payload?.type;
@@ -156,8 +186,26 @@ function parseLine(line: string): SessionMessage | null {
   return null;
 }
 
-function parseRuntime(line: string): SessionRuntimeSummary | null {
-  const parsed = parseJsonLine(line);
+function parseActivity(parsed: any): SessionActivity | null {
+  if (parsed.type !== "event_msg") {
+    return null;
+  }
+
+  const payload = parsed.payload;
+  const createdAt = parseTimestamp(parsed.timestamp);
+  switch (payload?.type) {
+    case "exec_command_end":
+      return buildCommandActivityFromRolloutEvent(payload, createdAt);
+    case "patch_apply_end":
+      return buildFileChangeActivityFromRolloutEvent(payload, createdAt);
+    case "guardian_assessment":
+      return buildCommandActivityFromGuardianAssessment(payload, createdAt);
+    default:
+      return null;
+  }
+}
+
+function parseRuntime(parsed: any): SessionRuntimeSummary | null {
   if (!parsed || parsed.type !== "turn_context") {
     return null;
   }
@@ -201,6 +249,18 @@ function parseRuntime(line: string): SessionRuntimeSummary | null {
   }
 
   return runtime;
+}
+
+function appendBounded<T>(entries: T[], next: T, limit: number | null): void {
+  if (limit && limit > 0) {
+    entries.push(next);
+    if (entries.length > limit) {
+      entries.shift();
+    }
+    return;
+  }
+
+  entries.push(next);
 }
 
 function parseJsonLine(line: string): any | null {
