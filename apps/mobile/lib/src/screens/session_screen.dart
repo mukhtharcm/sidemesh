@@ -7,6 +7,7 @@ import 'package:web_socket_channel/io.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../session_favorites_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -33,6 +34,7 @@ class SessionScreen extends StatefulWidget {
 class _SessionScreenState extends State<SessionScreen> {
   final _composerController = TextEditingController();
   final _scrollController = ScrollController();
+  final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
 
   SessionSummary? _session;
   List<SessionMessage> _messages = const [];
@@ -50,6 +52,7 @@ class _SessionScreenState extends State<SessionScreen> {
   @override
   void initState() {
     super.initState();
+    _favorites.ensureLoaded();
     _session = widget.session;
     _loadSnapshot();
     _connectLive();
@@ -83,7 +86,8 @@ class _SessionScreenState extends State<SessionScreen> {
         _pendingAction = pendingAction;
         _running = status.isRunning;
         _loading = false;
-        _awaitingAssistantReply = status.isRunning &&
+        _awaitingAssistantReply =
+            status.isRunning &&
             _liveAssistantText.isEmpty &&
             pendingAction == null;
         if (!_running) {
@@ -98,9 +102,9 @@ class _SessionScreenState extends State<SessionScreen> {
       setState(() {
         _loading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load session: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to load session: $error')));
     }
   }
 
@@ -221,9 +225,9 @@ class _SessionScreenState extends State<SessionScreen> {
         offset: _composerController.text.length,
       );
       final stillHasPending = _pendingAction != null;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to send input: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to send input: $error')));
       setState(() {
         _optimisticMessages = _optimisticMessages
             .where((message) => message.id != optimisticMessage.id)
@@ -254,9 +258,9 @@ class _SessionScreenState extends State<SessionScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to stop session: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to stop session: $error')));
     }
   }
 
@@ -280,8 +284,7 @@ class _SessionScreenState extends State<SessionScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(controller.text),
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
             child: const Text('Save'),
           ),
         ],
@@ -306,9 +309,9 @@ class _SessionScreenState extends State<SessionScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to rename: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to rename: $error')));
     }
   }
 
@@ -345,10 +348,14 @@ class _SessionScreenState extends State<SessionScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to archive: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to archive: $error')));
     }
+  }
+
+  Future<void> _toggleFavorite() async {
+    await _favorites.toggleFavorite(widget.host, widget.session.id);
   }
 
   Future<void> _respondAction(String decision) async {
@@ -393,17 +400,14 @@ class _SessionScreenState extends State<SessionScreen> {
             children: [
               Text(
                 'Session details',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 16),
               _DetailRow(label: 'Host', value: widget.host.label),
               _DetailRow(label: 'Working dir', value: session.cwd),
-              _DetailRow(
-                label: 'Status',
-                value: _running ? 'Running' : 'Idle',
-              ),
+              _DetailRow(label: 'Status', value: _running ? 'Running' : 'Idle'),
               _DetailRow(label: 'Source', value: session.source),
               if (session.runtime != null) ...[
                 const SizedBox(height: 14),
@@ -446,8 +450,9 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   void _upsertOptimisticMessage(SessionMessage message) {
-    final existingIndex =
-        _optimisticMessages.indexWhere((item) => item.id == message.id);
+    final existingIndex = _optimisticMessages.indexWhere(
+      (item) => item.id == message.id,
+    );
     if (existingIndex == -1) {
       _optimisticMessages = [..._optimisticMessages, message];
       return;
@@ -468,8 +473,9 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   void _upsertActivity(SessionActivity activity) {
-    final existingIndex =
-        _activities.indexWhere((item) => item.id == activity.id);
+    final existingIndex = _activities.indexWhere(
+      (item) => item.id == activity.id,
+    );
     if (existingIndex == -1) {
       _activities = _sortActivities([..._activities, activity]);
       return;
@@ -514,7 +520,8 @@ class _SessionScreenState extends State<SessionScreen> {
   ) {
     return persisted.role == optimistic.role &&
         persisted.text.trim() == optimistic.text.trim() &&
-        (persisted.createdAt.difference(optimistic.createdAt).inSeconds).abs() <=
+        (persisted.createdAt.difference(optimistic.createdAt).inSeconds)
+                .abs() <=
             90;
   }
 
@@ -534,10 +541,7 @@ class _SessionScreenState extends State<SessionScreen> {
         backgroundColor: colors.canvas,
         title: Row(
           children: [
-            if (_running) ...[
-              const LivePulse(),
-              const SizedBox(width: 10),
-            ],
+            if (_running) ...[const LivePulse(), const SizedBox(width: 10)],
             Expanded(
               child: Text(
                 session.title,
@@ -557,6 +561,23 @@ class _SessionScreenState extends State<SessionScreen> {
                 label: Text('Stop', style: TextStyle(color: colors.danger)),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: ListenableBuilder(
+              listenable: _favorites,
+              builder: (context, _) {
+                final favorite = _favorites.isFavorite(widget.host, session.id);
+                return MeshIconButton(
+                  icon: favorite
+                      ? Icons.star_rounded
+                      : Icons.star_outline_rounded,
+                  tooltip: favorite ? 'Remove favorite' : 'Add favorite',
+                  color: favorite ? colors.warning : colors.textSecondary,
+                  onTap: _toggleFavorite,
+                );
+              },
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 10),
             child: MeshIconButton(
@@ -611,11 +632,15 @@ class _SessionScreenState extends State<SessionScreen> {
               onTap: _dismissKeyboard,
               child: Column(
                 children: [
-                  _SessionHeader(
-                    host: widget.host,
-                    session: session,
-                    running: _running,
-                    onDetails: () => _showSessionDetailsSheet(session),
+                  ListenableBuilder(
+                    listenable: _favorites,
+                    builder: (context, _) => _SessionHeader(
+                      host: widget.host,
+                      session: session,
+                      running: _running,
+                      favorite: _favorites.isFavorite(widget.host, session.id),
+                      onDetails: () => _showSessionDetailsSheet(session),
+                    ),
                   ),
                   if (_pendingAction != null)
                     Padding(
@@ -636,23 +661,24 @@ class _SessionScreenState extends State<SessionScreen> {
                         final entry = timelineEntries[index];
                         return switch (entry.kind) {
                           _TimelineEntryKind.message => _MessageBubble(
-                              message: entry.message!,
-                            ),
+                            message: entry.message!,
+                          ),
                           _TimelineEntryKind.activity => _ActivityCard(
-                              activity: entry.activity!,
-                              sessionCwd: session.cwd,
-                            ),
-                          _TimelineEntryKind.thinking => const _ThinkingBubble(),
+                            activity: entry.activity!,
+                            sessionCwd: session.cwd,
+                          ),
+                          _TimelineEntryKind.thinking =>
+                            const _ThinkingBubble(),
                           _TimelineEntryKind.liveAssistant => _MessageBubble(
-                              message: SessionMessage(
-                                id: 'live',
-                                role: 'assistant',
-                                text: _liveAssistantText,
-                                createdAt: DateTime.now(),
-                                phase: 'commentary',
-                              ),
-                              live: true,
+                            message: SessionMessage(
+                              id: 'live',
+                              role: 'assistant',
+                              text: _liveAssistantText,
+                              createdAt: DateTime.now(),
+                              phase: 'commentary',
                             ),
+                            live: true,
+                          ),
                         };
                       },
                     ),
@@ -675,12 +701,14 @@ class _SessionHeader extends StatelessWidget {
     required this.host,
     required this.session,
     required this.running,
+    required this.favorite,
     required this.onDetails,
   });
 
   final HostProfile host;
   final SessionSummary session;
   final bool running;
+  final bool favorite;
   final VoidCallback onDetails;
 
   @override
@@ -700,14 +728,17 @@ class _SessionHeader extends StatelessWidget {
                   child: Text(
                     host.label,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 TextButton.icon(
                   onPressed: onDetails,
-                  icon: Icon(Icons.tune_rounded,
-                      size: 16, color: colors.accent),
+                  icon: Icon(
+                    Icons.tune_rounded,
+                    size: 16,
+                    color: colors.accent,
+                  ),
                   label: Text(
                     'Details',
                     style: TextStyle(color: colors.accent),
@@ -737,6 +768,13 @@ class _SessionHeader extends StatelessWidget {
                   icon: running ? Icons.bolt_rounded : Icons.pause_rounded,
                   mono: true,
                 ),
+                if (favorite)
+                  const MeshPill(
+                    label: 'favorite',
+                    tone: MeshPillTone.warning,
+                    icon: Icons.star_rounded,
+                    mono: true,
+                  ),
                 MeshPill(
                   label: session.source,
                   tone: MeshPillTone.accent,
@@ -786,28 +824,26 @@ class _PendingActionCard extends StatelessWidget {
               Text(
                 'Approval required',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: colors.warning,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.6,
-                    ),
+                  color: colors.warning,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.6,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
             action.title,
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.w700),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 8),
           Text(
             action.detail,
-            style: Theme.of(context)
-                .textTheme
-                .bodyMedium
-                ?.copyWith(color: colors.textSecondary),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: colors.textSecondary),
           ),
           const SizedBox(height: 14),
           Wrap(
@@ -829,10 +865,15 @@ class _PendingActionCard extends StatelessWidget {
               if (action.canDecline)
                 OutlinedButton.icon(
                   onPressed: () => onRespond('decline'),
-                  icon: Icon(Icons.close_rounded,
-                      size: 18, color: colors.danger),
-                  label: Text('Decline',
-                      style: TextStyle(color: colors.danger)),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: colors.danger,
+                  ),
+                  label: Text(
+                    'Decline',
+                    style: TextStyle(color: colors.danger),
+                  ),
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(
                       color: colors.danger.withValues(alpha: 0.5),
@@ -881,7 +922,10 @@ class _Composer extends StatelessWidget {
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(color: colors.border),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 2,
+                ),
                 child: TextField(
                   controller: controller,
                   minLines: 1,
@@ -966,24 +1010,24 @@ class _TimelineEntry {
   });
 
   factory _TimelineEntry.message(SessionMessage message) => _TimelineEntry._(
-        kind: _TimelineEntryKind.message,
-        createdAt: message.createdAt,
-        message: message,
-      );
+    kind: _TimelineEntryKind.message,
+    createdAt: message.createdAt,
+    message: message,
+  );
 
   factory _TimelineEntry.activity(SessionActivity activity) => _TimelineEntry._(
-        kind: _TimelineEntryKind.activity,
-        createdAt: activity.createdAt,
-        activity: activity,
-      );
+    kind: _TimelineEntryKind.activity,
+    createdAt: activity.createdAt,
+    activity: activity,
+  );
 
   factory _TimelineEntry.thinking(DateTime createdAt) =>
       _TimelineEntry._(kind: _TimelineEntryKind.thinking, createdAt: createdAt);
 
   factory _TimelineEntry.liveAssistant(DateTime createdAt) => _TimelineEntry._(
-        kind: _TimelineEntryKind.liveAssistant,
-        createdAt: createdAt,
-      );
+    kind: _TimelineEntryKind.liveAssistant,
+    createdAt: createdAt,
+  );
 
   final _TimelineEntryKind kind;
   final DateTime createdAt;
@@ -1015,10 +1059,9 @@ class _ThinkingBubble extends StatelessWidget {
               const SizedBox(width: 10),
               Text(
                 'Thinking…',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(color: colors.textSecondary),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: colors.textSecondary),
               ),
             ],
           ),
@@ -1061,8 +1104,8 @@ class _MessageBubble extends StatelessWidget {
                 color: live
                     ? colors.accent
                     : (isUser
-                        ? colors.userBubble
-                        : colors.assistantBubbleBorder),
+                          ? colors.userBubble
+                          : colors.assistantBubbleBorder),
                 width: live ? 1.4 : 1,
               ),
             ),
@@ -1084,9 +1127,7 @@ class _MessageBubble extends StatelessWidget {
                             message.phase == 'commentary'
                                 ? 'COMMENTARY'
                                 : 'ANSWER',
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelSmall
+                            style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
                                   color: colors.textTertiary,
                                   fontWeight: FontWeight.w800,
@@ -1097,14 +1138,17 @@ class _MessageBubble extends StatelessWidget {
                       ),
                     ),
                   if (isAssistant)
-                    _MarkdownMessageBody(text: message.text, textColor: textColor)
+                    _MarkdownMessageBody(
+                      text: message.text,
+                      textColor: textColor,
+                    )
                   else
                     SelectableText(
                       message.text,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: textColor,
-                            height: 1.45,
-                          ),
+                        color: textColor,
+                        height: 1.45,
+                      ),
                     ),
                 ],
               ),
@@ -1125,10 +1169,9 @@ class _MarkdownMessageBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final baseBody = Theme.of(context)
-        .textTheme
-        .bodyMedium
-        ?.copyWith(color: textColor, height: 1.5);
+    final baseBody = Theme.of(
+      context,
+    ).textTheme.bodyMedium?.copyWith(color: textColor, height: 1.5);
 
     final styleSheet = MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
       p: baseBody,
@@ -1137,9 +1180,10 @@ class _MarkdownMessageBody extends StatelessWidget {
       h3: Theme.of(context).textTheme.titleMedium?.copyWith(color: textColor),
       listBullet: baseBody,
       blockquote: baseBody?.copyWith(color: colors.textSecondary),
-      code: monoStyle(color: textColor, fontSize: 12.5).copyWith(
-        backgroundColor: colors.codeBackground,
-      ),
+      code: monoStyle(
+        color: textColor,
+        fontSize: 12.5,
+      ).copyWith(backgroundColor: colors.codeBackground),
       codeblockPadding: const EdgeInsets.all(12),
       codeblockDecoration: BoxDecoration(
         color: colors.codeBackground,
@@ -1147,9 +1191,7 @@ class _MarkdownMessageBody extends StatelessWidget {
         border: Border.all(color: colors.codeBorder),
       ),
       blockquoteDecoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(color: colors.accent, width: 3),
-        ),
+        border: Border(left: BorderSide(color: colors.accent, width: 3)),
       ),
       blockquotePadding: const EdgeInsets.fromLTRB(12, 6, 0, 6),
       horizontalRuleDecoration: BoxDecoration(
@@ -1190,9 +1232,10 @@ class _ActivityCardState extends State<_ActivityCard> {
     final title = switch (activity.type) {
       'command' =>
         (activity.command ?? '').trim().isEmpty ? 'Command' : activity.command!,
-      'file_change' => activity.changes.length == 1
-          ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
-          : 'Edited ${activity.changes.length} files',
+      'file_change' =>
+        activity.changes.length == 1
+            ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
+            : 'Edited ${activity.changes.length} files',
       'turn_diff' => 'Live turn diff',
       _ => 'Activity',
     };
@@ -1260,8 +1303,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                       alignment: Alignment.center,
-                      child: Icon(activityIcon,
-                          size: 18, color: colors.accent),
+                      child: Icon(activityIcon, size: 18, color: colors.accent),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -1281,24 +1323,24 @@ class _ActivityCardState extends State<_ActivityCard> {
                             title,
                             maxLines: 3,
                             overflow: TextOverflow.ellipsis,
-                            style: (activity.isCommand
-                                    ? monoStyle(
-                                        color: colors.textPrimary,
-                                        fontSize: 13,
-                                      )
-                                    : Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w700))
-                                ?.copyWith(height: 1.35),
+                            style:
+                                (activity.isCommand
+                                        ? monoStyle(
+                                            color: colors.textPrimary,
+                                            fontSize: 13,
+                                          )
+                                        : Theme.of(
+                                            context,
+                                          ).textTheme.titleSmall?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ))
+                                    ?.copyWith(height: 1.35),
                           ),
                           if (subtitle != null && subtitle.isNotEmpty) ...[
                             const SizedBox(height: 4),
                             Text(
                               subtitle,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
+                              style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(color: colors.textSecondary),
                             ),
                           ],
@@ -1345,10 +1387,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                       ),
                     if (activity.isCommand &&
                         (activity.processId ?? '').isNotEmpty)
-                      MeshPill(
-                        label: 'pty ${activity.processId}',
-                        mono: true,
-                      ),
+                      MeshPill(label: 'pty ${activity.processId}', mono: true),
                     if (activity.isCommand &&
                         activity.terminalStatus == 'input')
                       const MeshPill(
@@ -1365,13 +1404,13 @@ class _ActivityCardState extends State<_ActivityCard> {
                       ),
                     if (activity.isCommand)
                       ...activity.commandActions.map(
-                        (action) =>
-                            MeshPill(label: action.label, mono: true),
+                        (action) => MeshPill(label: action.label, mono: true),
                       ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                if (activity.isCommand) ..._buildCommandBody(context, activity)
+                if (activity.isCommand)
+                  ..._buildCommandBody(context, activity)
                 else if (activity.isTurnDiff) ...[
                   if ((activity.diff ?? '').isNotEmpty)
                     DiffView(diff: activity.diff!)
@@ -1399,7 +1438,9 @@ class _ActivityCardState extends State<_ActivityCard> {
   }
 
   List<Widget> _buildCommandBody(
-      BuildContext context, SessionActivity activity) {
+    BuildContext context,
+    SessionActivity activity,
+  ) {
     final colors = context.colors;
     final widgets = <Widget>[];
 
@@ -1433,11 +1474,13 @@ class _ActivityCardState extends State<_ActivityCard> {
       widgets.add(SyntaxCodeBlock(text: displayText, language: 'bash'));
       if (isLong) {
         widgets.add(const SizedBox(height: 6));
-        widgets.add(_ExpandToggle(
-          expanded: _outputExpanded,
-          hiddenCount: lines.length - _collapsedLineLimit,
-          onToggle: () => setState(() => _outputExpanded = !_outputExpanded),
-        ));
+        widgets.add(
+          _ExpandToggle(
+            expanded: _outputExpanded,
+            hiddenCount: lines.length - _collapsedLineLimit,
+            onToggle: () => setState(() => _outputExpanded = !_outputExpanded),
+          ),
+        );
       }
     } else if (activity.terminalStatus == 'waiting') {
       widgets.add(_waitingText(context, 'Interactive command is running.'));
@@ -1460,9 +1503,9 @@ class _ActivityCardState extends State<_ActivityCard> {
       ),
       child: Text(
         text,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSecondary,
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
       ),
     );
   }
@@ -1495,9 +1538,7 @@ class _ExpandToggle extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              expanded
-                  ? Icons.unfold_less_rounded
-                  : Icons.unfold_more_rounded,
+              expanded ? Icons.unfold_less_rounded : Icons.unfold_more_rounded,
               size: 16,
               color: colors.accent,
             ),
@@ -1537,8 +1578,11 @@ class _FileChangeBlock extends StatelessWidget {
       children: [
         Row(
           children: [
-            Icon(Icons.description_outlined,
-                size: 16, color: colors.textSecondary),
+            Icon(
+              Icons.description_outlined,
+              size: 16,
+              color: colors.textSecondary,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -1559,10 +1603,9 @@ class _FileChangeBlock extends StatelessWidget {
             padding: const EdgeInsets.only(top: 4, bottom: 8, left: 24),
             child: Text(
               'Moved from ${_relativeSessionPath(change.movePath!, sessionCwd)}',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: colors.textSecondary),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
             ),
           )
         else
@@ -1596,10 +1639,7 @@ class _DetailRow extends StatelessWidget {
             ).copyWith(letterSpacing: 1.2),
           ),
           const SizedBox(height: 4),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
+          Text(value, style: Theme.of(context).textTheme.bodyMedium),
         ],
       ),
     );
@@ -1650,8 +1690,10 @@ class _SessionRuntimeDetails extends StatelessWidget {
             children: details
                 .map(
                   (detail) => Container(
-                    constraints:
-                        const BoxConstraints(minWidth: 132, maxWidth: 200),
+                    constraints: const BoxConstraints(
+                      minWidth: 132,
+                      maxWidth: 200,
+                    ),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: colors.surface,
@@ -1672,9 +1714,7 @@ class _SessionRuntimeDetails extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           detail.value,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
+                          style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                       ],
