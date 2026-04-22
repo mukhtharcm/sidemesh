@@ -98,6 +98,10 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
             SessionScreen(host: host, session: session, api: _api),
       ),
     );
+    if (!mounted) {
+      return;
+    }
+    await _refreshHosts();
   }
 
   Future<void> _openHost(HostProfile host) async {
@@ -110,6 +114,10 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
         ),
       ),
     );
+    if (!mounted) {
+      return;
+    }
+    await _refreshHosts();
   }
 
   SessionSummary _sessionFromAction(PendingAction action) {
@@ -486,8 +494,7 @@ class _RecentPaneState extends State<_RecentPane> {
     }
     merged.sort((left, right) =>
         right.session.updatedAt.compareTo(left.session.updatedAt));
-    final activeCount =
-        merged.where((entry) => entry.session.status == 'running').length;
+    final activeCount = merged.where((entry) => entry.session.isActive).length;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       widget.onActiveCountChanged(activeCount);
@@ -572,7 +579,7 @@ class _SessionRowCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final running = session.status == 'running';
+    final running = session.isActive;
     return MeshCard(
       onTap: onTap,
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),

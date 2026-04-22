@@ -70,6 +70,10 @@ class SessionSummary {
   final String status;
   final SessionRuntimeSummary? runtime;
 
+  /// Older Sidemesh builds used `running`, while Codex app-server reports
+  /// active threads as `active`.
+  bool get isActive => status == 'active' || status == 'running';
+
   factory SessionSummary.fromJson(Map<String, dynamic> json) => SessionSummary(
     id: _stringValue(json['id']),
     title: _stringValue(json['title']),
