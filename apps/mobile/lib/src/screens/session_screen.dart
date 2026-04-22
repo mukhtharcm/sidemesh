@@ -3,12 +3,16 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:web_socket_channel/io.dart';
 
 import '../api_client.dart';
 import '../models.dart';
 import '../session_runtime.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
+import '../widgets/diff_view.dart';
+import '../widgets/mesh_widgets.dart';
+import '../widgets/syntax_code_block.dart';
 
 class SessionScreen extends StatefulWidget {
   const SessionScreen({
@@ -79,8 +83,7 @@ class _SessionScreenState extends State<SessionScreen> {
         _pendingAction = pendingAction;
         _running = status.isRunning;
         _loading = false;
-        _awaitingAssistantReply =
-            status.isRunning &&
+        _awaitingAssistantReply = status.isRunning &&
             _liveAssistantText.isEmpty &&
             pendingAction == null;
         if (!_running) {
@@ -95,9 +98,9 @@ class _SessionScreenState extends State<SessionScreen> {
       setState(() {
         _loading = false;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to load session: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load session: $error')),
+      );
     }
   }
 
@@ -218,9 +221,9 @@ class _SessionScreenState extends State<SessionScreen> {
         offset: _composerController.text.length,
       );
       final stillHasPending = _pendingAction != null;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to send input: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send input: $error')),
+      );
       setState(() {
         _optimisticMessages = _optimisticMessages
             .where((message) => message.id != optimisticMessage.id)
@@ -251,9 +254,9 @@ class _SessionScreenState extends State<SessionScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to stop session: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to stop session: $error')),
+      );
     }
   }
 
@@ -285,30 +288,34 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   Future<void> _showSessionDetailsSheet(SessionSummary session) async {
+    final colors = context.colors;
     await showModalBottomSheet<void>(
       context: context,
+      backgroundColor: colors.surface,
       showDragHandle: true,
       useSafeArea: true,
       builder: (context) => SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 'Session details',
-                style: Theme.of(context).textTheme.headlineSmall,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
               ),
               const SizedBox(height: 16),
-              _SheetDetailRow(label: 'Host', value: widget.host.label),
-              _SheetDetailRow(label: 'Working dir', value: session.cwd),
-              _SheetDetailRow(
+              _DetailRow(label: 'Host', value: widget.host.label),
+              _DetailRow(label: 'Working dir', value: session.cwd),
+              _DetailRow(
                 label: 'Status',
                 value: _running ? 'Running' : 'Idle',
               ),
-              _SheetDetailRow(label: 'Source', value: session.source),
+              _DetailRow(label: 'Source', value: session.source),
               if (session.runtime != null) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 _SessionRuntimeDetails(runtime: session.runtime!),
               ],
             ],
@@ -348,14 +355,12 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   void _upsertOptimisticMessage(SessionMessage message) {
-    final existingIndex = _optimisticMessages.indexWhere(
-      (item) => item.id == message.id,
-    );
+    final existingIndex =
+        _optimisticMessages.indexWhere((item) => item.id == message.id);
     if (existingIndex == -1) {
       _optimisticMessages = [..._optimisticMessages, message];
       return;
     }
-
     final updated = [..._optimisticMessages];
     updated[existingIndex] = message;
     _optimisticMessages = updated;
@@ -372,14 +377,12 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   void _upsertActivity(SessionActivity activity) {
-    final existingIndex = _activities.indexWhere(
-      (item) => item.id == activity.id,
-    );
+    final existingIndex =
+        _activities.indexWhere((item) => item.id == activity.id);
     if (existingIndex == -1) {
       _activities = _sortActivities([..._activities, activity]);
       return;
     }
-
     final updated = [..._activities];
     updated[existingIndex] = activity;
     _activities = _sortActivities(updated);
@@ -420,14 +423,14 @@ class _SessionScreenState extends State<SessionScreen> {
   ) {
     return persisted.role == optimistic.role &&
         persisted.text.trim() == optimistic.text.trim() &&
-        (persisted.createdAt.difference(optimistic.createdAt).inSeconds)
-                .abs() <=
+        (persisted.createdAt.difference(optimistic.createdAt).inSeconds).abs() <=
             90;
   }
 
   @override
   Widget build(BuildContext context) {
     final session = _session ?? widget.session;
+    final colors = context.colors;
     final visibleMessages = [..._messages, ..._optimisticMessages]
       ..sort((left, right) => left.createdAt.compareTo(right.createdAt));
     final timelineEntries = _buildTimelineEntries(
@@ -435,135 +438,63 @@ class _SessionScreenState extends State<SessionScreen> {
       _sortActivities(_activities),
     );
     return Scaffold(
+      backgroundColor: colors.canvas,
       appBar: AppBar(
-        title: Text(session.title),
+        backgroundColor: colors.canvas,
+        title: Row(
+          children: [
+            if (_running) ...[
+              const LivePulse(),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              child: Text(
+                session.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
         actions: [
           if (_running)
-            TextButton.icon(
-              onPressed: _stopSession,
-              icon: const Icon(Icons.stop_circle_outlined),
-              label: const Text('Stop'),
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: TextButton.icon(
+                onPressed: _stopSession,
+                icon: Icon(Icons.stop_circle_outlined, color: colors.danger),
+                label: Text('Stop', style: TextStyle(color: colors.danger)),
+              ),
             ),
-          IconButton(
-            tooltip: 'Reload',
-            onPressed: _loadSnapshot,
-            icon: const Icon(Icons.refresh),
+          Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: MeshIconButton(
+              icon: Icons.refresh_rounded,
+              tooltip: 'Reload',
+              onTap: _loadSnapshot,
+            ),
           ),
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const MeshLoader()
           : GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: _dismissKeyboard,
               child: Column(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                widget.host.label,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                            TextButton.icon(
-                              onPressed: () => _showSessionDetailsSheet(session),
-                              icon: const Icon(Icons.tune, size: 18),
-                              label: const Text('Details'),
-                              style: TextButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          session.cwd,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _StatusPill(
-                              label: _running ? 'Running' : 'Idle',
-                              color: _running
-                                  ? const Color(0xFFD7F2D3)
-                                  : const Color(0xFFE7E1D8),
-                            ),
-                            _StatusPill(
-                              label: session.source,
-                              color: const Color(0xFFEBC8A1),
-                            ),
-                            if ((session.runtime?.model ?? '').isNotEmpty)
-                              _StatusPill(
-                                label: session.runtime!.model!,
-                                color: const Color(0xFFF4E6CF),
-                              ),
-                            if ((session.runtime?.approvalPolicy ?? '')
-                                .isNotEmpty)
-                              _StatusPill(
-                                label: session.runtime!.approvalPolicy!,
-                                color: const Color(0xFFF6E6C5),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
+                  _SessionHeader(
+                    host: widget.host,
+                    session: session,
+                    running: _running,
+                    onDetails: () => _showSessionDetailsSheet(session),
                   ),
                   if (_pendingAction != null)
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                      child: Card(
-                        color: const Color(0xFFFFE2C7),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _pendingAction!.title,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(_pendingAction!.detail),
-                              const SizedBox(height: 14),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  if (_pendingAction!.canApprove)
-                                    FilledButton(
-                                      onPressed: () => _respondAction('accept'),
-                                      child: const Text('Approve'),
-                                    ),
-                                  if (_pendingAction!.canApproveForSession)
-                                    FilledButton.tonal(
-                                      onPressed: () =>
-                                          _respondAction('acceptForSession'),
-                                      child: const Text('Approve for session'),
-                                    ),
-                                  if (_pendingAction!.canDecline)
-                                    OutlinedButton(
-                                      onPressed: () => _respondAction('decline'),
-                                      child: const Text('Decline'),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                      child: _PendingActionCard(
+                        action: _pendingAction!,
+                        onRespond: _respondAction,
                       ),
                     ),
                   Expanded(
@@ -571,20 +502,20 @@ class _SessionScreenState extends State<SessionScreen> {
                       controller: _scrollController,
                       keyboardDismissBehavior:
                           ScrollViewKeyboardDismissBehavior.onDrag,
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
                       itemCount: timelineEntries.length,
-                      itemBuilder: (context, index) =>
-                          switch (timelineEntries[index].kind) {
-                            _TimelineEntryKind.message => _MessageBubble(
-                              message: timelineEntries[index].message!,
+                      itemBuilder: (context, index) {
+                        final entry = timelineEntries[index];
+                        return switch (entry.kind) {
+                          _TimelineEntryKind.message => _MessageBubble(
+                              message: entry.message!,
                             ),
-                            _TimelineEntryKind.activity => _ActivityCard(
-                              activity: timelineEntries[index].activity!,
+                          _TimelineEntryKind.activity => _ActivityCard(
+                              activity: entry.activity!,
                               sessionCwd: session.cwd,
                             ),
-                            _TimelineEntryKind.thinking =>
-                              const _ThinkingBubble(),
-                            _TimelineEntryKind.liveAssistant => _MessageBubble(
+                          _TimelineEntryKind.thinking => const _ThinkingBubble(),
+                          _TimelineEntryKind.liveAssistant => _MessageBubble(
                               message: SessionMessage(
                                 id: 'live',
                                 role: 'assistant',
@@ -594,59 +525,304 @@ class _SessionScreenState extends State<SessionScreen> {
                               ),
                               live: true,
                             ),
-                          },
+                        };
+                      },
                     ),
                   ),
-                  SafeArea(
-                    top: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _composerController,
-                              minLines: 1,
-                              maxLines: 5,
-                              onTapOutside: (_) => _dismissKeyboard(),
-                              decoration: const InputDecoration(
-                                hintText: 'Message this session',
-                                filled: true,
-                                fillColor: Color(0xFFFFFBF5),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.all(
-                                    Radius.circular(20),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          FilledButton(
-                            onPressed: _sending ? null : _sendInput,
-                            style: FilledButton.styleFrom(
-                              minimumSize: const Size(56, 56),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                            ),
-                            child: _sending
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.send_rounded),
-                          ),
-                        ],
-                      ),
-                    ),
+                  _Composer(
+                    controller: _composerController,
+                    sending: _sending,
+                    onSend: _sendInput,
+                    onDismiss: _dismissKeyboard,
                   ),
                 ],
               ),
             ),
+    );
+  }
+}
+
+class _SessionHeader extends StatelessWidget {
+  const _SessionHeader({
+    required this.host,
+    required this.session,
+    required this.running,
+    required this.onDetails,
+  });
+
+  final HostProfile host;
+  final SessionSummary session;
+  final bool running;
+  final VoidCallback onDetails;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
+      child: MeshCard(
+        padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+        accentStrip: running ? colors.success : colors.accent,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    host.label,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: onDetails,
+                  icon: Icon(Icons.tune_rounded,
+                      size: 16, color: colors.accent),
+                  label: Text(
+                    'Details',
+                    style: TextStyle(color: colors.accent),
+                  ),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              session.cwd,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                MeshPill(
+                  label: running ? 'running' : 'idle',
+                  tone: running ? MeshPillTone.success : MeshPillTone.neutral,
+                  icon: running ? Icons.bolt_rounded : Icons.pause_rounded,
+                  mono: true,
+                ),
+                MeshPill(
+                  label: session.source,
+                  tone: MeshPillTone.accent,
+                  mono: true,
+                ),
+                if ((session.runtime?.model ?? '').isNotEmpty)
+                  MeshPill(
+                    label: session.runtime!.model!,
+                    tone: MeshPillTone.info,
+                    mono: true,
+                  ),
+                if ((session.runtime?.approvalPolicy ?? '').isNotEmpty)
+                  MeshPill(
+                    label: 'approval ${session.runtime!.approvalPolicy!}',
+                    tone: MeshPillTone.warning,
+                    mono: true,
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingActionCard extends StatelessWidget {
+  const _PendingActionCard({required this.action, required this.onRespond});
+
+  final PendingAction action;
+  final ValueChanged<String> onRespond;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MeshCard(
+      tone: MeshCardTone.surface,
+      borderColor: colors.warning.withValues(alpha: 0.5),
+      accentStrip: colors.warning,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.shield_rounded, color: colors.warning, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                'Approval required',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: colors.warning,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            action.title,
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            action.detail,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: colors.textSecondary),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (action.canApprove)
+                FilledButton.icon(
+                  onPressed: () => onRespond('accept'),
+                  icon: const Icon(Icons.check_rounded, size: 18),
+                  label: const Text('Approve'),
+                ),
+              if (action.canApproveForSession)
+                OutlinedButton.icon(
+                  onPressed: () => onRespond('acceptForSession'),
+                  icon: const Icon(Icons.all_inclusive_rounded, size: 18),
+                  label: const Text('Approve for session'),
+                ),
+              if (action.canDecline)
+                OutlinedButton.icon(
+                  onPressed: () => onRespond('decline'),
+                  icon: Icon(Icons.close_rounded,
+                      size: 18, color: colors.danger),
+                  label: Text('Decline',
+                      style: TextStyle(color: colors.danger)),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(
+                      color: colors.danger.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Composer extends StatelessWidget {
+  const _Composer({
+    required this.controller,
+    required this.sending,
+    required this.onSend,
+    required this.onDismiss,
+  });
+
+  final TextEditingController controller;
+  final bool sending;
+  final VoidCallback onSend;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+        decoration: BoxDecoration(
+          color: colors.canvas,
+          border: Border(top: BorderSide(color: colors.border)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: colors.composerBackground,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: colors.border),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                child: TextField(
+                  controller: controller,
+                  minLines: 1,
+                  maxLines: 6,
+                  onTapOutside: (_) => onDismiss(),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  decoration: InputDecoration(
+                    hintText: 'Message this session',
+                    hintStyle: TextStyle(color: colors.textTertiary),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            _SendButton(sending: sending, onSend: onSend),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SendButton extends StatelessWidget {
+  const _SendButton({required this.sending, required this.onSend});
+
+  final bool sending;
+  final VoidCallback onSend;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: sending ? null : onSend,
+        child: Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: sending ? colors.surfaceMuted : colors.accent,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: sending
+                ? const []
+                : [
+                    BoxShadow(
+                      color: colors.accent.withValues(alpha: 0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+          ),
+          alignment: Alignment.center,
+          child: sending
+              ? SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: colors.textSecondary,
+                  ),
+                )
+              : Icon(Icons.arrow_upward_rounded, color: colors.accentOn),
+        ),
+      ),
     );
   }
 }
@@ -662,24 +838,24 @@ class _TimelineEntry {
   });
 
   factory _TimelineEntry.message(SessionMessage message) => _TimelineEntry._(
-    kind: _TimelineEntryKind.message,
-    createdAt: message.createdAt,
-    message: message,
-  );
+        kind: _TimelineEntryKind.message,
+        createdAt: message.createdAt,
+        message: message,
+      );
 
   factory _TimelineEntry.activity(SessionActivity activity) => _TimelineEntry._(
-    kind: _TimelineEntryKind.activity,
-    createdAt: activity.createdAt,
-    activity: activity,
-  );
+        kind: _TimelineEntryKind.activity,
+        createdAt: activity.createdAt,
+        activity: activity,
+      );
 
   factory _TimelineEntry.thinking(DateTime createdAt) =>
       _TimelineEntry._(kind: _TimelineEntryKind.thinking, createdAt: createdAt);
 
   factory _TimelineEntry.liveAssistant(DateTime createdAt) => _TimelineEntry._(
-    kind: _TimelineEntryKind.liveAssistant,
-    createdAt: createdAt,
-  );
+        kind: _TimelineEntryKind.liveAssistant,
+        createdAt: createdAt,
+      );
 
   final _TimelineEntryKind kind;
   final DateTime createdAt;
@@ -692,15 +868,34 @@ class _ThinkingBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _MessageBubble(
-      message: SessionMessage(
-        id: 'thinking',
-        role: 'assistant',
-        text: 'Thinking...',
-        createdAt: DateTime.now(),
-        phase: 'commentary',
+    final colors = context.colors;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: colors.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const LivePulse(),
+              const SizedBox(width: 10),
+              Text(
+                'Thinking…',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: colors.textSecondary),
+              ),
+            ],
+          ),
+        ),
       ),
-      live: true,
     );
   }
 }
@@ -713,60 +908,75 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final isUser = message.role == 'user';
     final isAssistant = message.role == 'assistant';
+
     final bubbleColor = switch (message.role) {
-      'user' => const Color(0xFF221C15),
-      'assistant' => live ? const Color(0xFFFFEBCD) : const Color(0xFFFFFBF5),
-      _ => const Color(0xFFE7E1D8),
+      'user' => colors.userBubble,
+      'assistant' => colors.assistantBubble,
+      _ => colors.surfaceMuted,
     };
-    final textColor = isUser ? Colors.white : const Color(0xFF221C15);
+    final textColor = isUser ? colors.userBubbleOn : colors.textPrimary;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 540),
+          constraints: const BoxConstraints(maxWidth: 560),
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: bubbleColor,
-              borderRadius: BorderRadius.circular(22),
-              border: live
-                  ? Border.all(color: const Color(0xFFCA6B1F), width: 1.2)
-                  : null,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: live
+                    ? colors.accent
+                    : (isUser
+                        ? colors.userBubble
+                        : colors.assistantBubbleBorder),
+                width: live ? 1.4 : 1,
+              ),
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (message.phase != null && message.role == 'assistant')
+                  if (message.phase != null && isAssistant)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        message.phase == 'commentary' ? 'Commentary' : 'Answer',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: textColor.withValues(alpha: 0.7),
-                          fontWeight: FontWeight.w700,
-                        ),
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          if (live) ...[
+                            const LivePulse(),
+                            const SizedBox(width: 6),
+                          ],
+                          Text(
+                            message.phase == 'commentary'
+                                ? 'COMMENTARY'
+                                : 'ANSWER',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(
+                                  color: colors.textTertiary,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 1.1,
+                                ),
+                          ),
+                        ],
                       ),
                     ),
                   if (isAssistant)
-                    _MarkdownMessageBody(
-                      text: message.text,
-                      textColor: textColor,
-                      codeBackgroundColor: live
-                          ? const Color(0xFFF6D8A8)
-                          : const Color(0xFFF2E3CB),
-                    )
+                    _MarkdownMessageBody(text: message.text, textColor: textColor)
                   else
                     SelectableText(
                       message.text,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: textColor,
-                        height: 1.45,
-                      ),
+                            color: textColor,
+                            height: 1.45,
+                          ),
                     ),
                 ],
               ),
@@ -779,21 +989,18 @@ class _MessageBubble extends StatelessWidget {
 }
 
 class _MarkdownMessageBody extends StatelessWidget {
-  const _MarkdownMessageBody({
-    required this.text,
-    required this.textColor,
-    required this.codeBackgroundColor,
-  });
+  const _MarkdownMessageBody({required this.text, required this.textColor});
 
   final String text;
   final Color textColor;
-  final Color codeBackgroundColor;
 
   @override
   Widget build(BuildContext context) {
-    final baseBody = Theme.of(
-      context,
-    ).textTheme.bodyMedium?.copyWith(color: textColor, height: 1.45);
+    final colors = context.colors;
+    final baseBody = Theme.of(context)
+        .textTheme
+        .bodyMedium
+        ?.copyWith(color: textColor, height: 1.5);
 
     final styleSheet = MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
       p: baseBody,
@@ -801,24 +1008,26 @@ class _MarkdownMessageBody extends StatelessWidget {
       h2: Theme.of(context).textTheme.titleLarge?.copyWith(color: textColor),
       h3: Theme.of(context).textTheme.titleMedium?.copyWith(color: textColor),
       listBullet: baseBody,
-      blockquote: baseBody,
-      code: GoogleFonts.ibmPlexMono(color: textColor, fontSize: 13),
+      blockquote: baseBody?.copyWith(color: colors.textSecondary),
+      code: monoStyle(color: textColor, fontSize: 12.5).copyWith(
+        backgroundColor: colors.codeBackground,
+      ),
       codeblockPadding: const EdgeInsets.all(12),
       codeblockDecoration: BoxDecoration(
-        color: codeBackgroundColor,
-        borderRadius: BorderRadius.circular(14),
+        color: colors.codeBackground,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.codeBorder),
       ),
       blockquoteDecoration: BoxDecoration(
         border: Border(
-          left: BorderSide(color: textColor.withValues(alpha: 0.25), width: 3),
+          left: BorderSide(color: colors.accent, width: 3),
         ),
       ),
       blockquotePadding: const EdgeInsets.fromLTRB(12, 6, 0, 6),
       horizontalRuleDecoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: textColor.withValues(alpha: 0.18)),
-        ),
+        border: Border(top: BorderSide(color: colors.border)),
       ),
+      a: TextStyle(color: colors.accent, decoration: TextDecoration.underline),
     );
 
     return MarkdownBody(
@@ -839,13 +1048,13 @@ class _ActivityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final title = switch (activity.type) {
       'command' =>
         (activity.command ?? '').trim().isEmpty ? 'Command' : activity.command!,
-      'file_change' =>
-        activity.changes.length == 1
-            ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
-            : 'Edited ${activity.changes.length} files',
+      'file_change' => activity.changes.length == 1
+          ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
+          : 'Edited ${activity.changes.length} files',
       'turn_diff' => 'Live turn diff',
       _ => 'Activity',
     };
@@ -858,17 +1067,36 @@ class _ActivityCard extends StatelessWidget {
     };
 
     final activityLabel = switch (activity.type) {
-      'command' => 'Command',
-      'file_change' => 'File change',
-      'turn_diff' => 'Turn diff',
-      _ => 'Activity',
+      'command' => 'COMMAND',
+      'file_change' => 'FILE CHANGE',
+      'turn_diff' => 'TURN DIFF',
+      _ => 'ACTIVITY',
     };
 
     final activityIcon = switch (activity.type) {
       'command' => Icons.terminal_rounded,
-      'file_change' => Icons.description_outlined,
-      'turn_diff' => Icons.data_object_rounded,
-      _ => Icons.bolt_outlined,
+      'file_change' => Icons.edit_note_rounded,
+      'turn_diff' => Icons.difference_rounded,
+      _ => Icons.bolt_rounded,
+    };
+
+    final statusTone = switch (activity.status) {
+      'completed' => MeshPillTone.success,
+      'failed' => MeshPillTone.danger,
+      'declined' => MeshPillTone.neutral,
+      _ => MeshPillTone.accent,
+    };
+    final statusLabel = switch (activity.status) {
+      'completed' => 'done',
+      'failed' => 'failed',
+      'declined' => 'declined',
+      _ => 'running',
+    };
+    final statusIcon = switch (activity.status) {
+      'completed' => Icons.check_rounded,
+      'failed' => Icons.error_outline_rounded,
+      'declined' => Icons.block_rounded,
+      _ => Icons.bolt_rounded,
     };
 
     return Align(
@@ -876,273 +1104,385 @@ class _ActivityCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 620),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF4E7),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: const Color(0xFFE7D3B8)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Icon(
-                          activityIcon,
-                          size: 18,
-                          color: const Color(0xFF8E4A15),
-                        ),
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: MeshCard(
+            tone: MeshCardTone.surface,
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: colors.accentMuted,
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              activityLabel,
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: const Color(0xFF8E4A15),
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.2,
-                                  ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              title,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleSmall
-                                  ?.copyWith(fontWeight: FontWeight.w700),
-                            ),
-                            if (subtitle != null && subtitle.isNotEmpty) ...[
-                              const SizedBox(height: 6),
-                              Text(
-                                subtitle,
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(color: const Color(0xFF6D5B49)),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      _ActivityStatusPill(status: activity.status),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (activity.turnId != null)
-                        _InfoTag(label: 'turn ${_shortId(activity.turnId!)}'),
-                      if (activity.isCommand && activity.exitCode != null)
-                        _InfoTag(label: 'exit ${activity.exitCode}'),
-                      if (activity.isCommand && activity.durationMs != null)
-                        _InfoTag(label: _formatDuration(activity.durationMs!)),
-                      if (activity.isCommand &&
-                          (activity.source ?? '').isNotEmpty)
-                        _InfoTag(label: _commandSourceLabel(activity.source!)),
-                      if (activity.isCommand &&
-                          (activity.processId ?? '').isNotEmpty)
-                        _InfoTag(label: 'pty ${activity.processId}'),
-                      if (activity.isCommand &&
-                          activity.terminalStatus == 'input')
-                        const _InfoTag(label: 'stdin'),
-                      if (activity.isCommand &&
-                          activity.terminalStatus == 'waiting')
-                        const _InfoTag(label: 'interactive'),
-                      if (activity.isCommand)
-                        ...activity.commandActions.map(
-                          (action) => _InfoTag(label: action.label),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  if (activity.isCommand) ...[
-                    if ((activity.terminalInput ?? '').isNotEmpty) ...[
-                      Text(
-                        'Sent to terminal',
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(
-                              color: const Color(0xFF6D5B49),
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 8),
-                      _CodeBlock(text: activity.terminalInput!),
-                      const SizedBox(height: 12),
-                    ],
-                    if ((activity.output ?? '').isNotEmpty)
-                      _CodeBlock(text: activity.output!)
-                    else if (activity.terminalStatus == 'waiting')
-                      Text(
-                        'Interactive command is running.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: const Color(0xFF6D5B49),
-                        ),
-                      )
-                    else
-                      Text(
-                        'Waiting for command output.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: const Color(0xFF6D5B49),
-                        ),
-                      ),
-                  ] else if (activity.isTurnDiff) ...[
-                    if ((activity.diff ?? '').isNotEmpty)
-                      _CodeBlock(text: activity.diff!)
-                    else
-                      Text(
-                        'Waiting for turn diff.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: const Color(0xFF6D5B49),
-                        ),
-                      ),
-                  ] else if (activity.changes.isEmpty) ...[
-                    Text(
-                      'Waiting for patch details.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF6D5B49),
-                      ),
+                      alignment: Alignment.center,
+                      child: Icon(activityIcon,
+                          size: 18, color: colors.accent),
                     ),
-                  ] else ...[
-                    ...activity.changes.map(
-                      (change) => Padding(
-                        padding: const EdgeInsets.only(bottom: 14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    _relativeSessionPath(
-                                      change.path,
-                                      sessionCwd,
-                                    ),
-                                    style: Theme.of(context)
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            activityLabel,
+                            style: monoStyle(
+                              color: colors.accent,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                            ).copyWith(letterSpacing: 1.2),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            title,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: (activity.isCommand
+                                    ? monoStyle(
+                                        color: colors.textPrimary,
+                                        fontSize: 13,
+                                      )
+                                    : Theme.of(context)
                                         .textTheme
                                         .titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _InfoTag(label: change.kind),
-                              ],
+                                        ?.copyWith(fontWeight: FontWeight.w700))
+                                ?.copyWith(height: 1.35),
+                          ),
+                          if (subtitle != null && subtitle.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              subtitle,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: colors.textSecondary),
                             ),
-                            if ((change.movePath ?? '').isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(
-                                  top: 6,
-                                  bottom: 8,
-                                ),
-                                child: Text(
-                                  'Moved from ${_relativeSessionPath(change.movePath!, sessionCwd)}',
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: const Color(0xFF6D5B49),
-                                      ),
-                                ),
-                              )
-                            else
-                              const SizedBox(height: 8),
-                            _CodeBlock(text: change.diff),
                           ],
-                        ),
+                        ],
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    MeshPill(
+                      label: statusLabel,
+                      tone: statusTone,
+                      icon: statusIcon,
+                      mono: true,
+                    ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    if (activity.turnId != null)
+                      MeshPill(
+                        label: 'turn ${_shortId(activity.turnId!)}',
+                        mono: true,
+                      ),
+                    if (activity.isCommand && activity.exitCode != null)
+                      MeshPill(
+                        label: 'exit ${activity.exitCode}',
+                        tone: activity.exitCode == 0
+                            ? MeshPillTone.success
+                            : MeshPillTone.danger,
+                        mono: true,
+                      ),
+                    if (activity.isCommand && activity.durationMs != null)
+                      MeshPill(
+                        label: _formatDuration(activity.durationMs!),
+                        mono: true,
+                      ),
+                    if (activity.isCommand &&
+                        (activity.source ?? '').isNotEmpty)
+                      MeshPill(
+                        label: _commandSourceLabel(activity.source!),
+                        mono: true,
+                      ),
+                    if (activity.isCommand &&
+                        (activity.processId ?? '').isNotEmpty)
+                      MeshPill(
+                        label: 'pty ${activity.processId}',
+                        mono: true,
+                      ),
+                    if (activity.isCommand &&
+                        activity.terminalStatus == 'input')
+                      const MeshPill(
+                        label: 'stdin',
+                        tone: MeshPillTone.info,
+                        mono: true,
+                      ),
+                    if (activity.isCommand &&
+                        activity.terminalStatus == 'waiting')
+                      const MeshPill(
+                        label: 'interactive',
+                        tone: MeshPillTone.warning,
+                        mono: true,
+                      ),
+                    if (activity.isCommand)
+                      ...activity.commandActions.map(
+                        (action) =>
+                            MeshPill(label: action.label, mono: true),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (activity.isCommand) ..._buildCommandBody(context, activity)
+                else if (activity.isTurnDiff) ...[
+                  if ((activity.diff ?? '').isNotEmpty)
+                    DiffView(diff: activity.diff!)
+                  else
+                    _waitingText(context, 'Waiting for turn diff.'),
+                ] else if (activity.changes.isEmpty) ...[
+                  _waitingText(context, 'Waiting for patch details.'),
+                ] else ...[
+                  ...activity.changes.map(
+                    (change) => Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: _FileChangeBlock(
+                        change: change,
+                        sessionCwd: sessionCwd,
+                      ),
+                    ),
+                  ),
                 ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildCommandBody(
+      BuildContext context, SessionActivity activity) {
+    final colors = context.colors;
+    final widgets = <Widget>[];
+
+    if ((activity.terminalInput ?? '').isNotEmpty) {
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            'Sent to terminal',
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ).copyWith(letterSpacing: 0.8),
+          ),
+        ),
+      );
+      widgets.add(
+        SyntaxCodeBlock(text: activity.terminalInput!, language: 'bash'),
+      );
+      widgets.add(const SizedBox(height: 12));
+    }
+
+    if ((activity.output ?? '').isNotEmpty) {
+      widgets.add(SyntaxCodeBlock(text: activity.output!, language: 'bash'));
+    } else if (activity.terminalStatus == 'waiting') {
+      widgets.add(_waitingText(context, 'Interactive command is running.'));
+    } else {
+      widgets.add(_waitingText(context, 'Waiting for command output.'));
+    }
+
+    return widgets;
+  }
+
+  Widget _waitingText(BuildContext context, String text) {
+    final colors = context.colors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+            ),
+      ),
+    );
+  }
+}
+
+class _FileChangeBlock extends StatelessWidget {
+  const _FileChangeBlock({required this.change, required this.sessionCwd});
+
+  final SessionActivityChange change;
+  final String sessionCwd;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final tone = switch (change.kind) {
+      'added' || 'add' || 'create' => MeshPillTone.success,
+      'deleted' || 'delete' || 'remove' => MeshPillTone.danger,
+      'moved' || 'move' || 'rename' => MeshPillTone.info,
+      _ => MeshPillTone.neutral,
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.description_outlined,
+                size: 16, color: colors.textSecondary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _relativeSessionPath(change.path, sessionCwd),
+                style: monoStyle(
+                  color: colors.textPrimary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
-          ),
+            const SizedBox(width: 8),
+            MeshPill(label: change.kind, tone: tone, mono: true),
+          ],
         ),
-      ),
+        if ((change.movePath ?? '').isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 8, left: 24),
+            child: Text(
+              'Moved from ${_relativeSessionPath(change.movePath!, sessionCwd)}',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: colors.textSecondary),
+            ),
+          )
+        else
+          const SizedBox(height: 8),
+        DiffView(diff: change.diff),
+      ],
     );
   }
 }
 
-class _ActivityStatusPill extends StatelessWidget {
-  const _ActivityStatusPill({required this.status});
-
-  final String status;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: _activityStatusColor(status),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        _activityStatusLabel(status),
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          fontWeight: FontWeight.w700,
-          color: const Color(0xFF221C15),
-        ),
-      ),
-    );
-  }
-}
-
-class _InfoTag extends StatelessWidget {
-  const _InfoTag({required this.label});
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({required this.label, required this.value});
 
   final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF5E6D1),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: const Color(0xFF6D5B49),
-          fontWeight: FontWeight.w700,
-        ),
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+            ).copyWith(letterSpacing: 1.2),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
       ),
     );
   }
 }
 
-class _CodeBlock extends StatelessWidget {
-  const _CodeBlock({required this.text});
+class _SessionRuntimeDetails extends StatelessWidget {
+  const _SessionRuntimeDetails({required this.runtime});
 
-  final String text;
+  final SessionRuntimeSummary runtime;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF4E3),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SelectableText(
-            text,
-            style: GoogleFonts.ibmPlexMono(
-              fontSize: 12.5,
-              height: 1.45,
-              color: const Color(0xFF221C15),
-            ),
+    final colors = context.colors;
+    final details = <({String label, String value})>[
+      (label: 'Model', value: runtimeValue(runtime.model)),
+      (label: 'Reasoning', value: runtimeValue(runtime.reasoningEffort)),
+      (label: 'Approval', value: runtimeValue(runtime.approvalPolicy)),
+      (label: 'Sandbox', value: runtimeValue(runtime.sandboxMode)),
+      (label: 'Network', value: runtimeNetworkValue(runtime.networkAccess)),
+    ];
+
+    if ((runtime.personality ?? '').isNotEmpty) {
+      details.add((label: 'Style', value: runtime.personality!));
+    }
+    if ((runtime.summaryMode ?? '').isNotEmpty) {
+      details.add((label: 'Summary', value: runtime.summaryMode!));
+    }
+
+    return MeshCard(
+      tone: MeshCardTone.muted,
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'RUNTIME',
+            style: monoStyle(
+              color: colors.accent,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+            ).copyWith(letterSpacing: 1.2),
           ),
-        ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: details
+                .map(
+                  (detail) => Container(
+                    constraints:
+                        const BoxConstraints(minWidth: 132, maxWidth: 200),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: colors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          detail.label.toUpperCase(),
+                          style: monoStyle(
+                            color: colors.textSecondary,
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w800,
+                          ).copyWith(letterSpacing: 1.1),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          detail.value,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+        ],
       ),
     );
   }
@@ -1181,24 +1521,6 @@ String _activityFileSummary(
   return labels.join('  •  ');
 }
 
-String _activityStatusLabel(String status) {
-  return switch (status) {
-    'completed' => 'Done',
-    'failed' => 'Failed',
-    'declined' => 'Declined',
-    _ => 'Running',
-  };
-}
-
-Color _activityStatusColor(String status) {
-  return switch (status) {
-    'completed' => const Color(0xFFD7F2D3),
-    'failed' => const Color(0xFFFFD3CC),
-    'declined' => const Color(0xFFE7E1D8),
-    _ => const Color(0xFFFFE2C7),
-  };
-}
-
 String _formatDuration(int durationMs) {
   if (durationMs >= 1000) {
     final seconds = durationMs / 1000;
@@ -1222,148 +1544,4 @@ String _shortId(String value) {
     return value;
   }
   return value.substring(value.length - 8);
-}
-
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.label, required this.color});
-
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(label),
-    );
-  }
-}
-
-class _SheetDetailRow extends StatelessWidget {
-  const _SheetDetailRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: const Color(0xFF7A6246),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(value, style: Theme.of(context).textTheme.bodyMedium),
-        ],
-      ),
-    );
-  }
-}
-
-class _SessionRuntimeDetails extends StatelessWidget {
-  const _SessionRuntimeDetails({required this.runtime});
-
-  final SessionRuntimeSummary runtime;
-
-  @override
-  Widget build(BuildContext context) {
-    final details = <({String label, String value})>[
-      (label: 'Model', value: runtimeValue(runtime.model)),
-      (label: 'Reasoning', value: runtimeValue(runtime.reasoningEffort)),
-      (label: 'Approval', value: runtimeValue(runtime.approvalPolicy)),
-      (label: 'Sandbox', value: runtimeValue(runtime.sandboxMode)),
-      (label: 'Network', value: runtimeNetworkValue(runtime.networkAccess)),
-    ];
-
-    if ((runtime.personality ?? '').isNotEmpty) {
-      details.add((label: 'Style', value: runtime.personality!));
-    }
-    if ((runtime.summaryMode ?? '').isNotEmpty) {
-      details.add((label: 'Summary', value: runtime.summaryMode!));
-    }
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF4E7),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Session details',
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: details
-                  .map(
-                    (detail) => _SessionDetailTile(
-                      label: detail.label,
-                      value: detail.value,
-                    ),
-                  )
-                  .toList(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SessionDetailTile extends StatelessWidget {
-  const _SessionDetailTile({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 132, maxWidth: 180),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: const Color(0xFF7A6246),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: const Color(0xFF221C15),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
