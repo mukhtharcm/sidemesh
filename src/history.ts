@@ -3,31 +3,69 @@ import { access } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 
-import type { RolloutLog, SessionMessage } from "./types.js";
+import type { RolloutLog, SessionMessage, SessionRuntimeSummary } from "./types.js";
 
 export async function loadRolloutLog(
   sessionId: string,
   rolloutPath: string | null,
   codexHomePath: string | null,
 ): Promise<RolloutLog> {
-  const resolvedPath = rolloutPath || (await findRolloutPath(sessionId, codexHomePath));
+  const resolvedPath = await resolveRolloutPath(sessionId, rolloutPath, codexHomePath);
   if (!resolvedPath) {
-    return { messages: [] };
+    return { messages: [], runtime: null };
   }
 
+  return scanRolloutFile(resolvedPath, true);
+}
+
+export async function loadSessionRuntime(
+  sessionId: string,
+  rolloutPath: string | null,
+  codexHomePath: string | null,
+): Promise<SessionRuntimeSummary | null> {
+  const resolvedPath = await resolveRolloutPath(sessionId, rolloutPath, codexHomePath);
+  if (!resolvedPath) {
+    return null;
+  }
+
+  const parsed = await scanRolloutFile(resolvedPath, false);
+  return parsed.runtime;
+}
+
+async function resolveRolloutPath(
+  sessionId: string,
+  rolloutPath: string | null,
+  codexHomePath: string | null,
+): Promise<string | null> {
+  return rolloutPath || (await findRolloutPath(sessionId, codexHomePath));
+}
+
+async function scanRolloutFile(
+  rolloutPath: string,
+  includeMessages: boolean,
+): Promise<RolloutLog> {
   const messages: SessionMessage[] = [];
-  const file = createReadStream(resolvedPath, { encoding: "utf8" });
+  let runtime: SessionRuntimeSummary | null = null;
+  const file = createReadStream(rolloutPath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: file, crlfDelay: Infinity });
 
   for await (const line of lines) {
-    const entry = parseLine(line);
-    if (!entry) {
+    const nextRuntime = parseRuntime(line);
+    if (nextRuntime) {
+      runtime = nextRuntime;
+    }
+
+    if (!includeMessages) {
       continue;
     }
-    messages.push(entry);
+
+    const entry = parseLine(line);
+    if (entry) {
+      messages.push(entry);
+    }
   }
 
-  return { messages };
+  return { messages, runtime };
 }
 
 async function findRolloutPath(sessionId: string, codexHomePath: string | null): Promise<string | null> {
@@ -69,10 +107,8 @@ async function walkDirectories(root: string, depth: number): Promise<string[]> {
 }
 
 function parseLine(line: string): SessionMessage | null {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
+  const parsed = parseJsonLine(line);
+  if (!parsed) {
     return null;
   }
 
@@ -109,6 +145,61 @@ function parseLine(line: string): SessionMessage | null {
   return null;
 }
 
+function parseRuntime(line: string): SessionRuntimeSummary | null {
+  const parsed = parseJsonLine(line);
+  if (!parsed || parsed.type !== "turn_context") {
+    return null;
+  }
+
+  const payload = parsed.payload;
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const typed = payload as Record<string, any>;
+  const collaborationSettings =
+    typed.collaboration_mode &&
+    typeof typed.collaboration_mode === "object" &&
+    typed.collaboration_mode.settings &&
+    typeof typed.collaboration_mode.settings === "object"
+      ? (typed.collaboration_mode.settings as Record<string, any>)
+      : null;
+
+  const runtime = {
+    model: asOptionalString(typed.model) || asOptionalString(collaborationSettings?.model),
+    reasoningEffort:
+      asOptionalString(typed.effort) || asOptionalString(collaborationSettings?.reasoning_effort),
+    approvalPolicy: asOptionalString(typed.approval_policy),
+    sandboxMode: asOptionalString(typed.sandbox_policy?.type),
+    networkAccess: asOptionalBoolean(typed.sandbox_policy?.network_access),
+    summaryMode: asOptionalString(typed.summary),
+    personality: asOptionalString(typed.personality),
+    updatedAt: parseTimestamp(parsed.timestamp),
+  };
+
+  if (
+    !runtime.model &&
+    !runtime.reasoningEffort &&
+    !runtime.approvalPolicy &&
+    !runtime.sandboxMode &&
+    runtime.networkAccess === undefined &&
+    !runtime.summaryMode &&
+    !runtime.personality
+  ) {
+    return null;
+  }
+
+  return runtime;
+}
+
+function parseJsonLine(line: string): any | null {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
+
 function parseTimestamp(raw: unknown): number {
   if (typeof raw === "number") {
     return raw * 1000;
@@ -132,4 +223,12 @@ export async function rolloutExists(rolloutPath: string | null): Promise<boolean
   } catch {
     return false;
   }
+}
+
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function asOptionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }

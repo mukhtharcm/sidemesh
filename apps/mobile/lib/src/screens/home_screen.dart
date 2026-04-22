@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../api_client.dart';
 import '../host_store.dart';
 import '../models.dart';
+import '../session_runtime.dart';
 import 'host_detail_screen.dart';
 import 'session_screen.dart';
 
@@ -96,6 +97,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
       updatedAt: action.requestedAt,
       source: 'appServer',
       status: 'pendingApproval',
+      runtime: null,
     );
   }
 
@@ -276,6 +278,10 @@ class _RecentPaneState extends State<_RecentPane> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('${entry.host.label}  •  ${entry.session.cwd}'),
+                        if (entry.session.runtime != null) ...[
+                          const SizedBox(height: 8),
+                          SessionRuntimeWrap(runtime: entry.session.runtime),
+                        ],
                         if (entry.session.preview.isNotEmpty) ...[
                           const SizedBox(height: 8),
                           Text(

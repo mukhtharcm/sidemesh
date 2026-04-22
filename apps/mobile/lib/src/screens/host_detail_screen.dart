@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../session_runtime.dart';
 
 class HostDetailScreen extends StatefulWidget {
   const HostDetailScreen({
@@ -114,109 +115,121 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _refresh,
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-                    children: [
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(_error!, textAlign: TextAlign.center),
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+                children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _node?.label ?? widget.host.label,
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(widget.host.baseUrl),
+                          const SizedBox(height: 14),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
                             children: [
-                              Text(
-                                _node?.label ?? widget.host.label,
-                                style: Theme.of(context).textTheme.headlineSmall,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(widget.host.baseUrl),
-                              const SizedBox(height: 14),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  _InfoChip(label: _node?.platform ?? 'unknown'),
-                                  _InfoChip(label: _node?.hostname ?? 'unresolved'),
-                                  _InfoChip(label: _node?.codexVersion ?? 'codex unknown'),
-                                ],
+                              _InfoChip(label: _node?.platform ?? 'unknown'),
+                              _InfoChip(label: _node?.hostname ?? 'unresolved'),
+                              _InfoChip(
+                                label: _node?.codexVersion ?? 'codex unknown',
                               ),
                             ],
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        'Known workspaces',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 10),
-                      if (_workspaces.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 20),
-                          child: Text('No prior workspaces on this host yet.'),
-                        )
-                      else
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: _workspaces
-                              .map(
-                                (workspace) => Chip(
-                                  label: Text('${workspace.label} · ${workspace.sessionCount}'),
-                                ),
-                              )
-                              .toList(),
-                        ),
-                      const SizedBox(height: 20),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Sessions',
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                          ),
-                          FilledButton.icon(
-                            onPressed: _createSession,
-                            icon: const Icon(Icons.add),
-                            label: const Text('New'),
-                          ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      if (_sessions.isEmpty)
-                        const Text('No sessions found.')
-                      else
-                        ..._sessions.map(
-                          (session) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Card(
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.all(18),
-                                title: Text(session.title),
-                                subtitle: Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: Text(session.cwd),
-                                ),
-                                trailing: const Icon(Icons.chevron_right),
-                                onTap: () => widget.onOpenSession(session),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Known workspaces',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 10),
+                  if (_workspaces.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 20),
+                      child: Text('No prior workspaces on this host yet.'),
+                    )
+                  else
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: _workspaces
+                          .map(
+                            (workspace) => Chip(
+                              label: Text(
+                                '${workspace.label} · ${workspace.sessionCount}',
                               ),
                             ),
-                          ),
+                          )
+                          .toList(),
+                    ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Sessions',
+                          style: Theme.of(context).textTheme.titleLarge,
                         ),
+                      ),
+                      FilledButton.icon(
+                        onPressed: _createSession,
+                        icon: const Icon(Icons.add),
+                        label: const Text('New'),
+                      ),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  if (_sessions.isEmpty)
+                    const Text('No sessions found.')
+                  else
+                    ..._sessions.map(
+                      (session) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Card(
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.all(18),
+                            title: Text(session.title),
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(session.cwd),
+                                  if (session.runtime != null) ...[
+                                    const SizedBox(height: 8),
+                                    SessionRuntimeWrap(
+                                      runtime: session.runtime,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => widget.onOpenSession(session),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
     );
   }
 }
@@ -307,9 +320,9 @@ class _CreateSessionSheetState extends State<_CreateSessionSheet> {
                     if (cwd.isEmpty || prompt.isEmpty) {
                       return;
                     }
-                    Navigator.of(context).pop(
-                      _CreateSessionInput(cwd: cwd, prompt: prompt),
-                    );
+                    Navigator.of(
+                      context,
+                    ).pop(_CreateSessionInput(cwd: cwd, prompt: prompt));
                   },
                   icon: const Icon(Icons.rocket_launch_outlined),
                   label: const Text('Launch'),
@@ -324,10 +337,7 @@ class _CreateSessionSheetState extends State<_CreateSessionSheet> {
 }
 
 class _CreateSessionInput {
-  const _CreateSessionInput({
-    required this.cwd,
-    required this.prompt,
-  });
+  const _CreateSessionInput({required this.cwd, required this.prompt});
 
   final String cwd;
   final String prompt;

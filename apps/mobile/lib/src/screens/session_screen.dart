@@ -8,6 +8,7 @@ import 'package:web_socket_channel/io.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../session_runtime.dart';
 
 class SessionScreen extends StatefulWidget {
   const SessionScreen({
@@ -304,6 +305,10 @@ class _SessionScreenState extends State<SessionScreen> {
                           ),
                         ],
                       ),
+                      if (session.runtime != null) ...[
+                        const SizedBox(height: 12),
+                        _SessionRuntimeDetails(runtime: session.runtime!),
+                      ],
                     ],
                   ),
                 ),
@@ -567,6 +572,103 @@ class _StatusPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(label),
+    );
+  }
+}
+
+class _SessionRuntimeDetails extends StatelessWidget {
+  const _SessionRuntimeDetails({required this.runtime});
+
+  final SessionRuntimeSummary runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    final details = <({String label, String value})>[
+      (label: 'Model', value: runtimeValue(runtime.model)),
+      (label: 'Reasoning', value: runtimeValue(runtime.reasoningEffort)),
+      (label: 'Approval', value: runtimeValue(runtime.approvalPolicy)),
+      (label: 'Sandbox', value: runtimeValue(runtime.sandboxMode)),
+      (label: 'Network', value: runtimeNetworkValue(runtime.networkAccess)),
+    ];
+
+    if ((runtime.personality ?? '').isNotEmpty) {
+      details.add((label: 'Style', value: runtime.personality!));
+    }
+    if ((runtime.summaryMode ?? '').isNotEmpty) {
+      details.add((label: 'Summary', value: runtime.summaryMode!));
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF4E7),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Session details',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: details
+                  .map(
+                    (detail) => _SessionDetailTile(
+                      label: detail.label,
+                      value: detail.value,
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SessionDetailTile extends StatelessWidget {
+  const _SessionDetailTile({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 132, maxWidth: 180),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: const Color(0xFF7A6246),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF221C15),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

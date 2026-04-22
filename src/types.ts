@@ -16,6 +16,7 @@ export interface SessionSummary {
   source: string;
   status: string;
   rolloutPath: string | null;
+  runtime: SessionRuntimeSummary | null;
 }
 
 export interface WorkspaceSummary {
@@ -111,4 +112,16 @@ export interface PendingActionRecord extends PendingAction {
 
 export interface RolloutLog {
   messages: SessionMessage[];
+  runtime: SessionRuntimeSummary | null;
+}
+
+export interface SessionRuntimeSummary {
+  model?: string;
+  reasoningEffort?: string;
+  approvalPolicy?: string;
+  sandboxMode?: string;
+  networkAccess?: boolean;
+  summaryMode?: string;
+  personality?: string;
+  updatedAt?: number;
 }
