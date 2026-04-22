@@ -44,12 +44,29 @@ class ApiClient {
     HostProfile host, {
     required String cwd,
     required String prompt,
+    String? model,
+    String? approvalPolicy,
+    String? sandboxMode,
+    String? webSearch,
+    String? profile,
   }) async {
-    final response = await _post(
-      host,
-      '/api/sessions/create',
-      body: {'cwd': cwd, 'prompt': prompt},
-    );
+    final body = <String, dynamic>{'cwd': cwd, 'prompt': prompt};
+    if ((model ?? '').isNotEmpty) {
+      body['model'] = model;
+    }
+    if ((approvalPolicy ?? '').isNotEmpty) {
+      body['approvalPolicy'] = approvalPolicy;
+    }
+    if ((sandboxMode ?? '').isNotEmpty) {
+      body['sandboxMode'] = sandboxMode;
+    }
+    if ((webSearch ?? '').isNotEmpty) {
+      body['webSearch'] = webSearch;
+    }
+    if ((profile ?? '').isNotEmpty) {
+      body['profile'] = profile;
+    }
+    final response = await _post(host, '/api/sessions/create', body: body);
     final payload = _decodeObject(response);
     return SessionSummary.fromJson(payload['session'] as Map<String, dynamic>);
   }

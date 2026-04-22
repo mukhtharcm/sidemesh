@@ -40,6 +40,18 @@ interface SessionRuntimeCacheEntry {
   runtime: SessionRuntimeSummary | null;
 }
 
+type ApprovalPolicyValue = "untrusted" | "on-failure" | "on-request" | "never";
+type SandboxModeValue = "read-only" | "workspace-write" | "danger-full-access";
+type WebSearchModeValue = "disabled" | "cached" | "live";
+
+interface CreateSessionOverrides {
+  model: string | null;
+  approvalPolicy: ApprovalPolicyValue | null;
+  sandboxMode: SandboxModeValue | null;
+  webSearch: WebSearchModeValue | null;
+  profile: string | null;
+}
+
 export async function startServer(config: NodeConfig): Promise<void> {
   const bridge = new CodexBridge(config.codexBin);
   await bridge.start();
@@ -322,17 +334,33 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.post("/api/sessions/create", asyncRoute(async (request, response) => {
     const cwd = asString(request.body?.cwd);
     const prompt = asString(request.body?.prompt);
+    const overrides = parseCreateSessionOverrides(request.body);
     if (!cwd) {
       response.status(400).json({ error: "cwd is required" });
       return;
     }
 
-    const started = (await bridge.request("thread/start", {
+    const startedParams: Record<string, unknown> = {
       cwd,
-      approvalPolicy: "never",
       experimentalRawEvents: false,
       persistExtendedHistory: true,
-    })) as any;
+    };
+
+    if (overrides.model) {
+      startedParams.model = overrides.model;
+    }
+    if (overrides.approvalPolicy) {
+      startedParams.approvalPolicy = overrides.approvalPolicy;
+    }
+    if (overrides.sandboxMode) {
+      startedParams.sandbox = overrides.sandboxMode;
+    }
+    const configOverrides = buildThreadConfigOverrides(overrides);
+    if (configOverrides) {
+      startedParams.config = configOverrides;
+    }
+
+    const started = (await bridge.request("thread/start", startedParams)) as any;
     const thread = started.thread as ThreadRecord;
 
     let turnId: string | null = null;
@@ -1034,6 +1062,67 @@ function sendEvent(socket: WebSocket, event: LiveEvent): void {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function parseCreateSessionOverrides(value: unknown): CreateSessionOverrides {
+  const typed = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    model: asString(typed.model),
+    approvalPolicy: parseApprovalPolicy(typed.approvalPolicy),
+    sandboxMode: parseSandboxMode(typed.sandboxMode),
+    webSearch: parseWebSearchMode(typed.webSearch),
+    profile: asString(typed.profile),
+  };
+}
+
+function parseApprovalPolicy(value: unknown): ApprovalPolicyValue | null {
+  const policy = asString(value);
+  switch (policy) {
+    case "untrusted":
+    case "on-failure":
+    case "on-request":
+    case "never":
+      return policy;
+    default:
+      return null;
+  }
+}
+
+function parseSandboxMode(value: unknown): SandboxModeValue | null {
+  const mode = asString(value);
+  switch (mode) {
+    case "read-only":
+    case "workspace-write":
+    case "danger-full-access":
+      return mode;
+    default:
+      return null;
+  }
+}
+
+function parseWebSearchMode(value: unknown): WebSearchModeValue | null {
+  const mode = asString(value);
+  switch (mode) {
+    case "disabled":
+    case "cached":
+    case "live":
+      return mode;
+    default:
+      return null;
+  }
+}
+
+function buildThreadConfigOverrides(
+  overrides: CreateSessionOverrides,
+): Record<string, unknown> | null {
+  const config: Record<string, unknown> = {};
+  if (overrides.profile) {
+    config.profile = overrides.profile;
+  }
+  if (overrides.webSearch) {
+    config.web_search = overrides.webSearch;
+  }
+  return Object.keys(config).length > 0 ? config : null;
 }
 
 function formatPermissionRequestDetail(reason: unknown, permissions: unknown): string {
