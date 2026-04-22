@@ -76,7 +76,7 @@ class _SessionScreenState extends State<SessionScreen> {
           _liveAssistantText = '';
         }
       });
-      _jumpToBottom();
+      await _scrollToBottom();
     } catch (error) {
       if (!mounted) {
         return;
@@ -119,7 +119,7 @@ class _SessionScreenState extends State<SessionScreen> {
           _running = true;
           _liveAssistantText += event.delta ?? '';
         });
-        _jumpToBottom();
+        unawaited(_scrollToBottom(animated: true));
       case 'turn_completed':
         setState(() {
           _running = false;
@@ -224,17 +224,29 @@ class _SessionScreenState extends State<SessionScreen> {
     }
   }
 
-  void _jumpToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) {
+  Future<void> _scrollToBottom({bool animated = false}) async {
+    for (var attempt = 0; attempt < 3; attempt += 1) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !_scrollController.hasClients) {
+        continue;
+      }
+
+      final targetOffset = _scrollController.position.maxScrollExtent;
+      final distance = (_scrollController.offset - targetOffset).abs();
+      if (distance < 1) {
         return;
       }
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent + 96,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-      );
-    });
+
+      if (animated && attempt == 2) {
+        await _scrollController.animateTo(
+          targetOffset,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _scrollController.jumpTo(targetOffset);
+      }
+    }
   }
 
   @override
