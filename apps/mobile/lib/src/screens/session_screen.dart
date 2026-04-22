@@ -32,22 +32,33 @@ class SessionScreen extends StatefulWidget {
 }
 
 class _SessionScreenState extends State<SessionScreen> {
+  static const _recentMessageLimit = 120;
+  static const _recentActivityLimit = 80;
+  static const _liveUpdateFlushInterval = Duration(milliseconds: 48);
+
   final _composerController = TextEditingController();
   final _scrollController = ScrollController();
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
+  final StringBuffer _assistantDeltaBuffer = StringBuffer();
+  final Map<String, SessionActivity> _pendingActivityUpdates =
+      <String, SessionActivity>{};
 
   SessionSummary? _session;
   List<SessionMessage> _messages = const [];
   List<SessionMessage> _optimisticMessages = const [];
   List<SessionActivity> _activities = const [];
+  SessionLogHistorySummary? _history;
   PendingAction? _pendingAction;
   bool _running = false;
   bool _loading = true;
+  bool _loadFullHistory = false;
+  bool _loadingFullHistory = false;
   bool _sending = false;
   bool _awaitingAssistantReply = false;
   String _liveAssistantText = '';
   IOWebSocketChannel? _channel;
   StreamSubscription? _subscription;
+  Timer? _liveFlushTimer;
 
   @override
   void initState() {
@@ -63,13 +74,20 @@ class _SessionScreenState extends State<SessionScreen> {
     _composerController.dispose();
     _scrollController.dispose();
     _subscription?.cancel();
+    _liveFlushTimer?.cancel();
     _channel?.sink.close();
     super.dispose();
   }
 
-  Future<void> _loadSnapshot() async {
+  Future<void> _loadSnapshot({bool? fullHistory}) async {
+    final useFullHistory = fullHistory ?? _loadFullHistory;
     try {
-      final log = await widget.api.fetchLog(widget.host, widget.session.id);
+      final log = await widget.api.fetchLog(
+        widget.host,
+        widget.session.id,
+        messageLimit: useFullHistory ? null : _recentMessageLimit,
+        activityLimit: useFullHistory ? null : _recentActivityLimit,
+      );
       if (!mounted) {
         return;
       }
@@ -79,8 +97,10 @@ class _SessionScreenState extends State<SessionScreen> {
         _messages = log.messages;
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
         _activities = _sortActivities(log.activities);
+        _history = log.history;
         _pendingAction = pendingAction;
         _running = log.session.isActive;
+        _loadFullHistory = useFullHistory;
         _loading = false;
         _awaitingAssistantReply =
             log.session.isActive &&
@@ -101,6 +121,20 @@ class _SessionScreenState extends State<SessionScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Failed to load session: $error')));
+    }
+  }
+
+  Future<void> _loadFullTranscript() async {
+    if (_loadingFullHistory || _loadFullHistory) {
+      return;
+    }
+    setState(() => _loadingFullHistory = true);
+    try {
+      await _loadSnapshot(fullHistory: true);
+    } finally {
+      if (mounted) {
+        setState(() => _loadingFullHistory = false);
+      }
     }
   }
 
@@ -141,27 +175,26 @@ class _SessionScreenState extends State<SessionScreen> {
               _liveAssistantText.isEmpty && _pendingAction == null;
         });
       case 'assistant_delta':
-        setState(() {
-          _running = true;
-          _awaitingAssistantReply = false;
-          _liveAssistantText += event.delta ?? '';
-        });
-        unawaited(_scrollToBottom(animated: true));
+        final delta = event.delta;
+        if (delta == null || delta.isEmpty) {
+          return;
+        }
+        _assistantDeltaBuffer.write(delta);
+        _scheduleLiveFlush();
       case 'turn_completed':
+        _flushPendingLiveUpdates();
         setState(() {
           _running = false;
           _awaitingAssistantReply = false;
         });
-        unawaited(_loadSnapshot());
+        unawaited(_loadSnapshot(fullHistory: _loadFullHistory));
       case 'activity_updated':
         final activity = event.activity;
         if (activity == null) {
           return;
         }
-        setState(() {
-          _upsertActivity(activity);
-        });
-        unawaited(_scrollToBottom(animated: true));
+        _pendingActivityUpdates[activity.id] = activity;
+        _scheduleLiveFlush();
       case 'action_opened':
         setState(() {
           _pendingAction = event.action;
@@ -176,6 +209,46 @@ class _SessionScreenState extends State<SessionScreen> {
       case 'error':
         break;
     }
+  }
+
+  void _scheduleLiveFlush() {
+    if (_liveFlushTimer != null) {
+      return;
+    }
+    _liveFlushTimer = Timer(_liveUpdateFlushInterval, _flushPendingLiveUpdates);
+  }
+
+  void _flushPendingLiveUpdates() {
+    _liveFlushTimer?.cancel();
+    _liveFlushTimer = null;
+    if (!mounted) {
+      _assistantDeltaBuffer.clear();
+      _pendingActivityUpdates.clear();
+      return;
+    }
+
+    final hasDelta = _assistantDeltaBuffer.isNotEmpty;
+    final delta = hasDelta ? _assistantDeltaBuffer.toString() : '';
+    _assistantDeltaBuffer.clear();
+
+    final activities = _pendingActivityUpdates.values.toList();
+    _pendingActivityUpdates.clear();
+
+    if (!hasDelta && activities.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      if (hasDelta) {
+        _running = true;
+        _awaitingAssistantReply = false;
+        _liveAssistantText += delta;
+      }
+      for (final activity in activities) {
+        _upsertActivity(activity);
+      }
+    });
+    unawaited(_scrollToBottom(animated: true));
   }
 
   Future<void> _sendInput() async {
@@ -527,10 +600,7 @@ class _SessionScreenState extends State<SessionScreen> {
     final colors = context.colors;
     final visibleMessages = [..._messages, ..._optimisticMessages]
       ..sort((left, right) => left.createdAt.compareTo(right.createdAt));
-    final timelineEntries = _buildTimelineEntries(
-      visibleMessages,
-      _sortActivities(_activities),
-    );
+    final timelineEntries = _buildTimelineEntries(visibleMessages, _activities);
     return Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -638,6 +708,15 @@ class _SessionScreenState extends State<SessionScreen> {
                       onDetails: () => _showSessionDetailsSheet(session),
                     ),
                   ),
+                  if ((_history?.isTruncated ?? false))
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: _HistoryTruncationCard(
+                        history: _history!,
+                        loading: _loadingFullHistory,
+                        onLoadFullHistory: _loadFullTranscript,
+                      ),
+                    ),
                   if (_pendingAction != null)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
@@ -877,6 +956,86 @@ class _PendingActionCard extends StatelessWidget {
                   ),
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryTruncationCard extends StatelessWidget {
+  const _HistoryTruncationCard({
+    required this.history,
+    required this.loading,
+    required this.onLoadFullHistory,
+  });
+
+  final SessionLogHistorySummary history;
+  final bool loading;
+  final VoidCallback onLoadFullHistory;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final hiddenMessages = (history.totalMessages - history.returnedMessages)
+        .clamp(0, 1 << 30);
+    final hiddenActivities =
+        (history.totalActivities - history.returnedActivities).clamp(
+          0,
+          1 << 30,
+        );
+
+    final parts = <String>[];
+    if (hiddenMessages > 0) {
+      parts.add('$hiddenMessages older messages');
+    }
+    if (hiddenActivities > 0) {
+      parts.add('$hiddenActivities older actions');
+    }
+
+    return MeshCard(
+      tone: MeshCardTone.muted,
+      borderColor: colors.info.withValues(alpha: 0.35),
+      accentStrip: colors.info,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.speed_rounded, color: colors.info, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Showing recent history first',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  parts.isEmpty
+                      ? 'Load the full transcript if you need older context.'
+                      : 'Hidden for faster loading: ${parts.join(' and ')}.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.tonal(
+            onPressed: loading ? null : onLoadFullHistory,
+            child: loading
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Load all'),
           ),
         ],
       ),

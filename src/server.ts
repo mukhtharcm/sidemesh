@@ -46,6 +46,15 @@ interface SessionLogCacheEntry {
   messages: SessionMessage[];
   activities: SessionActivity[];
   runtime: SessionRuntimeSummary | null;
+  history: SessionHistorySummary;
+}
+
+interface SessionHistorySummary {
+  isTruncated: boolean;
+  totalMessages: number;
+  returnedMessages: number;
+  totalActivities: number;
+  returnedActivities: number;
 }
 
 type ApprovalPolicyValue = "untrusted" | "on-failure" | "on-request" | "never";
@@ -226,7 +235,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       if (turnId) {
         activeTurns.delete(sessionId);
         liveActivities.delete(sessionId);
-        logCache.delete(sessionId);
+        clearSessionLogCache(logCache, sessionId);
         clearActionsForSession(pendingActions, socketsBySession, sessionId);
         broadcast(socketsBySession, sessionId, {
           type: "turn_completed",
@@ -313,7 +322,11 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   app.get("/api/sessions/:sessionId/log", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
-    const cached = logCache.get(sessionId);
+    const query = request.query as Record<string, unknown>;
+    const messageLimit = asInteger(query.messageLimit);
+    const activityLimit = asInteger(query.activityLimit);
+    const cacheKey = buildSessionLogCacheKey(sessionId, messageLimit, activityLimit);
+    const cached = logCache.get(cacheKey);
 
     if (cached) {
       const session = await readSession(bridge, sessionId, false);
@@ -330,24 +343,38 @@ export async function startServer(config: NodeConfig): Promise<void> {
             liveActivities.get(sessionId)?.values() || [],
           ),
           pendingAction: findPendingActionForSession(pendingActions, sessionId),
+          history: cached.history,
         });
         return;
       }
     }
 
     const session = await readSessionForLog(bridge, sessionId);
-    const log = await loadRolloutLog(sessionId, session.path, bridge.codexHome);
-    const baseActivities = extractSessionActivities(session);
+    const log = await loadRolloutLog(
+      sessionId,
+      session.path,
+      bridge.codexHome,
+      messageLimit,
+    );
+    const extractedActivities = extractSessionActivities(session, activityLimit);
+    const baseActivities = extractedActivities.activities;
     const activities = mergeSessionActivities(
       baseActivities,
       liveActivities.get(sessionId)?.values() || [],
     );
+    const history = buildSessionHistorySummary(
+      log.totalMessages,
+      log.messages.length,
+      extractedActivities.totalCount,
+      baseActivities.length,
+    );
 
-    setSessionLogCacheEntry(logCache, session.id, {
+    setSessionLogCacheEntry(logCache, cacheKey, {
       threadUpdatedAt: session.updatedAt,
       messages: log.messages,
       activities: baseActivities,
       runtime: log.runtime,
+      history,
     });
     runtimeCache.set(session.id, {
       threadUpdatedAt: session.updatedAt,
@@ -358,6 +385,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       messages: log.messages,
       activities,
       pendingAction: findPendingActionForSession(pendingActions, sessionId),
+      history,
     });
   }));
 
@@ -521,7 +549,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     await bridge.request("thread/archive", { threadId: sessionId });
     activeTurns.delete(sessionId);
     liveActivities.delete(sessionId);
-    logCache.delete(sessionId);
+    clearSessionLogCache(logCache, sessionId);
     response.json({ archived: true });
   }));
 
@@ -953,13 +981,13 @@ async function loadCachedSessionRuntime(
 
 function setSessionLogCacheEntry(
   logCache: Map<string, SessionLogCacheEntry>,
-  sessionId: string,
+  cacheKey: string,
   entry: SessionLogCacheEntry,
 ): void {
-  if (logCache.has(sessionId)) {
-    logCache.delete(sessionId);
+  if (logCache.has(cacheKey)) {
+    logCache.delete(cacheKey);
   }
-  logCache.set(sessionId, entry);
+  logCache.set(cacheKey, entry);
 
   while (logCache.size > SESSION_LOG_CACHE_LIMIT) {
     const oldest = logCache.keys().next().value;
@@ -968,6 +996,42 @@ function setSessionLogCacheEntry(
     }
     logCache.delete(oldest);
   }
+}
+
+function clearSessionLogCache(
+  logCache: Map<string, SessionLogCacheEntry>,
+  sessionId: string,
+): void {
+  const prefix = `${sessionId}::`;
+  for (const key of [...logCache.keys()]) {
+    if (key.startsWith(prefix)) {
+      logCache.delete(key);
+    }
+  }
+}
+
+function buildSessionLogCacheKey(
+  sessionId: string,
+  messageLimit: number | null,
+  activityLimit: number | null,
+): string {
+  return `${sessionId}::m${messageLimit ?? "all"}::a${activityLimit ?? "all"}`;
+}
+
+function buildSessionHistorySummary(
+  totalMessages: number,
+  returnedMessages: number,
+  totalActivities: number,
+  returnedActivities: number,
+): SessionHistorySummary {
+  return {
+    isTruncated:
+      returnedMessages < totalMessages || returnedActivities < totalActivities,
+    totalMessages,
+    returnedMessages,
+    totalActivities,
+    returnedActivities,
+  };
 }
 
 function extractSessionId(method: string, params: unknown): string | null {

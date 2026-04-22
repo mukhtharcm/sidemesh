@@ -9,13 +9,14 @@ export async function loadRolloutLog(
   sessionId: string,
   rolloutPath: string | null,
   codexHomePath: string | null,
+  messageLimit: number | null = null,
 ): Promise<RolloutLog> {
   const resolvedPath = await resolveRolloutPath(sessionId, rolloutPath, codexHomePath);
   if (!resolvedPath) {
-    return { messages: [], runtime: null };
+    return { messages: [], runtime: null, totalMessages: 0 };
   }
 
-  return scanRolloutFile(resolvedPath, true);
+  return scanRolloutFile(resolvedPath, true, messageLimit);
 }
 
 export async function loadSessionRuntime(
@@ -43,9 +44,11 @@ async function resolveRolloutPath(
 async function scanRolloutFile(
   rolloutPath: string,
   includeMessages: boolean,
+  messageLimit: number | null = null,
 ): Promise<RolloutLog> {
   const messages: SessionMessage[] = [];
   let runtime: SessionRuntimeSummary | null = null;
+  let totalMessages = 0;
   const file = createReadStream(rolloutPath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: file, crlfDelay: Infinity });
 
@@ -61,11 +64,19 @@ async function scanRolloutFile(
 
     const entry = parseLine(line);
     if (entry) {
-      messages.push(entry);
+      totalMessages += 1;
+      if (messageLimit && messageLimit > 0) {
+        messages.push(entry);
+        if (messages.length > messageLimit) {
+          messages.shift();
+        }
+      } else {
+        messages.push(entry);
+      }
     }
   }
 
-  return { messages, runtime };
+  return { messages, runtime, totalMessages };
 }
 
 async function findRolloutPath(sessionId: string, codexHomePath: string | null): Promise<string | null> {
