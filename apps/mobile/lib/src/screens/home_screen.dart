@@ -6,6 +6,10 @@ import '../api_client.dart';
 import '../host_store.dart';
 import '../models.dart';
 import '../session_runtime.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
+import '../theme/theme_controller.dart';
+import '../widgets/mesh_widgets.dart';
 import 'host_detail_screen.dart';
 import 'session_screen.dart';
 
@@ -17,7 +21,26 @@ class SidemeshHomeScreen extends StatefulWidget {
 }
 
 class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
-  static const _tabTitles = ['Recent', 'Inbox', 'Hosts'];
+  static const _tabs = [
+    _TabDef(
+      title: 'Recent',
+      subtitle: 'Latest activity across the fleet',
+      icon: Icons.schedule_rounded,
+      selectedIcon: Icons.schedule_rounded,
+    ),
+    _TabDef(
+      title: 'Inbox',
+      subtitle: 'Pending approvals from every host',
+      icon: Icons.all_inbox_outlined,
+      selectedIcon: Icons.all_inbox_rounded,
+    ),
+    _TabDef(
+      title: 'Hosts',
+      subtitle: 'Your mesh of Codex nodes',
+      icon: Icons.hub_outlined,
+      selectedIcon: Icons.hub_rounded,
+    ),
+  ];
 
   final HostStore _store = HostStore();
   final ApiClient _api = ApiClient();
@@ -103,72 +126,249 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+    final tab = _tabs[_tabIndex];
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_tabTitles[_tabIndex]),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _refreshHosts,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
+      backgroundColor: colors.canvas,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            _TopBar(
+              tab: tab,
+              onRefresh: _refreshHosts,
+            ),
+            Expanded(
+              child: _loading
+                  ? const MeshLoader()
+                  : IndexedStack(
+                      index: _tabIndex,
+                      children: [
+                        _RecentPane(
+                          hosts: _hosts,
+                          api: _api,
+                          onOpenSession: _openSession,
+                        ),
+                        _InboxPane(
+                          hosts: _hosts,
+                          api: _api,
+                          onOpenSession: (host, action) =>
+                              _openSession(host, _sessionFromAction(action)),
+                        ),
+                        _HostsPane(
+                          hosts: _hosts,
+                          onOpenHost: _openHost,
+                          onEditHost: (host) =>
+                              _showHostEditor(initialHost: host),
+                          onRemoveHost: _removeHost,
+                          onAddHost: () => _showHostEditor(),
+                        ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
       ),
-      floatingActionButton: _tabIndex == 2
+      floatingActionButton: _tabIndex == 2 && _hosts.isNotEmpty
           ? FloatingActionButton.extended(
               onPressed: () => _showHostEditor(),
-              icon: const Icon(Icons.add_link),
+              icon: const Icon(Icons.add_link_rounded),
               label: const Text('Add host'),
             )
           : null,
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : IndexedStack(
-              index: _tabIndex,
-              children: [
-                _RecentPane(
-                  hosts: _hosts,
-                  api: _api,
-                  onOpenSession: _openSession,
-                ),
-                _InboxPane(
-                  hosts: _hosts,
-                  api: _api,
-                  onOpenSession: (host, action) =>
-                      _openSession(host, _sessionFromAction(action)),
-                ),
-                _HostsPane(
-                  hosts: _hosts,
-                  onOpenHost: _openHost,
-                  onEditHost: (host) => _showHostEditor(initialHost: host),
-                  onRemoveHost: _removeHost,
+      bottomNavigationBar: _MeshNavBar(
+        tabs: _tabs,
+        currentIndex: _tabIndex,
+        onTap: (index) => setState(() => _tabIndex = index),
+      ),
+    );
+  }
+}
+
+class _TabDef {
+  const _TabDef({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.selectedIcon,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final IconData selectedIcon;
+}
+
+class _TopBar extends StatelessWidget {
+  const _TopBar({required this.tab, required this.onRefresh});
+
+  final _TabDef tab;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final controller = ThemeScope.of(context);
+    final isDark = controller.isDark(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 16, 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: colors.accent,
+              borderRadius: BorderRadius.circular(11),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.accent.withValues(alpha: 0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tabIndex,
-        onDestinationSelected: (index) {
-          setState(() {
-            _tabIndex = index;
-          });
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.schedule_outlined),
-            selectedIcon: Icon(Icons.schedule),
-            label: 'Recent',
+            alignment: Alignment.center,
+            child: Icon(Icons.graphic_eq_rounded,
+                color: colors.accentOn, size: 20),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.inventory_2_outlined),
-            selectedIcon: Icon(Icons.inventory_2),
-            label: 'Inbox',
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'sidemesh',
+                      style: monoStyle(
+                        color: colors.textPrimary,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ).copyWith(letterSpacing: -0.4),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '/ ${tab.title.toLowerCase()}',
+                      style: monoStyle(
+                        color: colors.accent,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                Text(
+                  tab.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                ),
+              ],
+            ),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.hub_outlined),
-            selectedIcon: Icon(Icons.hub),
-            label: 'Hosts',
+          const SizedBox(width: 8),
+          MeshIconButton(
+            icon: isDark
+                ? Icons.light_mode_rounded
+                : Icons.dark_mode_rounded,
+            tooltip: isDark ? 'Light mode' : 'Dark mode',
+            onTap: () => controller.toggle(context),
+          ),
+          const SizedBox(width: 8),
+          MeshIconButton(
+            icon: Icons.refresh_rounded,
+            tooltip: 'Refresh',
+            onTap: onRefresh,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MeshNavBar extends StatelessWidget {
+  const _MeshNavBar({
+    required this.tabs,
+    required this.currentIndex,
+    required this.onTap,
+  });
+
+  final List<_TabDef> tabs;
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        border: Border(top: BorderSide(color: colors.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: List.generate(tabs.length, (index) {
+            final tab = tabs[index];
+            final selected = index == currentIndex;
+            return Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 3),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => onTap(index),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOut,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? colors.accentMuted
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: selected
+                              ? colors.accent.withValues(alpha: 0.4)
+                              : Colors.transparent,
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            selected ? tab.selectedIcon : tab.icon,
+                            size: 22,
+                            color: selected
+                                ? colors.accent
+                                : colors.textSecondary,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            tab.title,
+                            style: monoStyle(
+                              color: selected
+                                  ? colors.accent
+                                  : colors.textSecondary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ).copyWith(letterSpacing: 0.3),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
       ),
     );
   }
@@ -214,29 +414,25 @@ class _RecentPaneState extends State<_RecentPane> {
         merged.addAll(
           sessions
               .take(20)
-              .map(
-                (session) => _RemoteSessionEntry(host: host, session: session),
-              ),
+              .map((session) =>
+                  _RemoteSessionEntry(host: host, session: session)),
         );
       } catch (_) {
         continue;
       }
     }
-    merged.sort(
-      (left, right) =>
-          right.session.updatedAt.compareTo(left.session.updatedAt),
-    );
+    merged.sort((left, right) =>
+        right.session.updatedAt.compareTo(left.session.updatedAt));
     return merged;
   }
 
   @override
   Widget build(BuildContext context) {
     if (widget.hosts.isEmpty) {
-      return const _EmptyState(
-        icon: Icons.schedule_outlined,
+      return const MeshEmptyState(
+        icon: Icons.schedule_rounded,
         title: 'No sessions yet',
-        body:
-            'Add a host first, then your most recent Codex sessions will land here.',
+        body: 'Add a host first — your most recent Codex sessions will land here.',
       );
     }
 
@@ -244,65 +440,136 @@ class _RecentPaneState extends State<_RecentPane> {
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
+          return const MeshLoader();
         }
         final entries = snapshot.data ?? const [];
         if (entries.isEmpty) {
-          return const _EmptyState(
-            icon: Icons.cloud_off,
-            title: 'No reachable sessions',
-            body:
-                'The saved hosts are fine, but none of them returned recent sessions right now.',
+          return RefreshIndicator(
+            color: context.colors.accent,
+            onRefresh: () async {
+              setState(() => _future = _loadRecent());
+              await _future;
+            },
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: const [
+                SizedBox(height: 80),
+                MeshEmptyState(
+                  icon: Icons.cloud_off_rounded,
+                  title: 'No reachable sessions',
+                  body:
+                      'Saved hosts look fine, but none returned recent sessions right now.',
+                ),
+              ],
+            ),
           );
         }
         return RefreshIndicator(
+          color: context.colors.accent,
           onRefresh: () async {
-            setState(() {
-              _future = _loadRecent();
-            });
+            setState(() => _future = _loadRecent());
             await _future;
           },
           child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             itemCount: entries.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 14),
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
             itemBuilder: (context, index) {
               final entry = entries[index];
-              return Card(
-                child: ListTile(
-                  contentPadding: const EdgeInsets.all(18),
-                  title: Text(entry.session.title),
-                  subtitle: Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('${entry.host.label}  •  ${entry.session.cwd}'),
-                        if (entry.session.runtime != null) ...[
-                          const SizedBox(height: 8),
-                          SessionRuntimeWrap(runtime: entry.session.runtime),
-                        ],
-                        if (entry.session.preview.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            entry.session.preview,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: const Color(0xFF6D5B49)),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => widget.onOpenSession(entry.host, entry.session),
-                ),
+              return _SessionRowCard(
+                host: entry.host,
+                session: entry.session,
+                onTap: () => widget.onOpenSession(entry.host, entry.session),
               );
             },
           ),
         );
       },
+    );
+  }
+}
+
+class _SessionRowCard extends StatelessWidget {
+  const _SessionRowCard({
+    required this.host,
+    required this.session,
+    required this.onTap,
+  });
+
+  final HostProfile host;
+  final SessionSummary session;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final running = session.status == 'running';
+    return MeshCard(
+      onTap: onTap,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      accentStrip: running ? colors.success : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  session.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: colors.textTertiary),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(Icons.dns_rounded, size: 13, color: colors.textTertiary),
+              const SizedBox(width: 4),
+              Text(
+                host.label,
+                style: monoStyle(
+                  color: colors.textSecondary,
+                  fontSize: 11.5,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  session.cwd,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    color: colors.textTertiary,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (session.runtime != null) ...[
+            const SizedBox(height: 10),
+            SessionRuntimeWrap(runtime: session.runtime),
+          ],
+          if (session.preview.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              session.preview,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.35,
+                  ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -353,17 +620,13 @@ class _InboxPaneState extends State<_InboxPane> {
         continue;
       }
     }
-    merged.sort(
-      (left, right) =>
-          right.action.requestedAt.compareTo(left.action.requestedAt),
-    );
+    merged.sort((left, right) =>
+        right.action.requestedAt.compareTo(left.action.requestedAt));
     return merged;
   }
 
   Future<void> _refresh() async {
-    setState(() {
-      _future = _loadInbox();
-    });
+    setState(() => _future = _loadInbox());
     await _future;
   }
 
@@ -394,9 +657,10 @@ class _InboxPaneState extends State<_InboxPane> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     if (widget.hosts.isEmpty) {
-      return const _EmptyState(
-        icon: Icons.inventory_2_outlined,
+      return const MeshEmptyState(
+        icon: Icons.all_inbox_rounded,
         title: 'Inbox is empty',
         body:
             'Add a host first. Pending approvals from every machine will show up here.',
@@ -407,19 +671,20 @@ class _InboxPaneState extends State<_InboxPane> {
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
+          return const MeshLoader();
         }
 
         final entries = snapshot.data ?? const [];
         if (entries.isEmpty) {
           return RefreshIndicator(
+            color: colors.accent,
             onRefresh: _refresh,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                SizedBox(height: 120),
-                _EmptyState(
-                  icon: Icons.verified_outlined,
+              children: const [
+                SizedBox(height: 80),
+                MeshEmptyState(
+                  icon: Icons.verified_rounded,
                   title: 'No pending approvals',
                   body:
                       'Command, file, and permission prompts from your Codex nodes will appear here.',
@@ -430,86 +695,20 @@ class _InboxPaneState extends State<_InboxPane> {
         }
 
         return RefreshIndicator(
+          color: colors.accent,
           onRefresh: _refresh,
           child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             itemCount: entries.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 14),
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
             itemBuilder: (context, index) {
               final entry = entries[index];
-              final action = entry.action;
-              return Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              action.title,
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                          _ActionKindChip(kind: action.kind),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        '${entry.host.label}  •  ${action.sessionTitle ?? action.sessionId}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF6D5B49),
-                        ),
-                      ),
-                      if ((action.cwd ?? '').isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          action.cwd!,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: const Color(0xFF6D5B49)),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      Text(action.detail),
-                      const SizedBox(height: 14),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          FilledButton.tonalIcon(
-                            onPressed: () =>
-                                widget.onOpenSession(entry.host, action),
-                            icon: const Icon(Icons.forum_outlined),
-                            label: const Text('Open session'),
-                          ),
-                          if (action.canApprove)
-                            FilledButton(
-                              onPressed: () =>
-                                  _respond(entry.host, action, 'accept'),
-                              child: const Text('Approve'),
-                            ),
-                          if (action.canApproveForSession)
-                            FilledButton.tonal(
-                              onPressed: () => _respond(
-                                entry.host,
-                                action,
-                                'acceptForSession',
-                              ),
-                              child: const Text('Approve for session'),
-                            ),
-                          if (action.canDecline)
-                            OutlinedButton(
-                              onPressed: () =>
-                                  _respond(entry.host, action, 'decline'),
-                              child: const Text('Decline'),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
+              return _InboxCard(
+                entry: entry,
+                onOpenSession: () =>
+                    widget.onOpenSession(entry.host, entry.action),
+                onRespond: (decision) =>
+                    _respond(entry.host, entry.action, decision),
               );
             },
           ),
@@ -519,91 +718,256 @@ class _InboxPaneState extends State<_InboxPane> {
   }
 }
 
+class _InboxCard extends StatelessWidget {
+  const _InboxCard({
+    required this.entry,
+    required this.onOpenSession,
+    required this.onRespond,
+  });
+
+  final _PendingActionEntry entry;
+  final VoidCallback onOpenSession;
+  final ValueChanged<String> onRespond;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final action = entry.action;
+    return MeshCard(
+      tone: MeshCardTone.surface,
+      borderColor: colors.warning.withValues(alpha: 0.35),
+      accentStrip: colors.warning,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  action.title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              MeshPill(
+                label: _actionKindLabel(action.kind),
+                tone: MeshPillTone.warning,
+                mono: true,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(Icons.dns_rounded, size: 13, color: colors.textTertiary),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  '${entry.host.label}  •  ${action.sessionTitle ?? action.sessionId}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+                ),
+              ),
+            ],
+          ),
+          if ((action.cwd ?? '').isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              action.cwd!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Text(
+            action.detail,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: colors.textSecondary, height: 1.4),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: onOpenSession,
+                icon: const Icon(Icons.forum_outlined, size: 18),
+                label: const Text('Open session'),
+              ),
+              if (action.canApprove)
+                FilledButton.icon(
+                  onPressed: () => onRespond('accept'),
+                  icon: const Icon(Icons.check_rounded, size: 18),
+                  label: const Text('Approve'),
+                ),
+              if (action.canApproveForSession)
+                OutlinedButton(
+                  onPressed: () => onRespond('acceptForSession'),
+                  child: const Text('Approve for session'),
+                ),
+              if (action.canDecline)
+                OutlinedButton.icon(
+                  onPressed: () => onRespond('decline'),
+                  icon: Icon(Icons.close_rounded,
+                      size: 18, color: colors.danger),
+                  label: Text('Decline',
+                      style: TextStyle(color: colors.danger)),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(
+                      color: colors.danger.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _actionKindLabel(String kind) {
+  return switch (kind) {
+    'command' => 'command',
+    'file_change' => 'files',
+    'permissions' => 'permissions',
+    _ => kind,
+  };
+}
+
 class _HostsPane extends StatelessWidget {
   const _HostsPane({
     required this.hosts,
     required this.onOpenHost,
     required this.onEditHost,
     required this.onRemoveHost,
+    required this.onAddHost,
   });
 
   final List<HostProfile> hosts;
   final ValueChanged<HostProfile> onOpenHost;
   final ValueChanged<HostProfile> onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
+  final VoidCallback onAddHost;
 
   @override
   Widget build(BuildContext context) {
     if (hosts.isEmpty) {
-      return const _EmptyState(
-        icon: Icons.route_outlined,
-        title: 'No hosts yet',
-        body:
-            'Add a MacBook or VPS node by pasting its Tailscale address and shared token.',
+      return Padding(
+        padding: const EdgeInsets.all(20),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const MeshEmptyState(
+                icon: Icons.route_rounded,
+                title: 'No hosts yet',
+                body:
+                    'Add a MacBook or VPS node by pasting its Tailscale address and shared token.',
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: onAddHost,
+                icon: const Icon(Icons.add_link_rounded),
+                label: const Text('Add your first host'),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
       itemCount: hosts.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 14),
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final host = hosts[index];
-        return Card(
-          child: InkWell(
-            borderRadius: BorderRadius.circular(24),
-            onTap: () => onOpenHost(host),
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: Row(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFEBC8A1),
-                      borderRadius: BorderRadius.all(Radius.circular(16)),
-                    ),
-                    child: const Icon(
-                      Icons.storage_rounded,
-                      color: Color(0xFF221C15),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          host.label,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          host.baseUrl,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: const Color(0xFF6D5B49)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Edit host',
-                    onPressed: () => onEditHost(host),
-                    icon: const Icon(Icons.edit_outlined),
-                  ),
-                  IconButton(
-                    tooltip: 'Remove host',
-                    onPressed: () => onRemoveHost(host),
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-                ],
-              ),
-            ),
-          ),
+        return _HostRowCard(
+          host: host,
+          onTap: () => onOpenHost(host),
+          onEdit: () => onEditHost(host),
+          onRemove: () => onRemoveHost(host),
         );
       },
+    );
+  }
+}
+
+class _HostRowCard extends StatelessWidget {
+  const _HostRowCard({
+    required this.host,
+    required this.onTap,
+    required this.onEdit,
+    required this.onRemove,
+  });
+
+  final HostProfile host;
+  final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MeshCard(
+      onTap: onTap,
+      padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: colors.accentMuted,
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.dns_rounded, color: colors.accent, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  host.label,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  host.baseUrl,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style:
+                      monoStyle(color: colors.textSecondary, fontSize: 11.5),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Edit host',
+            onPressed: onEdit,
+            icon: Icon(Icons.edit_outlined,
+                size: 20, color: colors.textSecondary),
+          ),
+          IconButton(
+            tooltip: 'Remove host',
+            onPressed: onRemove,
+            icon: Icon(Icons.delete_outline,
+                size: 20, color: colors.textSecondary),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -625,15 +989,12 @@ class _HostEditorSheetState extends State<_HostEditorSheet> {
   @override
   void initState() {
     super.initState();
-    _labelController = TextEditingController(
-      text: widget.initialHost?.label ?? '',
-    );
-    _baseUrlController = TextEditingController(
-      text: widget.initialHost?.baseUrl ?? '',
-    );
-    _tokenController = TextEditingController(
-      text: widget.initialHost?.token ?? '',
-    );
+    _labelController =
+        TextEditingController(text: widget.initialHost?.label ?? '');
+    _baseUrlController =
+        TextEditingController(text: widget.initialHost?.baseUrl ?? '');
+    _tokenController =
+        TextEditingController(text: widget.initialHost?.token ?? '');
   }
 
   @override
@@ -646,68 +1007,89 @@ class _HostEditorSheetState extends State<_HostEditorSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     final isEditing = widget.initialHost != null;
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 16, 16, bottom + 16),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                isEditing ? 'Edit host' : 'Add host',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 18),
-              TextField(
-                controller: _labelController,
-                decoration: const InputDecoration(
-                  labelText: 'Label',
-                  hintText: 'MacBook or VPS-1',
+      child: MeshCard(
+        tone: MeshCardTone.surface,
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: colors.accentMuted,
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    isEditing ? Icons.edit_rounded : Icons.add_link_rounded,
+                    color: colors.accent,
+                    size: 18,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _baseUrlController,
-                decoration: const InputDecoration(
-                  labelText: 'Base URL',
-                  hintText: 'http://macbook.tailnet.ts.net:8787',
-                ),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _tokenController,
-                decoration: const InputDecoration(labelText: 'Shared token'),
-              ),
-              const SizedBox(height: 18),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton.icon(
-                  onPressed: () {
-                    final label = _labelController.text.trim();
-                    final baseUrl = normalizeBaseUrl(_baseUrlController.text);
-                    final token = _tokenController.text.trim();
-                    if (label.isEmpty || baseUrl.isEmpty || token.isEmpty) {
-                      return;
-                    }
-                    Navigator.of(context).pop(
-                      HostProfile(
-                        id: widget.initialHost?.id ?? _randomId(),
-                        label: label,
-                        baseUrl: baseUrl,
-                        token: token,
+                const SizedBox(width: 12),
+                Text(
+                  isEditing ? 'Edit host' : 'Add host',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
-                    );
-                  },
-                  icon: const Icon(Icons.check),
-                  label: Text(isEditing ? 'Save changes' : 'Save host'),
                 ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            TextField(
+              controller: _labelController,
+              decoration: const InputDecoration(
+                labelText: 'Label',
+                hintText: 'MacBook or VPS-1',
               ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _baseUrlController,
+              decoration: const InputDecoration(
+                labelText: 'Base URL',
+                hintText: 'http://macbook.tailnet.ts.net:8787',
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _tokenController,
+              decoration: const InputDecoration(labelText: 'Shared token'),
+            ),
+            const SizedBox(height: 18),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: () {
+                  final label = _labelController.text.trim();
+                  final baseUrl = normalizeBaseUrl(_baseUrlController.text);
+                  final token = _tokenController.text.trim();
+                  if (label.isEmpty || baseUrl.isEmpty || token.isEmpty) {
+                    return;
+                  }
+                  Navigator.of(context).pop(
+                    HostProfile(
+                      id: widget.initialHost?.id ?? _randomId(),
+                      label: label,
+                      baseUrl: baseUrl,
+                      token: token,
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.check_rounded),
+                label: Text(isEditing ? 'Save changes' : 'Save host'),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -726,69 +1108,6 @@ class _PendingActionEntry {
 
   final HostProfile host;
   final PendingAction action;
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({
-    required this.icon,
-    required this.title,
-    required this.body,
-  });
-
-  final IconData icon;
-  final String title;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 52, color: const Color(0xFFCA6B1F)),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.headlineSmall,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              body,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ActionKindChip extends StatelessWidget {
-  const _ActionKindChip({required this.kind});
-
-  final String kind;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = switch (kind) {
-      'command' => 'Command',
-      'file_change' => 'Files',
-      'permissions' => 'Permissions',
-      _ => kind,
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFFEBC8A1),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(label),
-    );
-  }
 }
 
 String _randomId() {
