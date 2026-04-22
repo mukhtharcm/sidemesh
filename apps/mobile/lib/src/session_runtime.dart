@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'models.dart';
+import 'widgets/mesh_widgets.dart';
 
 List<String> buildRuntimeHighlights(SessionRuntimeSummary? runtime) {
   if (runtime == null) {
@@ -57,19 +58,10 @@ class SessionRuntimeWrap extends StatelessWidget {
       runSpacing: 6,
       children: labels
           .map(
-            (label) => Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF4E6CF),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                label,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: const Color(0xFF6D4D2B),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+            (label) => MeshPill(
+              label: label,
+              tone: MeshPillTone.accent,
+              mono: true,
             ),
           )
           .toList(),

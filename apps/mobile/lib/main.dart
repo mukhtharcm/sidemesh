@@ -1,56 +1,55 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter/services.dart';
 
 import 'src/screens/home_screen.dart';
+import 'src/theme/app_theme.dart';
+import 'src/theme/theme_controller.dart';
 
-void main() {
-  runApp(const SidemeshApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final themeController = await ThemeController.load();
+  runApp(SidemeshApp(themeController: themeController));
 }
 
 class SidemeshApp extends StatelessWidget {
-  const SidemeshApp({super.key});
+  const SidemeshApp({super.key, required this.themeController});
+
+  final ThemeController themeController;
 
   @override
   Widget build(BuildContext context) {
-    final base = ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xFFCA6B1F),
-        brightness: Brightness.light,
-        surface: const Color(0xFFFFF8EF),
+    return ThemeScope(
+      notifier: themeController,
+      child: AnimatedBuilder(
+        animation: themeController,
+        builder: (context, _) {
+          final mode = themeController.mode;
+          final isDark = mode == ThemeMode.dark ||
+              (mode == ThemeMode.system &&
+                  MediaQuery.platformBrightnessOf(context) == Brightness.dark);
+          return AnnotatedRegion<SystemUiOverlayStyle>(
+            value: isDark
+                ? SystemUiOverlayStyle.light.copyWith(
+                    statusBarColor: Colors.transparent,
+                    systemNavigationBarColor: const Color(0xFF0B0F14),
+                    systemNavigationBarIconBrightness: Brightness.light,
+                  )
+                : SystemUiOverlayStyle.dark.copyWith(
+                    statusBarColor: Colors.transparent,
+                    systemNavigationBarColor: const Color(0xFFF6EFE2),
+                    systemNavigationBarIconBrightness: Brightness.dark,
+                  ),
+            child: MaterialApp(
+              title: 'Sidemesh',
+              debugShowCheckedModeBanner: false,
+              theme: buildLightTheme(),
+              darkTheme: buildDarkTheme(),
+              themeMode: mode,
+              home: const SidemeshHomeScreen(),
+            ),
+          );
+        },
       ),
-      useMaterial3: true,
-    );
-
-    return MaterialApp(
-      title: 'Sidemesh',
-      debugShowCheckedModeBanner: false,
-      theme: base.copyWith(
-        scaffoldBackgroundColor: const Color(0xFFF3E7D5),
-        textTheme: GoogleFonts.spaceGroteskTextTheme(base.textTheme),
-        appBarTheme: base.appBarTheme.copyWith(
-          backgroundColor: const Color(0xFFF3E7D5),
-          foregroundColor: const Color(0xFF221C15),
-          elevation: 0,
-          scrolledUnderElevation: 0,
-        ),
-        cardTheme: const CardThemeData(
-          color: Color(0xFFFFFBF5),
-          elevation: 0,
-          margin: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(24)),
-            side: BorderSide(color: Color(0x14000000)),
-          ),
-        ),
-        navigationBarTheme: base.navigationBarTheme.copyWith(
-          backgroundColor: const Color(0xFFFFFBF5),
-          indicatorColor: const Color(0xFFEBC8A1),
-          labelTextStyle: WidgetStateProperty.all(
-            GoogleFonts.spaceGrotesk(fontWeight: FontWeight.w600),
-          ),
-        ),
-      ),
-      home: const SidemeshHomeScreen(),
     );
   }
 }
