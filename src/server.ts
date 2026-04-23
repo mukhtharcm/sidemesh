@@ -13,6 +13,7 @@ import type {
   NodeConfig,
   PendingAction,
   PendingActionRecord,
+  SessionMessageAttachment,
   SessionMessage,
   SessionRuntimeSummary,
   SessionSummary,
@@ -73,6 +74,21 @@ interface CreateSessionOverrides {
   webSearch: WebSearchModeValue | null;
   profile: string | null;
 }
+
+type SessionInputItem =
+  | {
+      type: "text";
+      text: string;
+      text_elements: unknown[];
+    }
+  | {
+      type: "image";
+      url: string;
+    }
+  | {
+      type: "localImage";
+      path: string;
+    };
 
 export async function startServer(config: NodeConfig): Promise<void> {
   const bridge = new CodexBridge(config.codexBin);
@@ -334,7 +350,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }
 
   app.use(cors());
-  app.use(express.json({ limit: "8mb" }));
+  // Image attachments are sent as data URLs, so message payloads can be
+  // materially larger than plain-text turns.
+  app.use(express.json({ limit: "16mb" }));
 
   app.get("/healthz", (_request, response) => {
     response.json({ ok: true, label: config.label });
@@ -504,6 +522,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.post("/api/sessions/create", asyncRoute(async (request, response) => {
     const cwd = asString(request.body?.cwd);
     const prompt = asString(request.body?.prompt);
+    const input = parseInputItems(request.body?.input);
     const overrides = parseCreateSessionOverrides(request.body);
     if (!cwd) {
       response.status(400).json({ error: "cwd is required" });
@@ -534,10 +553,11 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const thread = started.thread as ThreadRecord;
 
     let turnId: string | null = null;
-    if (prompt) {
+    const resolvedInput = input.length > 0 ? input : buildLegacyTextInput(prompt);
+    if (resolvedInput.length > 0) {
       const turn = (await bridge.request("turn/start", {
         threadId: thread.id,
-        input: [{ type: "text", text: prompt, text_elements: [] }],
+        input: resolvedInput,
       })) as any;
       turnId = asString(turn.turn?.id) || null;
       if (turnId) {
@@ -554,18 +574,24 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.post("/api/sessions/:sessionId/input", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
     const text = asString(request.body?.text);
+    const input = parseInputItems(request.body?.input);
     const clientMessageId = asString(request.body?.clientMessageId);
-    if (!text) {
-      response.status(400).json({ error: "text is required" });
+    const resolvedInput = input.length > 0 ? input : buildLegacyTextInput(text);
+    if (resolvedInput.length === 0) {
+      response.status(400).json({ error: "input is required" });
       return;
     }
 
-    const submittedMessage = buildSubmittedUserMessage(text, clientMessageId, allocSeq(sessionId));
+    const submittedMessage = buildSubmittedUserMessage(
+      resolvedInput,
+      clientMessageId,
+      allocSeq(sessionId),
+    );
     const state = await loadRunState(bridge, sessionId, activeTurns);
     if (state.turnId) {
       const steer = (await bridge.request("turn/steer", {
         threadId: sessionId,
-        input: [{ type: "text", text, text_elements: [] }],
+        input: resolvedInput,
         expectedTurnId: state.turnId,
       })) as any;
       broadcastLive(sessionId, {
@@ -590,7 +616,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
     const turnStartParams: Record<string, unknown> = {
       threadId: sessionId,
-      input: [{ type: "text", text, text_elements: [] }],
+      input: resolvedInput,
     };
     const turnOverrides = parseTurnOverrides(request.body);
     if (turnOverrides.approvalPolicy) {
@@ -1075,14 +1101,15 @@ function asInteger(value: unknown): number | null {
 }
 
 function buildSubmittedUserMessage(
-  text: string,
+  input: SessionInputItem[],
   clientMessageId: string | null,
   seq: number,
 ): SessionMessage {
   return {
     id: clientMessageId || randomUUID(),
     role: "user",
-    text,
+    text: buildSubmittedUserMessageText(input),
+    attachments: buildSubmittedUserMessageAttachments(input),
     createdAt: Date.now(),
     seq,
   };
@@ -1328,6 +1355,84 @@ function sendEvent(socket: WebSocket, event: LiveEvent): void {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function buildLegacyTextInput(text: string | null): SessionInputItem[] {
+  if (!text) {
+    return [];
+  }
+  return [{ type: "text", text, text_elements: [] }];
+}
+
+function parseInputItems(value: unknown): SessionInputItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const items: SessionInputItem[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const typed = item as Record<string, unknown>;
+    switch (typed.type) {
+      case "text": {
+        const text = asString(typed.text);
+        if (!text) {
+          continue;
+        }
+        items.push({
+          type: "text",
+          text,
+          text_elements: Array.isArray(typed.text_elements) ? typed.text_elements : [],
+        });
+        break;
+      }
+      case "image": {
+        const url = asString(typed.url);
+        if (!url) {
+          continue;
+        }
+        items.push({ type: "image", url });
+        break;
+      }
+      case "localImage":
+      case "local_image": {
+        const path = asString(typed.path);
+        if (!path) {
+          continue;
+        }
+        items.push({ type: "localImage", path });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return items;
+}
+
+function buildSubmittedUserMessageText(input: SessionInputItem[]): string {
+  return input
+    .filter((item): item is Extract<SessionInputItem, { type: "text" }> => item.type === "text")
+    .map((item) => item.text.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function buildSubmittedUserMessageAttachments(input: SessionInputItem[]): SessionMessageAttachment[] {
+  const attachments: SessionMessageAttachment[] = [];
+  for (const item of input) {
+    if (item.type === "image") {
+      attachments.push({ type: "image", url: item.url });
+      continue;
+    }
+    if (item.type === "localImage") {
+      attachments.push({ type: "localImage", path: item.path });
+    }
+  }
+  return attachments;
 }
 
 function parseCreateSessionOverrides(value: unknown): CreateSessionOverrides {
