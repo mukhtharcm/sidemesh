@@ -2268,9 +2268,9 @@ class _MarkdownMessageBodyState extends State<_MarkdownMessageBody> {
         listBullet: baseBody,
         blockquote: baseBody?.copyWith(color: colors.textSecondary),
         code: monoStyle(
-          color: widget.textColor,
+          color: colors.accent,
           fontSize: 12.5,
-        ).copyWith(backgroundColor: colors.codeBackground),
+        ),
         codeblockPadding: const EdgeInsets.all(12),
         codeblockDecoration: BoxDecoration(
           color: colors.codeBackground,
