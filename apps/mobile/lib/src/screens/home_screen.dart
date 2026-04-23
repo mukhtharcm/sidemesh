@@ -1332,16 +1332,22 @@ class _InboxCard extends StatelessWidget {
       tone: MeshCardTone.surface,
       borderColor: colors.warning.withValues(alpha: 0.35),
       accentStrip: colors.warning,
+      onTap: onOpenSession,
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: Text(
                   action.title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
+                    height: 1.25,
                   ),
                 ),
               ),
@@ -1353,77 +1359,57 @@ class _InboxCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Icon(Icons.dns_rounded, size: 13, color: colors.textTertiary),
-              const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  '${entry.host.label}  •  ${action.sessionTitle ?? action.sessionId}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
-                ),
-              ),
-            ],
+          const SizedBox(height: 6),
+          Text(
+            '${entry.host.label} · ${action.sessionTitle ?? action.sessionId}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: monoStyle(color: colors.textTertiary, fontSize: 11),
           ),
-          if ((action.cwd ?? '').isNotEmpty) ...[
-            const SizedBox(height: 4),
+          if (action.detail.isNotEmpty) ...[
+            const SizedBox(height: 8),
             Text(
-              action.cwd!,
-              maxLines: 1,
+              action.detail,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                height: 1.35,
+              ),
             ),
           ],
-          const SizedBox(height: 12),
-          Text(
-            action.detail,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: colors.textSecondary,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              OutlinedButton.icon(
-                onPressed: onOpenSession,
-                icon: const Icon(Icons.forum_outlined, size: 18),
-                label: const Text('Open session'),
-              ),
-              if (action.canApprove)
-                FilledButton.icon(
-                  onPressed: () => onRespond('accept'),
-                  icon: const Icon(Icons.check_rounded, size: 18),
-                  label: const Text('Approve'),
-                ),
               if (action.canApproveForSession)
-                OutlinedButton(
-                  onPressed: () => onRespond('acceptForSession'),
-                  child: const Text('Approve for session'),
+                _MobileInboxAction(
+                  icon: Icons.history_toggle_off_rounded,
+                  tooltip: 'Approve for session',
+                  foreground: colors.textSecondary,
+                  background: colors.surfaceMuted,
+                  onTap: () => onRespond('acceptForSession'),
                 ),
-              if (action.canDecline)
-                OutlinedButton.icon(
-                  onPressed: () => onRespond('decline'),
-                  icon: Icon(
-                    Icons.close_rounded,
-                    size: 18,
-                    color: colors.danger,
-                  ),
-                  label: Text(
-                    'Decline',
-                    style: TextStyle(color: colors.danger),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(
-                      color: colors.danger.withValues(alpha: 0.5),
-                    ),
-                  ),
+              if (action.canDecline) ...[
+                if (action.canApproveForSession) const SizedBox(width: 8),
+                _MobileInboxAction(
+                  icon: Icons.close_rounded,
+                  tooltip: 'Decline',
+                  foreground: colors.danger,
+                  background: colors.danger.withValues(alpha: 0.12),
+                  onTap: () => onRespond('decline'),
                 ),
+              ],
+              if (action.canApprove) ...[
+                const SizedBox(width: 8),
+                _MobileInboxAction(
+                  icon: Icons.check_rounded,
+                  tooltip: 'Approve',
+                  foreground: Colors.white,
+                  background: colors.success,
+                  onTap: () => onRespond('accept'),
+                ),
+              ],
             ],
           ),
         ],
@@ -1540,6 +1526,45 @@ class _SquareIconAction extends StatelessWidget {
             width: 26,
             height: 26,
             child: Icon(icon, size: 16, color: foreground),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Touch-sized inline action button for the mobile inbox cards — same
+/// square vibe as the desktop `_SquareIconAction` but with a larger hit
+/// target suitable for fingers.
+class _MobileInboxAction extends StatelessWidget {
+  const _MobileInboxAction({
+    required this.icon,
+    required this.tooltip,
+    required this.foreground,
+    required this.background,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final Color foreground;
+  final Color background;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: background,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onTap,
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Icon(icon, size: 22, color: foreground),
           ),
         ),
       ),
