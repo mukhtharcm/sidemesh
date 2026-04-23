@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
+import 'package:highlight/highlight.dart' show highlight, Node;
 
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -99,24 +99,22 @@ class _SyntaxCodeBlockState extends State<SyntaxCodeBlock> {
             ),
           Padding(
             padding: widget.padding,
-            // Local selection scope: the horizontal scroller inside a
-            // code block competes with the outer SelectionArea's pan,
-            // so cross-message drag-selection otherwise skips over the
-            // block. Keeping a local area lets users drag inside the
-            // block, and the Copy button handles whole-block copy.
-            child: SelectionArea(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: HighlightView(
+            // Render via Text.rich (not RichText) so the ancestor
+            // chat-level SelectionArea treats code blocks the same as
+            // prose — selection flows across paragraphs and code.
+            // Long lines wrap to the bubble width; the Copy button
+            // above handles whole-block copy.
+            child: Text.rich(
+              TextSpan(
+                style: monoStyle(
+                  color: colors.codeForeground,
+                  fontSize: 12.5,
+                  height: 1.5,
+                ),
+                children: _highlightSpans(
                   widget.text,
-                  language: lang ?? 'plaintext',
+                  language: lang,
                   theme: theme,
-                  padding: EdgeInsets.zero,
-                  textStyle: monoStyle(
-                    color: colors.codeForeground,
-                    fontSize: 12.5,
-                    height: 1.5,
-                  ),
                 ),
               ),
             ),
@@ -231,4 +229,45 @@ String? detectLanguage({String? path, String? command}) {
     return 'bash';
   }
   return null;
+}
+
+/// Convert `highlight` package parse tree into TextSpan children using
+/// the given theme. Mirrors flutter_highlight's internal `_convert`
+/// so we can render via Text.rich (participates in SelectionArea)
+/// instead of RichText (which does not).
+List<TextSpan> _highlightSpans(
+  String source, {
+  String? language,
+  required Map<String, TextStyle> theme,
+}) {
+  final parsed = highlight.parse(source, language: language ?? 'plaintext');
+  final nodes = parsed.nodes;
+  if (nodes == null || nodes.isEmpty) {
+    return [TextSpan(text: source)];
+  }
+  final List<TextSpan> spans = [];
+  final List<List<TextSpan>> stack = [];
+  List<TextSpan> currentSpans = spans;
+
+  void traverse(Node node) {
+    if (node.value != null) {
+      currentSpans.add(node.className == null
+          ? TextSpan(text: node.value)
+          : TextSpan(text: node.value, style: theme[node.className!]));
+    } else if (node.children != null) {
+      final List<TextSpan> tmp = [];
+      currentSpans.add(TextSpan(children: tmp, style: theme[node.className!]));
+      stack.add(currentSpans);
+      currentSpans = tmp;
+      for (final n in node.children!) {
+        traverse(n);
+      }
+      currentSpans = stack.removeLast();
+    }
+  }
+
+  for (final node in nodes) {
+    traverse(node);
+  }
+  return spans;
 }
