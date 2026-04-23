@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -45,16 +46,39 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
 
   final HostStore _store = HostStore();
   final ApiClient _api = ApiClient();
+  final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
   List<HostProfile> _hosts = const [];
   bool _loading = true;
   int _tabIndex = 0;
   int _activeCount = 0;
   int _inboxCount = 0;
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _refreshHosts();
+    _searchController.addListener(() {
+      final next = _searchController.text;
+      _searchDebounce?.cancel();
+      if (next.isEmpty) {
+        if (_query.isNotEmpty) setState(() => _query = '');
+        return;
+      }
+      _searchDebounce = Timer(const Duration(milliseconds: 140), () {
+        if (!mounted) return;
+        if (next == _query) return;
+        setState(() => _query = next);
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _refreshHosts() async {
@@ -146,6 +170,10 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
         child: Column(
           children: [
             _TopBar(tab: tab, onRefresh: _refreshHosts),
+            _HomeSearchBar(
+              controller: _searchController,
+              hintText: 'Search ${tab.title.toLowerCase()}',
+            ),
             Expanded(
               child: _loading
                   ? const MeshLoader()
@@ -155,6 +183,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
                         RecentPane(
                           hosts: _hosts,
                           api: _api,
+                          query: _query,
                           onOpenSession: _openSession,
                           onActiveCountChanged: (count) {
                             if (!mounted) return;
@@ -164,6 +193,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
                         InboxPane(
                           hosts: _hosts,
                           api: _api,
+                          query: _query,
                           onOpenSession: (host, action) =>
                               _openSession(host, _sessionFromAction(action)),
                           onInboxCountChanged: (count) {
@@ -173,6 +203,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
                         ),
                         HostsPane(
                           hosts: _hosts,
+                          query: _query,
                           onOpenHost: _openHost,
                           onEditHost: (host) =>
                               _showHostEditor(initialHost: host),
@@ -1438,6 +1469,79 @@ class _RecentErrorBanner extends StatelessWidget {
             child: const Text('Retry'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _HomeSearchBar extends StatelessWidget {
+  const _HomeSearchBar({required this.controller, required this.hintText});
+
+  final TextEditingController controller;
+  final String hintText;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: AnimatedBuilder(
+        animation: controller,
+        builder: (context, _) {
+          final hasQuery = controller.text.isNotEmpty;
+          return TextField(
+            controller: controller,
+            textInputAction: TextInputAction.search,
+            style: TextStyle(color: colors.textPrimary, fontSize: 14),
+            decoration: InputDecoration(
+              isDense: true,
+              filled: true,
+              fillColor: colors.surface,
+              hintText: hintText,
+              hintStyle: TextStyle(
+                color: colors.textTertiary,
+                fontSize: 14,
+              ),
+              prefixIcon: Icon(
+                Icons.search_rounded,
+                size: 18,
+                color: colors.textSecondary,
+              ),
+              prefixIconConstraints: const BoxConstraints(
+                minWidth: 36,
+                minHeight: 36,
+              ),
+              suffixIcon: hasQuery
+                  ? IconButton(
+                      tooltip: 'Clear',
+                      splashRadius: 16,
+                      iconSize: 16,
+                      onPressed: controller.clear,
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: colors.textSecondary,
+                      ),
+                    )
+                  : null,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 10,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: colors.border),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: colors.border),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: colors.accent, width: 1.2),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
