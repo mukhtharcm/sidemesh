@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:web_socket_channel/io.dart';
@@ -21,19 +22,25 @@ class SessionScreen extends StatefulWidget {
     required this.host,
     required this.session,
     required this.api,
+    this.topPadding,
   });
 
   final HostProfile host;
   final SessionSummary session;
   final ApiClient api;
+  // Extra top padding for embedded desktop use (to avoid overlapping the
+  // transparent macOS titlebar). When null, SafeArea handles insets.
+  final double? topPadding;
 
   @override
   State<SessionScreen> createState() => _SessionScreenState();
 }
 
 class _SessionScreenState extends State<SessionScreen> {
-  static const _recentMessageLimit = 120;
-  static const _recentActivityLimit = 80;
+  static const _initialMessageLimit = 120;
+  static const _initialActivityLimit = 80;
+  static const _messagePageSize = 120;
+  static const _activityPageSize = 80;
   static const _liveUpdateFlushInterval = Duration(milliseconds: 48);
 
   final _composerController = TextEditingController();
@@ -43,22 +50,39 @@ class _SessionScreenState extends State<SessionScreen> {
   final Map<String, SessionActivity> _pendingActivityUpdates =
       <String, SessionActivity>{};
 
+  // Live-streaming state is held in notifiers so that mid-stream deltas only
+  // rebuild the tiny widgets that display them, not the whole Scaffold/list.
+  final ValueNotifier<String> _liveAssistantNotifier = ValueNotifier<String>(
+    '',
+  );
+  final ValueNotifier<bool> _thinkingNotifier = ValueNotifier<bool>(false);
+
   SessionSummary? _session;
   List<SessionMessage> _messages = const [];
   List<SessionMessage> _optimisticMessages = const [];
   List<SessionActivity> _activities = const [];
   SessionLogHistorySummary? _history;
   PendingAction? _pendingAction;
+  int _messageLimit = _initialMessageLimit;
+  int _activityLimit = _initialActivityLimit;
   bool _running = false;
   bool _loading = true;
-  bool _loadFullHistory = false;
-  bool _loadingFullHistory = false;
+  bool _loadingOlderHistory = false;
   bool _sending = false;
   bool _awaitingAssistantReply = false;
-  String _liveAssistantText = '';
   IOWebSocketChannel? _channel;
   StreamSubscription? _subscription;
   Timer? _liveFlushTimer;
+
+  // Memoized timeline entries so rebuilds that don't change list inputs skip
+  // the list+sort work.
+  List<SessionMessage>? _entriesMessagesRef;
+  List<SessionMessage>? _entriesOptimisticRef;
+  List<SessionActivity>? _entriesActivitiesRef;
+  List<_TimelineEntry> _cachedEntries = const [];
+
+  String get _liveAssistantText => _liveAssistantNotifier.value;
+  set _liveAssistantText(String value) => _liveAssistantNotifier.value = value;
 
   @override
   void initState() {
@@ -76,17 +100,24 @@ class _SessionScreenState extends State<SessionScreen> {
     _subscription?.cancel();
     _liveFlushTimer?.cancel();
     _channel?.sink.close();
+    _liveAssistantNotifier.dispose();
+    _thinkingNotifier.dispose();
     super.dispose();
   }
 
-  Future<void> _loadSnapshot({bool? fullHistory}) async {
-    final useFullHistory = fullHistory ?? _loadFullHistory;
+  Future<void> _loadSnapshot({
+    int? messageLimit,
+    int? activityLimit,
+    bool scrollToBottom = true,
+  }) async {
+    final resolvedMessageLimit = messageLimit ?? _messageLimit;
+    final resolvedActivityLimit = activityLimit ?? _activityLimit;
     try {
       final log = await widget.api.fetchLog(
         widget.host,
         widget.session.id,
-        messageLimit: useFullHistory ? null : _recentMessageLimit,
-        activityLimit: useFullHistory ? null : _recentActivityLimit,
+        messageLimit: resolvedMessageLimit,
+        activityLimit: resolvedActivityLimit,
       );
       if (!mounted) {
         return;
@@ -98,9 +129,10 @@ class _SessionScreenState extends State<SessionScreen> {
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
         _activities = _sortActivities(log.activities);
         _history = log.history;
+        _messageLimit = resolvedMessageLimit;
+        _activityLimit = resolvedActivityLimit;
         _pendingAction = pendingAction;
         _running = log.session.isActive;
-        _loadFullHistory = useFullHistory;
         _loading = false;
         _awaitingAssistantReply =
             log.session.isActive &&
@@ -110,7 +142,9 @@ class _SessionScreenState extends State<SessionScreen> {
           _liveAssistantText = '';
         }
       });
-      await _scrollToBottom();
+      if (scrollToBottom) {
+        await _scrollToBottom();
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -124,18 +158,50 @@ class _SessionScreenState extends State<SessionScreen> {
     }
   }
 
-  Future<void> _loadFullTranscript() async {
-    if (_loadingFullHistory || _loadFullHistory) {
+  Future<void> _loadOlderTranscript() async {
+    final history = _history;
+    if (_loadingOlderHistory || history == null || !history.isTruncated) {
       return;
     }
-    setState(() => _loadingFullHistory = true);
+    final nextMessageLimit = _nextHistoryLimit(
+      current: _messageLimit,
+      pageSize: _messagePageSize,
+      total: history.totalMessages,
+    );
+    final nextActivityLimit = _nextHistoryLimit(
+      current: _activityLimit,
+      pageSize: _activityPageSize,
+      total: history.totalActivities,
+    );
+    if (nextMessageLimit == _messageLimit &&
+        nextActivityLimit == _activityLimit) {
+      return;
+    }
+
+    setState(() => _loadingOlderHistory = true);
     try {
-      await _loadSnapshot(fullHistory: true);
+      await _loadSnapshot(
+        messageLimit: nextMessageLimit,
+        activityLimit: nextActivityLimit,
+        scrollToBottom: false,
+      );
     } finally {
       if (mounted) {
-        setState(() => _loadingFullHistory = false);
+        setState(() => _loadingOlderHistory = false);
       }
     }
+  }
+
+  int _nextHistoryLimit({
+    required int current,
+    required int pageSize,
+    required int total,
+  }) {
+    if (total <= current) {
+      return current;
+    }
+    final expanded = current + pageSize;
+    return expanded > total ? total : expanded;
   }
 
   void _connectLive() {
@@ -167,13 +233,15 @@ class _SessionScreenState extends State<SessionScreen> {
           _running = true;
           _awaitingAssistantReply = true;
         });
-        unawaited(_scrollToBottom(animated: true));
+        _thinkingNotifier.value = _shouldShowThinking();
+        _scrollToBottomFast();
       case 'turn_started':
         setState(() {
           _running = true;
           _awaitingAssistantReply =
               _liveAssistantText.isEmpty && _pendingAction == null;
         });
+        _thinkingNotifier.value = _shouldShowThinking();
       case 'assistant_delta':
         final delta = event.delta;
         if (delta == null || delta.isEmpty) {
@@ -183,11 +251,36 @@ class _SessionScreenState extends State<SessionScreen> {
         _scheduleLiveFlush();
       case 'turn_completed':
         _flushPendingLiveUpdates();
+        final committedLive = _liveAssistantText;
         setState(() {
           _running = false;
           _awaitingAssistantReply = false;
+          if (committedLive.isNotEmpty) {
+            final turnId = event.turnId ?? 'turn';
+            final nextSeq = _nextTimelineSeq();
+            final finalMsg = SessionMessage(
+              id: 'local-final-$turnId',
+              role: 'assistant',
+              text: committedLive,
+              createdAt: DateTime.now(),
+              seq: nextSeq,
+              phase: 'final_answer',
+            );
+            _upsertOptimisticMessage(finalMsg);
+            _liveAssistantText = '';
+          }
         });
-        unawaited(_loadSnapshot(fullHistory: _loadFullHistory));
+        _thinkingNotifier.value = false;
+        // Background reconcile; do not block UI.
+        Future<void>.delayed(const Duration(milliseconds: 250), () {
+          if (!mounted) return;
+          unawaited(
+            _loadSnapshot(
+              messageLimit: _messageLimit,
+              activityLimit: _activityLimit,
+            ),
+          );
+        });
       case 'activity_updated':
         final activity = event.activity;
         if (activity == null) {
@@ -200,15 +293,24 @@ class _SessionScreenState extends State<SessionScreen> {
           _pendingAction = event.action;
           _awaitingAssistantReply = false;
         });
+        _thinkingNotifier.value = _shouldShowThinking();
       case 'action_resolved':
         setState(() {
           _pendingAction = null;
           _awaitingAssistantReply = _running && _liveAssistantText.isEmpty;
         });
+        _thinkingNotifier.value = _shouldShowThinking();
       case 'hello':
       case 'error':
         break;
     }
+  }
+
+  bool _shouldShowThinking() {
+    return _running &&
+        _awaitingAssistantReply &&
+        _liveAssistantText.isEmpty &&
+        _pendingAction == null;
   }
 
   void _scheduleLiveFlush() {
@@ -238,17 +340,23 @@ class _SessionScreenState extends State<SessionScreen> {
       return;
     }
 
-    setState(() {
-      if (hasDelta) {
-        _running = true;
-        _awaitingAssistantReply = false;
-        _liveAssistantText += delta;
-      }
-      for (final activity in activities) {
-        _upsertActivity(activity);
-      }
-    });
-    unawaited(_scrollToBottom(animated: true));
+    // Apply live delta without a full setState; the live bubble is wired to
+    // _liveAssistantNotifier and will rebuild on its own.
+    if (hasDelta) {
+      _running = true;
+      _awaitingAssistantReply = false;
+      _liveAssistantText += delta;
+      _thinkingNotifier.value = false;
+    }
+
+    if (activities.isNotEmpty) {
+      setState(() {
+        for (final activity in activities) {
+          _upsertActivity(activity);
+        }
+      });
+    }
+    _scrollToBottomFast();
   }
 
   Future<void> _sendInput() async {
@@ -263,6 +371,7 @@ class _SessionScreenState extends State<SessionScreen> {
       role: 'user',
       text: text,
       createdAt: DateTime.now(),
+      seq: _nextTimelineSeq(),
     );
 
     _composerController.clear();
@@ -273,8 +382,8 @@ class _SessionScreenState extends State<SessionScreen> {
       _liveAssistantText = '';
       _upsertOptimisticMessage(optimisticMessage);
     });
-    unawaited(_scrollToBottom(animated: true));
-
+    _thinkingNotifier.value = _shouldShowThinking();
+    _scrollToBottomFast(force: true);
     try {
       await widget.api.sendInput(
         widget.host,
@@ -493,28 +602,36 @@ class _SessionScreenState extends State<SessionScreen> {
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
-  Future<void> _scrollToBottom({bool animated = false}) async {
-    for (var attempt = 0; attempt < 3; attempt += 1) {
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || !_scrollController.hasClients) {
-        continue;
-      }
+  int _nextTimelineSeq() {
+    var maxSeq = 0;
+    for (final m in _messages) {
+      if (m.seq > maxSeq) maxSeq = m.seq;
+    }
+    for (final m in _optimisticMessages) {
+      if (m.seq > maxSeq) maxSeq = m.seq;
+    }
+    for (final a in _activities) {
+      if (a.seq > maxSeq) maxSeq = a.seq;
+    }
+    return maxSeq + 1;
+  }
 
-      final targetOffset = _scrollController.position.maxScrollExtent;
-      final distance = (_scrollController.offset - targetOffset).abs();
-      if (distance < 1) {
-        return;
-      }
+  // With reverse:true, the bottom of the chat is offset 0 — instant & always
+  // correct, no frame-wait dance needed. Only snaps if user is already near
+  // the bottom so we don't steal their scroll position while they're reading.
+  void _scrollToBottomFast({bool force = false}) {
+    if (!_scrollController.hasClients) return;
+    if (_scrollController.offset <= 0.5) return;
+    if (!force && _scrollController.offset > 160) return;
+    _scrollController.jumpTo(0);
+  }
 
-      if (animated && attempt == 2) {
-        await _scrollController.animateTo(
-          targetOffset,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-        );
-      } else {
-        _scrollController.jumpTo(targetOffset);
-      }
+  Future<void> _scrollToBottom() async {
+    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !_scrollController.hasClients) return;
+    if (_scrollController.offset > 0.5) {
+      _scrollController.jumpTo(0);
     }
   }
 
@@ -556,30 +673,38 @@ class _SessionScreenState extends State<SessionScreen> {
 
   List<SessionActivity> _sortActivities(List<SessionActivity> activities) {
     final sorted = [...activities];
-    sorted.sort((left, right) => left.createdAt.compareTo(right.createdAt));
+    sorted.sort((left, right) {
+      final bySeq = left.seq.compareTo(right.seq);
+      if (bySeq != 0) return bySeq;
+      return left.createdAt.compareTo(right.createdAt);
+    });
     return sorted;
   }
 
-  List<_TimelineEntry> _buildTimelineEntries(
-    List<SessionMessage> messages,
-    List<SessionActivity> activities,
-  ) {
-    final entries = <_TimelineEntry>[
-      ...messages.map(_TimelineEntry.message),
-      ...activities.map(_TimelineEntry.activity),
-    ]..sort((left, right) => left.createdAt.compareTo(right.createdAt));
-
-    if (_running &&
-        _awaitingAssistantReply &&
-        _liveAssistantText.isEmpty &&
-        _pendingAction == null) {
-      entries.add(_TimelineEntry.thinking(DateTime.now()));
+  List<_TimelineEntry> _buildTimelineEntries() {
+    // Memoize: if message/activity/optimistic list identities are unchanged,
+    // reuse the previous entries (skip the sort).
+    if (identical(_entriesMessagesRef, _messages) &&
+        identical(_entriesOptimisticRef, _optimisticMessages) &&
+        identical(_entriesActivitiesRef, _activities)) {
+      return _cachedEntries;
     }
 
-    if (_liveAssistantText.isNotEmpty) {
-      entries.add(_TimelineEntry.liveAssistant(DateTime.now()));
-    }
+    final entries =
+        <_TimelineEntry>[
+          ..._messages.map(_TimelineEntry.message),
+          ..._optimisticMessages.map(_TimelineEntry.message),
+          ..._activities.map(_TimelineEntry.activity),
+        ]..sort((left, right) {
+          final bySeq = left.seq.compareTo(right.seq);
+          if (bySeq != 0) return bySeq;
+          return left.createdAt.compareTo(right.createdAt);
+        });
 
+    _entriesMessagesRef = _messages;
+    _entriesOptimisticRef = _optimisticMessages;
+    _entriesActivitiesRef = _activities;
+    _cachedEntries = entries;
     return entries;
   }
 
@@ -598,10 +723,8 @@ class _SessionScreenState extends State<SessionScreen> {
   Widget build(BuildContext context) {
     final session = _session ?? widget.session;
     final colors = context.colors;
-    final visibleMessages = [..._messages, ..._optimisticMessages]
-      ..sort((left, right) => left.createdAt.compareTo(right.createdAt));
-    final timelineEntries = _buildTimelineEntries(visibleMessages, _activities);
-    return Scaffold(
+    final timelineEntries = _buildTimelineEntries();
+    final scaffold = Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
         backgroundColor: colors.canvas,
@@ -691,82 +814,92 @@ class _SessionScreenState extends State<SessionScreen> {
           const SizedBox(width: 4),
         ],
       ),
-      body: _loading
-          ? const MeshLoader()
-          : GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _dismissKeyboard,
-              child: Column(
-                children: [
-                  ListenableBuilder(
-                    listenable: _favorites,
-                    builder: (context, _) => _SessionHeader(
-                      host: widget.host,
-                      session: session,
-                      running: _running,
-                      favorite: _favorites.isFavorite(widget.host, session.id),
-                      onDetails: () => _showSessionDetailsSheet(session),
-                    ),
-                  ),
-                  if ((_history?.isTruncated ?? false))
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                      child: _HistoryTruncationCard(
-                        history: _history!,
-                        loading: _loadingFullHistory,
-                        onLoadFullHistory: _loadFullTranscript,
-                      ),
-                    ),
-                  if (_pendingAction != null)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                      child: _PendingActionCard(
-                        action: _pendingAction!,
-                        onRespond: _respondAction,
-                      ),
-                    ),
-                  Expanded(
-                    child: ListView.builder(
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: _dismissKeyboard,
+        child: Column(
+          children: [
+            ListenableBuilder(
+              listenable: _favorites,
+              builder: (context, _) => _SessionHeader(
+                host: widget.host,
+                session: session,
+                running: _running,
+                favorite: _favorites.isFavorite(widget.host, session.id),
+                onDetails: () => _showSessionDetailsSheet(session),
+              ),
+            ),
+            if ((_history?.isTruncated ?? false))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: _HistoryTruncationCard(
+                  history: _history!,
+                  loading: _loadingOlderHistory,
+                  onLoadOlderHistory: _loadOlderTranscript,
+                ),
+              ),
+            if (_pendingAction != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: _PendingActionCard(
+                  action: _pendingAction!,
+                  onRespond: _respondAction,
+                ),
+              ),
+            Expanded(
+              child: (_loading && timelineEntries.isEmpty)
+                  ? const MeshLoader()
+                  : ListView.builder(
                       controller: _scrollController,
+                      reverse: true,
                       keyboardDismissBehavior:
                           ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
                       itemCount: timelineEntries.length,
                       itemBuilder: (context, index) {
-                        final entry = timelineEntries[index];
-                        return switch (entry.kind) {
-                          _TimelineEntryKind.message => _MessageBubble(
-                            message: entry.message!,
-                          ),
-                          _TimelineEntryKind.activity => _ActivityCard(
-                            activity: entry.activity!,
-                            sessionCwd: session.cwd,
-                          ),
-                          _TimelineEntryKind.thinking =>
-                            const _ThinkingBubble(),
-                          _TimelineEntryKind.liveAssistant => _MessageBubble(
-                            message: SessionMessage(
-                              id: 'live',
-                              role: 'assistant',
-                              text: _liveAssistantText,
-                              createdAt: DateTime.now(),
-                              phase: 'commentary',
+                        // Reverse the mapping: index 0 (bottom) shows the
+                        // newest entry.
+                        final entry =
+                            timelineEntries[timelineEntries.length - 1 - index];
+                        return KeyedSubtree(
+                          key: ValueKey(entry.keyId),
+                          child: switch (entry.kind) {
+                            _TimelineEntryKind.message => _MessageBubble(
+                              message: entry.message!,
                             ),
-                            live: true,
-                          ),
-                        };
+                            _TimelineEntryKind.activity => _ActivityCard(
+                              activity: entry.activity!,
+                              sessionCwd: session.cwd,
+                            ),
+                            _TimelineEntryKind.thinking =>
+                              const _ThinkingBubble(),
+                            _TimelineEntryKind.liveAssistant =>
+                              const SizedBox.shrink(),
+                          },
+                        );
                       },
                     ),
-                  ),
-                  _Composer(
-                    controller: _composerController,
-                    sending: _sending,
-                    onSend: _sendInput,
-                    onDismiss: _dismissKeyboard,
-                  ),
-                ],
-              ),
             ),
+            _LiveStreamArea(
+              liveText: _liveAssistantNotifier,
+              thinking: _thinkingNotifier,
+            ),
+            _Composer(
+              controller: _composerController,
+              sending: _sending,
+              onSend: _sendInput,
+              onDismiss: _dismissKeyboard,
+            ),
+          ],
+        ),
+      ),
+    );
+    if (widget.topPadding == null) {
+      return scaffold;
+    }
+    return Padding(
+      padding: EdgeInsets.only(top: widget.topPadding!),
+      child: scaffold,
     );
   }
 }
@@ -967,12 +1100,12 @@ class _HistoryTruncationCard extends StatelessWidget {
   const _HistoryTruncationCard({
     required this.history,
     required this.loading,
-    required this.onLoadFullHistory,
+    required this.onLoadOlderHistory,
   });
 
   final SessionLogHistorySummary history;
   final bool loading;
-  final VoidCallback onLoadFullHistory;
+  final VoidCallback onLoadOlderHistory;
 
   @override
   Widget build(BuildContext context) {
@@ -985,13 +1118,17 @@ class _HistoryTruncationCard extends StatelessWidget {
           1 << 30,
         );
 
-    final parts = <String>[];
+    final hiddenParts = <String>[];
     if (hiddenMessages > 0) {
-      parts.add('$hiddenMessages older messages');
+      hiddenParts.add('$hiddenMessages older messages');
     }
     if (hiddenActivities > 0) {
-      parts.add('$hiddenActivities older actions');
+      hiddenParts.add('$hiddenActivities older actions');
     }
+    final shownParts = <String>[
+      '${history.returnedMessages}/${history.totalMessages} messages',
+      '${history.returnedActivities}/${history.totalActivities} actions',
+    ];
 
     return MeshCard(
       tone: MeshCardTone.muted,
@@ -1008,16 +1145,16 @@ class _HistoryTruncationCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Showing recent history first',
+                  'Recent history loaded',
                   style: Theme.of(
                     context,
                   ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  parts.isEmpty
-                      ? 'Load the full transcript if you need older context.'
-                      : 'Hidden for faster loading: ${parts.join(' and ')}.',
+                  hiddenParts.isEmpty
+                      ? 'Loaded ${shownParts.join(' and ')}.'
+                      : 'Loaded ${shownParts.join(' and ')}. Hidden for speed: ${hiddenParts.join(' and ')}.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.35,
@@ -1028,14 +1165,14 @@ class _HistoryTruncationCard extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           FilledButton.tonal(
-            onPressed: loading ? null : onLoadFullHistory,
+            onPressed: loading ? null : onLoadOlderHistory,
             child: loading
                 ? const SizedBox(
                     width: 14,
                     height: 14,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Load all'),
+                : const Text('Load older'),
           ),
         ],
       ),
@@ -1160,6 +1297,8 @@ class _TimelineEntry {
   const _TimelineEntry._({
     required this.kind,
     required this.createdAt,
+    required this.seq,
+    required this.keyId,
     this.message,
     this.activity,
   });
@@ -1167,27 +1306,67 @@ class _TimelineEntry {
   factory _TimelineEntry.message(SessionMessage message) => _TimelineEntry._(
     kind: _TimelineEntryKind.message,
     createdAt: message.createdAt,
+    seq: message.seq,
+    keyId: 'msg:${message.id}',
     message: message,
   );
 
   factory _TimelineEntry.activity(SessionActivity activity) => _TimelineEntry._(
     kind: _TimelineEntryKind.activity,
     createdAt: activity.createdAt,
+    seq: activity.seq,
+    keyId: 'act:${activity.id}',
     activity: activity,
-  );
-
-  factory _TimelineEntry.thinking(DateTime createdAt) =>
-      _TimelineEntry._(kind: _TimelineEntryKind.thinking, createdAt: createdAt);
-
-  factory _TimelineEntry.liveAssistant(DateTime createdAt) => _TimelineEntry._(
-    kind: _TimelineEntryKind.liveAssistant,
-    createdAt: createdAt,
   );
 
   final _TimelineEntryKind kind;
   final DateTime createdAt;
+  final int seq;
+  final String keyId;
   final SessionMessage? message;
   final SessionActivity? activity;
+}
+
+class _LiveStreamArea extends StatelessWidget {
+  const _LiveStreamArea({required this.liveText, required this.thinking});
+
+  final ValueListenable<String> liveText;
+  final ValueListenable<bool> thinking;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: liveText,
+      builder: (context, text, _) {
+        if (text.isNotEmpty) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: _MessageBubble(
+              message: SessionMessage(
+                id: 'live',
+                role: 'assistant',
+                text: text,
+                createdAt: DateTime.now(),
+                seq: 1 << 30,
+                phase: 'commentary',
+              ),
+              live: true,
+            ),
+          );
+        }
+        return ValueListenableBuilder<bool>(
+          valueListenable: thinking,
+          builder: (context, show, _) {
+            if (!show) return const SizedBox.shrink();
+            return const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: _ThinkingBubble(),
+            );
+          },
+        );
+      },
+    );
+  }
 }
 
 class _ThinkingBubble extends StatelessWidget {
