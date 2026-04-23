@@ -131,6 +131,110 @@ class _DesktopShellState extends State<DesktopShell> {
     }
   }
 
+  void _showShortcutsSheet() {
+    final colors = context.colors;
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final entries = <({String keys, String label})>[
+          (keys: '⌘F', label: 'Focus search'),
+          (keys: '⌘R', label: 'Refresh'),
+          (keys: '⌘W', label: 'Close active session'),
+          (keys: '⌘1 / ⌘2 / ⌘3', label: 'Recent / Inbox / Hosts'),
+          (keys: '⌘/', label: 'Show this help'),
+          (keys: 'Enter', label: 'Send message'),
+          (keys: 'Shift+Enter', label: 'Newline in composer'),
+          (keys: 'Long-press', label: 'Copy message to clipboard'),
+        ];
+        return Dialog(
+          backgroundColor: colors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: colors.border),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.keyboard_rounded,
+                        size: 18,
+                        color: colors.textSecondary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Keyboard shortcuts',
+                        style: Theme.of(dialogContext)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(
+                              color: colors.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Close',
+                        iconSize: 18,
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  for (final e in entries)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              e.label,
+                              style: TextStyle(
+                                color: colors.textPrimary,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colors.surfaceMuted,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: colors.border),
+                            ),
+                            child: Text(
+                              e.keys,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _showHostEditor({HostProfile? initial}) async {
     final result = await showModalBottomSheet<HostProfile>(
       context: context,
@@ -195,6 +299,10 @@ class _DesktopShellState extends State<DesktopShell> {
               _FocusSearchIntent(),
           SingleActivator(LogicalKeyboardKey.keyW, meta: true):
               _CloseActiveSessionIntent(),
+          SingleActivator(LogicalKeyboardKey.slash, meta: true):
+              _ShowShortcutsIntent(),
+          SingleActivator(LogicalKeyboardKey.slash, meta: true, shift: true):
+              _ShowShortcutsIntent(),
           SingleActivator(LogicalKeyboardKey.digit1, meta: true):
               _SwitchSectionIntent(_SidebarSection.recent),
           SingleActivator(LogicalKeyboardKey.digit2, meta: true):
@@ -230,6 +338,12 @@ class _DesktopShellState extends State<DesktopShell> {
                     return null;
                   },
                 ),
+            _ShowShortcutsIntent: CallbackAction<_ShowShortcutsIntent>(
+              onInvoke: (_) {
+                _showShortcutsSheet();
+                return null;
+              },
+            ),
             _SwitchSectionIntent: CallbackAction<_SwitchSectionIntent>(
               onInvoke: (intent) {
                 setState(() => _section = intent.section);
@@ -274,6 +388,7 @@ class _DesktopShellState extends State<DesktopShell> {
                     if (!mounted) return;
                     setState(() => _inboxCount = n);
                   },
+                  onShowShortcuts: _showShortcutsSheet,
                 ),
                 _SidebarResizer(
                   color: colors.border,
@@ -309,6 +424,10 @@ class _CloseActiveSessionIntent extends Intent {
   const _CloseActiveSessionIntent();
 }
 
+class _ShowShortcutsIntent extends Intent {
+  const _ShowShortcutsIntent();
+}
+
 class _SwitchSectionIntent extends Intent {
   const _SwitchSectionIntent(this.section);
   final _SidebarSection section;
@@ -338,6 +457,7 @@ class _Sidebar extends StatelessWidget {
     required this.onRemoveHost,
     required this.onActiveCountChanged,
     required this.onInboxCountChanged,
+    required this.onShowShortcuts,
   });
 
   final double titlebarInset;
@@ -362,6 +482,7 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<HostProfile> onRemoveHost;
   final ValueChanged<int> onActiveCountChanged;
   final ValueChanged<int> onInboxCountChanged;
+  final VoidCallback onShowShortcuts;
 
   @override
   Widget build(BuildContext context) {
@@ -442,7 +563,10 @@ class _Sidebar extends StatelessWidget {
                     ),
             ),
             Container(height: 1, color: colors.border),
-            _SidebarFooter(onAddHost: onAddHost),
+            _SidebarFooter(
+              onAddHost: onAddHost,
+              onShowShortcuts: onShowShortcuts,
+            ),
           ],
         ),
       ),
@@ -622,9 +746,10 @@ class _SidebarPane extends StatelessWidget {
 }
 
 class _SidebarFooter extends StatelessWidget {
-  const _SidebarFooter({required this.onAddHost});
+  const _SidebarFooter({required this.onAddHost, required this.onShowShortcuts});
 
   final VoidCallback onAddHost;
+  final VoidCallback onShowShortcuts;
 
   @override
   Widget build(BuildContext context) {
@@ -652,8 +777,42 @@ class _SidebarFooter extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
+          _ShortcutsButton(onTap: onShowShortcuts),
+          const SizedBox(width: 8),
           _ThemeToggleButton(),
         ],
+      ),
+    );
+  }
+}
+
+class _ShortcutsButton extends StatelessWidget {
+  const _ShortcutsButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: 'Keyboard shortcuts (⌘/)',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            border: Border.all(color: colors.border),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.keyboard_rounded,
+            size: 16,
+            color: colors.textSecondary,
+          ),
+        ),
       ),
     );
   }
