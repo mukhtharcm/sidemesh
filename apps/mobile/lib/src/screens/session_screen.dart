@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
+import 'package:image/image.dart' as img;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/io.dart';
 
@@ -59,6 +61,7 @@ class _SessionScreenState extends State<SessionScreen>
   static const _maxDraftImageCount = 4;
   static const _maxDraftImageBytes = 5 * 1024 * 1024;
   static const _maxDraftPayloadBytes = 9 * 1024 * 1024;
+  static const _maxDecodedDraftImageBytes = 18 * 1024 * 1024;
 
   final _composerController = TextEditingController();
   final _scrollController = ScrollController();
@@ -731,21 +734,13 @@ class _SessionScreenState extends State<SessionScreen>
         );
         continue;
       }
-      if (bytes.length > _maxDraftImageBytes) {
+      if (bytes.length > _maxDecodedDraftImageBytes) {
         if (!mounted) return;
         showAppSnackBar(
           context,
-          '${file.name.isEmpty ? 'That image' : file.name} is larger than 5 MB.',
+          '${file.name.isEmpty ? 'That image' : file.name} is too large to process on-device.',
         );
         continue;
-      }
-      if (totalBytes + bytes.length > _maxDraftPayloadBytes) {
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          'Attached images are too large for one message. Remove one or pick a smaller file.',
-        );
-        break;
       }
 
       final mimeType = _mimeTypeForImageName(file.name);
@@ -758,17 +753,41 @@ class _SessionScreenState extends State<SessionScreen>
         continue;
       }
 
-      final dataUrl = 'data:$mimeType;base64,${base64Encode(bytes)}';
+      final prepared = await _prepareDraftImageAttachment(
+        name: file.name.isEmpty ? 'image' : file.name,
+        mimeType: mimeType,
+        bytes: bytes,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (prepared.bytes.length > _maxDraftImageBytes) {
+        showAppSnackBar(
+          context,
+          '${prepared.name} is still larger than 5 MB after compression.',
+        );
+        continue;
+      }
+      if (totalBytes + prepared.bytes.length > _maxDraftPayloadBytes) {
+        showAppSnackBar(
+          context,
+          'Attached images are too large for one message. Remove one or pick a smaller file.',
+        );
+        break;
+      }
+
+      final dataUrl =
+          'data:${prepared.mimeType};base64,${base64Encode(prepared.bytes)}';
       nextAttachments.add(
         _ComposerImageAttachment(
           id: 'draft-${DateTime.now().microsecondsSinceEpoch}-${nextAttachments.length}',
-          name: file.name.isEmpty ? 'image' : file.name,
-          mimeType: mimeType,
-          bytes: bytes,
+          name: prepared.name,
+          mimeType: prepared.mimeType,
+          bytes: prepared.bytes,
           dataUrl: dataUrl,
         ),
       );
-      totalBytes += bytes.length;
+      totalBytes += prepared.bytes.length;
     }
 
     if (!mounted) {
@@ -784,6 +803,24 @@ class _SessionScreenState extends State<SessionScreen>
       return file.bytes;
     }
     return file.xFile.readAsBytes();
+  }
+
+  Future<_PreparedDraftImage> _prepareDraftImageAttachment({
+    required String name,
+    required String mimeType,
+    required Uint8List bytes,
+  }) async {
+    final payload = await compute(_compressDraftImagePayload, <String, Object?>{
+      'name': name,
+      'mimeType': mimeType,
+      'bytes': bytes,
+    });
+
+    return _PreparedDraftImage(
+      name: payload['name'] as String,
+      mimeType: payload['mimeType'] as String,
+      bytes: payload['bytes'] as Uint8List,
+    );
   }
 
   void _removeDraftAttachment(String attachmentId) {
@@ -2412,6 +2449,18 @@ class _ComposerImageAttachment {
   int get byteLength => bytes.length;
 }
 
+class _PreparedDraftImage {
+  const _PreparedDraftImage({
+    required this.name,
+    required this.mimeType,
+    required this.bytes,
+  });
+
+  final String name;
+  final String mimeType;
+  final Uint8List bytes;
+}
+
 class _LiveAssistantMessageState {
   const _LiveAssistantMessageState({
     required this.id,
@@ -2779,20 +2828,20 @@ class _MessageImageAttachmentTileState extends State<_MessageImageAttachmentTile
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final imageChild = _dataUrlBytes != null
-        ? Image.memory(
-            _dataUrlBytes!,
-            fit: BoxFit.cover,
-            gaplessPlayback: true,
-          )
-        : (!_isInlineImageDataUrl(widget.url)
-              ? Image.network(
-                  widget.url,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) =>
-                      _AttachmentLoadError(colors: colors),
-                )
-              : _AttachmentLoadError(colors: colors));
+    final imageProvider = _imageProvider();
+    final heroTag = _messageImageHeroTag(widget.url);
+    final imageChild = imageProvider == null
+        ? _AttachmentLoadError(colors: colors)
+        : Hero(
+            tag: heroTag,
+            child: Image(
+              image: imageProvider,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              errorBuilder: (context, error, stackTrace) =>
+                  _AttachmentLoadError(colors: colors),
+            ),
+          );
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -2802,9 +2851,36 @@ class _MessageImageAttachmentTileState extends State<_MessageImageAttachmentTile
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(15),
-        child: AspectRatio(aspectRatio: 1.35, child: imageChild),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: imageProvider == null
+                ? null
+                : () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => _FullscreenImageViewer(
+                          imageProvider: imageProvider,
+                          heroTag: heroTag,
+                        ),
+                      ),
+                    );
+                  },
+            child: AspectRatio(aspectRatio: 1.35, child: imageChild),
+          ),
+        ),
       ),
     );
+  }
+
+  ImageProvider<Object>? _imageProvider() {
+    if (_dataUrlBytes != null) {
+      return MemoryImage(_dataUrlBytes!);
+    }
+    if (!_isInlineImageDataUrl(widget.url)) {
+      return NetworkImage(widget.url);
+    }
+    return null;
   }
 }
 
@@ -2870,6 +2946,48 @@ class _AttachmentLoadError extends StatelessWidget {
         Icons.broken_image_outlined,
         color: colors.textTertiary,
         size: 28,
+      ),
+    );
+  }
+}
+
+class _FullscreenImageViewer extends StatelessWidget {
+  const _FullscreenImageViewer({
+    required this.imageProvider,
+    required this.heroTag,
+  });
+
+  final ImageProvider<Object> imageProvider;
+  final String heroTag;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: SafeArea(
+        child: Center(
+          child: InteractiveViewer(
+            minScale: 1,
+            maxScale: 5,
+            child: Hero(
+              tag: heroTag,
+              child: Image(
+                image: imageProvider,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => const Icon(
+                  Icons.broken_image_outlined,
+                  color: Colors.white54,
+                  size: 36,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -3016,6 +3134,9 @@ Uint8List? _decodeInlineImageDataUrl(String value) {
   }
 }
 
+String _messageImageHeroTag(String url) =>
+    'session-image:${url.hashCode.toUnsigned(32)}';
+
 String _basename(String path) {
   final normalized = path.replaceAll('\\', '/');
   final parts = normalized.split('/');
@@ -3030,6 +3151,66 @@ String _formatByteCount(int bytes) {
     return '${(bytes / 1024).toStringAsFixed(1)} KB';
   }
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
+Map<String, Object?> _compressDraftImagePayload(Map<String, Object?> payload) {
+  final name = payload['name']! as String;
+  final mimeType = payload['mimeType']! as String;
+  final bytes = payload['bytes']! as Uint8List;
+
+  if (mimeType == 'image/gif') {
+    return <String, Object?>{
+      'name': name,
+      'mimeType': mimeType,
+      'bytes': bytes,
+    };
+  }
+
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) {
+    return <String, Object?>{
+      'name': name,
+      'mimeType': mimeType,
+      'bytes': bytes,
+    };
+  }
+
+  final baked = img.bakeOrientation(decoded);
+  final longestEdge = math.max(baked.width, baked.height);
+  final isPng = mimeType == 'image/png';
+  final shouldKeepOriginal =
+      longestEdge <= 1800 && bytes.length <= 900 * 1024 && !mimeType.contains('bmp');
+  if (shouldKeepOriginal) {
+    return <String, Object?>{
+      'name': name,
+      'mimeType': mimeType,
+      'bytes': bytes,
+    };
+  }
+
+  final resized = longestEdge > 1800
+      ? img.copyResize(
+          baked,
+          width: baked.width >= baked.height ? 1800 : null,
+          height: baked.height > baked.width ? 1800 : null,
+          interpolation: img.Interpolation.cubic,
+        )
+      : baked;
+
+  final outputMimeType = isPng ? 'image/png' : 'image/jpeg';
+  final encoded = outputMimeType == 'image/png'
+      ? Uint8List.fromList(img.encodePng(resized, level: 6))
+      : Uint8List.fromList(img.encodeJpg(resized, quality: 84));
+
+  final chosenBytes = encoded.length < bytes.length ? encoded : bytes;
+  final chosenMimeType =
+      identical(chosenBytes, encoded) ? outputMimeType : mimeType;
+
+  return <String, Object?>{
+    'name': name,
+    'mimeType': chosenMimeType,
+    'bytes': chosenBytes,
+  };
 }
 
 Future<void> _openLink(BuildContext context, String href) async {
