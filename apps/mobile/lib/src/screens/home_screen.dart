@@ -894,7 +894,7 @@ class _InboxPaneState extends State<InboxPane> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to resolve action: $error')),
+        SnackBar(content: Text('Failed to resolve action: ${friendlyError(error)}')),
       );
     }
   }

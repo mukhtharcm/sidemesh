@@ -155,7 +155,7 @@ class _SessionScreenState extends State<SessionScreen> {
       });
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Failed to load session: $error')));
+      ).showSnackBar(SnackBar(content: Text("Failed to load session: ${friendlyError(error)}")));
     }
   }
 
@@ -406,7 +406,7 @@ class _SessionScreenState extends State<SessionScreen> {
       final stillHasPending = _pendingAction != null;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Failed to send input: $error')));
+      ).showSnackBar(SnackBar(content: Text("Failed to send: ${friendlyError(error)}")));
       setState(() {
         _optimisticMessages = _optimisticMessages
             .where((message) => message.id != optimisticMessage.id)
@@ -472,7 +472,7 @@ class _SessionScreenState extends State<SessionScreen> {
       }
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Failed to stop session: $error')));
+      ).showSnackBar(SnackBar(content: Text("Failed to stop session: ${friendlyError(error)}")));
     }
   }
 
@@ -523,7 +523,7 @@ class _SessionScreenState extends State<SessionScreen> {
       }
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Failed to rename: $error')));
+      ).showSnackBar(SnackBar(content: Text("Failed to rename: ${friendlyError(error)}")));
     }
   }
 
@@ -562,7 +562,7 @@ class _SessionScreenState extends State<SessionScreen> {
       }
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Failed to archive: $error')));
+      ).showSnackBar(SnackBar(content: Text("Failed to archive: ${friendlyError(error)}")));
     }
   }
 
@@ -606,7 +606,7 @@ class _SessionScreenState extends State<SessionScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to resolve action: $error')),
+        SnackBar(content: Text("Failed to resolve action: ${friendlyError(error)}")),
       );
     }
   }

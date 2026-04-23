@@ -235,6 +235,63 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $body';
 }
 
+/// Turns low-level errors (ApiException, SocketException, TimeoutException)
+/// into short human-readable strings suitable for snackbars.
+String friendlyError(Object error) {
+  if (error is ApiException) {
+    final parsed = _tryExtractMessage(error.body);
+    if (parsed != null && parsed.isNotEmpty) {
+      return parsed;
+    }
+    switch (error.statusCode) {
+      case 401:
+      case 403:
+        return 'Not authorized (${error.statusCode}). Check the host token.';
+      case 404:
+        return 'Not found on the host.';
+      case 408:
+      case 504:
+        return 'The host took too long to respond.';
+      case 500:
+      case 502:
+      case 503:
+        return 'The host reported a server error (${error.statusCode}).';
+    }
+    return 'Request failed (${error.statusCode}).';
+  }
+  final text = error.toString();
+  if (text.contains('SocketException') ||
+      text.contains('Connection refused') ||
+      text.contains('Failed host lookup')) {
+    return "Couldn't reach the host. Is the Sidemesh daemon running?";
+  }
+  if (text.contains('TimeoutException')) {
+    return 'Request timed out.';
+  }
+  final trimmed = text.replaceFirst('Exception: ', '');
+  return trimmed.length > 160 ? '${trimmed.substring(0, 157)}…' : trimmed;
+}
+
+String? _tryExtractMessage(String body) {
+  if (body.isEmpty) return null;
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map) {
+      for (final key in const ['message', 'error', 'detail']) {
+        final v = decoded[key];
+        if (v is String && v.isNotEmpty) return v;
+      }
+    }
+    if (decoded is String && decoded.isNotEmpty) return decoded;
+  } catch (_) {
+    // Not JSON — fall through.
+  }
+  final trimmed = body.trim();
+  if (trimmed.isEmpty) return null;
+  if (trimmed.length > 160) return '${trimmed.substring(0, 157)}…';
+  return trimmed;
+}
+
 String normalizeBaseUrl(String raw) {
   final trimmed = raw.trim();
   if (trimmed.isEmpty) {
