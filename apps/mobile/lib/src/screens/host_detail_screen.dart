@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api_client.dart';
@@ -37,12 +39,36 @@ class HostDetailScreen extends StatefulWidget {
 class _HostDetailScreenState extends State<HostDetailScreen> {
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
   late Future<_HostOverview> _future;
+  Timer? _refreshTimer;
+  static const Duration _refreshInterval = Duration(seconds: 20);
 
   @override
   void initState() {
     super.initState();
     _favorites.ensureLoaded();
+    SessionReadStore.instance.ensureLoaded();
     _future = _load();
+    _refreshTimer = Timer.periodic(
+      _refreshInterval,
+      (_) => _silentRefresh(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _silentRefresh() async {
+    if (!mounted) return;
+    try {
+      final fresh = await _load();
+      if (!mounted) return;
+      setState(() => _future = Future.value(fresh));
+    } catch (_) {
+      // Keep the last good snapshot on transient errors.
+    }
   }
 
   Future<_HostOverview> _load() async {
