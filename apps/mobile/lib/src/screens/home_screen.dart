@@ -588,12 +588,25 @@ class _RecentPaneState extends State<RecentPane> {
   List<String> _failedHostLabels = const [];
   int _loadGen = 0;
   bool _initialLoadStarted = false;
+  Timer? _refreshTimer;
+  static const Duration _refreshInterval = Duration(seconds: 20);
 
   @override
   void initState() {
     super.initState();
     _favorites.ensureLoaded();
+    SessionReadStore.instance.ensureLoaded();
     _kickoffLoad();
+    _refreshTimer = Timer.periodic(
+      _refreshInterval,
+      (_) => _silentRefresh(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -604,8 +617,7 @@ class _RecentPaneState extends State<RecentPane> {
     }
   }
 
-  void _kickoffLoad() {
-    final gen = ++_loadGen;
+  void _kickoffLoad() {    final gen = ++_loadGen;
     _initialLoadStarted = true;
     setState(() {
       _entries = const [];
@@ -623,6 +635,52 @@ class _RecentPaneState extends State<RecentPane> {
         widget.onActiveCountChanged(0);
       });
     }
+  }
+
+  Future<void> _silentRefresh() async {
+    if (!mounted || widget.hosts.isEmpty) return;
+    // Fetch per host without tearing down the current list. Merge fresh
+    // entries by (host, session) so the unread store sees new updatedAt
+    // values even when the user hasn't pulled-to-refresh.
+    final hosts = widget.hosts.toList();
+    final fetches = await Future.wait(
+      hosts.map<Future<List<SessionSummary>?>>((host) async {
+        try {
+          return await widget.api.fetchSessions(host, limit: 40);
+        } catch (_) {
+          return null;
+        }
+      }),
+      eagerError: false,
+    );
+    if (!mounted) return;
+    final merged = <RemoteSessionEntry>[];
+    final handled = <String>{};
+    for (var i = 0; i < hosts.length; i++) {
+      final host = hosts[i];
+      final fresh = fetches[i];
+      if (fresh == null) {
+        // Fetch failed — keep whatever we had for this host.
+        merged.addAll(_entries.where((e) => e.host.id == host.id));
+        handled.add(host.id);
+        continue;
+      }
+      for (final session in fresh.take(20)) {
+        merged.add(RemoteSessionEntry(host: host, session: session));
+      }
+      handled.add(host.id);
+    }
+    // Preserve entries from hosts no longer in widget.hosts (rare) just
+    // in case — they'll fall off the next kickoff.
+    for (final entry in _entries) {
+      if (!handled.contains(entry.host.id)) {
+        merged.add(entry);
+      }
+    }
+    setState(() {
+      _entries = merged;
+    });
+    _emitActiveCount();
   }
 
   Future<void> _loadHost(HostProfile host, int gen) async {

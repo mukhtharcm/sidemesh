@@ -49,21 +49,25 @@ class SessionReadStore extends ChangeNotifier {
     }
     _installEpochMs = epoch;
     final raw = prefs.getString(_prefsKey);
-    if (raw == null || raw.isEmpty) return;
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is Map<String, dynamic>) {
-        decoded.forEach((key, value) {
-          if (value is int) {
-            _seenAtMs[key] = value;
-          } else if (value is num) {
-            _seenAtMs[key] = value.toInt();
-          }
-        });
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) {
+          decoded.forEach((key, value) {
+            if (value is int) {
+              _seenAtMs[key] = value;
+            } else if (value is num) {
+              _seenAtMs[key] = value.toInt();
+            }
+          });
+        }
+      } catch (_) {
+        // Corrupted state — treat every session as unread. No crash.
       }
-    } catch (_) {
-      // Corrupted state — treat every session as unread. No crash.
     }
+    // Notify any listeners that may have evaluated isUnread before the
+    // store finished hydrating (install epoch was 0 → everything unread).
+    notifyListeners();
   }
 
   String _keyFor(HostProfile host, String sessionId) =>
