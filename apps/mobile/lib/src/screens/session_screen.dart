@@ -2,9 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:markdown/markdown.dart' as md;
+import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/io.dart';
 
 import '../api_client.dart';
@@ -2038,12 +2041,13 @@ class _MessageBubble extends StatelessWidget {
                         textColor: textColor,
                       )
                     else
-                      SelectableText(
-                        message.text,
+                      _LinkifiedSelectableText(
+                        text: message.text,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: textColor,
                           height: 1.45,
                         ),
+                        linkColor: colors.accent,
                       ),
                   ],
                 ),
@@ -2137,6 +2141,102 @@ class _MarkdownMessageBodyState extends State<_MarkdownMessageBody> {
       shrinkWrap: true,
       softLineBreak: true,
       styleSheet: _cached!,
+      extensionSet: md.ExtensionSet.gitHubWeb,
+      onTapLink: (text, href, title) {
+        if (href == null || href.isEmpty) return;
+        _openLink(context, href);
+      },
+    );
+  }
+}
+
+Future<void> _openLink(BuildContext context, String href) async {
+  final uri = Uri.tryParse(href);
+  if (uri == null) return;
+  final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!ok && context.mounted) {
+    showAppSnackBar(context, 'Could not open link');
+  }
+}
+
+// Matches http(s)://… and www.… URLs. Conservative trailing punctuation trim
+// happens in _buildLinkSpans below.
+final RegExp _urlRegExp = RegExp(
+  r'(https?:\/\/[^\s<>]+|www\.[^\s<>]+)',
+  caseSensitive: false,
+);
+
+class _LinkifiedSelectableText extends StatefulWidget {
+  const _LinkifiedSelectableText({
+    required this.text,
+    required this.style,
+    required this.linkColor,
+  });
+
+  final String text;
+  final TextStyle? style;
+  final Color linkColor;
+
+  @override
+  State<_LinkifiedSelectableText> createState() =>
+      _LinkifiedSelectableTextState();
+}
+
+class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
+  final List<TapGestureRecognizer> _recognizers = [];
+
+  @override
+  void dispose() {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    _recognizers.clear();
+
+    final spans = <InlineSpan>[];
+    final matches = _urlRegExp.allMatches(widget.text).toList();
+    var cursor = 0;
+    for (final m in matches) {
+      if (m.start > cursor) {
+        spans.add(TextSpan(text: widget.text.substring(cursor, m.start)));
+      }
+      var raw = m.group(0)!;
+      // Trim common trailing punctuation that usually isn't part of the URL.
+      final trimmed = raw.replaceAll(RegExp(r'[),.!?;:\]]+$'), '');
+      final trailing = raw.substring(trimmed.length);
+      raw = trimmed;
+      final href = raw.startsWith('www.') ? 'https://$raw' : raw;
+      final recognizer = TapGestureRecognizer()
+        ..onTap = () => _openLink(context, href);
+      _recognizers.add(recognizer);
+      spans.add(
+        TextSpan(
+          text: raw,
+          style: TextStyle(
+            color: widget.linkColor,
+            decoration: TextDecoration.underline,
+          ),
+          recognizer: recognizer,
+        ),
+      );
+      if (trailing.isNotEmpty) {
+        spans.add(TextSpan(text: trailing));
+      }
+      cursor = m.end;
+    }
+    if (cursor < widget.text.length) {
+      spans.add(TextSpan(text: widget.text.substring(cursor)));
+    }
+
+    return SelectableText.rich(
+      TextSpan(style: widget.style, children: spans),
     );
   }
 }
