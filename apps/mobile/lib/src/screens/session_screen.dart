@@ -11,6 +11,7 @@ import 'package:web_socket_channel/io.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import 'file_browser_screen.dart';
 import '../session_favorites_store.dart';
 import '../session_overrides_store.dart';
 import '../session_policy_store.dart';
@@ -1144,6 +1145,22 @@ class _SessionScreenState extends State<SessionScreen>
                   onTap: _toggleFavorite,
                 );
               },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: MeshIconButton(
+              icon: Icons.folder_outlined,
+              tooltip: 'Browse files',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => FileBrowserScreen(
+                    host: widget.host,
+                    api: widget.api,
+                    root: session.cwd,
+                  ),
+                ),
+              ),
             ),
           ),
           Padding(
