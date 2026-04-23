@@ -11,6 +11,7 @@ import '../theme/app_colors.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/mesh_widgets.dart';
 import 'home_screen.dart';
+import 'host_detail_screen.dart';
 import 'session_screen.dart';
 
 /// Two-pane macOS shell — sidebar (Recent / Inbox / Hosts) on the left,
@@ -41,6 +42,7 @@ class _DesktopShellState extends State<DesktopShell> {
   bool _loading = true;
   _SidebarSection _section = _SidebarSection.recent;
   _ActiveSession? _active;
+  HostProfile? _activeHost;
   int _inboxCount = 0;
   int _activeCount = 0;
   String _query = '';
@@ -258,6 +260,9 @@ class _DesktopShellState extends State<DesktopShell> {
     if (_active?.host.id == host.id) {
       setState(() => _active = null);
     }
+    if (_activeHost?.id == host.id) {
+      setState(() => _activeHost = null);
+    }
     await _loadHosts();
     _bumpRefresh();
   }
@@ -265,6 +270,14 @@ class _DesktopShellState extends State<DesktopShell> {
   void _openSession(HostProfile host, SessionSummary session) {
     setState(() {
       _active = _ActiveSession(host: host, session: session);
+      _activeHost = null;
+    });
+  }
+
+  void _openHostDetail(HostProfile host) {
+    setState(() {
+      _activeHost = host;
+      _active = null;
     });
   }
 
@@ -367,6 +380,7 @@ class _DesktopShellState extends State<DesktopShell> {
                   inboxCount: _inboxCount,
                   activeCount: _activeCount,
                   selectedSessionId: _active?.session.id,
+                  selectedHostId: _activeHost?.id,
                   searchController: _searchController,
                   searchFocus: _searchFocus,
                   query: _query,
@@ -377,6 +391,7 @@ class _DesktopShellState extends State<DesktopShell> {
                   onOpenSession: _openSession,
                   onOpenSessionFromAction: (host, action) =>
                       _openSession(host, _sessionFromAction(action)),
+                  onOpenHostDetail: _openHostDetail,
                   onAddHost: () => _showHostEditor(),
                   onEditHost: (h) => _showHostEditor(initial: h),
                   onRemoveHost: _removeHost,
@@ -399,8 +414,13 @@ class _DesktopShellState extends State<DesktopShell> {
                   child: _DetailPane(
                     titlebarInset: _titlebarInset,
                     active: _active,
+                    activeHost: _activeHost,
                     api: _api,
-                    onClose: () => setState(() => _active = null),
+                    onClose: () => setState(() {
+                      _active = null;
+                      _activeHost = null;
+                    }),
+                    onOpenSession: _openSession,
                   ),
                 ),
               ],
@@ -445,6 +465,7 @@ class _Sidebar extends StatelessWidget {
     required this.inboxCount,
     required this.activeCount,
     required this.selectedSessionId,
+    required this.selectedHostId,
     required this.searchController,
     required this.searchFocus,
     required this.query,
@@ -452,6 +473,7 @@ class _Sidebar extends StatelessWidget {
     required this.onSelectSection,
     required this.onOpenSession,
     required this.onOpenSessionFromAction,
+    required this.onOpenHostDetail,
     required this.onAddHost,
     required this.onEditHost,
     required this.onRemoveHost,
@@ -470,6 +492,7 @@ class _Sidebar extends StatelessWidget {
   final int inboxCount;
   final int activeCount;
   final String? selectedSessionId;
+  final String? selectedHostId;
   final TextEditingController searchController;
   final FocusNode searchFocus;
   final String query;
@@ -477,6 +500,7 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<_SidebarSection> onSelectSection;
   final void Function(HostProfile, SessionSummary) onOpenSession;
   final void Function(HostProfile, PendingAction) onOpenSessionFromAction;
+  final ValueChanged<HostProfile> onOpenHostDetail;
   final VoidCallback onAddHost;
   final ValueChanged<HostProfile> onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
@@ -570,9 +594,11 @@ class _Sidebar extends StatelessWidget {
                       hosts: hosts,
                       api: api,
                       selectedSessionId: selectedSessionId,
+                      selectedHostId: selectedHostId,
                       query: query,
                       onOpenSession: onOpenSession,
                       onOpenSessionFromAction: onOpenSessionFromAction,
+                      onOpenHostDetail: onOpenHostDetail,
                       onEditHost: onEditHost,
                       onRemoveHost: onRemoveHost,
                       onAddHost: onAddHost,
@@ -698,9 +724,11 @@ class _SidebarPane extends StatelessWidget {
     required this.hosts,
     required this.api,
     required this.selectedSessionId,
+    required this.selectedHostId,
     required this.query,
     required this.onOpenSession,
     required this.onOpenSessionFromAction,
+    required this.onOpenHostDetail,
     required this.onEditHost,
     required this.onRemoveHost,
     required this.onAddHost,
@@ -712,9 +740,11 @@ class _SidebarPane extends StatelessWidget {
   final List<HostProfile> hosts;
   final ApiClient api;
   final String? selectedSessionId;
+  final String? selectedHostId;
   final String query;
   final void Function(HostProfile, SessionSummary) onOpenSession;
   final void Function(HostProfile, PendingAction) onOpenSessionFromAction;
+  final ValueChanged<HostProfile> onOpenHostDetail;
   final ValueChanged<HostProfile> onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
   final VoidCallback onAddHost;
@@ -746,16 +776,13 @@ class _SidebarPane extends StatelessWidget {
       case _SidebarSection.hosts:
         return HostsPane(
           hosts: hosts,
-          onOpenHost: (h) {
-            // On desktop, "opening" a host surfaces its sessions in Recent.
-            // For now, just open the editor as a quick way to inspect.
-            onEditHost(h);
-          },
+          onOpenHost: onOpenHostDetail,
           onEditHost: onEditHost,
           onRemoveHost: onRemoveHost,
           onAddHost: onAddHost,
           query: query,
           dense: true,
+          selectedHostId: selectedHostId,
         );
     }
   }
@@ -883,14 +910,18 @@ class _DetailPane extends StatefulWidget {
   const _DetailPane({
     required this.titlebarInset,
     required this.active,
+    required this.activeHost,
     required this.api,
     required this.onClose,
+    required this.onOpenSession,
   });
 
   final double titlebarInset;
   final _ActiveSession? active;
+  final HostProfile? activeHost;
   final ApiClient api;
   final VoidCallback onClose;
+  final void Function(HostProfile, SessionSummary) onOpenSession;
 
   @override
   State<_DetailPane> createState() => _DetailPaneState();
@@ -902,8 +933,23 @@ class _DetailPaneState extends State<_DetailPane> {
   @override
   Widget build(BuildContext context) {
     final active = widget.active;
-    // Cross-fade between the empty placeholder and the active session so
-    // closing/swapping doesn't snap the entire right-hand pane.
+    final activeHost = widget.activeHost;
+    Widget child;
+    if (active != null) {
+      child = _buildActive(
+        context,
+        active,
+        key: ValueKey('active-${active.host.id}-${active.session.id}'),
+      );
+    } else if (activeHost != null) {
+      child = _buildHost(
+        context,
+        activeHost,
+        key: ValueKey('host-${activeHost.id}'),
+      );
+    } else {
+      child = _buildEmpty(context, key: const ValueKey('empty'));
+    }
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 180),
       switchInCurve: Curves.easeOutCubic,
@@ -912,13 +958,7 @@ class _DetailPaneState extends State<_DetailPane> {
         opacity: animation,
         child: child,
       ),
-      child: active == null
-          ? _buildEmpty(context, key: const ValueKey('empty'))
-          : _buildActive(
-              context,
-              active,
-              key: ValueKey('active-${active.host.id}-${active.session.id}'),
-            ),
+      child: child,
     );
   }
 
@@ -988,6 +1028,45 @@ class _DetailPaneState extends State<_DetailPane> {
               session: active.session,
               api: widget.api,
               topPadding: widget.titlebarInset + 6,
+            ),
+          ),
+          Positioned(
+            top: 6,
+            right: 10,
+            child: AnimatedOpacity(
+              opacity: _hoverClose ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 140),
+              child: IgnorePointer(
+                ignoring: !_hoverClose,
+                child: _CloseSessionButton(onClose: widget.onClose),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHost(
+    BuildContext context,
+    HostProfile host, {
+    required Key key,
+  }) {
+    return MouseRegion(
+      key: key,
+      onEnter: (_) => setState(() => _hoverClose = true),
+      onExit: (_) => setState(() => _hoverClose = false),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: HostDetailScreen(
+              key: ValueKey('host-detail-${host.id}'),
+              host: host,
+              api: widget.api,
+              embedded: true,
+              topPadding: widget.titlebarInset + 6,
+              onOpenSession: (session) =>
+                  widget.onOpenSession(host, session),
             ),
           ),
           Positioned(

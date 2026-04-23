@@ -1487,6 +1487,7 @@ class HostsPane extends StatelessWidget {
     required this.onAddHost,
     this.query = '',
     this.dense = false,
+    this.selectedHostId,
   });
 
   final List<HostProfile> hosts;
@@ -1496,6 +1497,7 @@ class HostsPane extends StatelessWidget {
   final VoidCallback onAddHost;
   final String query;
   final bool dense;
+  final String? selectedHostId;
 
   @override
   Widget build(BuildContext context) {
@@ -1552,6 +1554,7 @@ class HostsPane extends StatelessWidget {
         return _HostRowCard(
           host: host,
           dense: dense,
+          selected: dense && selectedHostId == host.id,
           onTap: () => onOpenHost(host),
           onEdit: () => onEditHost(host),
           onRemove: () => onRemoveHost(host),
@@ -1568,6 +1571,7 @@ class _HostRowCard extends StatelessWidget {
     required this.onEdit,
     required this.onRemove,
     this.dense = false,
+    this.selected = false,
   });
 
   final HostProfile host;
@@ -1575,6 +1579,7 @@ class _HostRowCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onRemove;
   final bool dense;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -1589,8 +1594,20 @@ class _HostRowCard extends StatelessWidget {
             child: InkWell(
               onTap: onTap,
               borderRadius: BorderRadius.circular(10),
-              child: Padding(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
                 padding: const EdgeInsets.fromLTRB(10, 9, 6, 10),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? colors.accentMuted
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: selected
+                        ? colors.accent.withValues(alpha: 0.35)
+                        : Colors.transparent,
+                  ),
+                ),
                 child: Row(
                   children: [
                     Stack(
@@ -1632,6 +1649,7 @@ class _HostRowCard extends StatelessWidget {
                             ).textTheme.bodyMedium?.copyWith(
                               fontWeight: FontWeight.w600,
                               height: 1.25,
+                              color: selected ? colors.accent : null,
                             ),
                           ),
                           const SizedBox(height: 2),
