@@ -67,9 +67,8 @@ class _SessionScreenState extends State<SessionScreen>
 
   // Live-streaming state is held in notifiers so that mid-stream deltas only
   // rebuild the tiny widgets that display them, not the whole Scaffold/list.
-  final ValueNotifier<String> _liveAssistantNotifier = ValueNotifier<String>(
-    '',
-  );
+  final ValueNotifier<_LiveAssistantMessageState?> _liveAssistantNotifier =
+      ValueNotifier<_LiveAssistantMessageState?>(null);
   final ValueNotifier<bool> _thinkingNotifier = ValueNotifier<bool>(false);
 
   SessionSummary? _session;
@@ -106,9 +105,13 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionMessage>? _entriesMessagesRef;
   List<SessionMessage>? _entriesOptimisticRef;
   List<SessionActivity>? _entriesActivitiesRef;
+  String? _entriesLiveAssistantId;
   List<_TimelineEntry> _cachedEntries = const [];
 
-  String get _liveAssistantText => _liveAssistantNotifier.value;
+  _LiveAssistantMessageState? get _liveAssistantMessage =>
+      _liveAssistantNotifier.value;
+
+  String get _liveAssistantText => _liveAssistantMessage?.text ?? '';
   // Surfaces a "↓ New" pill when the user has scrolled away from the
   // bottom of the transcript so they can jump back to the live area.
   final ValueNotifier<bool> _showJumpToLatest = ValueNotifier<bool>(false);
@@ -118,7 +121,9 @@ class _SessionScreenState extends State<SessionScreen>
   // banner can reappear if the truncation window changes.
   bool _historyBannerDismissed = false;
 
-  set _liveAssistantText(String value) => _liveAssistantNotifier.value = value;
+  void _clearLiveAssistantMessage() {
+    _liveAssistantNotifier.value = null;
+  }
 
   @override
   void initState() {
@@ -215,6 +220,7 @@ class _SessionScreenState extends State<SessionScreen>
         return;
       }
       final pendingAction = log.pendingAction;
+      final livePersisted = _hasPersistedLiveAssistant(log.messages);
       // Capture any live events delivered while the snapshot was in flight —
       // we'll replay them after the snapshot setState so they aren't clobbered.
       final bufferedEvents = List<LiveEvent>.from(_pendingLiveEvents);
@@ -234,13 +240,13 @@ class _SessionScreenState extends State<SessionScreen>
         _pendingAction = pendingAction ?? _pendingAction;
         _running = log.session.isActive;
         _loading = false;
+        if (!_running || livePersisted) {
+          _clearLiveAssistantMessage();
+        }
         _awaitingAssistantReply =
             log.session.isActive &&
             _liveAssistantText.isEmpty &&
             _pendingAction == null;
-        if (!_running) {
-          _liveAssistantText = '';
-        }
         // Seed lastSeq from the snapshot so subsequent resyncs can use the
         // cheap delta endpoint instead of re-downloading everything.
         var highestSeq = _lastEventSeq ?? 0;
@@ -254,6 +260,7 @@ class _SessionScreenState extends State<SessionScreen>
           _lastEventSeq = highestSeq;
         }
       });
+      _refreshThinkingState();
       _markCurrentSessionSeen();
       // Replay live events that landed during the fetch so action_opened /
       // activity_updated aren't silently dropped.
@@ -298,9 +305,11 @@ class _SessionScreenState extends State<SessionScreen>
         return true;
       }
       setState(() {
+        var mergedMessages = _messages;
+        var nextRunning = _running;
         if (delta.session != null) {
           _session = delta.session!;
-          _running = delta.session!.isActive;
+          nextRunning = delta.session!.isActive;
         }
         if (delta.messages.isNotEmpty) {
           final byId = <String, SessionMessage>{
@@ -309,13 +318,11 @@ class _SessionScreenState extends State<SessionScreen>
           for (final m in delta.messages) {
             byId[m.id] = m;
           }
-          final merged = byId.values.toList()
+          mergedMessages = byId.values.toList()
             ..sort((a, b) {
               if (a.seq != b.seq) return a.seq.compareTo(b.seq);
               return a.createdAt.compareTo(b.createdAt);
             });
-          _messages = merged;
-          _optimisticMessages = _reconcileOptimisticMessages(merged);
         }
         if (delta.activities.isNotEmpty) {
           final byId = <String, SessionActivity>{
@@ -326,11 +333,20 @@ class _SessionScreenState extends State<SessionScreen>
           }
           _activities = _sortActivities(byId.values.toList());
         }
+        _messages = mergedMessages;
+        _optimisticMessages = _reconcileOptimisticMessages(mergedMessages);
         _pendingAction = delta.pendingAction ?? _pendingAction;
+        _running = nextRunning;
+        if (!nextRunning || _hasPersistedLiveAssistant(mergedMessages)) {
+          _clearLiveAssistantMessage();
+        }
+        _awaitingAssistantReply =
+            nextRunning && _liveAssistantText.isEmpty && _pendingAction == null;
         if (delta.nextSeq > (_lastEventSeq ?? 0)) {
           _lastEventSeq = delta.nextSeq;
         }
       });
+      _refreshThinkingState();
       _markCurrentSessionSeen();
       return true;
     } catch (_) {
@@ -504,7 +520,7 @@ class _SessionScreenState extends State<SessionScreen>
           _running = true;
           _awaitingAssistantReply = true;
         });
-        _thinkingNotifier.value = _shouldShowThinking();
+        _refreshThinkingState();
         _scrollToBottomFast();
       case 'turn_started':
         setState(() {
@@ -512,7 +528,7 @@ class _SessionScreenState extends State<SessionScreen>
           _awaitingAssistantReply =
               _liveAssistantText.isEmpty && _pendingAction == null;
         });
-        _thinkingNotifier.value = _shouldShowThinking();
+        _refreshThinkingState();
       case 'assistant_delta':
         final delta = event.delta;
         if (delta == null || delta.isEmpty) {
@@ -522,24 +538,22 @@ class _SessionScreenState extends State<SessionScreen>
         _scheduleLiveFlush();
       case 'turn_completed':
         _flushPendingLiveUpdates();
-        final committedLive = _liveAssistantText;
+        final committedLive = _liveAssistantMessage;
         setState(() {
           _running = false;
           _awaitingAssistantReply = false;
-          if (committedLive.isNotEmpty) {
-            final turnId = event.turnId ?? 'turn';
-            final nextSeq = _nextTimelineSeq();
+          if (committedLive != null && committedLive.text.isNotEmpty) {
             final finalMsg = SessionMessage(
-              id: 'local-final-$turnId',
+              id: committedLive.id,
               role: 'assistant',
-              text: committedLive,
-              createdAt: DateTime.now(),
-              seq: nextSeq,
+              text: committedLive.text,
+              createdAt: committedLive.createdAt,
+              seq: committedLive.seq,
               phase: 'final_answer',
             );
             _upsertOptimisticMessage(finalMsg);
-            _liveAssistantText = '';
           }
+          _clearLiveAssistantMessage();
         });
         _thinkingNotifier.value = false;
         // Background reconcile; do not block UI. Delayed enough for Codex to
@@ -568,13 +582,13 @@ class _SessionScreenState extends State<SessionScreen>
           _pendingAction = event.action;
           _awaitingAssistantReply = false;
         });
-        _thinkingNotifier.value = _shouldShowThinking();
+        _refreshThinkingState();
       case 'action_resolved':
         setState(() {
           _pendingAction = null;
           _awaitingAssistantReply = _running && _liveAssistantText.isEmpty;
         });
-        _thinkingNotifier.value = _shouldShowThinking();
+        _refreshThinkingState();
       case 'hello':
       case 'error':
         break;
@@ -586,6 +600,10 @@ class _SessionScreenState extends State<SessionScreen>
         _awaitingAssistantReply &&
         _liveAssistantText.isEmpty &&
         _pendingAction == null;
+  }
+
+  void _refreshThinkingState() {
+    _thinkingNotifier.value = _shouldShowThinking();
   }
 
   void _scheduleLiveFlush() {
@@ -615,16 +633,29 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
 
-    // Apply live delta without a full setState; the live bubble is wired to
-    // _liveAssistantNotifier and will rebuild on its own.
-    if (hasDelta) {
-      _running = true;
-      _awaitingAssistantReply = false;
-      _liveAssistantText += delta;
-      _thinkingNotifier.value = false;
-    }
+    final currentLive = _liveAssistantMessage;
+    final updatedLive = hasDelta
+        ? _appendLiveAssistantDelta(currentLive, delta)
+        : currentLive;
+    final needsLiveInsert = hasDelta && currentLive == null;
 
-    if (activities.isNotEmpty) {
+    if (hasDelta) {
+      if (needsLiveInsert || activities.isNotEmpty) {
+        setState(() {
+          _running = true;
+          _awaitingAssistantReply = false;
+          _liveAssistantNotifier.value = updatedLive;
+          for (final activity in activities) {
+            _upsertActivity(activity);
+          }
+        });
+      } else {
+        _running = true;
+        _awaitingAssistantReply = false;
+        _liveAssistantNotifier.value = updatedLive;
+      }
+      _thinkingNotifier.value = false;
+    } else if (activities.isNotEmpty) {
       setState(() {
         for (final activity in activities) {
           _upsertActivity(activity);
@@ -654,10 +685,10 @@ class _SessionScreenState extends State<SessionScreen>
       _sending = true;
       _running = true;
       _awaitingAssistantReply = true;
-      _liveAssistantText = '';
+      _clearLiveAssistantMessage();
       _upsertOptimisticMessage(optimisticMessage);
     });
-    _thinkingNotifier.value = _shouldShowThinking();
+    _refreshThinkingState();
     _scrollToBottomFast(force: true);
     try {
       final policy = _policyStore.policyFor(widget.host, widget.session.id);
@@ -691,6 +722,7 @@ class _SessionScreenState extends State<SessionScreen>
         _awaitingAssistantReply =
             wasRunning && _liveAssistantText.isEmpty && !stillHasPending;
       });
+      _refreshThinkingState();
     } finally {
       if (mounted) {
         setState(() {
@@ -734,9 +766,15 @@ class _SessionScreenState extends State<SessionScreen>
       HapticFeedback.mediumImpact();
       setState(() {
         _running = false;
+        _awaitingAssistantReply = false;
+        _clearLiveAssistantMessage();
       });
-      showAppSnackBar(context, 'Session stopped.',
-          duration: const Duration(seconds: 2));
+      _refreshThinkingState();
+      showAppSnackBar(
+        context,
+        'Session stopped.',
+        duration: const Duration(seconds: 2),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -863,11 +901,7 @@ class _SessionScreenState extends State<SessionScreen>
         'denied' => 'Declined',
         _ => 'Decision sent',
       };
-      showAppSnackBar(
-        context,
-        label,
-        duration: const Duration(seconds: 2),
-      );
+      showAppSnackBar(context, label, duration: const Duration(seconds: 2));
     } catch (error) {
       if (!mounted) {
         return;
@@ -933,8 +967,10 @@ class _SessionScreenState extends State<SessionScreen>
         barrierColor: Colors.black.withValues(alpha: 0.35),
         builder: (dialogContext) => Dialog(
           backgroundColor: context.colors.surface,
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 48, vertical: 48),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 48,
+            vertical: 48,
+          ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -969,14 +1005,18 @@ class _SessionScreenState extends State<SessionScreen>
         builder: (dialogContext) {
           final colors = context.colors;
           final mediaSize = MediaQuery.of(dialogContext).size;
-          final maxWidth =
-              (mediaSize.width * 0.8).clamp(640.0, 1100.0).toDouble();
-          final maxHeight =
-              (mediaSize.height * 0.85).clamp(480.0, 860.0).toDouble();
+          final maxWidth = (mediaSize.width * 0.8)
+              .clamp(640.0, 1100.0)
+              .toDouble();
+          final maxHeight = (mediaSize.height * 0.85)
+              .clamp(480.0, 860.0)
+              .toDouble();
           return Dialog(
             backgroundColor: colors.surface,
-            insetPadding:
-                const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 40,
+              vertical: 40,
+            ),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
             ),
@@ -998,13 +1038,36 @@ class _SessionScreenState extends State<SessionScreen>
     }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => FileViewerScreen(
-          host: widget.host,
-          api: widget.api,
-          path: path,
-        ),
+        builder: (_) =>
+            FileViewerScreen(host: widget.host, api: widget.api, path: path),
       ),
     );
+  }
+
+  bool _hasPersistedLiveAssistant(Iterable<SessionMessage> messages) {
+    final liveAssistant = _liveAssistantMessage;
+    if (liveAssistant == null) {
+      return false;
+    }
+    return messages.any(
+      (message) => _matchesPersistedMessage(message, liveAssistant.toMessage()),
+    );
+  }
+
+  _LiveAssistantMessageState _appendLiveAssistantDelta(
+    _LiveAssistantMessageState? current,
+    String delta,
+  ) {
+    if (current == null) {
+      return _LiveAssistantMessageState(
+        id: 'local-stream-${DateTime.now().microsecondsSinceEpoch}',
+        text: delta,
+        createdAt: DateTime.now(),
+        seq: _nextTimelineSeq(),
+        phase: 'commentary',
+      );
+    }
+    return current.copyWith(text: '${current.text}$delta');
   }
 
   int _nextTimelineSeq() {
@@ -1017,6 +1080,10 @@ class _SessionScreenState extends State<SessionScreen>
     }
     for (final a in _activities) {
       if (a.seq > maxSeq) maxSeq = a.seq;
+    }
+    final liveAssistant = _liveAssistantMessage;
+    if (liveAssistant != null && liveAssistant.seq > maxSeq) {
+      maxSeq = liveAssistant.seq;
     }
     return maxSeq + 1;
   }
@@ -1087,11 +1154,13 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   List<_TimelineEntry> _buildTimelineEntries() {
+    final liveAssistant = _liveAssistantMessage;
     // Memoize: if message/activity/optimistic list identities are unchanged,
     // reuse the previous entries (skip the sort).
     if (identical(_entriesMessagesRef, _messages) &&
         identical(_entriesOptimisticRef, _optimisticMessages) &&
-        identical(_entriesActivitiesRef, _activities)) {
+        identical(_entriesActivitiesRef, _activities) &&
+        _entriesLiveAssistantId == liveAssistant?.id) {
       return _cachedEntries;
     }
 
@@ -1100,6 +1169,8 @@ class _SessionScreenState extends State<SessionScreen>
           ..._messages.map(_TimelineEntry.message),
           ..._optimisticMessages.map(_TimelineEntry.message),
           ..._activities.map(_TimelineEntry.activity),
+          if (liveAssistant != null)
+            _TimelineEntry.liveAssistant(liveAssistant),
         ]..sort((left, right) {
           final bySeq = left.seq.compareTo(right.seq);
           if (bySeq != 0) return bySeq;
@@ -1109,6 +1180,7 @@ class _SessionScreenState extends State<SessionScreen>
     _entriesMessagesRef = _messages;
     _entriesOptimisticRef = _optimisticMessages;
     _entriesActivitiesRef = _activities;
+    _entriesLiveAssistantId = liveAssistant?.id;
     _cachedEntries = entries;
     return entries;
   }
@@ -1169,13 +1241,9 @@ class _SessionScreenState extends State<SessionScreen>
                 );
                 final customised = !policy.isEmpty || runtimeLoosened;
                 return MeshIconButton(
-                  icon: customised
-                      ? Icons.tune_rounded
-                      : Icons.tune_outlined,
+                  icon: customised ? Icons.tune_rounded : Icons.tune_outlined,
                   tooltip: 'Approval & sandbox',
-                  color: customised
-                      ? colors.accent
-                      : colors.textSecondary,
+                  color: customised ? colors.accent : colors.textSecondary,
                   onTap: () => _showSessionPolicySheet(session),
                 );
               },
@@ -1340,43 +1408,37 @@ class _SessionScreenState extends State<SessionScreen>
                               reverse: true,
                               keyboardDismissBehavior:
                                   ScrollViewKeyboardDismissBehavior.onDrag,
-                              padding:
-                                  const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                              physics:
-                                  const AlwaysScrollableScrollPhysics(),
-                              itemCount: timelineEntries.length + 1,
+                              padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              itemCount: timelineEntries.length,
                               itemBuilder: (context, index) {
-                              if (index == 0) {
+                                final entry =
+                                    timelineEntries[timelineEntries.length -
+                                        index -
+                                        1];
                                 return KeyedSubtree(
-                                  key: const ValueKey('__live_stream__'),
-                                  child: _LiveStreamArea(
-                                    liveText: _liveAssistantNotifier,
-                                    thinking: _thinkingNotifier,
-                                  ),
+                                  key: ValueKey(entry.keyId),
+                                  child: switch (entry.kind) {
+                                    _TimelineEntryKind.message =>
+                                      _MessageBubble(
+                                        message: entry.message!,
+                                        onOpenFile: _openWorkspaceFile,
+                                      ),
+                                    _TimelineEntryKind.activity =>
+                                      _ActivityCard(
+                                        activity: entry.activity!,
+                                        sessionCwd: session.cwd,
+                                        defaultCollapsed:
+                                            widget.topPadding == null,
+                                        onOpenFile: _openWorkspaceFile,
+                                      ),
+                                    _TimelineEntryKind.liveAssistant =>
+                                      _LiveAssistantBubble(
+                                        message: _liveAssistantNotifier,
+                                        onOpenFile: _openWorkspaceFile,
+                                      ),
+                                  },
                                 );
-                              }
-                              final entry = timelineEntries[timelineEntries
-                                      .length -
-                                  index];
-                              return KeyedSubtree(
-                                key: ValueKey(entry.keyId),
-                                child: switch (entry.kind) {
-                                  _TimelineEntryKind.message => _MessageBubble(
-                                    message: entry.message!,
-                                    onOpenFile: _openWorkspaceFile,
-                                  ),
-                                  _TimelineEntryKind.activity => _ActivityCard(
-                                    activity: entry.activity!,
-                                    sessionCwd: session.cwd,
-                                    defaultCollapsed: widget.topPadding == null,
-                                    onOpenFile: _openWorkspaceFile,
-                                  ),
-                                  _TimelineEntryKind.thinking =>
-                                    const _ThinkingBubble(),
-                                  _TimelineEntryKind.liveAssistant =>
-                                    const SizedBox.shrink(),
-                                },
-                              );
                               },
                             ),
                           ),
@@ -1415,6 +1477,7 @@ class _SessionScreenState extends State<SessionScreen>
                       ],
                     ),
             ),
+            _ComposerStatusStrip(thinking: _thinkingNotifier),
             _Composer(
               controller: _composerController,
               sending: _sending,
@@ -1507,10 +1570,7 @@ class _SessionHeader extends StatelessWidget {
                     session.cwd,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: monoStyle(
-                      color: colors.textSecondary,
-                      fontSize: 11,
-                    ),
+                    style: monoStyle(color: colors.textSecondary, fontSize: 11),
                   ),
                   if (_metaLine(session).isNotEmpty) ...[
                     const SizedBox(height: 3),
@@ -1530,11 +1590,7 @@ class _SessionHeader extends StatelessWidget {
             const SizedBox(width: 4),
             IconButton(
               onPressed: onDetails,
-              icon: Icon(
-                Icons.tune_rounded,
-                size: 18,
-                color: colors.accent,
-              ),
+              icon: Icon(Icons.tune_rounded, size: 18, color: colors.accent),
               tooltip: 'Session details',
               visualDensity: VisualDensity.compact,
               padding: const EdgeInsets.all(6),
@@ -1648,10 +1704,7 @@ class _SessionHeaderStrip extends StatelessWidget {
               ),
               Text(
                 '  ·  ',
-                style: monoStyle(
-                  color: colors.textTertiary,
-                  fontSize: 11.5,
-                ),
+                style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
               ),
               Flexible(
                 flex: 2,
@@ -1659,10 +1712,7 @@ class _SessionHeaderStrip extends StatelessWidget {
                   session.cwd,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: monoStyle(
-                    color: colors.textTertiary,
-                    fontSize: 11.5,
-                  ),
+                  style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
                 ),
               ),
               if (favorite) ...[
@@ -1670,11 +1720,7 @@ class _SessionHeaderStrip extends StatelessWidget {
                 Icon(Icons.star_rounded, size: 13, color: colors.warning),
               ],
               const SizedBox(width: 6),
-              Icon(
-                Icons.tune_rounded,
-                size: 14,
-                color: colors.accent,
-              ),
+              Icon(Icons.tune_rounded, size: 14, color: colors.accent),
             ],
           ),
         ),
@@ -1865,10 +1911,7 @@ class _HistoryTruncationCard extends StatelessWidget {
               onTap: onLoadOlderHistory,
               borderRadius: BorderRadius.circular(6),
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Text(
                   'Load older',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -2027,7 +2070,49 @@ class _SendButton extends StatelessWidget {
   }
 }
 
-enum _TimelineEntryKind { message, activity, thinking, liveAssistant }
+class _LiveAssistantMessageState {
+  const _LiveAssistantMessageState({
+    required this.id,
+    required this.text,
+    required this.createdAt,
+    required this.seq,
+    required this.phase,
+    this.live = true,
+  });
+
+  final String id;
+  final String text;
+  final DateTime createdAt;
+  final int seq;
+  final String? phase;
+  final bool live;
+
+  _LiveAssistantMessageState copyWith({
+    String? text,
+    String? phase,
+    bool? live,
+  }) {
+    return _LiveAssistantMessageState(
+      id: id,
+      text: text ?? this.text,
+      createdAt: createdAt,
+      seq: seq,
+      phase: phase ?? this.phase,
+      live: live ?? this.live,
+    );
+  }
+
+  SessionMessage toMessage() => SessionMessage(
+    id: id,
+    role: 'assistant',
+    text: text,
+    createdAt: createdAt,
+    seq: seq,
+    phase: phase,
+  );
+}
+
+enum _TimelineEntryKind { message, activity, liveAssistant }
 
 class _TimelineEntry {
   const _TimelineEntry._({
@@ -2055,6 +2140,14 @@ class _TimelineEntry {
     activity: activity,
   );
 
+  factory _TimelineEntry.liveAssistant(_LiveAssistantMessageState message) =>
+      _TimelineEntry._(
+        kind: _TimelineEntryKind.liveAssistant,
+        createdAt: message.createdAt,
+        seq: message.seq,
+        keyId: 'msg:${message.id}',
+      );
+
   final _TimelineEntryKind kind;
   final DateTime createdAt;
   final int seq;
@@ -2063,80 +2156,83 @@ class _TimelineEntry {
   final SessionActivity? activity;
 }
 
-class _LiveStreamArea extends StatelessWidget {
-  const _LiveStreamArea({required this.liveText, required this.thinking});
+class _LiveAssistantBubble extends StatelessWidget {
+  const _LiveAssistantBubble({required this.message, this.onOpenFile});
 
-  final ValueListenable<String> liveText;
-  final ValueListenable<bool> thinking;
+  final ValueListenable<_LiveAssistantMessageState?> message;
+  final void Function(String path)? onOpenFile;
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<String>(
-      valueListenable: liveText,
-      builder: (context, text, _) {
-        if (text.isNotEmpty) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: _MessageBubble(
-              message: SessionMessage(
-                id: 'live',
-                role: 'assistant',
-                text: text,
-                createdAt: DateTime.now(),
-                seq: 1 << 30,
-                phase: 'commentary',
-              ),
-              live: true,
-            ),
-          );
+    return ValueListenableBuilder<_LiveAssistantMessageState?>(
+      valueListenable: message,
+      builder: (context, liveMessage, _) {
+        if (liveMessage == null) {
+          return const SizedBox.shrink();
         }
-        return ValueListenableBuilder<bool>(
-          valueListenable: thinking,
-          builder: (context, show, _) {
-            if (!show) return const SizedBox.shrink();
-            return const Padding(
-              padding: EdgeInsets.only(bottom: 4),
-              child: _ThinkingBubble(),
-            );
-          },
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: _MessageBubble(
+            message: liveMessage.toMessage(),
+            live: liveMessage.live,
+            onOpenFile: onOpenFile,
+          ),
         );
       },
     );
   }
 }
 
-class _ThinkingBubble extends StatelessWidget {
-  const _ThinkingBubble();
+class _ComposerStatusStrip extends StatelessWidget {
+  const _ComposerStatusStrip({required this.thinking});
+
+  final ValueListenable<bool> thinking;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: colors.border),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const LivePulse(),
-              const SizedBox(width: 10),
-              Text(
-                'Thinking…',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: colors.textSecondary),
+    return ValueListenableBuilder<bool>(
+      valueListenable: thinking,
+      builder: (context, show, _) {
+        if (!show) {
+          return const SizedBox.shrink();
+        }
+        final colors = context.colors;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.border),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                children: [
+                  const LivePulse(),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Working',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: colors.textPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Waiting for assistant output…',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -2360,13 +2456,14 @@ class _MarkdownMessageBody extends StatelessWidget {
       },
       highlightBuilder: (context, hlText, style) {
         final isPath = onOpenFile != null && _looksLikeFilePath(hlText);
-        final displayStyle = monoStyle(
-          color: isPath ? colors.accent : colors.accent,
-          fontSize: 12.5,
-        ).copyWith(
-          decoration: isPath ? TextDecoration.underline : null,
-          decorationColor: isPath ? colors.accent : null,
-        );
+        final displayStyle =
+            monoStyle(
+              color: isPath ? colors.accent : colors.accent,
+              fontSize: 12.5,
+            ).copyWith(
+              decoration: isPath ? TextDecoration.underline : null,
+              decorationColor: isPath ? colors.accent : null,
+            );
         if (isPath) {
           return GestureDetector(
             onTap: () => onOpenFile!(hlText),
@@ -2413,14 +2510,51 @@ bool _hasKnownExtension(String path) {
   if (dot < 0 || dot == path.length - 1) return false;
   final ext = path.substring(dot + 1).toLowerCase();
   const knownExts = {
-    'dart', 'ts', 'tsx', 'js', 'mjs', 'cjs', 'jsx',
-    'json', 'yaml', 'yml', 'toml', 'md', 'markdown',
-    'html', 'htm', 'xml', 'svg', 'css', 'scss', 'less',
-    'py', 'go', 'rs', 'rb', 'java', 'kt', 'swift',
-    'c', 'h', 'cpp', 'cc', 'cxx', 'cs',
-    'sh', 'bash', 'zsh', 'fish',
-    'txt', 'env', 'lock', 'gradle', 'properties',
-    'proto', 'graphql', 'sql',
+    'dart',
+    'ts',
+    'tsx',
+    'js',
+    'mjs',
+    'cjs',
+    'jsx',
+    'json',
+    'yaml',
+    'yml',
+    'toml',
+    'md',
+    'markdown',
+    'html',
+    'htm',
+    'xml',
+    'svg',
+    'css',
+    'scss',
+    'less',
+    'py',
+    'go',
+    'rs',
+    'rb',
+    'java',
+    'kt',
+    'swift',
+    'c',
+    'h',
+    'cpp',
+    'cc',
+    'cxx',
+    'cs',
+    'sh',
+    'bash',
+    'zsh',
+    'fish',
+    'txt',
+    'env',
+    'lock',
+    'gradle',
+    'properties',
+    'proto',
+    'graphql',
+    'sql',
   };
   return knownExts.contains(ext);
 }
@@ -2501,9 +2635,7 @@ class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
       spans.add(TextSpan(text: widget.text.substring(cursor)));
     }
 
-    return SelectableText.rich(
-      TextSpan(style: widget.style, children: spans),
-    );
+    return SelectableText.rich(TextSpan(style: widget.style, children: spans));
   }
 }
 
@@ -2690,78 +2822,81 @@ class _ActivityCardState extends State<_ActivityCard> {
                 if (!_cardCollapsed) ...[
                   const SizedBox(height: 12),
                   Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    if (activity.turnId != null)
-                      MeshPill(
-                        label: 'turn ${_shortId(activity.turnId!)}',
-                        mono: true,
-                      ),
-                    if (activity.isCommand && activity.exitCode != null)
-                      MeshPill(
-                        label: 'exit ${activity.exitCode}',
-                        tone: activity.exitCode == 0
-                            ? MeshPillTone.success
-                            : MeshPillTone.danger,
-                        mono: true,
-                      ),
-                    if (activity.isCommand && activity.durationMs != null)
-                      MeshPill(
-                        label: _formatDuration(activity.durationMs!),
-                        mono: true,
-                      ),
-                    if (activity.isCommand &&
-                        (activity.source ?? '').isNotEmpty)
-                      MeshPill(
-                        label: _commandSourceLabel(activity.source!),
-                        mono: true,
-                      ),
-                    if (activity.isCommand &&
-                        (activity.processId ?? '').isNotEmpty)
-                      MeshPill(label: 'pty ${activity.processId}', mono: true),
-                    if (activity.isCommand &&
-                        activity.terminalStatus == 'input')
-                      const MeshPill(
-                        label: 'stdin',
-                        tone: MeshPillTone.info,
-                        mono: true,
-                      ),
-                    if (activity.isCommand &&
-                        activity.terminalStatus == 'waiting')
-                      const MeshPill(
-                        label: 'interactive',
-                        tone: MeshPillTone.warning,
-                        mono: true,
-                      ),
-                    if (activity.isCommand)
-                      ...activity.commandActions.map(
-                        (action) => MeshPill(label: action.label, mono: true),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                if (activity.isCommand)
-                  ..._buildCommandBody(context, activity)
-                else if (activity.isTurnDiff) ...[
-                  if ((activity.diff ?? '').isNotEmpty)
-                    _buildLazyDiff(
-                      context,
-                      label:
-                          'Show turn diff (${_diffLineCount(activity.diff!)} lines)',
-                      diff: activity.diff!,
-                    )
-                  else
-                    _waitingText(context, 'Waiting for turn diff.'),
-                ] else if (activity.changes.isEmpty) ...[
-                  _waitingText(context, 'Waiting for patch details.'),
-                ] else ...[
-                  _buildLazyFileChanges(
-                    context,
-                    changes: activity.changes,
-                    sessionCwd: sessionCwd,
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      if (activity.turnId != null)
+                        MeshPill(
+                          label: 'turn ${_shortId(activity.turnId!)}',
+                          mono: true,
+                        ),
+                      if (activity.isCommand && activity.exitCode != null)
+                        MeshPill(
+                          label: 'exit ${activity.exitCode}',
+                          tone: activity.exitCode == 0
+                              ? MeshPillTone.success
+                              : MeshPillTone.danger,
+                          mono: true,
+                        ),
+                      if (activity.isCommand && activity.durationMs != null)
+                        MeshPill(
+                          label: _formatDuration(activity.durationMs!),
+                          mono: true,
+                        ),
+                      if (activity.isCommand &&
+                          (activity.source ?? '').isNotEmpty)
+                        MeshPill(
+                          label: _commandSourceLabel(activity.source!),
+                          mono: true,
+                        ),
+                      if (activity.isCommand &&
+                          (activity.processId ?? '').isNotEmpty)
+                        MeshPill(
+                          label: 'pty ${activity.processId}',
+                          mono: true,
+                        ),
+                      if (activity.isCommand &&
+                          activity.terminalStatus == 'input')
+                        const MeshPill(
+                          label: 'stdin',
+                          tone: MeshPillTone.info,
+                          mono: true,
+                        ),
+                      if (activity.isCommand &&
+                          activity.terminalStatus == 'waiting')
+                        const MeshPill(
+                          label: 'interactive',
+                          tone: MeshPillTone.warning,
+                          mono: true,
+                        ),
+                      if (activity.isCommand)
+                        ...activity.commandActions.map(
+                          (action) => MeshPill(label: action.label, mono: true),
+                        ),
+                    ],
                   ),
-                ],
+                  const SizedBox(height: 12),
+                  if (activity.isCommand)
+                    ..._buildCommandBody(context, activity)
+                  else if (activity.isTurnDiff) ...[
+                    if ((activity.diff ?? '').isNotEmpty)
+                      _buildLazyDiff(
+                        context,
+                        label:
+                            'Show turn diff (${_diffLineCount(activity.diff!)} lines)',
+                        diff: activity.diff!,
+                      )
+                    else
+                      _waitingText(context, 'Waiting for turn diff.'),
+                  ] else if (activity.changes.isEmpty) ...[
+                    _waitingText(context, 'Waiting for patch details.'),
+                  ] else ...[
+                    _buildLazyFileChanges(
+                      context,
+                      changes: activity.changes,
+                      sessionCwd: sessionCwd,
+                    ),
+                  ],
                 ],
               ],
             ),
@@ -2957,8 +3092,7 @@ class _InlineFileViewerState extends State<_InlineFileViewer> {
           padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
           child: Row(
             children: [
-              Icon(Icons.description_outlined,
-                  size: 18, color: colors.accent),
+              Icon(Icons.description_outlined, size: 18, color: colors.accent),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -2969,10 +3103,9 @@ class _InlineFileViewerState extends State<_InlineFileViewer> {
                       baseName(widget.path),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Row(
@@ -3154,23 +3287,20 @@ class _FileChangeBlock extends StatelessWidget {
     final canOpen = onOpen != null && !isDeleted;
     final pathRow = Row(
       children: [
-        Icon(
-          Icons.description_outlined,
-          size: 16,
-          color: colors.textSecondary,
-        ),
+        Icon(Icons.description_outlined, size: 16, color: colors.textSecondary),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             _relativeSessionPath(change.path, sessionCwd),
-            style: monoStyle(
-              color: canOpen ? colors.accent : colors.textPrimary,
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-            ).copyWith(
-              decoration: canOpen ? TextDecoration.underline : null,
-              decorationColor: canOpen ? colors.accent : null,
-            ),
+            style:
+                monoStyle(
+                  color: canOpen ? colors.accent : colors.textPrimary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ).copyWith(
+                  decoration: canOpen ? TextDecoration.underline : null,
+                  decorationColor: canOpen ? colors.accent : null,
+                ),
           ),
         ),
         const SizedBox(width: 8),
@@ -3477,8 +3607,9 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
                   Expanded(
                     child: Text(
                       'Session controls',
-                      style: theme.textTheme.titleLarge
-                          ?.copyWith(fontWeight: FontWeight.w700),
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -3486,8 +3617,10 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
               const SizedBox(height: 6),
               Text(
                 'Change how Codex handles approvals, file access and network for this session. Applied on your next message; Codex remembers it for the rest of the thread.',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: colors.textSecondary, height: 1.4),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colors.textSecondary,
+                  height: 1.4,
+                ),
               ),
               const SizedBox(height: 18),
               _PolicyAutopilotCard(
@@ -3498,8 +3631,10 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
               const SizedBox(height: 22),
               Text(
                 'Approval policy',
-                style: theme.textTheme.labelLarge
-                    ?.copyWith(color: colors.textSecondary, letterSpacing: 0.4),
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.textSecondary,
+                  letterSpacing: 0.4,
+                ),
               ),
               const SizedBox(height: 8),
               for (final policy in ApprovalPolicy.values)
@@ -3508,7 +3643,8 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
                   groupValue: _effectiveApproval,
                   title: policy.label,
                   subtitle: policy.description,
-                  fromRuntime: _policy.approval == null &&
+                  fromRuntime:
+                      _policy.approval == null &&
                       widget.runtimeApproval == policy,
                   onSelected: (value) {
                     setState(() {
@@ -3519,8 +3655,10 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
               const SizedBox(height: 18),
               Text(
                 'Sandbox',
-                style: theme.textTheme.labelLarge
-                    ?.copyWith(color: colors.textSecondary, letterSpacing: 0.4),
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.textSecondary,
+                  letterSpacing: 0.4,
+                ),
               ),
               const SizedBox(height: 8),
               for (final sandbox in SandboxMode.values)
@@ -3529,7 +3667,8 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
                   groupValue: _effectiveSandbox,
                   title: sandbox.label,
                   subtitle: sandbox.description,
-                  fromRuntime: _policy.sandbox == null &&
+                  fromRuntime:
+                      _policy.sandbox == null &&
                       widget.runtimeSandbox == sandbox,
                   danger: sandbox == SandboxMode.dangerFullAccess,
                   onSelected: (value) {
@@ -3541,8 +3680,10 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
               const SizedBox(height: 18),
               Text(
                 'Network',
-                style: theme.textTheme.labelLarge
-                    ?.copyWith(color: colors.textSecondary, letterSpacing: 0.4),
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.textSecondary,
+                  letterSpacing: 0.4,
+                ),
               ),
               const SizedBox(height: 8),
               _PolicyNetworkTile(
@@ -3551,9 +3692,9 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
                 subtitle: _networkToggleDisabled
                     ? 'Full access already grants network. Toggle locked.'
                     : (_effectiveSandbox == SandboxMode.workspaceWrite ||
-                            _effectiveSandbox == SandboxMode.readOnly)
-                        ? 'Allow outbound network for tools like gh, curl, pip. Off by default for read-only / workspace-write.'
-                        : 'Allow outbound network.',
+                          _effectiveSandbox == SandboxMode.readOnly)
+                    ? 'Allow outbound network for tools like gh, curl, pip. Off by default for read-only / workspace-write.'
+                    : 'Allow outbound network.',
                 onChanged: (value) {
                   setState(() {
                     _policy = _policy.copyWith(networkAccess: value);
@@ -3632,22 +3773,23 @@ class _PolicyAutopilotCard extends StatelessWidget {
                   Text(
                     'Autopilot — never ask again',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: colors.textPrimary,
-                        ),
+                      fontWeight: FontWeight.w700,
+                      color: colors.textPrimary,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     'Approval = never · Sandbox = full access · Network = on. Codex runs without pausing for approvals and can hit the internet.',
-                    style: Theme.of(context).textTheme.bodySmall
-                        ?.copyWith(color: colors.textSecondary, height: 1.35),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                      height: 1.35,
+                    ),
                   ),
                 ],
               ),
             ),
             if (active)
-              Icon(Icons.check_circle_rounded,
-                  color: colors.accent, size: 20),
+              Icon(Icons.check_circle_rounded, color: colors.accent, size: 20),
           ],
         ),
       ),
@@ -3694,31 +3836,27 @@ class _PolicyNetworkTile extends StatelessWidget {
                 Text(
                   'Allow outbound network',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: colors.textPrimary,
-                      ),
+                    fontWeight: FontWeight.w600,
+                    color: colors.textPrimary,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                        height: 1.35,
-                      ),
+                    color: colors.textSecondary,
+                    height: 1.35,
+                  ),
                 ),
               ],
             ),
           ),
-          Switch(
-            value: value,
-            onChanged: disabled ? null : onChanged,
-          ),
+          Switch(value: value, onChanged: disabled ? null : onChanged),
         ],
       ),
     );
   }
 }
-
 
 class _PolicyRadioTile<T> extends StatelessWidget {
   const _PolicyRadioTile({
@@ -3754,9 +3892,7 @@ class _PolicyRadioTile<T> extends StatelessWidget {
           decoration: BoxDecoration(
             color: selected ? colors.accentMuted.withValues(alpha: 0.55) : null,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected ? accent : colors.border,
-            ),
+            border: Border.all(color: selected ? accent : colors.border),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3778,9 +3914,7 @@ class _PolicyRadioTile<T> extends StatelessWidget {
                         Expanded(
                           child: Text(
                             title,
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleSmall
+                            style: Theme.of(context).textTheme.titleSmall
                                 ?.copyWith(
                                   fontWeight: FontWeight.w600,
                                   color: colors.textPrimary,
@@ -3790,7 +3924,9 @@ class _PolicyRadioTile<T> extends StatelessWidget {
                         if (fromRuntime)
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
                               color: colors.surfaceMuted,
                               borderRadius: BorderRadius.circular(6),
@@ -3798,9 +3934,7 @@ class _PolicyRadioTile<T> extends StatelessWidget {
                             ),
                             child: Text(
                               'current',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelSmall
+                              style: Theme.of(context).textTheme.labelSmall
                                   ?.copyWith(
                                     color: colors.textSecondary,
                                     letterSpacing: 0.4,
@@ -3813,9 +3947,9 @@ class _PolicyRadioTile<T> extends StatelessWidget {
                     Text(
                       subtitle,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.textSecondary,
-                            height: 1.35,
-                          ),
+                        color: colors.textSecondary,
+                        height: 1.35,
+                      ),
                     ),
                   ],
                 ),
