@@ -433,6 +433,45 @@ export async function startServer(config: NodeConfig): Promise<void> {
     });
   }));
 
+  // Replay endpoint for cheap reconnect / resume. Clients pass `since`
+  // (the highest seq they've already observed) and get only newer
+  // messages + activities — no re-downloading the full transcript.
+  app.get("/api/sessions/:sessionId/events", asyncRoute(async (request, response) => {
+    const sessionId = pathParam(request.params.sessionId);
+    const query = request.query as Record<string, unknown>;
+    const since = asInteger(query.since) ?? 0;
+
+    const session = await readSession(bridge, sessionId, false);
+    const log = await loadRolloutLog(
+      sessionId,
+      session.path,
+      bridge.codexHome,
+    );
+    ensureSeqCursor(sessionId, log.nextSeq);
+    const activities = mergeSessionActivities(
+      log.activities,
+      liveActivities.get(sessionId)?.values() || [],
+    );
+    const newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
+    const newActivities = activities.filter((a) => (a.seq ?? 0) > since);
+    let highestSeq = since;
+    for (const m of newMessages) {
+      if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
+    }
+    for (const a of newActivities) {
+      if ((a.seq ?? 0) > highestSeq) highestSeq = a.seq ?? highestSeq;
+    }
+    response.json({
+      sessionId,
+      since,
+      nextSeq: highestSeq,
+      messages: newMessages,
+      activities: newActivities,
+      pendingAction: findPendingActionForSession(pendingActions, sessionId),
+      session: mapSession(session, log.runtime),
+    });
+  }));
+
   app.get("/api/sessions/:sessionId/status", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
     const state = await loadRunState(bridge, sessionId, activeTurns);
