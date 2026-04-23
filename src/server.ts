@@ -31,6 +31,11 @@ import {
 } from "./activity.js";
 import { CodexBridge } from "./codex-client.js";
 import { loadRolloutLog, loadSessionRuntime } from "./history.js";
+import {
+  FsWatchRegistry,
+  attachFsLiveSocket,
+  registerFsRoutes,
+} from "./fs-routes.js";
 
 const DEFAULT_SOURCES = ["cli", "vscode", "exec", "appServer"];
 const SESSION_LOG_CACHE_LIMIT = 24;
@@ -112,7 +117,14 @@ export async function startServer(config: NodeConfig): Promise<void> {
     process.stderr.write(line);
   });
 
+  const fsWatchRegistry = new FsWatchRegistry(bridge);
+
   bridge.on("notification", ({ method, params }) => {
+    if (method === "fs/changed") {
+      fsWatchRegistry.deliver(params as { watchId?: string; changedPaths?: string[] });
+      return;
+    }
+
     const sessionId = extractSessionId(method, params);
     if (!sessionId) {
       return;
@@ -322,7 +334,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }
 
   app.use(cors());
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "8mb" }));
 
   app.get("/healthz", (_request, response) => {
     response.json({ ok: true, label: config.label });
@@ -357,6 +369,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const sessions = await listSessions(bridge, runtimeCache);
     response.json(buildWorkspaces(sessions));
   }));
+
+  registerFsRoutes(app, {
+    bridge,
+    listSessions: () => listSessions(bridge, runtimeCache),
+    watchRegistry: fsWatchRegistry,
+  });
 
   app.get("/api/actions", asyncRoute(async (_request, response) => {
     response.json(await listPendingActions(bridge, pendingActions));
@@ -686,7 +704,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const wsServer = new WebSocketServer({ noServer: true });
   server.on("upgrade", (request, socket, head) => {
     const [pathOnly, queryString] = (request.url || "").split("?");
-    if (pathOnly !== "/api/live") {
+    if (pathOnly !== "/api/live" && pathOnly !== "/api/fs/live") {
       socket.destroy();
       return;
     }
@@ -695,6 +713,17 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : "";
     if (token !== config.token) {
       socket.destroy();
+      return;
+    }
+
+    if (pathOnly === "/api/fs/live") {
+      wsServer.handleUpgrade(request, socket, head, (ws) => {
+        try { ws.send(JSON.stringify({ type: "hello" })); } catch { /* noop */ }
+        attachFsLiveSocket(ws, fsWatchRegistry, {
+          bridge,
+          listSessions: () => listSessions(bridge, runtimeCache),
+        });
+      });
       return;
     }
 
