@@ -1623,52 +1623,77 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
-class _MarkdownMessageBody extends StatelessWidget {
+class _MarkdownMessageBody extends StatefulWidget {
   const _MarkdownMessageBody({required this.text, required this.textColor});
 
   final String text;
   final Color textColor;
 
   @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final baseBody = Theme.of(
-      context,
-    ).textTheme.bodyMedium?.copyWith(color: textColor, height: 1.5);
+  State<_MarkdownMessageBody> createState() => _MarkdownMessageBodyState();
+}
 
-    final styleSheet = MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-      p: baseBody,
-      h1: Theme.of(context).textTheme.headlineSmall?.copyWith(color: textColor),
-      h2: Theme.of(context).textTheme.titleLarge?.copyWith(color: textColor),
-      h3: Theme.of(context).textTheme.titleMedium?.copyWith(color: textColor),
-      listBullet: baseBody,
-      blockquote: baseBody?.copyWith(color: colors.textSecondary),
-      code: monoStyle(
-        color: textColor,
-        fontSize: 12.5,
-      ).copyWith(backgroundColor: colors.codeBackground),
-      codeblockPadding: const EdgeInsets.all(12),
-      codeblockDecoration: BoxDecoration(
-        color: colors.codeBackground,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.codeBorder),
-      ),
-      blockquoteDecoration: BoxDecoration(
-        border: Border(left: BorderSide(color: colors.accent, width: 3)),
-      ),
-      blockquotePadding: const EdgeInsets.fromLTRB(12, 6, 0, 6),
-      horizontalRuleDecoration: BoxDecoration(
-        border: Border(top: BorderSide(color: colors.border)),
-      ),
-      a: TextStyle(color: colors.accent, decoration: TextDecoration.underline),
+class _MarkdownMessageBodyState extends State<_MarkdownMessageBody> {
+  MarkdownStyleSheet? _cached;
+  Object? _cacheKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = context.colors;
+    final key = Object.hash(
+      theme.brightness,
+      widget.textColor.toARGB32(),
+      colors.codeBackground.toARGB32(),
+      colors.codeBorder.toARGB32(),
+      colors.accent.toARGB32(),
+      colors.border.toARGB32(),
+      colors.textSecondary.toARGB32(),
     );
 
+    if (_cached == null || _cacheKey != key) {
+      final baseBody = theme.textTheme.bodyMedium?.copyWith(
+        color: widget.textColor,
+        height: 1.5,
+      );
+      _cached = MarkdownStyleSheet.fromTheme(theme).copyWith(
+        p: baseBody,
+        h1: theme.textTheme.headlineSmall?.copyWith(color: widget.textColor),
+        h2: theme.textTheme.titleLarge?.copyWith(color: widget.textColor),
+        h3: theme.textTheme.titleMedium?.copyWith(color: widget.textColor),
+        listBullet: baseBody,
+        blockquote: baseBody?.copyWith(color: colors.textSecondary),
+        code: monoStyle(
+          color: widget.textColor,
+          fontSize: 12.5,
+        ).copyWith(backgroundColor: colors.codeBackground),
+        codeblockPadding: const EdgeInsets.all(12),
+        codeblockDecoration: BoxDecoration(
+          color: colors.codeBackground,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.codeBorder),
+        ),
+        blockquoteDecoration: BoxDecoration(
+          border: Border(left: BorderSide(color: colors.accent, width: 3)),
+        ),
+        blockquotePadding: const EdgeInsets.fromLTRB(12, 6, 0, 6),
+        horizontalRuleDecoration: BoxDecoration(
+          border: Border(top: BorderSide(color: colors.border)),
+        ),
+        a: TextStyle(
+          color: colors.accent,
+          decoration: TextDecoration.underline,
+        ),
+      );
+      _cacheKey = key;
+    }
+
     return MarkdownBody(
-      data: text,
+      data: widget.text,
       selectable: true,
       shrinkWrap: true,
       softLineBreak: true,
-      styleSheet: styleSheet,
+      styleSheet: _cached!,
     );
   }
 }
