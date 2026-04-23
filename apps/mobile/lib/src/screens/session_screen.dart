@@ -925,88 +925,119 @@ class _SessionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
       child: MeshCard(
-        padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+        padding: const EdgeInsets.fromLTRB(14, 9, 8, 9),
         accentStrip: running ? colors.success : colors.accent,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    host.label,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          host.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _HeaderStatusDot(
+                        color: running ? colors.success : colors.textTertiary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        running ? 'running' : 'idle',
+                        style: monoStyle(
+                          color: running
+                              ? colors.success
+                              : colors.textSecondary,
+                          fontSize: 10.5,
+                        ),
+                      ),
+                      if (favorite) ...[
+                        const SizedBox(width: 6),
+                        Icon(
+                          Icons.star_rounded,
+                          size: 13,
+                          color: colors.warning,
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    session.cwd,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: monoStyle(
+                      color: colors.textSecondary,
+                      fontSize: 11,
                     ),
                   ),
-                ),
-                TextButton.icon(
-                  onPressed: onDetails,
-                  icon: Icon(
-                    Icons.tune_rounded,
-                    size: 16,
-                    color: colors.accent,
-                  ),
-                  label: Text(
-                    'Details',
-                    style: TextStyle(color: colors.accent),
-                  ),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
-              ],
+                  if (_metaLine(session).isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      _metaLine(session),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(
+                        color: colors.textTertiary,
+                        fontSize: 10.5,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
-            const SizedBox(height: 2),
-            Text(
-              session.cwd,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                MeshPill(
-                  label: running ? 'running' : 'idle',
-                  tone: running ? MeshPillTone.success : MeshPillTone.neutral,
-                  icon: running ? Icons.bolt_rounded : Icons.pause_rounded,
-                  mono: true,
-                ),
-                if (favorite)
-                  const MeshPill(
-                    label: 'favorite',
-                    tone: MeshPillTone.warning,
-                    icon: Icons.star_rounded,
-                    mono: true,
-                  ),
-                MeshPill(
-                  label: session.source,
-                  tone: MeshPillTone.accent,
-                  mono: true,
-                ),
-                if ((session.runtime?.model ?? '').isNotEmpty)
-                  MeshPill(
-                    label: session.runtime!.model!,
-                    tone: MeshPillTone.info,
-                    mono: true,
-                  ),
-                if ((session.runtime?.approvalPolicy ?? '').isNotEmpty)
-                  MeshPill(
-                    label: 'approval ${session.runtime!.approvalPolicy!}',
-                    tone: MeshPillTone.warning,
-                    mono: true,
-                  ),
-              ],
+            const SizedBox(width: 4),
+            IconButton(
+              onPressed: onDetails,
+              icon: Icon(
+                Icons.tune_rounded,
+                size: 18,
+                color: colors.accent,
+              ),
+              tooltip: 'Session details',
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.all(6),
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  static String _metaLine(SessionSummary session) {
+    final parts = <String>[session.source];
+    final model = session.runtime?.model;
+    if (model != null && model.isNotEmpty) parts.add(model);
+    final approval = session.runtime?.approvalPolicy;
+    if (approval != null && approval.isNotEmpty) {
+      parts.add('approval $approval');
+    }
+    return parts.join(' · ');
+  }
+}
+
+class _HeaderStatusDot extends StatelessWidget {
+  const _HeaderStatusDot({required this.color});
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
 }

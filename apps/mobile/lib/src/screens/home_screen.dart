@@ -468,7 +468,7 @@ class RecentPane extends StatefulWidget {
 
 class _RecentPaneState extends State<RecentPane> {
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
-  late Future<List<RemoteSessionEntry>> _future;
+  late Future<_RecentLoadResult> _future;
 
   @override
   void initState() {
@@ -485,7 +485,8 @@ class _RecentPaneState extends State<RecentPane> {
     }
   }
 
-  Future<List<RemoteSessionEntry>> _loadRecent() async {
+  Future<_RecentLoadResult> _loadRecent() async {
+    final failures = <String>[];
     final results = await Future.wait(
       widget.hosts.map((host) async {
         try {
@@ -497,6 +498,7 @@ class _RecentPaneState extends State<RecentPane> {
               )
               .toList();
         } catch (_) {
+          failures.add(host.label);
           return const <RemoteSessionEntry>[];
         }
       }),
@@ -512,7 +514,7 @@ class _RecentPaneState extends State<RecentPane> {
       if (!mounted) return;
       widget.onActiveCountChanged(activeCount);
     });
-    return merged;
+    return _RecentLoadResult(entries: merged, failedHosts: failures);
   }
 
   List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
@@ -551,13 +553,15 @@ class _RecentPaneState extends State<RecentPane> {
       );
     }
 
-    return FutureBuilder<List<RemoteSessionEntry>>(
+    return FutureBuilder<_RecentLoadResult>(
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const MeshLoader();
         }
-        final entries = snapshot.data ?? const [];
+        final result = snapshot.data ?? const _RecentLoadResult.empty();
+        final entries = result.entries;
+        final failures = result.failedHosts;
         if (entries.isEmpty) {
           return RefreshIndicator(
             color: context.colors.accent,
@@ -567,9 +571,16 @@ class _RecentPaneState extends State<RecentPane> {
             },
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              children: const [
-                SizedBox(height: 80),
-                MeshEmptyState(
+              children: [
+                if (failures.isNotEmpty)
+                  _RecentErrorBanner(
+                    hostLabels: failures,
+                    onRetry: () {
+                      setState(() => _future = _loadRecent());
+                    },
+                  ),
+                const SizedBox(height: 80),
+                const MeshEmptyState(
                   icon: Icons.cloud_off_rounded,
                   title: 'No reachable sessions',
                   body:
@@ -593,6 +604,13 @@ class _RecentPaneState extends State<RecentPane> {
                 child: ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   children: [
+                    if (failures.isNotEmpty)
+                      _RecentErrorBanner(
+                        hostLabels: failures,
+                        onRetry: () {
+                          setState(() => _future = _loadRecent());
+                        },
+                      ),
                     const SizedBox(height: 80),
                     MeshEmptyState(
                       icon: Icons.search_off_rounded,
@@ -604,6 +622,8 @@ class _RecentPaneState extends State<RecentPane> {
                 ),
               );
             }
+            final basePadding =
+                widget.padding ?? const EdgeInsets.fromLTRB(16, 8, 16, 32);
             return RefreshIndicator(
               color: context.colors.accent,
               onRefresh: () async {
@@ -611,12 +631,21 @@ class _RecentPaneState extends State<RecentPane> {
                 await _future;
               },
               child: ListView.separated(
-                padding:
-                    widget.padding ?? const EdgeInsets.fromLTRB(16, 8, 16, 32),
-                itemCount: sortedEntries.length,
+                padding: basePadding,
+                itemCount: sortedEntries.length + (failures.isNotEmpty ? 1 : 0),
                 separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
-                  final entry = sortedEntries[index];
+                  if (failures.isNotEmpty && index == 0) {
+                    return _RecentErrorBanner(
+                      hostLabels: failures,
+                      onRetry: () {
+                        setState(() => _future = _loadRecent());
+                      },
+                    );
+                  }
+                  final entryIndex =
+                      failures.isNotEmpty ? index - 1 : index;
+                  final entry = sortedEntries[entryIndex];
                   return _SessionRowCard(
                     host: entry.host,
                     session: entry.session,
@@ -1348,4 +1377,68 @@ String _randomId() {
     12,
     (_) => alphabet[random.nextInt(alphabet.length)],
   ).join();
+}
+
+class _RecentLoadResult {
+  const _RecentLoadResult({required this.entries, required this.failedHosts});
+  const _RecentLoadResult.empty()
+    : entries = const [],
+      failedHosts = const [];
+
+  final List<RemoteSessionEntry> entries;
+  final List<String> failedHosts;
+}
+
+class _RecentErrorBanner extends StatelessWidget {
+  const _RecentErrorBanner({
+    required this.hostLabels,
+    required this.onRetry,
+  });
+
+  final List<String> hostLabels;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final summary = hostLabels.length == 1
+        ? '${hostLabels.first} is unreachable.'
+        : '${hostLabels.length} hosts are unreachable: ${hostLabels.join(', ')}.';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+      decoration: BoxDecoration(
+        color: colors.warningMuted,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.warning.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.cloud_off_rounded, size: 18, color: colors.warning),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              summary,
+              style: TextStyle(
+                color: colors.warning,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: onRetry,
+            style: TextButton.styleFrom(
+              foregroundColor: colors.warning,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: const Size(0, 32),
+              visualDensity: VisualDensity.compact,
+              textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
 }

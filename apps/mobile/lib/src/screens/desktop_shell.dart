@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api_client.dart';
 import '../host_store.dart';
@@ -41,17 +42,23 @@ class _DesktopShellState extends State<DesktopShell> {
   int _inboxCount = 0;
   int _activeCount = 0;
   String _query = '';
+  double _sidebarWidth = _defaultSidebarWidth;
   // Used to trigger refresh of sidebar panes after a host/session mutation.
   int _refreshTick = 0;
 
   // Reserve space under the macOS titlebar so traffic lights & drag area
   // stay clean. 28pt matches the standard NSWindow titlebar height.
   static const double _titlebarInset = 28;
+  static const double _defaultSidebarWidth = 304;
+  static const double _minSidebarWidth = 240;
+  static const double _maxSidebarWidth = 440;
+  static const String _sidebarWidthPref = 'sidemesh.desktop.sidebarWidth';
 
   @override
   void initState() {
     super.initState();
     _loadHosts();
+    _loadSidebarWidth();
     _searchController.addListener(() {
       final next = _searchController.text;
       if (next != _query) {
@@ -74,6 +81,38 @@ class _DesktopShellState extends State<DesktopShell> {
       _hosts = hosts;
       _loading = false;
     });
+  }
+
+  Future<void> _loadSidebarWidth() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getDouble(_sidebarWidthPref);
+      if (stored != null && mounted) {
+        setState(() {
+          _sidebarWidth = stored.clamp(_minSidebarWidth, _maxSidebarWidth);
+        });
+      }
+    } catch (_) {
+      // Preferences unavailable — stick with the default.
+    }
+  }
+
+  void _resizeSidebar(double delta) {
+    final next = (_sidebarWidth + delta).clamp(
+      _minSidebarWidth,
+      _maxSidebarWidth,
+    );
+    if (next == _sidebarWidth) return;
+    setState(() => _sidebarWidth = next);
+  }
+
+  Future<void> _persistSidebarWidth() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_sidebarWidthPref, _sidebarWidth);
+    } catch (_) {
+      // Best-effort persistence.
+    }
   }
 
   Future<void> _showHostEditor({HostProfile? initial}) async {
@@ -189,6 +228,7 @@ class _DesktopShellState extends State<DesktopShell> {
               children: [
                 _Sidebar(
                   titlebarInset: _titlebarInset,
+                  width: _sidebarWidth,
                   hosts: _hosts,
                   loading: _loading,
                   api: _api,
@@ -219,7 +259,11 @@ class _DesktopShellState extends State<DesktopShell> {
                     setState(() => _inboxCount = n);
                   },
                 ),
-                Container(width: 1, color: colors.border),
+                _SidebarResizer(
+                  color: colors.border,
+                  onDrag: _resizeSidebar,
+                  onDragEnd: _persistSidebarWidth,
+                ),
                 Expanded(
                   child: _DetailPane(
                     titlebarInset: _titlebarInset,
@@ -257,6 +301,7 @@ class _SwitchSectionIntent extends Intent {
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.titlebarInset,
+    required this.width,
     required this.hosts,
     required this.loading,
     required this.api,
@@ -280,6 +325,7 @@ class _Sidebar extends StatelessWidget {
   });
 
   final double titlebarInset;
+  final double width;
   final List<HostProfile> hosts;
   final bool loading;
   final ApiClient api;
@@ -305,7 +351,7 @@ class _Sidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return SizedBox(
-      width: 304,
+      width: width,
       child: Container(
         color: colors.surface,
         child: Column(
@@ -641,7 +687,7 @@ class _ThemeToggleButton extends StatelessWidget {
   }
 }
 
-class _DetailPane extends StatelessWidget {
+class _DetailPane extends StatefulWidget {
   const _DetailPane({
     required this.titlebarInset,
     required this.active,
@@ -655,14 +701,22 @@ class _DetailPane extends StatelessWidget {
   final VoidCallback onClose;
 
   @override
+  State<_DetailPane> createState() => _DetailPaneState();
+}
+
+class _DetailPaneState extends State<_DetailPane> {
+  bool _hoverClose = false;
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final active = widget.active;
     if (active == null) {
       return Container(
         color: colors.canvas,
         child: Column(
           children: [
-            SizedBox(height: titlebarInset + 16),
+            SizedBox(height: widget.titlebarInset + 16),
             Expanded(
               child: Center(
                 child: Column(
@@ -702,27 +756,37 @@ class _DetailPane extends StatelessWidget {
         ),
       );
     }
-    final session = active!;
     // The session screen was designed for full-screen mobile, so we overlay
-    // a small drag region + close action on top for desktop. SessionScreen's
-    // own SafeArea will still be honored.
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: SessionScreen(
-            key: ValueKey('session-${session.host.id}-${session.session.id}'),
-            host: session.host,
-            session: session.session,
-            api: api,
-            topPadding: titlebarInset + 6,
+    // a small drag region + close action on top for desktop. The button
+    // fades in on hover so it doesn't distract during normal reading.
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hoverClose = true),
+      onExit: (_) => setState(() => _hoverClose = false),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: SessionScreen(
+              key: ValueKey('session-${active.host.id}-${active.session.id}'),
+              host: active.host,
+              session: active.session,
+              api: widget.api,
+              topPadding: widget.titlebarInset + 6,
+            ),
           ),
-        ),
-        Positioned(
-          top: 6,
-          right: 10,
-          child: _CloseSessionButton(onClose: onClose),
-        ),
-      ],
+          Positioned(
+            top: 6,
+            right: 10,
+            child: AnimatedOpacity(
+              opacity: _hoverClose ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 140),
+              child: IgnorePointer(
+                ignoring: !_hoverClose,
+                child: _CloseSessionButton(onClose: widget.onClose),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -880,6 +944,57 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
             },
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A thin vertical splitter that shows a resize cursor on hover and forwards
+/// horizontal drag deltas to the shell, which clamps and persists the width.
+class _SidebarResizer extends StatefulWidget {
+  const _SidebarResizer({
+    required this.color,
+    required this.onDrag,
+    required this.onDragEnd,
+  });
+
+  final Color color;
+  final ValueChanged<double> onDrag;
+  final VoidCallback onDragEnd;
+
+  @override
+  State<_SidebarResizer> createState() => _SidebarResizerState();
+}
+
+class _SidebarResizerState extends State<_SidebarResizer> {
+  bool _hover = false;
+  bool _dragging = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = _hover || _dragging;
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) => setState(() => _dragging = true),
+        onHorizontalDragUpdate: (d) => widget.onDrag(d.delta.dx),
+        onHorizontalDragEnd: (_) {
+          setState(() => _dragging = false);
+          widget.onDragEnd();
+        },
+        child: SizedBox(
+          width: 5,
+          child: Center(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              width: active ? 2 : 1,
+              color: widget.color.withValues(alpha: active ? 0.9 : 1.0),
+            ),
+          ),
+        ),
       ),
     );
   }
