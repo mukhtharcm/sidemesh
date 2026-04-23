@@ -30,6 +30,7 @@ export async function loadRolloutLog(
       runtime: null,
       totalMessages: 0,
       totalActivities: 0,
+      nextSeq: 0,
     };
   }
 
@@ -80,6 +81,7 @@ async function scanRolloutFile(
   let runtime: SessionRuntimeSummary | null = null;
   let totalMessages = 0;
   let totalActivities = 0;
+  let seq = 0;
   const file = createReadStream(rolloutPath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: file, crlfDelay: Infinity });
 
@@ -95,23 +97,25 @@ async function scanRolloutFile(
     }
 
     if (options.includeMessages) {
-      const entry = parseMessage(parsed);
+      const entry = parseMessage(parsed, seq);
       if (entry) {
         totalMessages += 1;
+        seq += 1;
         appendBounded(messages, entry, options.messageLimit ?? null);
       }
     }
 
     if (options.includeActivities) {
-      const activity = parseActivity(parsed);
+      const activity = parseActivity(parsed, seq);
       if (activity) {
         totalActivities += 1;
+        seq += 1;
         appendBounded(activities, activity, options.activityLimit ?? null);
       }
     }
   }
 
-  return { messages, activities, runtime, totalMessages, totalActivities };
+  return { messages, activities, runtime, totalMessages, totalActivities, nextSeq: seq };
 }
 
 async function findRolloutPath(sessionId: string, codexHomePath: string | null): Promise<string | null> {
@@ -152,7 +156,7 @@ async function walkDirectories(root: string, depth: number): Promise<string[]> {
   return files;
 }
 
-function parseMessage(parsed: any): SessionMessage | null {
+function parseMessage(parsed: any, seq: number): SessionMessage | null {
   const createdAt = parseTimestamp(parsed.timestamp);
   if (parsed.type === "event_msg") {
     const payloadType = parsed.payload?.type;
@@ -162,6 +166,7 @@ function parseMessage(parsed: any): SessionMessage | null {
         role: "user",
         text: parsed.payload.message,
         createdAt,
+        seq,
       };
     }
     if (payloadType === "agent_message" && typeof parsed.payload?.message === "string") {
@@ -170,6 +175,7 @@ function parseMessage(parsed: any): SessionMessage | null {
         role: "assistant",
         text: parsed.payload.message,
         createdAt,
+        seq,
         phase: parsed.payload.phase || "final_answer",
       };
     }
@@ -179,6 +185,7 @@ function parseMessage(parsed: any): SessionMessage | null {
         role: "system",
         text: `Turn aborted: ${parsed.payload?.reason || "unknown"}`,
         createdAt,
+        seq,
       };
     }
   }
@@ -186,7 +193,7 @@ function parseMessage(parsed: any): SessionMessage | null {
   return null;
 }
 
-function parseActivity(parsed: any): SessionActivity | null {
+function parseActivity(parsed: any, seq: number): SessionActivity | null {
   if (parsed.type !== "event_msg") {
     return null;
   }
@@ -195,11 +202,11 @@ function parseActivity(parsed: any): SessionActivity | null {
   const createdAt = parseTimestamp(parsed.timestamp);
   switch (payload?.type) {
     case "exec_command_end":
-      return buildCommandActivityFromRolloutEvent(payload, createdAt);
+      return buildCommandActivityFromRolloutEvent(payload, createdAt, seq);
     case "patch_apply_end":
-      return buildFileChangeActivityFromRolloutEvent(payload, createdAt);
+      return buildFileChangeActivityFromRolloutEvent(payload, createdAt, seq);
     case "guardian_assessment":
-      return buildCommandActivityFromGuardianAssessment(payload, createdAt);
+      return buildCommandActivityFromGuardianAssessment(payload, createdAt, seq);
     default:
       return null;
   }
