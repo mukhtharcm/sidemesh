@@ -570,10 +570,18 @@ export async function startServer(config: NodeConfig): Promise<void> {
         persistExtendedHistory: true,
       });
     }
-    const turn = (await bridge.request("turn/start", {
+    const turnStartParams: Record<string, unknown> = {
       threadId: sessionId,
       input: [{ type: "text", text, text_elements: [] }],
-    })) as any;
+    };
+    const turnOverrides = parseTurnOverrides(request.body);
+    if (turnOverrides.approvalPolicy) {
+      turnStartParams.approvalPolicy = turnOverrides.approvalPolicy;
+    }
+    if (turnOverrides.sandboxMode) {
+      turnStartParams.sandbox = turnOverrides.sandboxMode;
+    }
+    const turn = (await bridge.request("turn/start", turnStartParams)) as any;
     const turnId = asString(turn.turn?.id);
     if (turnId) {
       activeTurns.set(sessionId, { turnId, startedAt: Date.now() });
@@ -1294,6 +1302,19 @@ function parseCreateSessionOverrides(value: unknown): CreateSessionOverrides {
     sandboxMode: parseSandboxMode(typed.sandboxMode),
     webSearch: parseWebSearchMode(typed.webSearch),
     profile: asString(typed.profile),
+  };
+}
+
+interface TurnOverrides {
+  approvalPolicy: ApprovalPolicyValue | null;
+  sandboxMode: SandboxModeValue | null;
+}
+
+function parseTurnOverrides(value: unknown): TurnOverrides {
+  const typed = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    approvalPolicy: parseApprovalPolicy(typed.approvalPolicy),
+    sandboxMode: parseSandboxMode(typed.sandbox ?? typed.sandboxMode),
   };
 }
 

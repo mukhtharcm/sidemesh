@@ -112,11 +112,18 @@ class ApiClient {
     required String sessionId,
     required String text,
     String? clientMessageId,
+    String? approvalPolicy,
+    String? sandboxMode,
   }) async {
     await _post(
       host,
       '/api/sessions/$sessionId/input',
-      body: {'text': text, 'clientMessageId': clientMessageId},
+      body: {
+        'text': text,
+        'clientMessageId': clientMessageId,
+        if (approvalPolicy != null) 'approvalPolicy': approvalPolicy,
+        if (sandboxMode != null) 'sandbox': sandboxMode,
+      },
     );
   }
 
