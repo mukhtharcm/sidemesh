@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../api_client.dart';
+import '../host_status_store.dart';
 import '../host_store.dart';
 import '../models.dart';
 import '../session_favorites_store.dart';
@@ -514,53 +515,84 @@ class RecentPane extends StatefulWidget {
 
 class _RecentPaneState extends State<RecentPane> {
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
-  late Future<_RecentLoadResult> _future;
+  final HostStatusStore _statuses = HostStatusStore.instance;
+  // Progressive load state: entries stream in per-host as each fetch
+  // resolves rather than blocking on Future.wait(all).
+  List<RemoteSessionEntry> _entries = const [];
+  Set<String> _pendingHostIds = <String>{};
+  List<String> _failedHostLabels = const [];
+  int _loadGen = 0;
+  bool _initialLoadStarted = false;
 
   @override
   void initState() {
     super.initState();
     _favorites.ensureLoaded();
-    _future = _loadRecent();
+    _kickoffLoad();
   }
 
   @override
   void didUpdateWidget(covariant RecentPane oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.hosts != widget.hosts) {
-      _future = _loadRecent();
+      _kickoffLoad();
     }
   }
 
-  Future<_RecentLoadResult> _loadRecent() async {
-    final failures = <String>[];
-    final results = await Future.wait(
-      widget.hosts.map((host) async {
-        try {
-          final sessions = await widget.api.fetchSessions(host, limit: 40);
-          return sessions
-              .take(20)
-              .map(
-                (session) => RemoteSessionEntry(host: host, session: session),
-              )
-              .toList();
-        } catch (_) {
-          failures.add(host.label);
-          return const <RemoteSessionEntry>[];
-        }
-      }),
-    );
+  void _kickoffLoad() {
+    final gen = ++_loadGen;
+    _initialLoadStarted = true;
+    setState(() {
+      _entries = const [];
+      _pendingHostIds = widget.hosts.map((h) => h.id).toSet();
+      _failedHostLabels = const [];
+    });
+    for (final host in widget.hosts) {
+      _statuses.markProbing(host.id);
+      _loadHost(host, gen);
+    }
+    if (widget.hosts.isEmpty) {
+      // Emit zero active so the nav badge clears immediately.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        widget.onActiveCountChanged(0);
+      });
+    }
+  }
 
-    final merged = results.expand((entries) => entries).toList();
-    merged.sort(
-      (left, right) =>
-          right.session.updatedAt.compareTo(left.session.updatedAt),
-    );
-    final activeCount = merged.where((entry) => entry.session.isActive).length;
+  Future<void> _loadHost(HostProfile host, int gen) async {
+    try {
+      final sessions = await widget.api.fetchSessions(host, limit: 40);
+      if (!mounted || gen != _loadGen) return;
+      _statuses.markOnline(host.id);
+      final newEntries = sessions
+          .take(20)
+          .map(
+            (session) => RemoteSessionEntry(host: host, session: session),
+          )
+          .toList();
+      setState(() {
+        _entries = [..._entries, ...newEntries];
+        _pendingHostIds = {..._pendingHostIds}..remove(host.id);
+      });
+      _emitActiveCount();
+    } catch (error) {
+      if (!mounted || gen != _loadGen) return;
+      _statuses.markOffline(host.id, error: friendlyError(error));
+      setState(() {
+        _failedHostLabels = [..._failedHostLabels, host.label];
+        _pendingHostIds = {..._pendingHostIds}..remove(host.id);
+      });
+      _emitActiveCount();
+    }
+  }
+
+  void _emitActiveCount() {
+    final count = _entries.where((e) => e.session.isActive).length;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      widget.onActiveCountChanged(activeCount);
+      widget.onActiveCountChanged(count);
     });
-    return _RecentLoadResult(entries: merged, failedHosts: failures);
   }
 
   List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
@@ -599,118 +631,107 @@ class _RecentPaneState extends State<RecentPane> {
       );
     }
 
-    return FutureBuilder<_RecentLoadResult>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const MeshLoader();
+    final stillLoadingInitial =
+        _initialLoadStarted &&
+        _entries.isEmpty &&
+        _failedHostLabels.isEmpty &&
+        _pendingHostIds.isNotEmpty;
+
+    if (stillLoadingInitial) {
+      return const MeshLoader();
+    }
+
+    return ListenableBuilder(
+      listenable: Listenable.merge([_favorites, _statuses]),
+      builder: (context, _) {
+        final sortedEntries = _sortEntries(_entries);
+        final isRefreshing = _pendingHostIds.isNotEmpty;
+        final hasFailures = _failedHostLabels.isNotEmpty;
+        final noResults = sortedEntries.isEmpty;
+        final basePadding =
+            widget.padding ?? const EdgeInsets.fromLTRB(16, 8, 16, 32);
+        Future<void> handleRefresh() async {
+          _kickoffLoad();
         }
-        final result = snapshot.data ?? const _RecentLoadResult.empty();
-        final entries = result.entries;
-        final failures = result.failedHosts;
-        if (entries.isEmpty) {
+
+        if (noResults) {
           return RefreshIndicator(
             color: context.colors.accent,
-            onRefresh: () async {
-              setState(() => _future = _loadRecent());
-              await _future;
-            },
+            onRefresh: handleRefresh,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
-                if (failures.isNotEmpty)
+                if (isRefreshing)
+                  _RecentProgressStrip(
+                    remaining: _pendingHostIds.length,
+                    total: widget.hosts.length,
+                  ),
+                if (hasFailures)
                   _RecentErrorBanner(
-                    hostLabels: failures,
-                    onRetry: () {
-                      setState(() => _future = _loadRecent());
-                    },
+                    hostLabels: _failedHostLabels,
+                    onRetry: handleRefresh,
                   ),
                 const SizedBox(height: 80),
-                const MeshEmptyState(
-                  icon: Icons.cloud_off_rounded,
-                  title: 'No reachable sessions',
-                  body:
-                      'Saved hosts look fine, but none returned recent sessions right now.',
+                MeshEmptyState(
+                  icon: widget.query.trim().isEmpty
+                      ? Icons.cloud_off_rounded
+                      : Icons.search_off_rounded,
+                  title: widget.query.trim().isEmpty
+                      ? 'No reachable sessions'
+                      : 'No matches',
+                  body: widget.query.trim().isEmpty
+                      ? 'Saved hosts look fine, but none returned recent sessions right now.'
+                      : 'No sessions match "${widget.query.trim()}". Clear the filter to see everything.',
                 ),
               ],
             ),
           );
         }
-        return ListenableBuilder(
-          listenable: _favorites,
-          builder: (context, _) {
-            final sortedEntries = _sortEntries(entries);
-            if (sortedEntries.isEmpty) {
-              return RefreshIndicator(
-                color: context.colors.accent,
-                onRefresh: () async {
-                  setState(() => _future = _loadRecent());
-                  await _future;
-                },
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  children: [
-                    if (failures.isNotEmpty)
-                      _RecentErrorBanner(
-                        hostLabels: failures,
-                        onRetry: () {
-                          setState(() => _future = _loadRecent());
-                        },
-                      ),
-                    const SizedBox(height: 80),
-                    MeshEmptyState(
-                      icon: Icons.search_off_rounded,
-                      title: 'No matches',
-                      body:
-                          'No sessions match "${widget.query.trim()}". Clear the filter to see everything.',
-                    ),
-                  ],
-                ),
-              );
-            }
-            final basePadding =
-                widget.padding ?? const EdgeInsets.fromLTRB(16, 8, 16, 32);
-            return RefreshIndicator(
-              color: context.colors.accent,
-              onRefresh: () async {
-                setState(() => _future = _loadRecent());
-                await _future;
-              },
-              child: ListView.separated(
-                padding: basePadding,
-                itemCount: sortedEntries.length + (failures.isNotEmpty ? 1 : 0),
-                separatorBuilder: (_, _) => const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  if (failures.isNotEmpty && index == 0) {
-                    return _RecentErrorBanner(
-                      hostLabels: failures,
-                      onRetry: () {
-                        setState(() => _future = _loadRecent());
-                      },
-                    );
-                  }
-                  final entryIndex =
-                      failures.isNotEmpty ? index - 1 : index;
-                  final entry = sortedEntries[entryIndex];
-                  return _SessionRowCard(
-                    host: entry.host,
-                    session: entry.session,
-                    favorite: _favorites.isFavorite(
-                      entry.host,
-                      entry.session.id,
-                    ),
-                    selected:
-                        widget.selectedSessionId == entry.session.id,
-                    onTap: () =>
-                        widget.onOpenSession(entry.host, entry.session),
-                    onToggleFavorite: () {
-                      _favorites.toggleFavorite(entry.host, entry.session.id);
-                    },
+        final leadingStrips =
+            (isRefreshing ? 1 : 0) + (hasFailures ? 1 : 0);
+        return RefreshIndicator(
+          color: context.colors.accent,
+          onRefresh: handleRefresh,
+          child: ListView.separated(
+            padding: basePadding,
+            itemCount: sortedEntries.length + leadingStrips,
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              var offset = 0;
+              if (isRefreshing) {
+                if (index == offset) {
+                  return _RecentProgressStrip(
+                    remaining: _pendingHostIds.length,
+                    total: widget.hosts.length,
                   );
+                }
+                offset += 1;
+              }
+              if (hasFailures) {
+                if (index == offset) {
+                  return _RecentErrorBanner(
+                    hostLabels: _failedHostLabels,
+                    onRetry: handleRefresh,
+                  );
+                }
+                offset += 1;
+              }
+              final entry = sortedEntries[index - offset];
+              return _SessionRowCard(
+                host: entry.host,
+                session: entry.session,
+                favorite: _favorites.isFavorite(
+                  entry.host,
+                  entry.session.id,
+                ),
+                selected: widget.selectedSessionId == entry.session.id,
+                onTap: () => widget.onOpenSession(entry.host, entry.session),
+                onToggleFavorite: () {
+                  _favorites.toggleFavorite(entry.host, entry.session.id);
                 },
-              ),
-            );
-          },
+              );
+            },
+          ),
         );
       },
     );
@@ -842,51 +863,81 @@ class InboxPane extends StatefulWidget {
 }
 
 class _InboxPaneState extends State<InboxPane> {
-  late Future<List<PendingActionEntry>> _future;
+  final HostStatusStore _statuses = HostStatusStore.instance;
+  List<PendingActionEntry> _entries = const [];
+  Set<String> _pendingHostIds = <String>{};
+  List<String> _failedHostLabels = const [];
+  int _loadGen = 0;
+  bool _initialLoadStarted = false;
 
   @override
   void initState() {
     super.initState();
-    _future = _loadInbox();
+    _kickoffLoad();
   }
 
   @override
   void didUpdateWidget(covariant InboxPane oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.hosts != widget.hosts) {
-      _future = _loadInbox();
+      _kickoffLoad();
     }
   }
 
-  Future<List<PendingActionEntry>> _loadInbox() async {
-    final results = await Future.wait(
-      widget.hosts.map((host) async {
-        try {
-          final actions = await widget.api.fetchPendingActions(host);
-          return actions
-              .map((action) => PendingActionEntry(host: host, action: action))
-              .toList();
-        } catch (_) {
-          return const <PendingActionEntry>[];
-        }
-      }),
-    );
+  void _kickoffLoad() {
+    final gen = ++_loadGen;
+    _initialLoadStarted = true;
+    setState(() {
+      _entries = const [];
+      _pendingHostIds = widget.hosts.map((h) => h.id).toSet();
+      _failedHostLabels = const [];
+    });
+    for (final host in widget.hosts) {
+      _statuses.markProbing(host.id);
+      _loadHost(host, gen);
+    }
+    if (widget.hosts.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        widget.onInboxCountChanged(0);
+      });
+    }
+  }
 
-    final merged = results.expand((entries) => entries).toList();
-    merged.sort(
-      (left, right) =>
-          right.action.requestedAt.compareTo(left.action.requestedAt),
-    );
+  Future<void> _loadHost(HostProfile host, int gen) async {
+    try {
+      final actions = await widget.api.fetchPendingActions(host);
+      if (!mounted || gen != _loadGen) return;
+      _statuses.markOnline(host.id);
+      final newEntries = actions
+          .map((action) => PendingActionEntry(host: host, action: action))
+          .toList();
+      setState(() {
+        _entries = [..._entries, ...newEntries];
+        _pendingHostIds = {..._pendingHostIds}..remove(host.id);
+      });
+      _emitInboxCount();
+    } catch (error) {
+      if (!mounted || gen != _loadGen) return;
+      _statuses.markOffline(host.id, error: friendlyError(error));
+      setState(() {
+        _failedHostLabels = [..._failedHostLabels, host.label];
+        _pendingHostIds = {..._pendingHostIds}..remove(host.id);
+      });
+      _emitInboxCount();
+    }
+  }
+
+  void _emitInboxCount() {
+    final count = _entries.length;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      widget.onInboxCountChanged(merged.length);
+      widget.onInboxCountChanged(count);
     });
-    return merged;
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = _loadInbox());
-    await _future;
+    _kickoffLoad();
   }
 
   Future<void> _respond(
@@ -927,71 +978,106 @@ class _InboxPaneState extends State<InboxPane> {
       );
     }
 
-    return FutureBuilder<List<PendingActionEntry>>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const MeshLoader();
-        }
+    final stillLoadingInitial =
+        _initialLoadStarted &&
+        _entries.isEmpty &&
+        _failedHostLabels.isEmpty &&
+        _pendingHostIds.isNotEmpty;
+    if (stillLoadingInitial) {
+      return const MeshLoader();
+    }
 
-        final allEntries = snapshot.data ?? const [];
-        final query = widget.query.trim().toLowerCase();
-        final entries = query.isEmpty
-            ? allEntries
-            : allEntries.where((entry) {
-                final a = entry.action;
-                return (a.sessionTitle ?? '').toLowerCase().contains(query) ||
-                    a.detail.toLowerCase().contains(query) ||
-                    (a.cwd ?? '').toLowerCase().contains(query) ||
-                    entry.host.label.toLowerCase().contains(query);
-              }).toList();
-        if (entries.isEmpty) {
-          return RefreshIndicator(
-            color: colors.accent,
-            onRefresh: _refresh,
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                const SizedBox(height: 80),
-                if (query.isNotEmpty)
-                  MeshEmptyState(
-                    icon: Icons.search_off_rounded,
-                    title: 'No matches',
-                    body:
-                        'No pending actions match "${widget.query.trim()}".',
-                  )
-                else
-                  const MeshEmptyState(
-                    icon: Icons.verified_rounded,
-                    title: 'No pending approvals',
-                    body:
-                        'Command, file, and permission prompts from your Codex nodes will appear here.',
-                  ),
-              ],
-            ),
-          );
-        }
+    final query = widget.query.trim().toLowerCase();
+    final allEntries = [..._entries]..sort(
+        (a, b) => b.action.requestedAt.compareTo(a.action.requestedAt),
+      );
+    final entries = query.isEmpty
+        ? allEntries
+        : allEntries.where((entry) {
+            final a = entry.action;
+            return (a.sessionTitle ?? '').toLowerCase().contains(query) ||
+                a.detail.toLowerCase().contains(query) ||
+                (a.cwd ?? '').toLowerCase().contains(query) ||
+                entry.host.label.toLowerCase().contains(query);
+          }).toList();
 
-        return RefreshIndicator(
-          color: colors.accent,
-          onRefresh: _refresh,
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            itemCount: entries.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              final entry = entries[index];
-              return _InboxCard(
-                entry: entry,
-                onOpenSession: () =>
-                    widget.onOpenSession(entry.host, entry.action),
-                onRespond: (decision) =>
-                    _respond(entry.host, entry.action, decision),
+    final isRefreshing = _pendingHostIds.isNotEmpty;
+    final hasFailures = _failedHostLabels.isNotEmpty;
+
+    if (entries.isEmpty) {
+      return RefreshIndicator(
+        color: colors.accent,
+        onRefresh: _refresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            if (isRefreshing)
+              _RecentProgressStrip(
+                remaining: _pendingHostIds.length,
+                total: widget.hosts.length,
+              ),
+            if (hasFailures)
+              _RecentErrorBanner(
+                hostLabels: _failedHostLabels,
+                onRetry: _refresh,
+              ),
+            const SizedBox(height: 80),
+            if (query.isNotEmpty)
+              MeshEmptyState(
+                icon: Icons.search_off_rounded,
+                title: 'No matches',
+                body: 'No pending actions match "${widget.query.trim()}".',
+              )
+            else
+              const MeshEmptyState(
+                icon: Icons.verified_rounded,
+                title: 'No pending approvals',
+                body:
+                    'Command, file, and permission prompts from your Codex nodes will appear here.',
+              ),
+          ],
+        ),
+      );
+    }
+
+    final leadingStrips = (isRefreshing ? 1 : 0) + (hasFailures ? 1 : 0);
+    return RefreshIndicator(
+      color: colors.accent,
+      onRefresh: _refresh,
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        itemCount: entries.length + leadingStrips,
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          var offset = 0;
+          if (isRefreshing) {
+            if (index == offset) {
+              return _RecentProgressStrip(
+                remaining: _pendingHostIds.length,
+                total: widget.hosts.length,
               );
-            },
-          ),
-        );
-      },
+            }
+            offset += 1;
+          }
+          if (hasFailures) {
+            if (index == offset) {
+              return _RecentErrorBanner(
+                hostLabels: _failedHostLabels,
+                onRetry: _refresh,
+              );
+            }
+            offset += 1;
+          }
+          final entry = entries[index - offset];
+          return _InboxCard(
+            entry: entry,
+            onOpenSession: () =>
+                widget.onOpenSession(entry.host, entry.action),
+            onRespond: (decision) =>
+                _respond(entry.host, entry.action, decision),
+          );
+        },
+      ),
     );
   }
 }
@@ -1219,62 +1305,160 @@ class _HostRowCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return MeshCard(
-      onTap: onTap,
-      padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: colors.accentMuted,
-              borderRadius: BorderRadius.circular(13),
-              border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.dns_rounded, color: colors.accent, size: 20),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  host.label,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+    return ListenableBuilder(
+      listenable: HostStatusStore.instance,
+      builder: (context, _) {
+        final status = HostStatusStore.instance.statusFor(host.id);
+        return MeshCard(
+          onTap: onTap,
+          padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
+          child: Row(
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: colors.accentMuted,
+                      borderRadius: BorderRadius.circular(13),
+                      border: Border.all(
+                        color: colors.accent.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      Icons.dns_rounded,
+                      color: colors.accent,
+                      size: 20,
+                    ),
                   ),
+                  Positioned(
+                    right: -2,
+                    bottom: -2,
+                    child: _HostStatusDot(status: status),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      host.label,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      host.baseUrl,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(
+                        color: colors.textSecondary,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                    if (status.reachability != HostReachability.unknown) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        _statusLine(status),
+                        style: monoStyle(
+                          color: _statusColor(colors, status),
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  host.baseUrl,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+              ),
+              IconButton(
+                tooltip: 'Edit host',
+                onPressed: onEdit,
+                icon: Icon(
+                  Icons.edit_outlined,
+                  size: 20,
+                  color: colors.textSecondary,
                 ),
-              ],
-            ),
+              ),
+              IconButton(
+                tooltip: 'Remove host',
+                onPressed: onRemove,
+                icon: Icon(
+                  Icons.delete_outline,
+                  size: 20,
+                  color: colors.textSecondary,
+                ),
+              ),
+            ],
           ),
-          IconButton(
-            tooltip: 'Edit host',
-            onPressed: onEdit,
-            icon: Icon(
-              Icons.edit_outlined,
-              size: 20,
-              color: colors.textSecondary,
-            ),
-          ),
-          IconButton(
-            tooltip: 'Remove host',
-            onPressed: onRemove,
-            icon: Icon(
-              Icons.delete_outline,
-              size: 20,
-              color: colors.textSecondary,
-            ),
-          ),
-        ],
+        );
+      },
+    );
+  }
+
+  String _statusLine(HostStatus status) {
+    switch (status.reachability) {
+      case HostReachability.online:
+        return 'Online';
+      case HostReachability.offline:
+        final err = status.lastError;
+        return err == null || err.isEmpty ? 'Offline' : 'Offline · $err';
+      case HostReachability.probing:
+        return 'Probing…';
+      case HostReachability.unknown:
+        return '';
+    }
+  }
+
+  Color _statusColor(AppColors colors, HostStatus status) {
+    switch (status.reachability) {
+      case HostReachability.online:
+        return colors.success;
+      case HostReachability.offline:
+        return colors.danger;
+      case HostReachability.probing:
+        return colors.textSecondary;
+      case HostReachability.unknown:
+        return colors.textTertiary;
+    }
+  }
+}
+
+class _HostStatusDot extends StatelessWidget {
+  const _HostStatusDot({required this.status});
+
+  final HostStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final Color fill;
+    switch (status.reachability) {
+      case HostReachability.online:
+        fill = colors.success;
+        break;
+      case HostReachability.offline:
+        fill = colors.danger;
+        break;
+      case HostReachability.probing:
+        fill = colors.warning;
+        break;
+      case HostReachability.unknown:
+        fill = colors.textTertiary;
+        break;
+    }
+    return Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(
+        color: fill,
+        shape: BoxShape.circle,
+        border: Border.all(color: colors.canvas, width: 2),
       ),
     );
   }
@@ -1430,14 +1614,41 @@ String _randomId() {
   ).join();
 }
 
-class _RecentLoadResult {
-  const _RecentLoadResult({required this.entries, required this.failedHosts});
-  const _RecentLoadResult.empty()
-    : entries = const [],
-      failedHosts = const [];
+class _RecentProgressStrip extends StatelessWidget {
+  const _RecentProgressStrip({required this.remaining, required this.total});
 
-  final List<RemoteSessionEntry> entries;
-  final List<String> failedHosts;
+  final int remaining;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final loaded = (total - remaining).clamp(0, total);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: colors.accent,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Loading hosts · $loaded of $total ready',
+              style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _RecentErrorBanner extends StatelessWidget {
