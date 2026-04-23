@@ -20,6 +20,11 @@ class HostStore {
               iOptions: IOSOptions(
                 accessibility: KeychainAccessibility.first_unlock,
               ),
+              // The macOS Data Protection Keychain needs a team-signed
+              // `com.apple.application-identifier` entitlement, which ad-hoc
+              // signed dev builds don't carry; using the legacy file-based
+              // keychain works without any signing setup.
+              mOptions: MacOsOptions(useDataProtectionKeyChain: false),
             );
 
   static const _legacyHostsKey = 'sidemesh_hosts_v1';
