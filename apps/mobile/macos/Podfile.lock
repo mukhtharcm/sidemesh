@@ -7,12 +7,15 @@ PODS:
   - shared_preferences_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
+  - url_launcher_macos (0.0.1):
+    - FlutterMacOS
 
 DEPENDENCIES:
   - flutter_secure_storage_macos (from `Flutter/ephemeral/.symlinks/plugins/flutter_secure_storage_macos/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - macos_window_utils (from `Flutter/ephemeral/.symlinks/plugins/macos_window_utils/macos`)
   - shared_preferences_foundation (from `Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin`)
+  - url_launcher_macos (from `Flutter/ephemeral/.symlinks/plugins/url_launcher_macos/macos`)
 
 EXTERNAL SOURCES:
   flutter_secure_storage_macos:
@@ -23,12 +26,15 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/macos_window_utils/macos
   shared_preferences_foundation:
     :path: Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin
+  url_launcher_macos:
+    :path: Flutter/ephemeral/.symlinks/plugins/url_launcher_macos/macos
 
 SPEC CHECKSUMS:
   flutter_secure_storage_macos: 7f45e30f838cf2659862a4e4e3ee1c347c2b3b54
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   macos_window_utils: 23f54331a0fd51eea9e0ed347253bf48fd379d1d
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
+  url_launcher_macos: f87a979182d112f911de6820aefddaf56ee9fbfd
 
 PODFILE CHECKSUM: 54d867c82ac51cbd61b565781b9fada492027009
 
