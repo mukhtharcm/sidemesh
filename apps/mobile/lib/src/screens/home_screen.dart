@@ -735,6 +735,10 @@ class _SessionRowCard extends StatelessWidget {
         children: [
           Row(
             children: [
+              if (running) ...[
+                _RunningDot(color: colors.success),
+                const SizedBox(width: 8),
+              ],
               Expanded(
                 child: Text(
                   session.title,
@@ -1543,6 +1547,60 @@ class _HomeSearchBar extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+class _RunningDot extends StatefulWidget {
+  const _RunningDot({required this.color});
+
+  final Color color;
+
+  @override
+  State<_RunningDot> createState() => _RunningDotState();
+}
+
+class _RunningDotState extends State<_RunningDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final t = _controller.value;
+        return Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: widget.color,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: widget.color.withValues(alpha: 0.35 + 0.35 * t),
+                blurRadius: 4 + 4 * t,
+                spreadRadius: 0.5 + 1.2 * t,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
