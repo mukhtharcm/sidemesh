@@ -178,6 +178,22 @@ export async function startServer(config: NodeConfig): Promise<void> {
       const item = (params as any)?.item;
       const turnId = asString((params as any)?.turnId);
       if (item && typeof item === "object") {
+        const itemType = asString((item as any)?.type);
+        if (method === "item/completed" && itemType === "agentMessage") {
+          const seq = allocSeq(sessionId);
+          const messageItem = buildCompletedAssistantMessage(item as Record<string, unknown>, seq);
+          if (messageItem) {
+            broadcastLive(sessionId, {
+              type: "assistant_message_completed",
+              sessionId,
+              turnId: turnId || undefined,
+              seq,
+              messageItem,
+            });
+          }
+          return;
+        }
+
         const existingSeq = liveActivities.get(sessionId)?.get(asString((item as any)?.id) || "")?.seq;
         const activity = buildActivityFromThreadItem(item as any, {
           turnId,
@@ -1114,6 +1130,31 @@ function buildSubmittedUserMessage(
     attachments: buildSubmittedUserMessageAttachments(input),
     createdAt: Date.now(),
     seq,
+  };
+}
+
+function buildCompletedAssistantMessage(
+  item: Record<string, unknown>,
+  seq: number,
+): SessionMessage | null {
+  const id = asString(item.id);
+  const text = asString(item.text);
+  if (!id || !text) {
+    return null;
+  }
+
+  const phase = asString(item.phase);
+  return {
+    id,
+    role: "assistant",
+    text,
+    attachments: [],
+    createdAt: Date.now(),
+    seq,
+    phase:
+      phase === "commentary" || phase === "final_answer"
+        ? phase
+        : undefined,
   };
 }
 
