@@ -154,6 +154,7 @@ class SessionMessage {
     required this.id,
     required this.role,
     required this.text,
+    required this.attachments,
     required this.createdAt,
     required this.seq,
     this.phase,
@@ -162,18 +163,90 @@ class SessionMessage {
   final String id;
   final String role;
   final String text;
+  final List<SessionMessageAttachment> attachments;
   final DateTime createdAt;
   final int seq;
   final String? phase;
+
+  bool get hasVisibleContent =>
+      text.trim().isNotEmpty || attachments.isNotEmpty;
 
   factory SessionMessage.fromJson(Map<String, dynamic> json) => SessionMessage(
     id: _stringValue(json['id']),
     role: _stringValue(json['role']),
     text: _stringValue(json['text']),
+    attachments: (json['attachments'] as List<dynamic>? ?? [])
+        .map(
+          (item) => SessionMessageAttachment.fromJson(
+            item as Map<String, dynamic>,
+          ),
+        )
+        .toList(),
     createdAt: _dateValue(json['createdAt']),
     seq: _intOrNull(json['seq']) ?? 0,
     phase: json['phase'] as String?,
   );
+}
+
+class SessionMessageAttachment {
+  const SessionMessageAttachment({
+    required this.type,
+    this.url,
+    this.path,
+  });
+
+  final String type;
+  final String? url;
+  final String? path;
+
+  bool get isImage => type == 'image' && (url?.isNotEmpty ?? false);
+  bool get isLocalImage => type == 'localImage' && (path?.isNotEmpty ?? false);
+
+  factory SessionMessageAttachment.fromJson(Map<String, dynamic> json) =>
+      SessionMessageAttachment(
+        type: _stringValue(json['type']),
+        url: _stringOrNull(json['url']),
+        path: _stringOrNull(json['path']),
+      );
+}
+
+class SessionInputItem {
+  const SessionInputItem._({
+    required this.type,
+    this.text,
+    this.url,
+    this.path,
+  });
+
+  const SessionInputItem.text(String text)
+    : this._(type: 'text', text: text);
+
+  const SessionInputItem.image(String url) : this._(type: 'image', url: url);
+
+  const SessionInputItem.localImage(String path)
+    : this._(type: 'localImage', path: path);
+
+  final String type;
+  final String? text;
+  final String? url;
+  final String? path;
+
+  Map<String, dynamic> toJson() {
+    switch (type) {
+      case 'text':
+        return {
+          'type': 'text',
+          'text': text ?? '',
+          'text_elements': const <dynamic>[],
+        };
+      case 'image':
+        return {'type': 'image', 'url': url ?? ''};
+      case 'localImage':
+        return {'type': 'localImage', 'path': path ?? ''};
+      default:
+        return {'type': type};
+    }
+  }
 }
 
 class SessionActivityChange {

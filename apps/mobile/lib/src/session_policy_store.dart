@@ -97,7 +97,9 @@ class SessionPolicy {
   Map<String, Object> toJson() => {
     if (approval != null) 'approval': approval!.wire,
     if (sandbox != null) 'sandbox': sandbox!.wire,
-    if (networkAccess != null) 'networkAccess': networkAccess!,
+    ...?networkAccess == null
+        ? null
+        : <String, Object>{'networkAccess': networkAccess!},
   };
 
   factory SessionPolicy.fromJson(Map<String, dynamic> json) => SessionPolicy(
