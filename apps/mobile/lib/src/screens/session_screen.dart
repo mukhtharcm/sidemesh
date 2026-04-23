@@ -2299,10 +2299,48 @@ class _MarkdownMessageBodyState extends State<_MarkdownMessageBody> {
       softLineBreak: true,
       styleSheet: _cached!,
       extensionSet: md.ExtensionSet.gitHubWeb,
+      builders: {
+        'pre': _CodeBlockBuilder(),
+      },
       onTapLink: (text, href, title) {
         if (href == null || href.isEmpty) return;
         _openLink(context, href);
       },
+    );
+  }
+}
+
+/// Renders fenced code blocks from markdown (`<pre><code>`) as a
+/// SyntaxCodeBlock — which brings syntax highlighting, a local
+/// selection scope and a Copy button — instead of the default
+/// unselectable container.
+class _CodeBlockBuilder extends MarkdownElementBuilder {
+  @override
+  bool isBlockElement() => true;
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final codeNode = element.children?.whereType<md.Element>().firstWhere(
+          (child) => child.tag == 'code',
+          orElse: () => element,
+        );
+    final text = codeNode?.textContent ?? element.textContent;
+    String? language;
+    final cls = codeNode?.attributes['class'];
+    if (cls != null && cls.startsWith('language-')) {
+      language = cls.substring('language-'.length);
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: SyntaxCodeBlock(
+        text: text.trimRight(),
+        language: language,
+      ),
     );
   }
 }
