@@ -13,6 +13,7 @@ import 'package:web_socket_channel/io.dart';
 import '../api_client.dart';
 import '../models.dart';
 import '../session_favorites_store.dart';
+import '../session_overrides_store.dart';
 import '../session_policy_store.dart';
 import '../session_read_store.dart';
 import '../session_runtime.dart';
@@ -784,6 +785,7 @@ class _SessionScreenState extends State<SessionScreen>
         return;
       }
       setState(() => _session = updated);
+      SessionOverridesStore.instance.apply(widget.host.id, updated);
     } catch (error) {
       if (!mounted) {
         return;

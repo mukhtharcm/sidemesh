@@ -9,6 +9,7 @@ import '../host_status_store.dart';
 import '../host_store.dart';
 import '../models.dart';
 import '../session_favorites_store.dart';
+import '../session_overrides_store.dart';
 import '../session_read_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
@@ -719,10 +720,19 @@ class _RecentPaneState extends State<RecentPane> {
   }
 
   List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
+    final overrides = SessionOverridesStore.instance;
+    final overlaid = entries
+        .map(
+          (entry) => RemoteSessionEntry(
+            host: entry.host,
+            session: overrides.overlay(entry.host.id, entry.session),
+          ),
+        )
+        .toList();
     final query = widget.query.trim().toLowerCase();
-    Iterable<RemoteSessionEntry> visible = entries;
+    Iterable<RemoteSessionEntry> visible = overlaid;
     if (query.isNotEmpty) {
-      visible = entries.where((entry) {
+      visible = overlaid.where((entry) {
         final session = entry.session;
         final host = entry.host;
         return session.title.toLowerCase().contains(query) ||
@@ -765,7 +775,11 @@ class _RecentPaneState extends State<RecentPane> {
     }
 
     return ListenableBuilder(
-      listenable: Listenable.merge([_favorites, _statuses]),
+      listenable: Listenable.merge([
+        _favorites,
+        _statuses,
+        SessionOverridesStore.instance,
+      ]),
       builder: (context, _) {
         final sortedEntries = _sortEntries(_entries);
         final isRefreshing = _pendingHostIds.isNotEmpty;
