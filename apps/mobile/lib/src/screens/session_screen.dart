@@ -896,20 +896,41 @@ class _SessionScreenState extends State<SessionScreen>
     await _policyStore.ensureLoaded();
     if (!mounted) return;
     final runtime = session.runtime;
+    final isDesktop = widget.topPadding != null;
+    final sheet = SessionPolicySheet(
+      host: widget.host,
+      session: session,
+      runtimeApproval: ApprovalPolicy.fromWire(runtime?.approvalPolicy),
+      runtimeSandbox: SandboxMode.fromWire(runtime?.sandboxMode),
+      runtimeNetworkAccess: runtime?.networkAccess,
+      store: _policyStore,
+    );
+    if (isDesktop) {
+      await showDialog<void>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.35),
+        builder: (dialogContext) => Dialog(
+          backgroundColor: context.colors.surface,
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 48, vertical: 48),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
+            child: sheet,
+          ),
+        ),
+      );
+      return;
+    }
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: context.colors.surface,
       showDragHandle: true,
       useSafeArea: true,
       isScrollControlled: true,
-      builder: (sheetContext) => SessionPolicySheet(
-        host: widget.host,
-        session: session,
-        runtimeApproval: ApprovalPolicy.fromWire(runtime?.approvalPolicy),
-        runtimeSandbox: SandboxMode.fromWire(runtime?.sandboxMode),
-        runtimeNetworkAccess: runtime?.networkAccess,
-        store: _policyStore,
-      ),
+      builder: (sheetContext) => sheet,
     );
   }
 
