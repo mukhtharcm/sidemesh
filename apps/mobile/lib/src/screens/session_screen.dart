@@ -5,8 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:markdown/markdown.dart' as md;
+import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/io.dart';
 
@@ -2227,120 +2226,58 @@ class _MessageCopyButtonState extends State<_MessageCopyButton> {
   }
 }
 
-class _MarkdownMessageBody extends StatefulWidget {
+class _MarkdownMessageBody extends StatelessWidget {
   const _MarkdownMessageBody({required this.text, required this.textColor});
 
   final String text;
   final Color textColor;
 
   @override
-  State<_MarkdownMessageBody> createState() => _MarkdownMessageBodyState();
-}
-
-class _MarkdownMessageBodyState extends State<_MarkdownMessageBody> {
-  MarkdownStyleSheet? _cached;
-  Object? _cacheKey;
-
-  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = context.colors;
-    final key = Object.hash(
-      theme.brightness,
-      widget.textColor.toARGB32(),
-      colors.codeBackground.toARGB32(),
-      colors.codeBorder.toARGB32(),
-      colors.accent.toARGB32(),
-      colors.border.toARGB32(),
-      colors.textSecondary.toARGB32(),
+    final baseBody = theme.textTheme.bodyMedium?.copyWith(
+      color: textColor,
+      height: 1.5,
     );
 
-    if (_cached == null || _cacheKey != key) {
-      final baseBody = theme.textTheme.bodyMedium?.copyWith(
-        color: widget.textColor,
-        height: 1.5,
-      );
-      _cached = MarkdownStyleSheet.fromTheme(theme).copyWith(
-        p: baseBody,
-        h1: theme.textTheme.headlineSmall?.copyWith(color: widget.textColor),
-        h2: theme.textTheme.titleLarge?.copyWith(color: widget.textColor),
-        h3: theme.textTheme.titleMedium?.copyWith(color: widget.textColor),
-        listBullet: baseBody,
-        blockquote: baseBody?.copyWith(color: colors.textSecondary),
-        code: monoStyle(
-          color: colors.accent,
-          fontSize: 12.5,
-        ),
-        codeblockPadding: const EdgeInsets.all(12),
-        codeblockDecoration: BoxDecoration(
-          color: colors.codeBackground,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: colors.codeBorder),
-        ),
-        blockquoteDecoration: BoxDecoration(
-          border: Border(left: BorderSide(color: colors.accent, width: 3)),
-        ),
-        blockquotePadding: const EdgeInsets.fromLTRB(12, 6, 0, 6),
-        horizontalRuleDecoration: BoxDecoration(
-          border: Border(top: BorderSide(color: colors.border)),
-        ),
-        a: TextStyle(
-          color: colors.accent,
-          decoration: TextDecoration.underline,
-        ),
-      );
-      _cacheKey = key;
-    }
-
-    return MarkdownBody(
-      data: widget.text,
-      selectable: false,
-      shrinkWrap: true,
-      softLineBreak: true,
-      styleSheet: _cached!,
-      extensionSet: md.ExtensionSet.gitHubWeb,
-      builders: {
-        'pre': _CodeBlockBuilder(),
-      },
-      onTapLink: (text, href, title) {
-        if (href == null || href.isEmpty) return;
+    return GptMarkdown(
+      text,
+      style: baseBody,
+      followLinkColor: false,
+      onLinkTap: (href, title) {
+        if (href.isEmpty) return;
         _openLink(context, href);
       },
-    );
-  }
-}
-
-/// Renders fenced code blocks from markdown (`<pre><code>`) as a
-/// SyntaxCodeBlock — which brings syntax highlighting, a local
-/// selection scope and a Copy button — instead of the default
-/// unselectable container.
-class _CodeBlockBuilder extends MarkdownElementBuilder {
-  @override
-  bool isBlockElement() => true;
-
-  @override
-  Widget? visitElementAfterWithContext(
-    BuildContext context,
-    md.Element element,
-    TextStyle? preferredStyle,
-    TextStyle? parentStyle,
-  ) {
-    final codeNode = element.children?.whereType<md.Element>().firstWhere(
-          (child) => child.tag == 'code',
-          orElse: () => element,
+      linkBuilder: (context, linkText, url, style) {
+        return Text.rich(
+          TextSpan(
+            children: [linkText],
+            style: (style).copyWith(
+              color: colors.accent,
+              decoration: TextDecoration.underline,
+            ),
+          ),
         );
-    final text = codeNode?.textContent ?? element.textContent;
-    String? language;
-    final cls = codeNode?.attributes['class'];
-    if (cls != null && cls.startsWith('language-')) {
-      language = cls.substring('language-'.length);
-    }
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: SyntaxCodeBlock(
-        text: text.trimRight(),
-        language: language,
-      ),
+      },
+      codeBuilder: (context, name, code, closed) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: SyntaxCodeBlock(
+            text: code.trimRight(),
+            language: name.isEmpty ? null : name,
+          ),
+        );
+      },
+      highlightBuilder: (context, hlText, style) {
+        return Text(
+          hlText,
+          style: monoStyle(
+            color: colors.accent,
+            fontSize: 12.5,
+          ),
+        );
+      },
     );
   }
 }
