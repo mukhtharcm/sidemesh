@@ -39,6 +39,8 @@ dependencies:
   flutter_highlight: ^0.7.0
   macos_window_utils: ^1.9.1
   flutter_secure_storage: ^9.2.2
+  url_launcher: ^6.3.2
+  markdown: ^7.3.1
 
 dev_dependencies:
   flutter_test:
