@@ -99,19 +99,17 @@ class _SyntaxCodeBlockState extends State<SyntaxCodeBlock> {
             ),
           Padding(
             padding: widget.padding,
-            child: SelectionArea(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: HighlightView(
-                  widget.text,
-                  language: lang ?? 'plaintext',
-                  theme: theme,
-                  padding: EdgeInsets.zero,
-                  textStyle: monoStyle(
-                    color: colors.codeForeground,
-                    fontSize: 12.5,
-                    height: 1.5,
-                  ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: HighlightView(
+                widget.text,
+                language: lang ?? 'plaintext',
+                theme: theme,
+                padding: EdgeInsets.zero,
+                textStyle: monoStyle(
+                  color: colors.codeForeground,
+                  fontSize: 12.5,
+                  height: 1.5,
                 ),
               ),
             ),
