@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
 
 import 'models.dart';
+import 'fs_models.dart';
 
 class ApiClient {
   ApiClient({http.Client? client}) : _client = client ?? http.Client();
@@ -180,6 +181,104 @@ class ApiClient {
       headers: {'Authorization': 'Bearer ${host.token}'},
     );
   }
+
+  // -------------------------- Workspace filesystem --------------------------
+
+  Future<List<String>> fetchFsRoots(HostProfile host) async {
+    final response = await _get(host, '/api/fs/roots');
+    final decoded = _decodeObject(response);
+    return ((decoded['roots'] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList();
+  }
+
+  Future<FsListing> listDirectory(HostProfile host, String path) async {
+    final response =
+        await _get(host, '/api/fs/list', queryParameters: {'path': path});
+    return FsListing.fromJson(_decodeObject(response));
+  }
+
+  Future<FsMetadata> fetchMetadata(HostProfile host, String path) async {
+    final response = await _get(
+      host,
+      '/api/fs/metadata',
+      queryParameters: {'path': path},
+    );
+    return FsMetadata.fromJson(_decodeObject(response));
+  }
+
+  Future<FsFile> readFile(HostProfile host, String path) async {
+    final response =
+        await _get(host, '/api/fs/read', queryParameters: {'path': path});
+    return FsFile.fromJson(_decodeObject(response));
+  }
+
+  Future<void> writeFile(
+    HostProfile host, {
+    required String path,
+    required String contents,
+  }) async {
+    await _post(
+      host,
+      '/api/fs/write',
+      body: {'path': path, 'contents': contents},
+    );
+  }
+
+  Future<void> createDirectory(
+    HostProfile host, {
+    required String path,
+    bool recursive = true,
+  }) async {
+    await _post(
+      host,
+      '/api/fs/createDir',
+      body: {'path': path, 'recursive': recursive},
+    );
+  }
+
+  Future<void> remove(
+    HostProfile host, {
+    required String path,
+    bool recursive = true,
+    bool force = true,
+  }) async {
+    await _post(
+      host,
+      '/api/fs/remove',
+      body: {'path': path, 'recursive': recursive, 'force': force},
+    );
+  }
+
+  Future<void> copy(
+    HostProfile host, {
+    required String sourcePath,
+    required String destinationPath,
+    bool recursive = false,
+  }) async {
+    await _post(
+      host,
+      '/api/fs/copy',
+      body: {
+        'sourcePath': sourcePath,
+        'destinationPath': destinationPath,
+        'recursive': recursive,
+      },
+    );
+  }
+
+  IOWebSocketChannel openFsLive(HostProfile host) {
+    final baseUri = Uri.parse(host.baseUrl);
+    final wsUri = baseUri.replace(
+      scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
+      path: '/api/fs/live',
+    );
+    return IOWebSocketChannel.connect(
+      wsUri,
+      headers: {'Authorization': 'Bearer ${host.token}'},
+    );
+  }
+
 
   Future<http.Response> _get(
     HostProfile host,
