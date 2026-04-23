@@ -366,6 +366,51 @@ class SessionLog {
   );
 }
 
+class SessionEventsDelta {
+  const SessionEventsDelta({
+    required this.sessionId,
+    required this.since,
+    required this.nextSeq,
+    required this.messages,
+    required this.activities,
+    required this.pendingAction,
+    required this.session,
+  });
+
+  final String sessionId;
+  final int since;
+  final int nextSeq;
+  final List<SessionMessage> messages;
+  final List<SessionActivity> activities;
+  final PendingAction? pendingAction;
+  final SessionSummary? session;
+
+  factory SessionEventsDelta.fromJson(Map<String, dynamic> json) =>
+      SessionEventsDelta(
+        sessionId: _stringValue(json['sessionId']),
+        since: _intValue(json['since']),
+        nextSeq: _intValue(json['nextSeq']),
+        messages: (json['messages'] as List<dynamic>? ?? [])
+            .map((item) =>
+                SessionMessage.fromJson(item as Map<String, dynamic>))
+            .toList(),
+        activities: (json['activities'] as List<dynamic>? ?? [])
+            .map((item) =>
+                SessionActivity.fromJson(item as Map<String, dynamic>))
+            .toList(),
+        pendingAction: json['pendingAction'] == null
+            ? null
+            : PendingAction.fromJson(
+                json['pendingAction'] as Map<String, dynamic>,
+              ),
+        session: json['session'] == null
+            ? null
+            : SessionSummary.fromJson(
+                json['session'] as Map<String, dynamic>,
+              ),
+      );
+}
+
 class SessionLogHistorySummary {
   const SessionLogHistorySummary({
     required this.isTruncated,

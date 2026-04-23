@@ -151,17 +151,21 @@ class _SessionScreenState extends State<SessionScreen>
     if (state == AppLifecycleState.resumed && mounted && !_disposed) {
       // OS can pause or silently kill the socket while backgrounded; the
       // normal onDone / onError path often doesn't fire until a write
-      // actually fails. Force a reconnect + snapshot re-sync on resume so
-      // the user sees fresh state immediately.
+      // actually fails. Force a reconnect + re-sync on resume so the user
+      // sees fresh state immediately — prefer the cheap events delta over
+      // a full snapshot whenever we have a known lastSeq.
       _reconnectAttempts = 0;
       _reconnectTimer?.cancel();
-      unawaited(
-        _loadSnapshot(
-          messageLimit: _messageLimit,
-          activityLimit: _activityLimit,
-          scrollToBottom: false,
-        ),
-      );
+      unawaited(() async {
+        final applied = await _resyncDelta();
+        if (!applied && mounted) {
+          await _loadSnapshot(
+            messageLimit: _messageLimit,
+            activityLimit: _activityLimit,
+            scrollToBottom: false,
+          );
+        }
+      }());
       _connectLive();
     }
   }
@@ -212,6 +216,18 @@ class _SessionScreenState extends State<SessionScreen>
         if (!_running) {
           _liveAssistantText = '';
         }
+        // Seed lastSeq from the snapshot so subsequent resyncs can use the
+        // cheap delta endpoint instead of re-downloading everything.
+        var highestSeq = _lastEventSeq ?? 0;
+        for (final m in log.messages) {
+          if (m.seq > highestSeq) highestSeq = m.seq;
+        }
+        for (final a in log.activities) {
+          if (a.seq > highestSeq) highestSeq = a.seq;
+        }
+        if (highestSeq > 0) {
+          _lastEventSeq = highestSeq;
+        }
       });
       // Replay live events that landed during the fetch so action_opened /
       // activity_updated aren't silently dropped.
@@ -234,6 +250,64 @@ class _SessionScreenState extends State<SessionScreen>
       );
     } finally {
       _snapshotInFlight = false;
+    }
+  }
+
+  /// Cheap catchup using the events endpoint. Returns true if the delta
+  /// was applied; false if we should fall back to a full snapshot.
+  Future<bool> _resyncDelta() async {
+    final last = _lastEventSeq;
+    if (last == null) return false;
+    try {
+      final delta = await widget.api.fetchEvents(
+        widget.host,
+        widget.session.id,
+        since: last,
+      );
+      if (!mounted) return true;
+      if (delta.messages.isEmpty &&
+          delta.activities.isEmpty &&
+          delta.pendingAction == null &&
+          delta.session == null) {
+        return true;
+      }
+      setState(() {
+        if (delta.session != null) {
+          _session = delta.session!;
+          _running = delta.session!.isActive;
+        }
+        if (delta.messages.isNotEmpty) {
+          final byId = <String, SessionMessage>{
+            for (final m in _messages) m.id: m,
+          };
+          for (final m in delta.messages) {
+            byId[m.id] = m;
+          }
+          final merged = byId.values.toList()
+            ..sort((a, b) {
+              if (a.seq != b.seq) return a.seq.compareTo(b.seq);
+              return a.createdAt.compareTo(b.createdAt);
+            });
+          _messages = merged;
+          _optimisticMessages = _reconcileOptimisticMessages(merged);
+        }
+        if (delta.activities.isNotEmpty) {
+          final byId = <String, SessionActivity>{
+            for (final a in _activities) a.id: a,
+          };
+          for (final a in delta.activities) {
+            byId[a.id] = a;
+          }
+          _activities = _sortActivities(byId.values.toList());
+        }
+        _pendingAction = delta.pendingAction ?? _pendingAction;
+        if (delta.nextSeq > (_lastEventSeq ?? 0)) {
+          _lastEventSeq = delta.nextSeq;
+        }
+      });
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -369,14 +443,18 @@ class _SessionScreenState extends State<SessionScreen>
       final nextSeq = event.nextSeq;
       final last = _lastEventSeq;
       if (nextSeq != null && last != null && nextSeq > last + 1) {
-        // We missed events while disconnected; re-sync from authoritative log.
-        unawaited(
-          _loadSnapshot(
-            messageLimit: _messageLimit,
-            activityLimit: _activityLimit,
-            scrollToBottom: false,
-          ),
-        );
+        // We missed events while disconnected; try the cheap delta first,
+        // fall back to a full snapshot if that fails.
+        unawaited(() async {
+          final applied = await _resyncDelta();
+          if (!applied && mounted) {
+            await _loadSnapshot(
+              messageLimit: _messageLimit,
+              activityLimit: _activityLimit,
+              scrollToBottom: false,
+            );
+          }
+        }());
       }
       return;
     }

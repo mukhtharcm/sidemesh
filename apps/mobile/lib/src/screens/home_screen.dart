@@ -513,6 +513,15 @@ class RecentPane extends StatefulWidget {
   State<RecentPane> createState() => _RecentPaneState();
 }
 
+bool _sameHostIds(List<HostProfile> a, List<HostProfile> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i].id != b[i].id) return false;
+  }
+  return true;
+}
+
 class _RecentPaneState extends State<RecentPane> {
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
   final HostStatusStore _statuses = HostStatusStore.instance;
@@ -534,7 +543,7 @@ class _RecentPaneState extends State<RecentPane> {
   @override
   void didUpdateWidget(covariant RecentPane oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.hosts != widget.hosts) {
+    if (!_sameHostIds(oldWidget.hosts, widget.hosts)) {
       _kickoffLoad();
     }
   }
@@ -879,7 +888,7 @@ class _InboxPaneState extends State<InboxPane> {
   @override
   void didUpdateWidget(covariant InboxPane oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.hosts != widget.hosts) {
+    if (!_sameHostIds(oldWidget.hosts, widget.hosts)) {
       _kickoffLoad();
     }
   }

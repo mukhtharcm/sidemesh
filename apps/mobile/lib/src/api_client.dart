@@ -58,6 +58,19 @@ class ApiClient {
     return SessionLog.fromJson(_decodeObject(response));
   }
 
+  Future<SessionEventsDelta> fetchEvents(
+    HostProfile host,
+    String sessionId, {
+    required int since,
+  }) async {
+    final response = await _get(
+      host,
+      '/api/sessions/$sessionId/events',
+      queryParameters: {'since': '$since'},
+    );
+    return SessionEventsDelta.fromJson(_decodeObject(response));
+  }
+
   Future<SessionStatus> fetchStatus(HostProfile host, String sessionId) async {
     final response = await _get(host, '/api/sessions/$sessionId/status');
     return SessionStatus.fromJson(_decodeObject(response));
