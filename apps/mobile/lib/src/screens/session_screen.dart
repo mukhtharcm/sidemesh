@@ -13,6 +13,7 @@ import 'package:web_socket_channel/io.dart';
 import '../api_client.dart';
 import '../models.dart';
 import '../session_favorites_store.dart';
+import '../session_policy_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -52,6 +53,7 @@ class _SessionScreenState extends State<SessionScreen>
   final _composerController = TextEditingController();
   final _scrollController = ScrollController();
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
+  final SessionPolicyStore _policyStore = SessionPolicyStore.instance;
   final StringBuffer _assistantDeltaBuffer = StringBuffer();
   final Map<String, SessionActivity> _pendingActivityUpdates =
       <String, SessionActivity>{};
@@ -116,6 +118,7 @@ class _SessionScreenState extends State<SessionScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _favorites.ensureLoaded();
+    _policyStore.ensureLoaded();
     _session = widget.session;
     _scrollController.addListener(_onTranscriptScroll);
     _loadSnapshot();
@@ -636,11 +639,14 @@ class _SessionScreenState extends State<SessionScreen>
     _thinkingNotifier.value = _shouldShowThinking();
     _scrollToBottomFast(force: true);
     try {
+      final policy = _policyStore.policyFor(widget.host, widget.session.id);
       await widget.api.sendInput(
         widget.host,
         sessionId: widget.session.id,
         text: text,
         clientMessageId: optimisticMessage.id,
+        approvalPolicy: policy.approval?.wire,
+        sandboxMode: policy.sandbox?.wire,
       );
       if (!mounted) {
         return;
@@ -885,6 +891,26 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
+  Future<void> _showSessionPolicySheet(SessionSummary session) async {
+    await _policyStore.ensureLoaded();
+    if (!mounted) return;
+    final runtime = session.runtime;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.colors.surface,
+      showDragHandle: true,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SessionPolicySheet(
+        host: widget.host,
+        session: session,
+        runtimeApproval: ApprovalPolicy.fromWire(runtime?.approvalPolicy),
+        runtimeSandbox: SandboxMode.fromWire(runtime?.sandboxMode),
+        store: _policyStore,
+      ),
+    );
+  }
+
   void _dismissKeyboard() {
     FocusManager.instance.primaryFocus?.unfocus();
   }
@@ -1037,6 +1063,26 @@ class _SessionScreenState extends State<SessionScreen>
                 label: Text('Stop', style: TextStyle(color: colors.danger)),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: ListenableBuilder(
+              listenable: _policyStore,
+              builder: (context, _) {
+                final policy = _policyStore.policyFor(widget.host, session.id);
+                final customised = !policy.isEmpty;
+                return MeshIconButton(
+                  icon: customised
+                      ? Icons.tune_rounded
+                      : Icons.tune_outlined,
+                  tooltip: 'Approval & sandbox',
+                  color: customised
+                      ? colors.accent
+                      : colors.textSecondary,
+                  onTap: () => _showSessionPolicySheet(session),
+                );
+              },
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 10),
             child: ListenableBuilder(
@@ -2977,4 +3023,349 @@ String _shortId(String value) {
     return value;
   }
   return value.substring(value.length - 8);
+}
+
+class SessionPolicySheet extends StatefulWidget {
+  const SessionPolicySheet({
+    super.key,
+    required this.host,
+    required this.session,
+    required this.runtimeApproval,
+    required this.runtimeSandbox,
+    required this.store,
+  });
+
+  final HostProfile host;
+  final SessionSummary session;
+  final ApprovalPolicy? runtimeApproval;
+  final SandboxMode? runtimeSandbox;
+  final SessionPolicyStore store;
+
+  @override
+  State<SessionPolicySheet> createState() => _SessionPolicySheetState();
+}
+
+class _SessionPolicySheetState extends State<SessionPolicySheet> {
+  late SessionPolicy _policy;
+
+  @override
+  void initState() {
+    super.initState();
+    _policy = widget.store.policyFor(widget.host, widget.session.id);
+  }
+
+  ApprovalPolicy get _effectiveApproval =>
+      _policy.approval ?? widget.runtimeApproval ?? ApprovalPolicy.untrusted;
+
+  SandboxMode get _effectiveSandbox =>
+      _policy.sandbox ?? widget.runtimeSandbox ?? SandboxMode.workspaceWrite;
+
+  bool get _isAutopilot =>
+      _effectiveApproval == ApprovalPolicy.never &&
+      (_effectiveSandbox == SandboxMode.workspaceWrite ||
+          _effectiveSandbox == SandboxMode.dangerFullAccess);
+
+  Future<void> _save() async {
+    await widget.store.setPolicy(widget.host, widget.session.id, _policy);
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    showAppSnackBar(
+      context,
+      _policy.isEmpty
+          ? 'Session uses host defaults on the next message.'
+          : 'Applied on your next message — Codex will remember it.',
+    );
+  }
+
+  Future<void> _reset() async {
+    setState(() => _policy = const SessionPolicy());
+  }
+
+  void _applyAutopilot() {
+    setState(() {
+      _policy = _policy.copyWith(
+        approval: ApprovalPolicy.never,
+        sandbox: SandboxMode.workspaceWrite,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final theme = Theme.of(context);
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.tune_rounded, color: colors.accent, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Session controls',
+                      style: theme.textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Change how Codex handles approvals and file access for this session. Applied on your next message; Codex remembers it for the rest of the thread.',
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(color: colors.textSecondary, height: 1.4),
+              ),
+              const SizedBox(height: 18),
+              _PolicyAutopilotCard(
+                active: _isAutopilot,
+                onTap: _applyAutopilot,
+                colors: colors,
+              ),
+              const SizedBox(height: 22),
+              Text(
+                'Approval policy',
+                style: theme.textTheme.labelLarge
+                    ?.copyWith(color: colors.textSecondary, letterSpacing: 0.4),
+              ),
+              const SizedBox(height: 8),
+              for (final policy in ApprovalPolicy.values)
+                _PolicyRadioTile<ApprovalPolicy>(
+                  value: policy,
+                  groupValue: _effectiveApproval,
+                  title: policy.label,
+                  subtitle: policy.description,
+                  fromRuntime: _policy.approval == null &&
+                      widget.runtimeApproval == policy,
+                  onSelected: (value) {
+                    setState(() {
+                      _policy = _policy.copyWith(approval: value);
+                    });
+                  },
+                ),
+              const SizedBox(height: 18),
+              Text(
+                'Sandbox',
+                style: theme.textTheme.labelLarge
+                    ?.copyWith(color: colors.textSecondary, letterSpacing: 0.4),
+              ),
+              const SizedBox(height: 8),
+              for (final sandbox in SandboxMode.values)
+                _PolicyRadioTile<SandboxMode>(
+                  value: sandbox,
+                  groupValue: _effectiveSandbox,
+                  title: sandbox.label,
+                  subtitle: sandbox.description,
+                  fromRuntime: _policy.sandbox == null &&
+                      widget.runtimeSandbox == sandbox,
+                  danger: sandbox == SandboxMode.dangerFullAccess,
+                  onSelected: (value) {
+                    setState(() {
+                      _policy = _policy.copyWith(sandbox: value);
+                    });
+                  },
+                ),
+              const SizedBox(height: 22),
+              Row(
+                children: [
+                  if (!_policy.isEmpty)
+                    TextButton.icon(
+                      onPressed: _reset,
+                      icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                      label: const Text('Clear override'),
+                    ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: _save,
+                    icon: const Icon(Icons.check_rounded, size: 18),
+                    label: const Text('Save'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PolicyAutopilotCard extends StatelessWidget {
+  const _PolicyAutopilotCard({
+    required this.active,
+    required this.onTap,
+    required this.colors,
+  });
+
+  final bool active;
+  final VoidCallback onTap;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final border = active ? colors.accent : colors.border;
+    final bg = active ? colors.accentMuted : colors.surfaceMuted;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.auto_awesome_rounded, color: colors.accent, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Autopilot — never ask again',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: colors.textPrimary,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Approval = never · Sandbox = workspace write. Codex runs without pausing for approvals.',
+                    style: Theme.of(context).textTheme.bodySmall
+                        ?.copyWith(color: colors.textSecondary, height: 1.35),
+                  ),
+                ],
+              ),
+            ),
+            if (active)
+              Icon(Icons.check_circle_rounded,
+                  color: colors.accent, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PolicyRadioTile<T> extends StatelessWidget {
+  const _PolicyRadioTile({
+    required this.value,
+    required this.groupValue,
+    required this.title,
+    required this.subtitle,
+    required this.onSelected,
+    this.fromRuntime = false,
+    this.danger = false,
+  });
+
+  final T value;
+  final T groupValue;
+  final String title;
+  final String subtitle;
+  final bool fromRuntime;
+  final bool danger;
+  final ValueChanged<T> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final selected = value == groupValue;
+    final accent = danger ? colors.danger : colors.accent;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: () => onSelected(value),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          decoration: BoxDecoration(
+            color: selected ? colors.accentMuted.withValues(alpha: 0.55) : null,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? accent : colors.border,
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                size: 20,
+                color: selected ? accent : colors.textSecondary,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleSmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.textPrimary,
+                                ),
+                          ),
+                        ),
+                        if (fromRuntime)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: colors.surfaceMuted,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: colors.border),
+                            ),
+                            child: Text(
+                              'current',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                    color: colors.textSecondary,
+                                    letterSpacing: 0.4,
+                                  ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: colors.textSecondary,
+                            height: 1.35,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
