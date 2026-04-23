@@ -168,7 +168,7 @@ class AppColors extends ThemeExtension<AppColors> {
     diffMetaLine: Color(0xFF6D5B49),
     diffHunkLine: Color(0xFF0969DA),
     diffGutterText: Color(0xFF1F2328),
-    userBubble: Color(0xFF1C1812),
+    userBubble: Color(0xFFCA6B1F),
     userBubbleOn: Color(0xFFFFFBF3),
     assistantBubble: Color(0xFFFBF3E1),
     assistantBubbleBorder: Color(0xFFD9C8A8),

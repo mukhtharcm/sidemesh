@@ -2227,18 +2227,14 @@ class _MessageBubble extends StatelessWidget {
                       ),
                       linkColor: colors.accent,
                     ),
-                  if (message.text.trim().isNotEmpty)
+                  if (!isUser && message.text.trim().isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Align(
-                        alignment: isUser
-                            ? Alignment.centerLeft
-                            : Alignment.centerRight,
+                        alignment: Alignment.centerRight,
                         child: _MessageCopyButton(
                           text: message.text,
-                          tone: isUser
-                              ? colors.userBubbleOn.withValues(alpha: 0.75)
-                              : colors.textSecondary,
+                          tone: colors.textSecondary,
                           accent: colors.accent,
                         ),
                       ),
