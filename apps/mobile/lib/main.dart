@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:macos_window_utils/macos_window_utils.dart';
 
 import 'src/screens/desktop_shell.dart';
@@ -16,6 +17,10 @@ bool get _isMacOSDesktop =>
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (_isMacOSDesktop) {
+    // Our macOS build runs unsandboxed by design so keychain access works
+    // without extra signing setup. file_picker 11+ assumes a sandboxed app
+    // and performs an entitlement check unless we opt out explicitly.
+    await FilePicker.skipEntitlementsChecks();
     await WindowManipulator.initialize();
     // Extend content behind the titlebar so the traffic lights float over
     // our UI. We draw our own header spacing inside the shell.
