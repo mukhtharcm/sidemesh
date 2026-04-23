@@ -24,7 +24,8 @@ class SidemeshHomeScreen extends StatefulWidget {
   State<SidemeshHomeScreen> createState() => _SidemeshHomeScreenState();
 }
 
-class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
+class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
+    with WidgetsBindingObserver {
   static const _tabs = [
     _TabDef(
       title: 'Recent',
@@ -50,6 +51,9 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
   final ApiClient _api = ApiClient();
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
+  Timer? _heartbeatTimer;
+  bool _heartbeatInFlight = false;
+  static const Duration _heartbeatInterval = Duration(seconds: 45);
   List<HostProfile> _hosts = const [];
   bool _loading = true;
   int _tabIndex = 0;
@@ -60,6 +64,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _refreshHosts();
     _searchController.addListener(() {
       final next = _searchController.text;
@@ -74,13 +79,59 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
         setState(() => _query = next);
       });
     });
+    _startHeartbeat();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchDebounce?.cancel();
+    _heartbeatTimer?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Kick an immediate probe on foreground so the dots reflect reality
+      // before the next scheduled tick.
+      _startHeartbeat();
+      unawaited(_runHeartbeat());
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _heartbeatTimer?.cancel();
+      _heartbeatTimer = null;
+    }
+  }
+
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(
+      _heartbeatInterval,
+      (_) => unawaited(_runHeartbeat()),
+    );
+  }
+
+  Future<void> _runHeartbeat() async {
+    if (_heartbeatInFlight || _hosts.isEmpty) return;
+    _heartbeatInFlight = true;
+    try {
+      final store = HostStatusStore.instance;
+      await Future.wait(
+        _hosts.map((host) async {
+          try {
+            await _api.fetchNode(host);
+            store.markOnline(host.id);
+          } catch (error) {
+            store.markOffline(host.id, error: friendlyError(error));
+          }
+        }),
+        eagerError: false,
+      );
+    } finally {
+      _heartbeatInFlight = false;
+    }
   }
 
   Future<void> _refreshHosts() async {
