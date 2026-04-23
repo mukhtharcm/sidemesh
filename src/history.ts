@@ -11,6 +11,7 @@ import {
 import type {
   RolloutLog,
   SessionActivity,
+  SessionMessageAttachment,
   SessionMessage,
   SessionRuntimeSummary,
 } from "./types.js";
@@ -160,11 +161,17 @@ function parseMessage(parsed: any, seq: number): SessionMessage | null {
   const createdAt = parseTimestamp(parsed.timestamp);
   if (parsed.type === "event_msg") {
     const payloadType = parsed.payload?.type;
-    if (payloadType === "user_message" && typeof parsed.payload?.message === "string") {
+    if (payloadType === "user_message") {
+      const text = typeof parsed.payload?.message === "string" ? parsed.payload.message : "";
+      const attachments = parseMessageAttachments(parsed.payload);
+      if (!text && attachments.length === 0) {
+        return null;
+      }
       return {
         id: `${createdAt}-user`,
         role: "user",
-        text: parsed.payload.message,
+        text,
+        attachments,
         createdAt,
         seq,
       };
@@ -174,6 +181,7 @@ function parseMessage(parsed: any, seq: number): SessionMessage | null {
         id: `${createdAt}-assistant-${parsed.payload.phase || "final_answer"}`,
         role: "assistant",
         text: parsed.payload.message,
+        attachments: [],
         createdAt,
         seq,
         phase: parsed.payload.phase || "final_answer",
@@ -184,6 +192,7 @@ function parseMessage(parsed: any, seq: number): SessionMessage | null {
         id: `${createdAt}-system-turn_aborted`,
         role: "system",
         text: `Turn aborted: ${parsed.payload?.reason || "unknown"}`,
+        attachments: [],
         createdAt,
         seq,
       };
@@ -191,6 +200,25 @@ function parseMessage(parsed: any, seq: number): SessionMessage | null {
   }
 
   return null;
+}
+
+function parseMessageAttachments(payload: any): SessionMessageAttachment[] {
+  const attachments: SessionMessageAttachment[] = [];
+  const images = Array.isArray(payload?.images) ? payload.images : [];
+  for (const url of images) {
+    if (typeof url === "string" && url.length > 0) {
+      attachments.push({ type: "image", url });
+    }
+  }
+
+  const localImages = Array.isArray(payload?.local_images) ? payload.local_images : [];
+  for (const path of localImages) {
+    if (typeof path === "string" && path.length > 0) {
+      attachments.push({ type: "localImage", path });
+    }
+  }
+
+  return attachments;
 }
 
 function parseActivity(parsed: any, seq: number): SessionActivity | null {

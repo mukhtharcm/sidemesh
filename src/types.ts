@@ -30,9 +30,16 @@ export interface SessionMessage {
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
+  attachments: SessionMessageAttachment[];
   createdAt: number;
   seq: number;
   phase?: "commentary" | "final_answer";
+}
+
+export interface SessionMessageAttachment {
+  type: "image" | "localImage";
+  url?: string;
+  path?: string;
 }
 
 export interface SessionActivityChange {
