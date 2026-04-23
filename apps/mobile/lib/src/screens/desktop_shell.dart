@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api_client.dart';
+import '../approval_inbox_store.dart';
 import '../host_store.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
@@ -43,7 +44,6 @@ class _DesktopShellState extends State<DesktopShell> {
   _SidebarSection _section = _SidebarSection.recent;
   _ActiveSession? _active;
   HostProfile? _activeHost;
-  int _inboxCount = 0;
   int _activeCount = 0;
   String _query = '';
   double _sidebarWidth = _defaultSidebarWidth;
@@ -99,6 +99,7 @@ class _DesktopShellState extends State<DesktopShell> {
       _hosts = hosts;
       _loading = false;
     });
+    ApprovalInboxStore.instance.configure(hosts: hosts, api: _api);
   }
 
   Future<void> _loadSidebarWidth() async {
@@ -369,41 +370,41 @@ class _DesktopShellState extends State<DesktopShell> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _Sidebar(
-                  titlebarInset: _titlebarInset,
-                  width: _sidebarWidth,
-                  hosts: _hosts,
-                  loading: _loading,
-                  api: _api,
-                  section: _section,
-                  refreshTick: _refreshTick,
-                  inboxCount: _inboxCount,
-                  activeCount: _activeCount,
-                  selectedSessionId: _active?.session.id,
-                  selectedHostId: _activeHost?.id,
-                  searchController: _searchController,
-                  searchFocus: _searchFocus,
-                  query: _query,
-                  onClearSearch: () {
-                    _searchController.clear();
-                  },
-                  onSelectSection: (s) => setState(() => _section = s),
-                  onOpenSession: _openSession,
-                  onOpenSessionFromAction: (host, action) =>
-                      _openSession(host, _sessionFromAction(action)),
-                  onOpenHostDetail: _openHostDetail,
-                  onAddHost: () => _showHostEditor(),
-                  onEditHost: (h) => _showHostEditor(initial: h),
-                  onRemoveHost: _removeHost,
-                  onActiveCountChanged: (n) {
-                    if (!mounted) return;
-                    setState(() => _activeCount = n);
-                  },
-                  onInboxCountChanged: (n) {
-                    if (!mounted) return;
-                    setState(() => _inboxCount = n);
-                  },
-                  onShowShortcuts: _showShortcutsSheet,
+                ListenableBuilder(
+                  listenable: ApprovalInboxStore.instance,
+                  builder: (context, _) => _Sidebar(
+                    titlebarInset: _titlebarInset,
+                    width: _sidebarWidth,
+                    hosts: _hosts,
+                    loading: _loading,
+                    api: _api,
+                    section: _section,
+                    refreshTick: _refreshTick,
+                    inboxCount: ApprovalInboxStore.instance.count,
+                    activeCount: _activeCount,
+                    selectedSessionId: _active?.session.id,
+                    selectedHostId: _activeHost?.id,
+                    searchController: _searchController,
+                    searchFocus: _searchFocus,
+                    query: _query,
+                    onClearSearch: () {
+                      _searchController.clear();
+                    },
+                    onSelectSection: (s) => setState(() => _section = s),
+                    onOpenSession: _openSession,
+                    onOpenSessionFromAction: (host, action) =>
+                        _openSession(host, _sessionFromAction(action)),
+                    onOpenHostDetail: _openHostDetail,
+                    onAddHost: () => _showHostEditor(),
+                    onEditHost: (h) => _showHostEditor(initial: h),
+                    onRemoveHost: _removeHost,
+                    onActiveCountChanged: (n) {
+                      if (!mounted) return;
+                      setState(() => _activeCount = n);
+                    },
+                    onInboxCountChanged: (_) {},
+                    onShowShortcuts: _showShortcutsSheet,
+                  ),
                 ),
                 _SidebarResizer(
                   color: colors.border,

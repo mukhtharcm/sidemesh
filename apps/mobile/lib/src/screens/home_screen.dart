@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../api_client.dart';
+import '../approval_inbox_store.dart';
 import '../host_status_store.dart';
 import '../host_store.dart';
 import '../models.dart';
@@ -58,7 +59,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   bool _loading = true;
   int _tabIndex = 0;
   int _activeCount = 0;
-  int _inboxCount = 0;
   String _query = '';
 
   @override
@@ -143,6 +143,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       _hosts = hosts;
       _loading = false;
     });
+    ApprovalInboxStore.instance
+        .configure(hosts: hosts, api: _api);
   }
 
   Future<void> _showHostEditor({HostProfile? initialHost}) async {
@@ -249,10 +251,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                           query: _query,
                           onOpenSession: (host, action) =>
                               _openSession(host, _sessionFromAction(action)),
-                          onInboxCountChanged: (count) {
-                            if (!mounted) return;
-                            setState(() => _inboxCount = count);
-                          },
+                          onInboxCountChanged: (_) {},
                         ),
                         HostsPane(
                           hosts: _hosts,
@@ -276,11 +275,14 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               label: const Text('Add host'),
             )
           : null,
-      bottomNavigationBar: _MeshNavBar(
-        tabs: _tabs,
-        currentIndex: _tabIndex,
-        onTap: (index) => setState(() => _tabIndex = index),
-        badges: [_activeCount, _inboxCount, 0],
+      bottomNavigationBar: ListenableBuilder(
+        listenable: ApprovalInboxStore.instance,
+        builder: (context, _) => _MeshNavBar(
+          tabs: _tabs,
+          currentIndex: _tabIndex,
+          onTap: (index) => setState(() => _tabIndex = index),
+          badges: [_activeCount, ApprovalInboxStore.instance.count, 0],
+        ),
       ),
     );
   }
@@ -1053,82 +1055,45 @@ class InboxPane extends StatefulWidget {
 }
 
 class _InboxPaneState extends State<InboxPane> {
-  final HostStatusStore _statuses = HostStatusStore.instance;
-  List<PendingActionEntry> _entries = const [];
-  Set<String> _pendingHostIds = <String>{};
-  List<String> _failedHostLabels = const [];
-  int _loadGen = 0;
-  bool _initialLoadStarted = false;
+  final ApprovalInboxStore _store = ApprovalInboxStore.instance;
 
   @override
   void initState() {
     super.initState();
-    _kickoffLoad();
+    _store.addListener(_onStoreChanged);
+    _store.configure(hosts: widget.hosts, api: widget.api);
+    _emitCount();
   }
 
   @override
   void didUpdateWidget(covariant InboxPane oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!_sameHostIds(oldWidget.hosts, widget.hosts)) {
-      _kickoffLoad();
+      _store.configure(hosts: widget.hosts, api: widget.api);
     }
   }
 
-  void _kickoffLoad() {
-    final gen = ++_loadGen;
-    _initialLoadStarted = true;
-    setState(() {
-      _entries = const [];
-      _pendingHostIds = widget.hosts.map((h) => h.id).toSet();
-      _failedHostLabels = const [];
-    });
-    for (final host in widget.hosts) {
-      _statuses.markProbing(host.id);
-      _loadHost(host, gen);
-    }
-    if (widget.hosts.isEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        widget.onInboxCountChanged(0);
-      });
-    }
+  @override
+  void dispose() {
+    _store.removeListener(_onStoreChanged);
+    super.dispose();
   }
 
-  Future<void> _loadHost(HostProfile host, int gen) async {
-    try {
-      final actions = await widget.api.fetchPendingActions(host);
-      if (!mounted || gen != _loadGen) return;
-      _statuses.markOnline(host.id);
-      final newEntries = actions
-          .map((action) => PendingActionEntry(host: host, action: action))
-          .toList();
-      setState(() {
-        _entries = [..._entries, ...newEntries];
-        _pendingHostIds = {..._pendingHostIds}..remove(host.id);
-      });
-      _emitInboxCount();
-    } catch (error) {
-      if (!mounted || gen != _loadGen) return;
-      _statuses.markOffline(host.id, error: friendlyError(error));
-      setState(() {
-        _failedHostLabels = [..._failedHostLabels, host.label];
-        _pendingHostIds = {..._pendingHostIds}..remove(host.id);
-      });
-      _emitInboxCount();
-    }
+  void _onStoreChanged() {
+    if (!mounted) return;
+    setState(() {});
+    _emitCount();
   }
 
-  void _emitInboxCount() {
-    final count = _entries.length;
+  void _emitCount() {
+    final count = _store.count;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       widget.onInboxCountChanged(count);
     });
   }
 
-  Future<void> _refresh() async {
-    _kickoffLoad();
-  }
+  Future<void> _refresh() => _store.refresh();
 
   Future<void> _respond(
     HostProfile host,
@@ -1141,14 +1106,13 @@ class _InboxPaneState extends State<InboxPane> {
         actionId: action.id,
         decision: decision,
       );
-      if (!mounted) {
-        return;
-      }
-      await _refresh();
+      if (!mounted) return;
+      // Optimistically drop the entry so the list feels responsive; the
+      // background poll will reconcile within a few seconds.
+      _store.removeEntry(action.id);
+      unawaited(_store.refresh());
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       showAppSnackBar(
         context,
         'Failed to resolve action: ${friendlyError(error)}',
@@ -1168,19 +1132,13 @@ class _InboxPaneState extends State<InboxPane> {
       );
     }
 
-    final stillLoadingInitial =
-        _initialLoadStarted &&
-        _entries.isEmpty &&
-        _failedHostLabels.isEmpty &&
-        _pendingHostIds.isNotEmpty;
+    final stillLoadingInitial = !_store.hasLoadedOnce && _store.isLoading;
     if (stillLoadingInitial) {
       return const MeshLoader();
     }
 
     final query = widget.query.trim().toLowerCase();
-    final allEntries = [..._entries]..sort(
-        (a, b) => b.action.requestedAt.compareTo(a.action.requestedAt),
-      );
+    final allEntries = _store.entries;
     final entries = query.isEmpty
         ? allEntries
         : allEntries.where((entry) {
@@ -1191,8 +1149,8 @@ class _InboxPaneState extends State<InboxPane> {
                 entry.host.label.toLowerCase().contains(query);
           }).toList();
 
-    final isRefreshing = _pendingHostIds.isNotEmpty;
-    final hasFailures = _failedHostLabels.isNotEmpty;
+    final isRefreshing = _store.isLoading;
+    final hasFailures = _store.failedHostLabels.isNotEmpty;
 
     if (entries.isEmpty) {
       return RefreshIndicator(
@@ -1203,12 +1161,12 @@ class _InboxPaneState extends State<InboxPane> {
           children: [
             if (isRefreshing)
               _RecentProgressStrip(
-                remaining: _pendingHostIds.length,
-                total: widget.hosts.length,
+                remaining: _store.pendingHostsRemaining,
+                total: _store.totalHosts,
               ),
             if (hasFailures)
               _RecentErrorBanner(
-                hostLabels: _failedHostLabels,
+                hostLabels: _store.failedHostLabels,
                 onRetry: _refresh,
               ),
             const SizedBox(height: 80),
@@ -1245,8 +1203,8 @@ class _InboxPaneState extends State<InboxPane> {
           if (isRefreshing) {
             if (index == offset) {
               return _RecentProgressStrip(
-                remaining: _pendingHostIds.length,
-                total: widget.hosts.length,
+                remaining: _store.pendingHostsRemaining,
+                total: _store.totalHosts,
               );
             }
             offset += 1;
@@ -1254,7 +1212,7 @@ class _InboxPaneState extends State<InboxPane> {
           if (hasFailures) {
             if (index == offset) {
               return _RecentErrorBanner(
-                hostLabels: _failedHostLabels,
+                hostLabels: _store.failedHostLabels,
                 onRetry: _refresh,
               );
             }
@@ -1982,13 +1940,6 @@ class RemoteSessionEntry {
 
   final HostProfile host;
   final SessionSummary session;
-}
-
-class PendingActionEntry {
-  const PendingActionEntry({required this.host, required this.action});
-
-  final HostProfile host;
-  final PendingAction action;
 }
 
 String _randomId() {
