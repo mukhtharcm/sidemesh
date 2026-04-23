@@ -23,6 +23,7 @@ class SessionReadStore extends ChangeNotifier {
   static final SessionReadStore instance = SessionReadStore._();
 
   static const _prefsKey = 'sidemesh_session_read_state_v1';
+  static const _installEpochKey = 'sidemesh_session_read_install_epoch_v1';
   static const _writeDebounce = Duration(milliseconds: 400);
 
   final Map<String, int> _seenAtMs = <String, int>{};
@@ -30,6 +31,7 @@ class SessionReadStore extends ChangeNotifier {
   Future<void>? _loadFuture;
   Timer? _flushTimer;
   bool _dirty = false;
+  int _installEpochMs = 0;
 
   Future<void> ensureLoaded() {
     return _loadFuture ??= _load();
@@ -38,6 +40,14 @@ class SessionReadStore extends ChangeNotifier {
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     _prefs = prefs;
+    var epoch = prefs.getInt(_installEpochKey);
+    if (epoch == null) {
+      // First launch with unread tracking enabled. Treat everything
+      // already known as read so we don't light up months-old sessions.
+      epoch = DateTime.now().millisecondsSinceEpoch;
+      await prefs.setInt(_installEpochKey, epoch);
+    }
+    _installEpochMs = epoch;
     final raw = prefs.getString(_prefsKey);
     if (raw == null || raw.isEmpty) return;
     try {
@@ -68,12 +78,16 @@ class SessionReadStore extends ChangeNotifier {
   }
 
   /// True when the session has activity newer than the last time the
-  /// user saw it. A brand-new session with no prior seen timestamp is
-  /// treated as unread until opened once.
+  /// user saw it. Sessions whose activity predates when this device
+  /// started tracking read-state are treated as already read, so we
+  /// don't light up every old session the first time the feature runs.
   bool isUnread(HostProfile host, SessionSummary session) {
+    final activityMs = session.updatedAt.millisecondsSinceEpoch;
     final seen = _seenAtMs[_keyFor(host, session.id)];
-    if (seen == null) return true;
-    return session.updatedAt.millisecondsSinceEpoch > seen;
+    if (seen != null) {
+      return activityMs > seen;
+    }
+    return activityMs > _installEpochMs;
   }
 
   /// Mark the session as seen up to [at]. No-op when we already recorded
