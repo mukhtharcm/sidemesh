@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import os from "node:os";
 import readline from "node:readline";
 
 import type { JsonRpcMessage } from "./types.js";
@@ -12,6 +13,37 @@ interface PendingRequest {
 
 interface InitializeResult {
   codexHome?: string;
+}
+
+function buildCodexSpawnEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+
+  // Service managers sometimes launch sidemesh with a stripped environment.
+  // Codex later derives shell/tool env from its own process environment, so
+  // missing HOME/USER here leaks into app-started sessions.
+  const home = env.HOME?.trim() || os.homedir().trim();
+  if (home) {
+    env.HOME = home;
+  }
+
+  let username = env.USER?.trim() || env.LOGNAME?.trim() || "";
+  if (!username) {
+    try {
+      username = os.userInfo().username.trim();
+    } catch {
+      username = "";
+    }
+  }
+  if (username) {
+    if (!env.USER?.trim()) {
+      env.USER = username;
+    }
+    if (!env.LOGNAME?.trim()) {
+      env.LOGNAME = username;
+    }
+  }
+
+  return env;
 }
 
 export class CodexBridge extends EventEmitter<{
@@ -35,6 +67,7 @@ export class CodexBridge extends EventEmitter<{
 
   public async start(): Promise<void> {
     this.process = spawn(this.codexBin, ["app-server"], {
+      env: buildCodexSpawnEnv(),
       stdio: ["pipe", "pipe", "pipe"],
     });
 
