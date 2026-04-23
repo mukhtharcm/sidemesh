@@ -106,6 +106,29 @@ class SessionPolicy {
     networkAccess: json['networkAccess'] as bool?,
   );
 
+  static SessionPolicy get factoryDefaults => const SessionPolicy(
+        approval: ApprovalPolicy.untrusted,
+        sandbox: SandboxMode.workspaceWrite,
+        networkAccess: false,
+      );
+
+  /// True when the live runtime reports a loosened, non-default state
+  /// (never-ask, danger sandbox, or network enabled). Used to mark the
+  /// session's policy control as "customised" even if this device has no
+  /// local override — e.g. another device pinned it.
+  static bool runtimeIsLoosened({
+    String? approvalPolicy,
+    String? sandboxMode,
+    bool? networkAccess,
+  }) {
+    if (approvalPolicy == 'never' || approvalPolicy == 'on-failure') {
+      return true;
+    }
+    if (sandboxMode == 'danger-full-access') return true;
+    if (networkAccess == true) return true;
+    return false;
+  }
+
   static const _sentinel = Object();
 }
 
