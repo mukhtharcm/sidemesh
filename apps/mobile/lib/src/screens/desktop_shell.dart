@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -43,6 +45,7 @@ class _DesktopShellState extends State<DesktopShell> {
   int _activeCount = 0;
   String _query = '';
   double _sidebarWidth = _defaultSidebarWidth;
+  Timer? _searchDebounce;
   // Used to trigger refresh of sidebar panes after a host/session mutation.
   int _refreshTick = 0;
 
@@ -61,14 +64,27 @@ class _DesktopShellState extends State<DesktopShell> {
     _loadSidebarWidth();
     _searchController.addListener(() {
       final next = _searchController.text;
-      if (next != _query) {
-        setState(() => _query = next);
+      if (next == _query) return;
+      _searchDebounce?.cancel();
+      // Apply instantly when clearing so the UI feels responsive; otherwise
+      // coalesce typing bursts.
+      if (next.isEmpty) {
+        setState(() => _query = '');
+        return;
       }
+      _searchDebounce = Timer(
+        const Duration(milliseconds: 140),
+        () {
+          if (!mounted) return;
+          setState(() => _query = _searchController.text);
+        },
+      );
     });
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -709,57 +725,82 @@ class _DetailPaneState extends State<_DetailPane> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final active = widget.active;
-    if (active == null) {
-      return Container(
-        color: colors.canvas,
-        child: Column(
-          children: [
-            SizedBox(height: widget.titlebarInset + 16),
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: colors.accentMuted,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(
-                        Icons.forum_rounded,
-                        color: colors.accent,
-                        size: 26,
-                      ),
+    // Cross-fade between the empty placeholder and the active session so
+    // closing/swapping doesn't snap the entire right-hand pane.
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: child,
+      ),
+      child: active == null
+          ? _buildEmpty(context, key: const ValueKey('empty'))
+          : _buildActive(
+              context,
+              active,
+              key: ValueKey('active-${active.host.id}-${active.session.id}'),
+            ),
+    );
+  }
+
+  Widget _buildEmpty(BuildContext context, {required Key key}) {
+    final colors = context.colors;
+    return Container(
+      key: key,
+      color: colors.canvas,
+      child: Column(
+        children: [
+          SizedBox(height: widget.titlebarInset + 16),
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: colors.accentMuted,
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Pick a session',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      Icons.forum_rounded,
+                      color: colors.accent,
+                      size: 26,
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Choose a host and session from the sidebar to get going.',
-                      style: TextStyle(color: colors.textSecondary),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Pick a session',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Choose a host and session from the sidebar to get going.',
+                    style: TextStyle(color: colors.textSecondary),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-      );
-    }
-    // The session screen was designed for full-screen mobile, so we overlay
-    // a small drag region + close action on top for desktop. The button
-    // fades in on hover so it doesn't distract during normal reading.
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActive(
+    BuildContext context,
+    _ActiveSession active, {
+    required Key key,
+  }) {
     return MouseRegion(
+      key: key,
       onEnter: (_) => setState(() => _hoverClose = true),
       onExit: (_) => setState(() => _hoverClose = false),
       child: Stack(

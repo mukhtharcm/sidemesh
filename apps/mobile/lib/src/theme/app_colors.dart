@@ -170,8 +170,8 @@ class AppColors extends ThemeExtension<AppColors> {
     diffGutterText: Color(0xFF1F2328),
     userBubble: Color(0xFF1C1812),
     userBubbleOn: Color(0xFFFFFBF3),
-    assistantBubble: Color(0xFFFFFBF3),
-    assistantBubbleBorder: Color(0xFFE6D9BF),
+    assistantBubble: Color(0xFFFBF3E1),
+    assistantBubbleBorder: Color(0xFFD9C8A8),
     composerBackground: Color(0xFFFFFBF3),
   );
 
