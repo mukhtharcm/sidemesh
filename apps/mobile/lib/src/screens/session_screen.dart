@@ -3090,9 +3090,10 @@ class _MarkdownMessageBody extends StatelessWidget {
       color: textColor,
       height: 1.5,
     );
+    final markdownText = _autoLinkBareUrlsForMarkdown(text);
 
     return GptMarkdown(
-      text,
+      markdownText,
       style: baseBody,
       followLinkColor: false,
       onLinkTap: (href, title) {
@@ -3239,6 +3240,93 @@ Future<void> _openLink(BuildContext context, String href) async {
   }
 }
 
+String _autoLinkBareUrlsForMarkdown(String text) {
+  if (text.isEmpty || !_urlRegExp.hasMatch(text)) {
+    return text;
+  }
+
+  final output = StringBuffer();
+  final fenceMatches = _fencedCodeRegExp.allMatches(text).toList();
+  var cursor = 0;
+
+  for (final match in fenceMatches) {
+    if (match.start > cursor) {
+      output.write(
+        _autoLinkBareUrlsOutsideInlineCode(text.substring(cursor, match.start)),
+      );
+    }
+    output.write(match.group(0)!);
+    cursor = match.end;
+  }
+
+  if (cursor < text.length) {
+    output.write(_autoLinkBareUrlsOutsideInlineCode(text.substring(cursor)));
+  }
+
+  return output.toString();
+}
+
+String _autoLinkBareUrlsOutsideInlineCode(String text) {
+  if (text.isEmpty || !_urlRegExp.hasMatch(text)) {
+    return text;
+  }
+
+  final output = StringBuffer();
+  final inlineCodeMatches = _inlineCodeRegExp.allMatches(text).toList();
+  var cursor = 0;
+
+  for (final match in inlineCodeMatches) {
+    if (match.start > cursor) {
+      output.write(
+        _wrapBareUrlsAsMarkdownLinks(text.substring(cursor, match.start)),
+      );
+    }
+    output.write(match.group(0)!);
+    cursor = match.end;
+  }
+
+  if (cursor < text.length) {
+    output.write(_wrapBareUrlsAsMarkdownLinks(text.substring(cursor)));
+  }
+
+  return output.toString();
+}
+
+String _wrapBareUrlsAsMarkdownLinks(String text) {
+  if (text.isEmpty || !_urlRegExp.hasMatch(text)) {
+    return text;
+  }
+
+  final output = StringBuffer();
+  var cursor = 0;
+  for (final match in _bareMarkdownUrlRegExp.allMatches(text)) {
+    final raw = match.group(0);
+    if (raw == null || raw.isEmpty) continue;
+    if (match.start > cursor) {
+      output.write(text.substring(cursor, match.start));
+    }
+
+    final trimmed = raw.replaceAll(RegExp(r'[),.!?;:\]]+$'), '');
+    if (trimmed.isEmpty) {
+      output.write(raw);
+      cursor = match.end;
+      continue;
+    }
+
+    final trailing = raw.substring(trimmed.length);
+    final href = trimmed.startsWith('www.') ? 'https://$trimmed' : trimmed;
+    output.write('[$trimmed]($href)');
+    output.write(trailing);
+    cursor = match.end;
+  }
+
+  if (cursor < text.length) {
+    output.write(text.substring(cursor));
+  }
+
+  return output.toString();
+}
+
 /// Returns true when [text] looks like a workspace file path rather than a
 /// plain identifier or URL. Requires a `/` separator AND either a known file
 /// extension or an explicit relative prefix (`./`, `../`).
@@ -3319,6 +3407,18 @@ final RegExp _urlRegExp = RegExp(
   r'(https?:\/\/[^\s<>]+|www\.[^\s<>]+)',
   caseSensitive: false,
 );
+
+// gpt_markdown parses markdown links, but it does not auto-link bare URLs.
+// Restore the old GitHub-style behavior in prose while leaving code intact.
+final RegExp _bareMarkdownUrlRegExp = RegExp(
+  r'(?<!\]\()(?<!\[)(https?:\/\/[^\s<>]+|www\.[^\s<>]+)',
+  caseSensitive: false,
+);
+final RegExp _fencedCodeRegExp = RegExp(
+  r'(```[\s\S]*?```|~~~[\s\S]*?~~~)',
+  multiLine: true,
+);
+final RegExp _inlineCodeRegExp = RegExp(r'(``[^`\n]*``|`[^`\n]*`)');
 
 class _LinkifiedSelectableText extends StatefulWidget {
   const _LinkifiedSelectableText({
