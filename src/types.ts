@@ -109,6 +109,7 @@ export interface LiveEvent {
     | "user_message_submitted"
     | "turn_started"
     | "assistant_delta"
+    | "assistant_message_completed"
     | "turn_completed"
     | "activity_updated"
     | "action_opened"
