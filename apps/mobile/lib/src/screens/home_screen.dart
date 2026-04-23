@@ -258,7 +258,6 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final controller = ThemeScope.of(context);
-    final isDark = controller.isDark(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 16, 8),
       child: Row(
@@ -324,9 +323,24 @@ class _TopBar extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           MeshIconButton(
-            icon: isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-            tooltip: isDark ? 'Light mode' : 'Dark mode',
-            onTap: () => controller.toggle(context),
+            icon: switch (controller.mode) {
+              ThemeMode.dark => Icons.dark_mode_rounded,
+              ThemeMode.light => Icons.light_mode_rounded,
+              ThemeMode.system => Icons.brightness_auto_rounded,
+            },
+            tooltip: switch (controller.mode) {
+              ThemeMode.dark => 'Theme: dark (tap for system)',
+              ThemeMode.light => 'Theme: light (tap for dark)',
+              ThemeMode.system => 'Theme: system (tap for light)',
+            },
+            onTap: () {
+              final next = switch (controller.mode) {
+                ThemeMode.system => ThemeMode.light,
+                ThemeMode.light => ThemeMode.dark,
+                ThemeMode.dark => ThemeMode.system,
+              };
+              controller.setMode(next);
+            },
           ),
           const SizedBox(width: 8),
           MeshIconButton(

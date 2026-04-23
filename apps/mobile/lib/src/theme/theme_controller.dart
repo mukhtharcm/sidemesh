@@ -24,7 +24,8 @@ class ThemeController extends ChangeNotifier {
     final mode = switch (raw) {
       'light' => ThemeMode.light,
       'dark' => ThemeMode.dark,
-      _ => ThemeMode.dark,
+      'system' => ThemeMode.system,
+      _ => ThemeMode.system,
     };
     return ThemeController._(mode);
   }
