@@ -2082,68 +2082,78 @@ class _MessageBubble extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 10),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onLongPress: message.text.trim().isEmpty
-                ? null
-                : () => _copyMessage(context, message.text),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: bubbleColor,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: live
-                      ? colors.accent
-                      : (isUser
-                            ? colors.userBubble
-                            : colors.assistantBubbleBorder),
-                  width: live ? 1.4 : 1,
-                ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: bubbleColor,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: live
+                    ? colors.accent
+                    : (isUser
+                          ? colors.userBubble
+                          : colors.assistantBubbleBorder),
+                width: live ? 1.4 : 1,
               ),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (message.phase != null && isAssistant)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Row(
-                          children: [
-                            if (live) ...[
-                              const LivePulse(),
-                              const SizedBox(width: 6),
-                            ],
-                            Text(
-                              message.phase == 'commentary'
-                                  ? 'COMMENTARY'
-                                  : 'ANSWER',
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: colors.textTertiary,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 1.1,
-                                  ),
-                            ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (message.phase != null && isAssistant)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          if (live) ...[
+                            const LivePulse(),
+                            const SizedBox(width: 6),
                           ],
+                          Text(
+                            message.phase == 'commentary'
+                                ? 'COMMENTARY'
+                                : 'ANSWER',
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: colors.textTertiary,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 1.1,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (isAssistant)
+                    _MarkdownMessageBody(
+                      text: message.text,
+                      textColor: textColor,
+                    )
+                  else
+                    _LinkifiedSelectableText(
+                      text: message.text,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: textColor,
+                        height: 1.45,
+                      ),
+                      linkColor: colors.accent,
+                    ),
+                  if (message.text.trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Align(
+                        alignment: isUser
+                            ? Alignment.centerLeft
+                            : Alignment.centerRight,
+                        child: _MessageCopyButton(
+                          text: message.text,
+                          tone: isUser
+                              ? colors.userBubbleOn.withValues(alpha: 0.75)
+                              : colors.textSecondary,
+                          accent: colors.accent,
                         ),
                       ),
-                    if (isAssistant)
-                      _MarkdownMessageBody(
-                        text: message.text,
-                        textColor: textColor,
-                      )
-                    else
-                      _LinkifiedSelectableText(
-                        text: message.text,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: textColor,
-                          height: 1.45,
-                        ),
-                        linkColor: colors.accent,
-                      ),
-                  ],
-                ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -2151,14 +2161,65 @@ class _MessageBubble extends StatelessWidget {
       ),
     );
   }
+}
 
-  void _copyMessage(BuildContext context, String text) {
-    Clipboard.setData(ClipboardData(text: text));
+class _MessageCopyButton extends StatefulWidget {
+  const _MessageCopyButton({
+    required this.text,
+    required this.tone,
+    required this.accent,
+  });
+
+  final String text;
+  final Color tone;
+  final Color accent;
+
+  @override
+  State<_MessageCopyButton> createState() => _MessageCopyButtonState();
+}
+
+class _MessageCopyButtonState extends State<_MessageCopyButton> {
+  bool _copied = false;
+
+  Future<void> _handle() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
     HapticFeedback.selectionClick();
-    showAppSnackBar(
-      context,
-      'Message copied',
-      duration: const Duration(seconds: 1),
+    if (!mounted) return;
+    setState(() => _copied = true);
+    Future.delayed(const Duration(milliseconds: 1400), () {
+      if (!mounted) return;
+      setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _copied ? widget.accent : widget.tone;
+    return InkWell(
+      onTap: _handle,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _copied ? Icons.check_rounded : Icons.copy_rounded,
+              size: 13,
+              color: color,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              _copied ? 'Copied' : 'Copy',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
