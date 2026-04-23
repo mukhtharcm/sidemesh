@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api_client.dart';
 import '../models.dart';
 import '../session_favorites_store.dart';
+import '../session_read_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -243,6 +244,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                       (session) => Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: _SessionRow(
+                          host: widget.host,
                           session: session,
                           favorite: _favorites.isFavorite(
                             widget.host,
@@ -527,12 +529,14 @@ class _WorkspaceCard extends StatelessWidget {
 
 class _SessionRow extends StatelessWidget {
   const _SessionRow({
+    required this.host,
     required this.session,
     required this.favorite,
     required this.onTap,
     required this.onToggleFavorite,
   });
 
+  final HostProfile host;
   final SessionSummary session;
   final bool favorite;
   final VoidCallback onTap;
@@ -542,52 +546,89 @@ class _SessionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final running = session.isActive;
-    return MeshCard(
-      onTap: onTap,
-      accentStrip: running ? colors.success : null,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return ListenableBuilder(
+      listenable: SessionReadStore.instance,
+      builder: (context, _) {
+        final unread = SessionReadStore.instance.isUnread(host, session);
+        return MeshCard(
+          onTap: onTap,
+          accentStrip: running ? colors.success : null,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  session.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      session.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.titleSmall?.copyWith(
+                            fontWeight: unread
+                                ? FontWeight.w800
+                                : FontWeight.w700,
+                          ),
+                    ),
+                  ),
+                  if (unread) ...[
+                    const SizedBox(width: 6),
+                    _UnreadDot(color: colors.accent),
+                    const SizedBox(width: 6),
+                  ],
+                  IconButton(
+                    onPressed: onToggleFavorite,
+                    tooltip: favorite ? 'Remove favorite' : 'Add favorite',
+                    visualDensity: VisualDensity.compact,
+                    iconSize: 20,
+                    splashRadius: 18,
+                    constraints:
+                        const BoxConstraints(minWidth: 32, minHeight: 32),
+                    icon: Icon(
+                      favorite
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
+                      color: favorite ? colors.warning : colors.textTertiary,
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded,
+                      color: colors.textTertiary),
+                ],
               ),
-              IconButton(
-                onPressed: onToggleFavorite,
-                tooltip: favorite ? 'Remove favorite' : 'Add favorite',
-                visualDensity: VisualDensity.compact,
-                iconSize: 20,
-                splashRadius: 18,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                icon: Icon(
-                  favorite ? Icons.star_rounded : Icons.star_outline_rounded,
-                  color: favorite ? colors.warning : colors.textTertiary,
-                ),
+              const SizedBox(height: 4),
+              Text(
+                session.cwd,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
               ),
-              Icon(Icons.chevron_right_rounded, color: colors.textTertiary),
+              if (session.runtime != null) ...[
+                const SizedBox(height: 8),
+                SessionRuntimeWrap(runtime: session.runtime),
+              ],
             ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            session.cwd,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
-          ),
-          if (session.runtime != null) ...[
-            const SizedBox(height: 8),
-            SessionRuntimeWrap(runtime: session.runtime),
-          ],
-        ],
+        );
+      },
+    );
+  }
+}
+
+class _UnreadDot extends StatelessWidget {
+  const _UnreadDot({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
       ),
     );
   }

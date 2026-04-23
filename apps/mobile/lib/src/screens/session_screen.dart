@@ -14,6 +14,7 @@ import '../api_client.dart';
 import '../models.dart';
 import '../session_favorites_store.dart';
 import '../session_policy_store.dart';
+import '../session_read_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -54,6 +55,7 @@ class _SessionScreenState extends State<SessionScreen>
   final _scrollController = ScrollController();
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
   final SessionPolicyStore _policyStore = SessionPolicyStore.instance;
+  final SessionReadStore _readStore = SessionReadStore.instance;
   final StringBuffer _assistantDeltaBuffer = StringBuffer();
   final Map<String, SessionActivity> _pendingActivityUpdates =
       <String, SessionActivity>{};
@@ -119,15 +121,27 @@ class _SessionScreenState extends State<SessionScreen>
     WidgetsBinding.instance.addObserver(this);
     _favorites.ensureLoaded();
     _policyStore.ensureLoaded();
+    _readStore.ensureLoaded();
     _session = widget.session;
     _scrollController.addListener(_onTranscriptScroll);
+    _markCurrentSessionSeen();
     _loadSnapshot();
     _connectLive();
+  }
+
+  void _markCurrentSessionSeen() {
+    final session = _session ?? widget.session;
+    _readStore.markSeen(widget.host, session.id, session.updatedAt);
   }
 
   @override
   void dispose() {
     _disposed = true;
+    // Stamp the most recent session state as seen before we unmount so
+    // anything that streamed in during the last turn counts as read on
+    // the way out.
+    _markCurrentSessionSeen();
+    unawaited(_readStore.flush());
     WidgetsBinding.instance.removeObserver(this);
     _reconnectTimer?.cancel();
     _composerController.dispose();
@@ -235,6 +249,7 @@ class _SessionScreenState extends State<SessionScreen>
           _lastEventSeq = highestSeq;
         }
       });
+      _markCurrentSessionSeen();
       // Replay live events that landed during the fetch so action_opened /
       // activity_updated aren't silently dropped.
       for (final event in bufferedEvents) {
@@ -311,6 +326,7 @@ class _SessionScreenState extends State<SessionScreen>
           _lastEventSeq = delta.nextSeq;
         }
       });
+      _markCurrentSessionSeen();
       return true;
     } catch (_) {
       return false;
