@@ -38,7 +38,8 @@ class SessionScreen extends StatefulWidget {
   State<SessionScreen> createState() => _SessionScreenState();
 }
 
-class _SessionScreenState extends State<SessionScreen> {
+class _SessionScreenState extends State<SessionScreen>
+    with WidgetsBindingObserver {
   static const _initialMessageLimit = 120;
   static const _initialActivityLimit = 80;
   static const _messagePageSize = 120;
@@ -101,6 +102,7 @@ class _SessionScreenState extends State<SessionScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _favorites.ensureLoaded();
     _session = widget.session;
     _loadSnapshot();
@@ -110,6 +112,7 @@ class _SessionScreenState extends State<SessionScreen> {
   @override
   void dispose() {
     _disposed = true;
+    WidgetsBinding.instance.removeObserver(this);
     _reconnectTimer?.cancel();
     _composerController.dispose();
     _scrollController.dispose();
@@ -119,6 +122,26 @@ class _SessionScreenState extends State<SessionScreen> {
     _liveAssistantNotifier.dispose();
     _thinkingNotifier.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted && !_disposed) {
+      // OS can pause or silently kill the socket while backgrounded; the
+      // normal onDone / onError path often doesn't fire until a write
+      // actually fails. Force a reconnect + snapshot re-sync on resume so
+      // the user sees fresh state immediately.
+      _reconnectAttempts = 0;
+      _reconnectTimer?.cancel();
+      unawaited(
+        _loadSnapshot(
+          messageLimit: _messageLimit,
+          activityLimit: _activityLimit,
+          scrollToBottom: false,
+        ),
+      );
+      _connectLive();
+    }
   }
 
   Future<void> _loadSnapshot({
@@ -391,13 +414,17 @@ class _SessionScreenState extends State<SessionScreen> {
           }
         });
         _thinkingNotifier.value = false;
-        // Background reconcile; do not block UI.
-        Future<void>.delayed(const Duration(milliseconds: 250), () {
+        // Background reconcile; do not block UI. Delayed enough for Codex to
+        // finish flushing the rollout .jsonl file — otherwise the snapshot
+        // reads a partial file and the new assistant message appears to
+        // vanish until the user reloads.
+        Future<void>.delayed(const Duration(milliseconds: 1200), () {
           if (!mounted) return;
           unawaited(
             _loadSnapshot(
               messageLimit: _messageLimit,
               activityLimit: _activityLimit,
+              scrollToBottom: false,
             ),
           );
         });
