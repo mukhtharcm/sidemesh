@@ -114,6 +114,7 @@ class ApiClient {
     String? clientMessageId,
     String? approvalPolicy,
     String? sandboxMode,
+    bool? networkAccess,
   }) async {
     await _post(
       host,
@@ -123,6 +124,7 @@ class ApiClient {
         'clientMessageId': clientMessageId,
         if (approvalPolicy != null) 'approvalPolicy': approvalPolicy,
         if (sandboxMode != null) 'sandbox': sandboxMode,
+        if (networkAccess != null) 'networkAccess': networkAccess,
       },
     );
   }
