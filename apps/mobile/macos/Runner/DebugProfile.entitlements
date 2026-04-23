@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		Sandbox is disabled for this build.
+
+		Sidemesh is a developer tool that talks to Codex daemons on the local
+		machine / LAN and needs free access to the keychain (via
+		flutter_secure_storage) without requiring the developer to configure
+		an Apple Developer team + keychain-access-groups entitlement. With
+		ad-hoc signing (`CODE_SIGN_IDENTITY = "-"`) + sandbox on, the keychain
+		APIs return errSecMissingEntitlement (-34018), which is the error we
+		hit in practice.
+
+		Flip `com.apple.security.app-sandbox` back to <true/> and configure a
+		development team in Xcode if you plan to notarize / distribute the app.
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>

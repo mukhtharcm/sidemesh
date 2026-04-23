@@ -73,7 +73,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _HostEditorSheet(initialHost: initialHost),
+      builder: (context) => HostEditorSheet(initialHost: initialHost),
     );
     if (result == null) {
       return;
@@ -152,7 +152,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
                   : IndexedStack(
                       index: _tabIndex,
                       children: [
-                        _RecentPane(
+                        RecentPane(
                           hosts: _hosts,
                           api: _api,
                           onOpenSession: _openSession,
@@ -161,7 +161,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
                             setState(() => _activeCount = count);
                           },
                         ),
-                        _InboxPane(
+                        InboxPane(
                           hosts: _hosts,
                           api: _api,
                           onOpenSession: (host, action) =>
@@ -171,7 +171,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen> {
                             setState(() => _inboxCount = count);
                           },
                         ),
-                        _HostsPane(
+                        HostsPane(
                           hosts: _hosts,
                           onOpenHost: _openHost,
                           onEditHost: (host) =>
@@ -442,8 +442,9 @@ class _NavIconWithBadge extends StatelessWidget {
   }
 }
 
-class _RecentPane extends StatefulWidget {
-  const _RecentPane({
+class RecentPane extends StatefulWidget {
+  const RecentPane({
+    super.key,
     required this.hosts,
     required this.api,
     required this.onOpenSession,
@@ -456,12 +457,12 @@ class _RecentPane extends StatefulWidget {
   final ValueChanged<int> onActiveCountChanged;
 
   @override
-  State<_RecentPane> createState() => _RecentPaneState();
+  State<RecentPane> createState() => _RecentPaneState();
 }
 
-class _RecentPaneState extends State<_RecentPane> {
+class _RecentPaneState extends State<RecentPane> {
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
-  late Future<List<_RemoteSessionEntry>> _future;
+  late Future<List<RemoteSessionEntry>> _future;
 
   @override
   void initState() {
@@ -471,14 +472,14 @@ class _RecentPaneState extends State<_RecentPane> {
   }
 
   @override
-  void didUpdateWidget(covariant _RecentPane oldWidget) {
+  void didUpdateWidget(covariant RecentPane oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.hosts != widget.hosts) {
       _future = _loadRecent();
     }
   }
 
-  Future<List<_RemoteSessionEntry>> _loadRecent() async {
+  Future<List<RemoteSessionEntry>> _loadRecent() async {
     final results = await Future.wait(
       widget.hosts.map((host) async {
         try {
@@ -486,11 +487,11 @@ class _RecentPaneState extends State<_RecentPane> {
           return sessions
               .take(20)
               .map(
-                (session) => _RemoteSessionEntry(host: host, session: session),
+                (session) => RemoteSessionEntry(host: host, session: session),
               )
               .toList();
         } catch (_) {
-          return const <_RemoteSessionEntry>[];
+          return const <RemoteSessionEntry>[];
         }
       }),
     );
@@ -508,7 +509,7 @@ class _RecentPaneState extends State<_RecentPane> {
     return merged;
   }
 
-  List<_RemoteSessionEntry> _sortEntries(List<_RemoteSessionEntry> entries) {
+  List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
     final sorted = [...entries];
     sorted.sort((left, right) {
       final leftFavorite = _favorites.isFavorite(left.host, left.session.id);
@@ -532,7 +533,7 @@ class _RecentPaneState extends State<_RecentPane> {
       );
     }
 
-    return FutureBuilder<List<_RemoteSessionEntry>>(
+    return FutureBuilder<List<RemoteSessionEntry>>(
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
@@ -694,8 +695,9 @@ class _SessionRowCard extends StatelessWidget {
   }
 }
 
-class _InboxPane extends StatefulWidget {
-  const _InboxPane({
+class InboxPane extends StatefulWidget {
+  const InboxPane({
+    super.key,
     required this.hosts,
     required this.api,
     required this.onOpenSession,
@@ -708,11 +710,11 @@ class _InboxPane extends StatefulWidget {
   final ValueChanged<int> onInboxCountChanged;
 
   @override
-  State<_InboxPane> createState() => _InboxPaneState();
+  State<InboxPane> createState() => _InboxPaneState();
 }
 
-class _InboxPaneState extends State<_InboxPane> {
-  late Future<List<_PendingActionEntry>> _future;
+class _InboxPaneState extends State<InboxPane> {
+  late Future<List<PendingActionEntry>> _future;
 
   @override
   void initState() {
@@ -721,23 +723,23 @@ class _InboxPaneState extends State<_InboxPane> {
   }
 
   @override
-  void didUpdateWidget(covariant _InboxPane oldWidget) {
+  void didUpdateWidget(covariant InboxPane oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.hosts != widget.hosts) {
       _future = _loadInbox();
     }
   }
 
-  Future<List<_PendingActionEntry>> _loadInbox() async {
+  Future<List<PendingActionEntry>> _loadInbox() async {
     final results = await Future.wait(
       widget.hosts.map((host) async {
         try {
           final actions = await widget.api.fetchPendingActions(host);
           return actions
-              .map((action) => _PendingActionEntry(host: host, action: action))
+              .map((action) => PendingActionEntry(host: host, action: action))
               .toList();
         } catch (_) {
-          return const <_PendingActionEntry>[];
+          return const <PendingActionEntry>[];
         }
       }),
     );
@@ -796,7 +798,7 @@ class _InboxPaneState extends State<_InboxPane> {
       );
     }
 
-    return FutureBuilder<List<_PendingActionEntry>>(
+    return FutureBuilder<List<PendingActionEntry>>(
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
@@ -854,7 +856,7 @@ class _InboxCard extends StatelessWidget {
     required this.onRespond,
   });
 
-  final _PendingActionEntry entry;
+  final PendingActionEntry entry;
   final VoidCallback onOpenSession;
   final ValueChanged<String> onRespond;
 
@@ -975,8 +977,9 @@ String _actionKindLabel(String kind) {
   };
 }
 
-class _HostsPane extends StatelessWidget {
-  const _HostsPane({
+class HostsPane extends StatelessWidget {
+  const HostsPane({
+    super.key,
     required this.hosts,
     required this.onOpenHost,
     required this.onEditHost,
@@ -1111,16 +1114,16 @@ class _HostRowCard extends StatelessWidget {
   }
 }
 
-class _HostEditorSheet extends StatefulWidget {
-  const _HostEditorSheet({this.initialHost});
+class HostEditorSheet extends StatefulWidget {
+  const HostEditorSheet({super.key, this.initialHost});
 
   final HostProfile? initialHost;
 
   @override
-  State<_HostEditorSheet> createState() => _HostEditorSheetState();
+  State<HostEditorSheet> createState() => _HostEditorSheetState();
 }
 
-class _HostEditorSheetState extends State<_HostEditorSheet> {
+class _HostEditorSheetState extends State<HostEditorSheet> {
   late final TextEditingController _labelController;
   late final TextEditingController _baseUrlController;
   late final TextEditingController _tokenController;
@@ -1238,15 +1241,15 @@ class _HostEditorSheetState extends State<_HostEditorSheet> {
   }
 }
 
-class _RemoteSessionEntry {
-  const _RemoteSessionEntry({required this.host, required this.session});
+class RemoteSessionEntry {
+  const RemoteSessionEntry({required this.host, required this.session});
 
   final HostProfile host;
   final SessionSummary session;
 }
 
-class _PendingActionEntry {
-  const _PendingActionEntry({required this.host, required this.action});
+class PendingActionEntry {
+  const PendingActionEntry({required this.host, required this.action});
 
   final HostProfile host;
   final PendingAction action;
