@@ -10,8 +10,12 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/io.dart';
 
 import '../api_client.dart';
+import '../fs_languages.dart';
 import '../models.dart';
 import 'file_browser_screen.dart';
+import 'file_viewer_pane.dart';
+import 'file_viewer_screen.dart';
+import 'workspace_browser_dialog.dart';
 import '../session_favorites_store.dart';
 import '../session_overrides_store.dart';
 import '../session_policy_store.dart';
@@ -956,6 +960,53 @@ class _SessionScreenState extends State<SessionScreen>
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
+  void _openWorkspaceFile(String path) {
+    final isDesktop = widget.topPadding != null;
+    if (isDesktop) {
+      showDialog<void>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.4),
+        builder: (dialogContext) {
+          final colors = context.colors;
+          final mediaSize = MediaQuery.of(dialogContext).size;
+          final maxWidth =
+              (mediaSize.width * 0.8).clamp(640.0, 1100.0).toDouble();
+          final maxHeight =
+              (mediaSize.height * 0.85).clamp(480.0, 860.0).toDouble();
+          return Dialog(
+            backgroundColor: colors.surface,
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: maxWidth,
+                maxHeight: maxHeight,
+              ),
+              child: _InlineFileViewer(
+                host: widget.host,
+                api: widget.api,
+                path: path,
+              ),
+            ),
+          );
+        },
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => FileViewerScreen(
+          host: widget.host,
+          api: widget.api,
+          path: path,
+        ),
+      ),
+    );
+  }
+
   int _nextTimelineSeq() {
     var maxSeq = 0;
     for (final m in _messages) {
@@ -1152,15 +1203,27 @@ class _SessionScreenState extends State<SessionScreen>
             child: MeshIconButton(
               icon: Icons.folder_outlined,
               tooltip: 'Browse files',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => FileBrowserScreen(
+              onTap: () {
+                final isDesktop = widget.topPadding != null;
+                if (isDesktop) {
+                  showWorkspaceBrowserDialog(
+                    context,
                     host: widget.host,
                     api: widget.api,
                     root: session.cwd,
-                  ),
-                ),
-              ),
+                  );
+                } else {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => FileBrowserScreen(
+                        host: widget.host,
+                        api: widget.api,
+                        root: session.cwd,
+                      ),
+                    ),
+                  );
+                }
+              },
             ),
           ),
           Padding(
@@ -1305,6 +1368,7 @@ class _SessionScreenState extends State<SessionScreen>
                                     activity: entry.activity!,
                                     sessionCwd: session.cwd,
                                     defaultCollapsed: widget.topPadding == null,
+                                    onOpenFile: _openWorkspaceFile,
                                   ),
                                   _TimelineEntryKind.thinking =>
                                     const _ThinkingBubble(),
@@ -2395,11 +2459,13 @@ class _ActivityCard extends StatefulWidget {
     required this.activity,
     required this.sessionCwd,
     this.defaultCollapsed = false,
+    this.onOpenFile,
   });
 
   final SessionActivity activity;
   final String sessionCwd;
   final bool defaultCollapsed;
+  final void Function(String path)? onOpenFile;
 
   @override
   State<_ActivityCard> createState() => _ActivityCardState();
@@ -2410,6 +2476,8 @@ class _ActivityCardState extends State<_ActivityCard> {
   bool _outputExpanded = false;
   bool _diffExpanded = false;
   late bool _cardCollapsed = widget.defaultCollapsed;
+
+  void _openWorkspaceFile(String path) => widget.onOpenFile?.call(path);
 
   @override
   Widget build(BuildContext context) {
@@ -2778,6 +2846,7 @@ class _ActivityCardState extends State<_ActivityCard> {
               child: _FileChangeBlock(
                 change: change,
                 sessionCwd: sessionCwd,
+                onOpen: _openWorkspaceFile,
               ),
             ),
           _DiffToggle(
@@ -2794,6 +2863,112 @@ class _ActivityCardState extends State<_ActivityCard> {
       label: label,
       expandedLabel: 'Hide diffs',
       onToggle: () => setState(() => _diffExpanded = true),
+    );
+  }
+}
+
+class _InlineFileViewer extends StatefulWidget {
+  const _InlineFileViewer({
+    required this.host,
+    required this.api,
+    required this.path,
+  });
+
+  final HostProfile host;
+  final ApiClient api;
+  final String path;
+
+  @override
+  State<_InlineFileViewer> createState() => _InlineFileViewerState();
+}
+
+class _InlineFileViewerState extends State<_InlineFileViewer> {
+  final GlobalKey<FileViewerPaneState> _paneKey =
+      GlobalKey<FileViewerPaneState>();
+  final ValueNotifier<int> _observable = ValueNotifier<int>(0);
+
+  @override
+  void dispose() {
+    _observable.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final languageId = languageForPath(widget.path);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
+          child: Row(
+            children: [
+              Icon(Icons.description_outlined,
+                  size: 18, color: colors.accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      baseName(widget.path),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        if (languageId != null) ...[
+                          MeshPill(label: languageId, mono: true),
+                          const SizedBox(width: 6),
+                        ],
+                        Flexible(
+                          child: Text(
+                            widget.path,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: monoStyle(
+                              color: colors.textTertiary,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              ListenableBuilder(
+                listenable: _observable,
+                builder: (context, _) =>
+                    FileViewerActions(state: _paneKey.currentState),
+              ),
+              IconButton(
+                tooltip: 'Close',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close_rounded, size: 20),
+              ),
+            ],
+          ),
+        ),
+        Divider(height: 1, color: colors.border),
+        Expanded(
+          child: FileViewerPane(
+            key: _paneKey,
+            host: widget.host,
+            api: widget.api,
+            path: widget.path,
+            observable: _observable,
+            dense: true,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2900,10 +3075,15 @@ class _ExpandToggle extends StatelessWidget {
 }
 
 class _FileChangeBlock extends StatelessWidget {
-  const _FileChangeBlock({required this.change, required this.sessionCwd});
+  const _FileChangeBlock({
+    required this.change,
+    required this.sessionCwd,
+    this.onOpen,
+  });
 
   final SessionActivityChange change;
   final String sessionCwd;
+  final void Function(String path)? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -2914,31 +3094,49 @@ class _FileChangeBlock extends StatelessWidget {
       'moved' || 'move' || 'rename' => MeshPillTone.info,
       _ => MeshPillTone.neutral,
     };
+    final isDeleted = switch (change.kind) {
+      'deleted' || 'delete' || 'remove' => true,
+      _ => false,
+    };
+    final canOpen = onOpen != null && !isDeleted;
+    final pathRow = Row(
+      children: [
+        Icon(
+          Icons.description_outlined,
+          size: 16,
+          color: colors.textSecondary,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            _relativeSessionPath(change.path, sessionCwd),
+            style: monoStyle(
+              color: canOpen ? colors.accent : colors.textPrimary,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ).copyWith(
+              decoration: canOpen ? TextDecoration.underline : null,
+              decorationColor: canOpen ? colors.accent : null,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        MeshPill(label: change.kind, tone: tone, mono: true),
+      ],
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Icon(
-              Icons.description_outlined,
-              size: 16,
-              color: colors.textSecondary,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                _relativeSessionPath(change.path, sessionCwd),
-                style: monoStyle(
-                  color: colors.textPrimary,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
+        canOpen
+            ? InkWell(
+                onTap: () => onOpen!(change.path),
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: pathRow,
                 ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            MeshPill(label: change.kind, tone: tone, mono: true),
-          ],
-        ),
+              )
+            : pathRow,
         if ((change.movePath ?? '').isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 8, left: 24),

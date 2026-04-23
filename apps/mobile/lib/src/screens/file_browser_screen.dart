@@ -7,30 +7,40 @@ import '../fs_models.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
-import 'file_viewer_screen.dart';
 import '../workspace_live_store.dart';
+import 'file_viewer_pane.dart';
+import 'file_viewer_screen.dart';
 
-/// Lazy-loading workspace browser rooted at a single cwd. Shows directories
-/// as expansion tiles; tapping a file pushes the [FileViewerScreen].
-class FileBrowserScreen extends StatefulWidget {
-  const FileBrowserScreen({
+/// Embeddable workspace browser tree. Manages its own live subscription,
+/// changed-path badges, and expansion state. Use [FileBrowserScreen] for
+/// the mobile-route variant.
+class FileBrowserTree extends StatefulWidget {
+  const FileBrowserTree({
     super.key,
     required this.host,
     required this.api,
     required this.root,
-    this.topPadding,
+    this.onOpenFile,
+    this.selectedPath,
   });
 
   final HostProfile host;
   final ApiClient api;
   final String root;
-  final double? topPadding;
+
+  /// Called when the user taps a file. When null, the tree defaults to
+  /// pushing a [FileViewerScreen] route.
+  final void Function(String path, Stream<FsChangeEvent>? liveStream)?
+      onOpenFile;
+
+  /// Highlights the given path as selected (for split-pane layouts).
+  final String? selectedPath;
 
   @override
-  State<FileBrowserScreen> createState() => _FileBrowserScreenState();
+  State<FileBrowserTree> createState() => _FileBrowserTreeState();
 }
 
-class _FileBrowserScreenState extends State<FileBrowserScreen> {
+class _FileBrowserTreeState extends State<FileBrowserTree> {
   WorkspaceLiveHandle? _live;
   final _changed = <String>{};
   StreamSubscription<FsChangeEvent>? _sub;
@@ -47,7 +57,6 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         }
       });
     });
-    // Subscribe to the root so we get a broad stream of changes.
     _live!.watch(widget.root).catchError((_) {});
   }
 
@@ -62,7 +71,13 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     super.dispose();
   }
 
-  void _openFile(String path) {
+  void _open(String path) {
+    _changed.remove(path);
+    final onOpen = widget.onOpenFile;
+    if (onOpen != null) {
+      onOpen(path, _live?.stream);
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => FileViewerScreen(
@@ -73,13 +88,48 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         ),
       ),
     );
-    _changed.remove(path);
   }
 
   @override
   Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 24),
+      children: [
+        _DirectoryNode(
+          host: widget.host,
+          api: widget.api,
+          path: widget.root,
+          depth: 0,
+          initiallyExpanded: true,
+          changedPaths: _changed,
+          selectedPath: widget.selectedPath,
+          onOpenFile: _open,
+          onEntryChanged: (p) => setState(() => _changed.remove(p)),
+        ),
+      ],
+    );
+  }
+}
+
+/// Mobile-friendly full-screen file browser. Wraps [FileBrowserTree] in a
+/// Scaffold + AppBar.
+class FileBrowserScreen extends StatelessWidget {
+  const FileBrowserScreen({
+    super.key,
+    required this.host,
+    required this.api,
+    required this.root,
+    this.topPadding,
+  });
+
+  final HostProfile host;
+  final ApiClient api;
+  final String root;
+  final double? topPadding;
+
+  @override
+  Widget build(BuildContext context) {
     final colors = context.colors;
-    final topPadding = widget.topPadding;
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -93,7 +143,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              _baseName(widget.root),
+              baseName(root),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -102,7 +152,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
             ),
             const SizedBox(height: 2),
             Text(
-              widget.root,
+              root,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: monoStyle(color: colors.textTertiary, fontSize: 11),
@@ -110,25 +160,11 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           ],
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(8, 6, 8, 24),
-        children: [
-          _DirectoryNode(
-            host: widget.host,
-            api: widget.api,
-            path: widget.root,
-            depth: 0,
-            initiallyExpanded: true,
-            changedPaths: _changed,
-            onOpenFile: _openFile,
-            onEntryChanged: (p) => setState(() => _changed.remove(p)),
-          ),
-        ],
-      ),
+      body: FileBrowserTree(host: host, api: api, root: root),
     );
     if (topPadding == null) return scaffold;
     return Padding(
-      padding: EdgeInsets.only(top: topPadding),
+      padding: EdgeInsets.only(top: topPadding!),
       child: scaffold,
     );
   }
@@ -144,6 +180,7 @@ class _DirectoryNode extends StatefulWidget {
     required this.changedPaths,
     required this.onEntryChanged,
     this.initiallyExpanded = false,
+    this.selectedPath,
   });
 
   final HostProfile host;
@@ -152,6 +189,7 @@ class _DirectoryNode extends StatefulWidget {
   final int depth;
   final bool initiallyExpanded;
   final Set<String> changedPaths;
+  final String? selectedPath;
   final void Function(String path) onOpenFile;
   final void Function(String path) onEntryChanged;
 
@@ -245,6 +283,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
                 path: entry.path,
                 depth: widget.depth + 1,
                 changedPaths: widget.changedPaths,
+                selectedPath: widget.selectedPath,
                 onOpenFile: widget.onOpenFile,
                 onEntryChanged: widget.onEntryChanged,
               );
@@ -255,6 +294,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
               iconColor: colors.textSecondary,
               title: entry.name,
               modified: widget.changedPaths.contains(entry.path),
+              selected: widget.selectedPath == entry.path,
               onTap: () {
                 widget.onEntryChanged(entry.path);
                 widget.onOpenFile(entry.path);
@@ -275,6 +315,7 @@ class _Row extends StatelessWidget {
     required this.onTap,
     this.trailing,
     this.modified = false,
+    this.selected = false,
   });
 
   final double indent;
@@ -284,12 +325,14 @@ class _Row extends StatelessWidget {
   final VoidCallback onTap;
   final Widget? trailing;
   final bool modified;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Material(
-      color: Colors.transparent,
+      color: selected ? colors.accentMuted : Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
@@ -304,7 +347,10 @@ class _Row extends StatelessWidget {
                   title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight:
+                            selected ? FontWeight.w700 : FontWeight.w500,
+                      ),
                 ),
               ),
               if (modified) ...[
