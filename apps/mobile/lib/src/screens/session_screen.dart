@@ -1092,7 +1092,13 @@ class _SessionScreenState extends State<SessionScreen>
               listenable: _policyStore,
               builder: (context, _) {
                 final policy = _policyStore.policyFor(widget.host, session.id);
-                final customised = !policy.isEmpty;
+                final runtime = session.runtime;
+                final runtimeLoosened = SessionPolicy.runtimeIsLoosened(
+                  approvalPolicy: runtime?.approvalPolicy,
+                  sandboxMode: runtime?.sandboxMode,
+                  networkAccess: runtime?.networkAccess,
+                );
+                final customised = !policy.isEmpty || runtimeLoosened;
                 return MeshIconButton(
                   icon: customised
                       ? Icons.tune_rounded
@@ -3112,7 +3118,7 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
   }
 
   void _reset() {
-    setState(() => _policy = const SessionPolicy());
+    setState(() => _policy = SessionPolicy.factoryDefaults);
   }
 
   void _applyAutopilot() {
@@ -3232,11 +3238,16 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
               const SizedBox(height: 22),
               Row(
                 children: [
-                  if (!_policy.isEmpty)
+                  if (!_policy.isEmpty ||
+                      SessionPolicy.runtimeIsLoosened(
+                        approvalPolicy: widget.runtimeApproval?.wire,
+                        sandboxMode: widget.runtimeSandbox?.wire,
+                        networkAccess: widget.runtimeNetworkAccess,
+                      ))
                     TextButton.icon(
                       onPressed: _reset,
                       icon: const Icon(Icons.restart_alt_rounded, size: 18),
-                      label: const Text('Clear override'),
+                      label: const Text('Reset to defaults'),
                     ),
                   const Spacer(),
                   TextButton(
