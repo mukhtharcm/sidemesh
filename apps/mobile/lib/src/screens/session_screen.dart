@@ -68,7 +68,8 @@ class _SessionScreenState extends State<SessionScreen>
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
   final SessionPolicyStore _policyStore = SessionPolicyStore.instance;
   final SessionReadStore _readStore = SessionReadStore.instance;
-  final StringBuffer _assistantDeltaBuffer = StringBuffer();
+  final List<_BufferedAssistantDelta> _assistantDeltaBuffer =
+      <_BufferedAssistantDelta>[];
   final Map<String, SessionActivity> _pendingActivityUpdates =
       <String, SessionActivity>{};
 
@@ -543,7 +544,9 @@ class _SessionScreenState extends State<SessionScreen>
         if (delta == null || delta.isEmpty) {
           return;
         }
-        _assistantDeltaBuffer.write(delta);
+        _assistantDeltaBuffer.add(
+          _BufferedAssistantDelta(delta: delta, itemId: event.itemId),
+        );
         _scheduleLiveFlush();
       case 'turn_completed':
         _flushPendingLiveUpdates();
@@ -632,9 +635,9 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
 
-    final hasDelta = _assistantDeltaBuffer.isNotEmpty;
-    final delta = hasDelta ? _assistantDeltaBuffer.toString() : '';
+    final deltas = List<_BufferedAssistantDelta>.from(_assistantDeltaBuffer);
     _assistantDeltaBuffer.clear();
+    final hasDelta = deltas.isNotEmpty;
 
     final activities = _pendingActivityUpdates.values.toList();
     _pendingActivityUpdates.clear();
@@ -644,16 +647,22 @@ class _SessionScreenState extends State<SessionScreen>
     }
 
     final currentLive = _liveAssistantMessage;
-    final updatedLive = hasDelta
-        ? _appendLiveAssistantDelta(currentLive, delta)
-        : currentLive;
-    final needsLiveInsert = hasDelta && currentLive == null;
+    final streamedState = hasDelta
+        ? _applyAssistantDeltas(currentLive, deltas)
+        : _AppliedAssistantDeltas(currentLive, false, const <SessionMessage>[]);
+    final updatedLive = streamedState.live;
+    final needsLiveInsert = streamedState.insertedNewLive;
 
     if (hasDelta) {
-      if (needsLiveInsert || activities.isNotEmpty) {
+      if (needsLiveInsert ||
+          activities.isNotEmpty ||
+          streamedState.completedMessages.isNotEmpty) {
         setState(() {
           _running = true;
           _awaitingAssistantReply = false;
+          for (final message in streamedState.completedMessages) {
+            _upsertOptimisticMessage(message);
+          }
           _liveAssistantNotifier.value = updatedLive;
           for (final activity in activities) {
             _upsertActivity(activity);
@@ -1279,18 +1288,54 @@ class _SessionScreenState extends State<SessionScreen>
 
   _LiveAssistantMessageState _appendLiveAssistantDelta(
     _LiveAssistantMessageState? current,
-    String delta,
+    _BufferedAssistantDelta delta,
   ) {
     if (current == null) {
       return _LiveAssistantMessageState(
+        itemId: delta.itemId,
         id: 'local-stream-${DateTime.now().microsecondsSinceEpoch}',
-        text: delta,
+        text: delta.delta,
         createdAt: DateTime.now(),
         seq: _nextTimelineSeq(),
         phase: 'commentary',
       );
     }
-    return current.copyWith(text: '${current.text}$delta');
+    return current.copyWith(text: '${current.text}${delta.delta}');
+  }
+
+  _AppliedAssistantDeltas _applyAssistantDeltas(
+    _LiveAssistantMessageState? current,
+    List<_BufferedAssistantDelta> deltas,
+  ) {
+    var live = current;
+    var insertedNewLive = current == null;
+    final completedMessages = <SessionMessage>[];
+
+    for (final delta in deltas) {
+      if (_shouldSplitLiveAssistant(live, delta)) {
+        if (live != null && live.text.isNotEmpty) {
+          completedMessages.add(live.toMessage());
+        }
+        live = null;
+        insertedNewLive = true;
+      }
+      live = _appendLiveAssistantDelta(live, delta);
+    }
+
+    return _AppliedAssistantDeltas(live, insertedNewLive, completedMessages);
+  }
+
+  bool _shouldSplitLiveAssistant(
+    _LiveAssistantMessageState? current,
+    _BufferedAssistantDelta next,
+  ) {
+    if (current == null) {
+      return false;
+    }
+    if (current.itemId == null || next.itemId == null) {
+      return false;
+    }
+    return current.itemId != next.itemId;
   }
 
   int _nextTimelineSeq() {
@@ -2461,8 +2506,28 @@ class _PreparedDraftImage {
   final Uint8List bytes;
 }
 
+class _BufferedAssistantDelta {
+  const _BufferedAssistantDelta({required this.delta, this.itemId});
+
+  final String delta;
+  final String? itemId;
+}
+
+class _AppliedAssistantDeltas {
+  const _AppliedAssistantDeltas(
+    this.live,
+    this.insertedNewLive,
+    this.completedMessages,
+  );
+
+  final _LiveAssistantMessageState? live;
+  final bool insertedNewLive;
+  final List<SessionMessage> completedMessages;
+}
+
 class _LiveAssistantMessageState {
   const _LiveAssistantMessageState({
+    required this.itemId,
     required this.id,
     required this.text,
     required this.createdAt,
@@ -2471,6 +2536,7 @@ class _LiveAssistantMessageState {
     this.live = true,
   });
 
+  final String? itemId;
   final String id;
   final String text;
   final DateTime createdAt;
@@ -2484,6 +2550,7 @@ class _LiveAssistantMessageState {
     bool? live,
   }) {
     return _LiveAssistantMessageState(
+      itemId: itemId,
       id: id,
       text: text ?? this.text,
       createdAt: createdAt,

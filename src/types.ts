@@ -118,6 +118,7 @@ export interface LiveEvent {
   seq?: number;
   nextSeq?: number;
   turnId?: string;
+  itemId?: string;
   delta?: string;
   status?: string;
   action?: PendingAction;

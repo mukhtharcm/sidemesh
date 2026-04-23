@@ -539,6 +539,7 @@ class LiveEvent {
     this.seq,
     this.nextSeq,
     this.turnId,
+    this.itemId,
     this.delta,
     this.status,
     this.action,
@@ -553,6 +554,7 @@ class LiveEvent {
   final int? seq;
   final int? nextSeq;
   final String? turnId;
+  final String? itemId;
   final String? delta;
   final String? status;
   final PendingAction? action;
@@ -567,6 +569,7 @@ class LiveEvent {
     seq: _intOrNull(json['seq']),
     nextSeq: _intOrNull(json['nextSeq']),
     turnId: json['turnId'] as String?,
+    itemId: json['itemId'] as String?,
     delta: json['delta'] as String?,
     status: json['status'] as String?,
     action: json['action'] == null
