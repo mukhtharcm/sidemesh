@@ -14,11 +14,20 @@ class HostDetailScreen extends StatefulWidget {
     required this.host,
     required this.api,
     required this.onOpenSession,
+    this.embedded = false,
+    this.topPadding = 0,
   });
 
   final HostProfile host;
   final ApiClient api;
   final ValueChanged<SessionSummary> onOpenSession;
+
+  /// When true, drop Scaffold/AppBar/FAB chrome and render a slim header
+  /// suitable for embedding inside the desktop two-pane shell.
+  final bool embedded;
+
+  /// Extra padding reserved at the top (e.g. macOS titlebar inset).
+  final double topPadding;
 
   @override
   State<HostDetailScreen> createState() => _HostDetailScreenState();
@@ -120,6 +129,23 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    if (widget.embedded) {
+      return Container(
+        color: colors.canvas,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(height: widget.topPadding),
+            _EmbeddedHostHeader(
+              host: widget.host,
+              onRefresh: _refresh,
+              onNewSession: () => _startSession(),
+            ),
+            Expanded(child: _buildBody(context)),
+          ],
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -137,96 +163,190 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
         icon: const Icon(Icons.play_arrow_rounded),
         label: const Text('New session'),
       ),
-      body: FutureBuilder<_HostOverview>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const MeshLoader();
-          }
-          if (snapshot.hasError) {
-            return MeshEmptyState(
-              icon: Icons.wifi_off_rounded,
-              title: 'Could not reach host',
-              body: snapshot.error.toString(),
-            );
-          }
-          final data = snapshot.data!;
-          return ListenableBuilder(
-            listenable: _favorites,
-            builder: (context, _) {
-              final sortedSessions = _sortSessions(data.sessions);
-              return RefreshIndicator(
-                color: colors.accent,
-                onRefresh: _refresh,
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
-                  children: [
-                    _NodeCard(host: widget.host, node: data.node),
-                    const SizedBox(height: 18),
-                    _SectionHeader(
-                      icon: Icons.folder_open_rounded,
-                      title: 'Workspaces',
-                      subtitle:
-                          '${data.workspaces.length} ${data.workspaces.length == 1 ? "entry" : "entries"}',
-                    ),
-                    const SizedBox(height: 8),
-                    if (data.workspaces.isEmpty)
-                      const MeshEmptyState(
-                        icon: Icons.folder_off_outlined,
-                        title: 'No workspaces',
-                        body: 'Start a session and this host will remember it.',
-                      )
-                    else
-                      ...data.workspaces.map(
-                        (workspace) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _WorkspaceCard(
-                            workspace: workspace,
-                            onTap: () =>
-                                _startSession(prefilledCwd: workspace.cwd),
-                          ),
+      body: _buildBody(context),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    final colors = context.colors;
+    return FutureBuilder<_HostOverview>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const MeshLoader();
+        }
+        if (snapshot.hasError) {
+          return MeshEmptyState(
+            icon: Icons.wifi_off_rounded,
+            title: 'Could not reach host',
+            body: snapshot.error.toString(),
+          );
+        }
+        final data = snapshot.data!;
+        return ListenableBuilder(
+          listenable: _favorites,
+          builder: (context, _) {
+            final sortedSessions = _sortSessions(data.sessions);
+            return RefreshIndicator(
+              color: colors.accent,
+              onRefresh: _refresh,
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  8,
+                  16,
+                  widget.embedded ? 32 : 120,
+                ),
+                children: [
+                  _NodeCard(host: widget.host, node: data.node),
+                  const SizedBox(height: 18),
+                  _SectionHeader(
+                    icon: Icons.folder_open_rounded,
+                    title: 'Workspaces',
+                    subtitle:
+                        '${data.workspaces.length} ${data.workspaces.length == 1 ? "entry" : "entries"}',
+                  ),
+                  const SizedBox(height: 8),
+                  if (data.workspaces.isEmpty)
+                    const MeshEmptyState(
+                      icon: Icons.folder_off_outlined,
+                      title: 'No workspaces',
+                      body: 'Start a session and this host will remember it.',
+                    )
+                  else
+                    ...data.workspaces.map(
+                      (workspace) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _WorkspaceCard(
+                          workspace: workspace,
+                          onTap: () =>
+                              _startSession(prefilledCwd: workspace.cwd),
                         ),
                       ),
-                    const SizedBox(height: 18),
-                    _SectionHeader(
-                      icon: Icons.history_rounded,
-                      title: 'Recent sessions',
-                      subtitle:
-                          '${data.sessions.length} ${data.sessions.length == 1 ? "session" : "sessions"}',
                     ),
-                    const SizedBox(height: 8),
-                    if (sortedSessions.isEmpty)
-                      const MeshEmptyState(
-                        icon: Icons.chat_bubble_outline_rounded,
-                        title: 'No sessions yet',
-                        body: 'Tap "New session" to start one on this host.',
-                      )
-                    else
-                      ...sortedSessions.map(
-                        (session) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _SessionRow(
-                            session: session,
-                            favorite: _favorites.isFavorite(
+                  const SizedBox(height: 18),
+                  _SectionHeader(
+                    icon: Icons.history_rounded,
+                    title: 'Recent sessions',
+                    subtitle:
+                        '${data.sessions.length} ${data.sessions.length == 1 ? "session" : "sessions"}',
+                  ),
+                  const SizedBox(height: 8),
+                  if (sortedSessions.isEmpty)
+                    const MeshEmptyState(
+                      icon: Icons.chat_bubble_outline_rounded,
+                      title: 'No sessions yet',
+                      body: 'Tap "New session" to start one on this host.',
+                    )
+                  else
+                    ...sortedSessions.map(
+                      (session) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _SessionRow(
+                          session: session,
+                          favorite: _favorites.isFavorite(
+                            widget.host,
+                            session.id,
+                          ),
+                          onTap: () => widget.onOpenSession(session),
+                          onToggleFavorite: () {
+                            _favorites.toggleFavorite(
                               widget.host,
                               session.id,
-                            ),
-                            onTap: () => widget.onOpenSession(session),
-                            onToggleFavorite: () {
-                              _favorites.toggleFavorite(
-                                widget.host,
-                                session.id,
-                              );
-                            },
-                          ),
+                            );
+                          },
                         ),
                       ),
-                  ],
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _EmbeddedHostHeader extends StatelessWidget {
+  const _EmbeddedHostHeader({
+    required this.host,
+    required this.onRefresh,
+    required this.onNewSession,
+  });
+
+  final HostProfile host;
+  final VoidCallback onRefresh;
+  final VoidCallback onNewSession;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 14, 14, 14),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: colors.accentMuted,
+              borderRadius: BorderRadius.circular(9),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.dns_rounded,
+              size: 17,
+              color: colors.accent,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  host.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              );
-            },
-          );
-        },
+                const SizedBox(height: 2),
+                Text(
+                  host.baseUrl,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    color: colors.textTertiary,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            onPressed: onRefresh,
+          ),
+          const SizedBox(width: 4),
+          FilledButton.icon(
+            onPressed: onNewSession,
+            icon: const Icon(Icons.play_arrow_rounded, size: 16),
+            label: const Text('New session'),
+            style: FilledButton.styleFrom(
+              backgroundColor: colors.accent,
+              foregroundColor: colors.accentOn,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            ),
+          ),
+        ],
       ),
     );
   }
