@@ -1190,6 +1190,7 @@ class _SessionScreenState extends State<SessionScreen>
                                   _TimelineEntryKind.activity => _ActivityCard(
                                     activity: entry.activity!,
                                     sessionCwd: session.cwd,
+                                    defaultCollapsed: widget.topPadding == null,
                                   ),
                                   _TimelineEntryKind.thinking =>
                                     const _ThinkingBubble(),
@@ -2141,10 +2142,15 @@ class _MarkdownMessageBodyState extends State<_MarkdownMessageBody> {
 }
 
 class _ActivityCard extends StatefulWidget {
-  const _ActivityCard({required this.activity, required this.sessionCwd});
+  const _ActivityCard({
+    required this.activity,
+    required this.sessionCwd,
+    this.defaultCollapsed = false,
+  });
 
   final SessionActivity activity;
   final String sessionCwd;
+  final bool defaultCollapsed;
 
   @override
   State<_ActivityCard> createState() => _ActivityCardState();
@@ -2154,7 +2160,7 @@ class _ActivityCardState extends State<_ActivityCard> {
   static const _collapsedLineLimit = 15;
   bool _outputExpanded = false;
   bool _diffExpanded = false;
-  bool _cardCollapsed = false;
+  late bool _cardCollapsed = widget.defaultCollapsed;
 
   @override
   Widget build(BuildContext context) {

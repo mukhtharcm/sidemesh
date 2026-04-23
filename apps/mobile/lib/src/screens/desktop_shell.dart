@@ -497,7 +497,7 @@ class _Sidebar extends StatelessWidget {
             // Draggable titlebar area with traffic-light inset.
             SizedBox(height: titlebarInset + 8),
             Padding(
-              padding: const EdgeInsets.fromLTRB(76, 0, 12, 10),
+              padding: const EdgeInsets.fromLTRB(76, 0, 8, 10),
               child: Row(
                 children: [
                   Container(
@@ -515,12 +515,19 @@ class _Sidebar extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'Sidemesh',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleSmall
-                        ?.copyWith(fontWeight: FontWeight.w700),
+                  Expanded(
+                    child: Text(
+                      'Sidemesh',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  _SidebarIconAction(
+                    icon: Icons.add_rounded,
+                    tooltip: 'Add host',
+                    onTap: onAddHost,
                   ),
                 ],
               ),
@@ -753,64 +760,79 @@ class _SidebarFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
+    // Slim status-bar footer. The prominent "Add host" action lives in the
+    // sidebar header as a compact "+" so this row stays balanced with the
+    // session composer on the detail pane.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
       child: Row(
         children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: onAddHost,
-              icon: const Icon(Icons.add_link_rounded, size: 16),
-              label: const Text('Add host'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: colors.textPrimary,
-                side: BorderSide(color: colors.border),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 10,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            ),
+          _SidebarIconAction(
+            icon: Icons.add_link_rounded,
+            tooltip: 'Add host',
+            onTap: onAddHost,
           ),
-          const SizedBox(width: 8),
-          _ShortcutsButton(onTap: onShowShortcuts),
-          const SizedBox(width: 8),
-          _ThemeToggleButton(),
+          const Spacer(),
+          _SidebarIconAction(
+            icon: Icons.keyboard_rounded,
+            tooltip: 'Keyboard shortcuts (⌘/)',
+            onTap: onShowShortcuts,
+          ),
+          const SizedBox(width: 6),
+          const _ThemeToggleButton(),
         ],
       ),
     );
   }
 }
 
-class _ShortcutsButton extends StatelessWidget {
-  const _ShortcutsButton({required this.onTap});
+class _SidebarIconAction extends StatefulWidget {
+  const _SidebarIconAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
 
+  final IconData icon;
+  final String tooltip;
   final VoidCallback onTap;
+
+  @override
+  State<_SidebarIconAction> createState() => _SidebarIconActionState();
+}
+
+class _SidebarIconActionState extends State<_SidebarIconAction> {
+  bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Tooltip(
-      message: 'Keyboard shortcuts (⌘/)',
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onTap,
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            border: Border.all(color: colors.border),
+      message: widget.tooltip,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        cursor: SystemMouseCursors.click,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
             borderRadius: BorderRadius.circular(8),
-          ),
-          alignment: Alignment.center,
-          child: Icon(
-            Icons.keyboard_rounded,
-            size: 16,
-            color: colors.textSecondary,
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: _hover ? colors.surfaceMuted : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                widget.icon,
+                size: 16,
+                color: _hover ? colors.textPrimary : colors.textSecondary,
+              ),
+            ),
           ),
         ),
       ),
@@ -818,44 +840,64 @@ class _ShortcutsButton extends StatelessWidget {
   }
 }
 
-class _ThemeToggleButton extends StatelessWidget {
+class _ThemeToggleButton extends StatefulWidget {
+  const _ThemeToggleButton();
+
+  @override
+  State<_ThemeToggleButton> createState() => _ThemeToggleButtonState();
+}
+
+class _ThemeToggleButtonState extends State<_ThemeToggleButton> {
+  bool _hover = false;
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final controller = ThemeScope.of(context);
-    IconData icon;
-    switch (controller.mode) {
-      case ThemeMode.dark:
-        icon = Icons.dark_mode_rounded;
-        break;
-      case ThemeMode.light:
-        icon = Icons.light_mode_rounded;
-        break;
-      case ThemeMode.system:
-        icon = Icons.brightness_auto_rounded;
-        break;
-    }
+    final IconData icon = switch (controller.mode) {
+      ThemeMode.dark => Icons.dark_mode_rounded,
+      ThemeMode.light => Icons.light_mode_rounded,
+      ThemeMode.system => Icons.brightness_auto_rounded,
+    };
+    final String tooltip = switch (controller.mode) {
+      ThemeMode.dark => 'Theme: dark (click for system)',
+      ThemeMode.light => 'Theme: light (click for dark)',
+      ThemeMode.system => 'Theme: system (click for light)',
+    };
     return Tooltip(
-      message: 'Cycle theme',
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: () {
-          final next = switch (controller.mode) {
-            ThemeMode.system => ThemeMode.light,
-            ThemeMode.light => ThemeMode.dark,
-            ThemeMode.dark => ThemeMode.system,
-          };
-          controller.setMode(next);
-        },
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            border: Border.all(color: colors.border),
+      message: tooltip,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        cursor: SystemMouseCursors.click,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
             borderRadius: BorderRadius.circular(8),
+            onTap: () {
+              final next = switch (controller.mode) {
+                ThemeMode.system => ThemeMode.light,
+                ThemeMode.light => ThemeMode.dark,
+                ThemeMode.dark => ThemeMode.system,
+              };
+              controller.setMode(next);
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: _hover ? colors.surfaceMuted : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                icon,
+                size: 16,
+                color: _hover ? colors.textPrimary : colors.textSecondary,
+              ),
+            ),
           ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 16, color: colors.textSecondary),
         ),
       ),
     );
