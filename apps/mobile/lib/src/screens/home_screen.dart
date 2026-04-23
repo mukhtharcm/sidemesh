@@ -9,6 +9,7 @@ import '../host_status_store.dart';
 import '../host_store.dart';
 import '../models.dart';
 import '../session_favorites_store.dart';
+import '../session_read_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -830,6 +831,22 @@ class _SessionRowCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final running = session.isActive;
+    return ListenableBuilder(
+      listenable: SessionReadStore.instance,
+      builder: (context, _) {
+        final unread = !selected &&
+            SessionReadStore.instance.isUnread(host, session);
+        return _buildBody(context, colors, running, unread);
+      },
+    );
+  }
+
+  Widget _buildBody(
+    BuildContext context,
+    AppColors colors,
+    bool running,
+    bool unread,
+  ) {
     if (dense) {
       // Compact variant used in the desktop sidebar. Uses a plain
       // InkWell + tinted fill for selection rather than the old accent
@@ -921,6 +938,14 @@ class _SessionRowCard extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (unread) ...[
+                  const SizedBox(width: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: _UnreadDot(color: colors.accent),
+                  ),
+                  const SizedBox(width: 2),
+                ],
                 if (favorite)
                   Padding(
                     padding: const EdgeInsets.only(left: 6, top: 2),
@@ -971,10 +996,16 @@ class _SessionRowCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight:
+                        unread ? FontWeight.w800 : FontWeight.w700,
                   ),
                 ),
               ),
+              if (unread) ...[
+                const SizedBox(width: 6),
+                _UnreadDot(color: colors.accent),
+                const SizedBox(width: 4),
+              ],
               IconButton(
                 onPressed: onToggleFavorite,
                 tooltip: favorite ? 'Remove favorite' : 'Add favorite',
@@ -2259,6 +2290,24 @@ class _RunningDot extends StatefulWidget {
 
   @override
   State<_RunningDot> createState() => _RunningDotState();
+}
+
+class _UnreadDot extends StatelessWidget {
+  const _UnreadDot({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
 }
 
 class _RunningDotState extends State<_RunningDot>
