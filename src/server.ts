@@ -161,12 +161,14 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
     if (method === "item/agentMessage/delta") {
       const delta = asString((params as any)?.delta);
+      const itemId = asString((params as any)?.itemId);
       if (delta) {
         broadcastLive(sessionId, {
           type: "assistant_delta",
           sessionId,
           delta,
           turnId: asString((params as any)?.turnId) || undefined,
+          itemId: itemId || undefined,
         });
       }
       return;
