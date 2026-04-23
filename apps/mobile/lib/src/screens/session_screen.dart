@@ -13,6 +13,7 @@ import '../session_favorites_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_snackbar.dart';
 import '../widgets/diff_view.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/syntax_code_block.dart';
@@ -153,9 +154,10 @@ class _SessionScreenState extends State<SessionScreen> {
       setState(() {
         _loading = false;
       });
-      ScaffoldMessenger.of(
+      showAppSnackBar(
         context,
-      ).showSnackBar(SnackBar(content: Text("Failed to load session: ${friendlyError(error)}")));
+        "Failed to load session: ${friendlyError(error)}",
+      );
     }
   }
 
@@ -404,9 +406,7 @@ class _SessionScreenState extends State<SessionScreen> {
         offset: _composerController.text.length,
       );
       final stillHasPending = _pendingAction != null;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Failed to send: ${friendlyError(error)}")));
+      showAppSnackBar(context, "Failed to send: ${friendlyError(error)}");
       setState(() {
         _optimisticMessages = _optimisticMessages
             .where((message) => message.id != optimisticMessage.id)
@@ -459,20 +459,16 @@ class _SessionScreenState extends State<SessionScreen> {
       setState(() {
         _running = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Session stopped.'),
-          duration: Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showAppSnackBar(context, 'Session stopped.',
+          duration: const Duration(seconds: 2));
     } catch (error) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
+      showAppSnackBar(
         context,
-      ).showSnackBar(SnackBar(content: Text("Failed to stop session: ${friendlyError(error)}")));
+        "Failed to stop session: ${friendlyError(error)}",
+      );
     }
   }
 
@@ -521,9 +517,7 @@ class _SessionScreenState extends State<SessionScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Failed to rename: ${friendlyError(error)}")));
+      showAppSnackBar(context, "Failed to rename: ${friendlyError(error)}");
     }
   }
 
@@ -560,9 +554,7 @@ class _SessionScreenState extends State<SessionScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Failed to archive: ${friendlyError(error)}")));
+      showAppSnackBar(context, "Failed to archive: ${friendlyError(error)}");
     }
   }
 
@@ -594,19 +586,18 @@ class _SessionScreenState extends State<SessionScreen> {
         'denied' => 'Declined',
         _ => 'Decision sent',
       };
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(label),
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
+      showAppSnackBar(
+        context,
+        label,
+        duration: const Duration(seconds: 2),
       );
     } catch (error) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to resolve action: ${friendlyError(error)}")),
+      showAppSnackBar(
+        context,
+        "Failed to resolve action: ${friendlyError(error)}",
       );
     }
   }
@@ -1613,12 +1604,10 @@ class _MessageBubble extends StatelessWidget {
   void _copyMessage(BuildContext context, String text) {
     Clipboard.setData(ClipboardData(text: text));
     HapticFeedback.selectionClick();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Message copied'),
-        duration: Duration(seconds: 1),
-        behavior: SnackBarBehavior.floating,
-      ),
+    showAppSnackBar(
+      context,
+      'Message copied',
+      duration: const Duration(seconds: 1),
     );
   }
 }
