@@ -51,17 +51,33 @@ class DiffView extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: IntrinsicWidth(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (final row in rows)
-                      _DiffRow(row: row, showLineNumbers: showLineNumbers),
-                  ],
-                ),
-              ),
+            // Horizontal scroll so long lines don't wrap. LayoutBuilder +
+            // ConstrainedBox(minWidth) ensures each row's background fills
+            // at least the full viewport width, so short rows don't have
+            // half-painted backgrounds when the user scrolls right.
+            LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minWidth: constraints.maxWidth,
+                    ),
+                    child: IntrinsicWidth(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final row in rows)
+                            _DiffRow(
+                              row: row,
+                              showLineNumbers: showLineNumbers,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
             if (truncated)
               Container(
@@ -157,7 +173,7 @@ class _DiffRow extends StatelessWidget {
         children: [
           if (showLineNumbers) ...[
             _GutterCell(
-              width: 34,
+              width: 44,
               background: gutterBg,
               child: Text(
                 row.oldNumber?.toString() ?? '',
@@ -166,7 +182,7 @@ class _DiffRow extends StatelessWidget {
               ),
             ),
             _GutterCell(
-              width: 34,
+              width: 44,
               background: gutterBg,
               child: Text(
                 row.newNumber?.toString() ?? '',
@@ -238,7 +254,9 @@ List<_DiffLine> _parseDiff(String input) {
     return const [];
   }
 
-  final lines = input.split('\n');
+  // Expand tabs to 4 spaces so indentation looks like code instead of a box
+  // glyph or a single character gap. Most git tooling renders tabs this way.
+  final lines = _expandTabs(input, 4).split('\n');
   // Strip a trailing empty line that comes from a terminal newline.
   if (lines.isNotEmpty && lines.last.isEmpty) {
     lines.removeLast();
@@ -311,3 +329,27 @@ List<_DiffLine> _parseDiff(String input) {
 }
 
 final RegExp _hunkHeader = RegExp(r'@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@');
+
+/// Expands tab characters line-aware so column alignment matches a real
+/// monospace rendering. Tab stops sit at [tabWidth] intervals relative to
+/// the start of each line.
+String _expandTabs(String input, int tabWidth) {
+  if (!input.contains('\t')) return input;
+  final out = StringBuffer();
+  int col = 0;
+  for (int i = 0; i < input.length; i += 1) {
+    final ch = input[i];
+    if (ch == '\n') {
+      out.write('\n');
+      col = 0;
+    } else if (ch == '\t') {
+      final spaces = tabWidth - (col % tabWidth);
+      out.write(' ' * spaces);
+      col += spaces;
+    } else {
+      out.write(ch);
+      col += 1;
+    }
+  }
+  return out.toString();
+}
