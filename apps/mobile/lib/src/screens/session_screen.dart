@@ -1363,6 +1363,7 @@ class _SessionScreenState extends State<SessionScreen>
                                 child: switch (entry.kind) {
                                   _TimelineEntryKind.message => _MessageBubble(
                                     message: entry.message!,
+                                    onOpenFile: _openWorkspaceFile,
                                   ),
                                   _TimelineEntryKind.activity => _ActivityCard(
                                     activity: entry.activity!,
@@ -2141,10 +2142,15 @@ class _ThinkingBubble extends StatelessWidget {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message, this.live = false});
+  const _MessageBubble({
+    required this.message,
+    this.live = false,
+    this.onOpenFile,
+  });
 
   final SessionMessage message;
   final bool live;
+  final void Function(String path)? onOpenFile;
 
   @override
   Widget build(BuildContext context) {
@@ -2210,6 +2216,7 @@ class _MessageBubble extends StatelessWidget {
                     _MarkdownMessageBody(
                       text: message.text,
                       textColor: textColor,
+                      onOpenFile: onOpenFile,
                     )
                   else
                     _LinkifiedSelectableText(
@@ -2308,10 +2315,15 @@ class _MessageCopyButtonState extends State<_MessageCopyButton> {
 }
 
 class _MarkdownMessageBody extends StatelessWidget {
-  const _MarkdownMessageBody({required this.text, required this.textColor});
+  const _MarkdownMessageBody({
+    required this.text,
+    required this.textColor,
+    this.onOpenFile,
+  });
 
   final String text;
   final Color textColor;
+  final void Function(String path)? onOpenFile;
 
   @override
   Widget build(BuildContext context) {
@@ -2351,13 +2363,21 @@ class _MarkdownMessageBody extends StatelessWidget {
         );
       },
       highlightBuilder: (context, hlText, style) {
-        return Text(
-          hlText,
-          style: monoStyle(
-            color: colors.accent,
-            fontSize: 12.5,
-          ),
+        final isPath = onOpenFile != null && _looksLikeFilePath(hlText);
+        final displayStyle = monoStyle(
+          color: isPath ? colors.accent : colors.accent,
+          fontSize: 12.5,
+        ).copyWith(
+          decoration: isPath ? TextDecoration.underline : null,
+          decorationColor: isPath ? colors.accent : null,
         );
+        if (isPath) {
+          return GestureDetector(
+            onTap: () => onOpenFile!(hlText),
+            child: Text(hlText, style: displayStyle),
+          );
+        }
+        return Text(hlText, style: displayStyle);
       },
     );
   }
@@ -2370,6 +2390,43 @@ Future<void> _openLink(BuildContext context, String href) async {
   if (!ok && context.mounted) {
     showAppSnackBar(context, 'Could not open link');
   }
+}
+
+/// Returns true when [text] looks like a workspace file path rather than a
+/// plain identifier or URL. Requires a `/` separator AND either a known file
+/// extension or an explicit relative prefix (`./`, `../`).
+bool _looksLikeFilePath(String text) {
+  if (text.isEmpty) return false;
+  // Never linkify URLs — those go through onLinkTap.
+  if (text.startsWith('http://') || text.startsWith('https://')) return false;
+  // Must contain a slash (rules out single words like `foo`)
+  if (!text.contains('/')) return false;
+  // Explicit relative prefixes → always treat as path
+  if (text.startsWith('./') || text.startsWith('../')) return true;
+  // Absolute path → treat as path when it has an extension
+  if (text.startsWith('/')) {
+    return _hasKnownExtension(text);
+  }
+  // Relative path like `src/foo.ts` — require a known extension to avoid
+  // false positives on domain names or command args like `--out/dir`
+  return _hasKnownExtension(text);
+}
+
+bool _hasKnownExtension(String path) {
+  final dot = path.lastIndexOf('.');
+  if (dot < 0 || dot == path.length - 1) return false;
+  final ext = path.substring(dot + 1).toLowerCase();
+  const knownExts = {
+    'dart', 'ts', 'tsx', 'js', 'mjs', 'cjs', 'jsx',
+    'json', 'yaml', 'yml', 'toml', 'md', 'markdown',
+    'html', 'htm', 'xml', 'svg', 'css', 'scss', 'less',
+    'py', 'go', 'rs', 'rb', 'java', 'kt', 'swift',
+    'c', 'h', 'cpp', 'cc', 'cxx', 'cs',
+    'sh', 'bash', 'zsh', 'fish',
+    'txt', 'env', 'lock', 'gradle', 'properties',
+    'proto', 'graphql', 'sql',
+  };
+  return knownExts.contains(ext);
 }
 
 // Matches http(s)://… and www.… URLs. Conservative trailing punctuation trim
