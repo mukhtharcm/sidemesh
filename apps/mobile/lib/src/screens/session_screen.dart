@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -55,6 +56,9 @@ class _SessionScreenState extends State<SessionScreen>
   static const _messagePageSize = 120;
   static const _activityPageSize = 80;
   static const _liveUpdateFlushInterval = Duration(milliseconds: 48);
+  static const _maxDraftImageCount = 4;
+  static const _maxDraftImageBytes = 5 * 1024 * 1024;
+  static const _maxDraftPayloadBytes = 9 * 1024 * 1024;
 
   final _composerController = TextEditingController();
   final _scrollController = ScrollController();
@@ -75,6 +79,8 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionMessage> _messages = const [];
   List<SessionMessage> _optimisticMessages = const [];
   List<SessionActivity> _activities = const [];
+  List<_ComposerImageAttachment> _draftAttachments =
+      const <_ComposerImageAttachment>[];
   SessionLogHistorySummary? _history;
   PendingAction? _pendingAction;
   int _messageLimit = _initialMessageLimit;
@@ -547,6 +553,7 @@ class _SessionScreenState extends State<SessionScreen>
               id: committedLive.id,
               role: 'assistant',
               text: committedLive.text,
+              attachments: const <SessionMessageAttachment>[],
               createdAt: committedLive.createdAt,
               seq: committedLive.seq,
               phase: 'final_answer',
@@ -665,17 +672,190 @@ class _SessionScreenState extends State<SessionScreen>
     _scrollToBottomFast();
   }
 
+  Future<void> _pickComposerImages() async {
+    if (_sending) {
+      return;
+    }
+
+    try {
+      final picked = await FilePicker.pickFiles(
+        allowMultiple: true,
+        withData: true,
+        type: FileType.custom,
+        allowedExtensions: const <String>[
+          'png',
+          'jpg',
+          'jpeg',
+          'webp',
+          'gif',
+          'bmp',
+          'heic',
+          'heif',
+        ],
+      );
+      if (!mounted || picked == null || picked.files.isEmpty) {
+        return;
+      }
+      await _addPickedDraftAttachments(picked.files);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      showAppSnackBar(context, 'Failed to attach images: ${friendlyError(error)}');
+    }
+  }
+
+  Future<void> _addPickedDraftAttachments(List<PlatformFile> files) async {
+    final nextAttachments = List<_ComposerImageAttachment>.from(_draftAttachments);
+    var totalBytes = nextAttachments.fold<int>(
+      0,
+      (sum, item) => sum + item.byteLength,
+    );
+
+    for (final file in files) {
+      if (nextAttachments.length >= _maxDraftImageCount) {
+        if (!mounted) return;
+        showAppSnackBar(
+          context,
+          'You can attach up to $_maxDraftImageCount images per message.',
+        );
+        break;
+      }
+
+      final bytes = await _readPickedFileBytes(file);
+      if (bytes == null || bytes.isEmpty) {
+        if (!mounted) return;
+        showAppSnackBar(
+          context,
+          'Could not read ${file.name.isEmpty ? 'that image' : file.name}.',
+        );
+        continue;
+      }
+      if (bytes.length > _maxDraftImageBytes) {
+        if (!mounted) return;
+        showAppSnackBar(
+          context,
+          '${file.name.isEmpty ? 'That image' : file.name} is larger than 5 MB.',
+        );
+        continue;
+      }
+      if (totalBytes + bytes.length > _maxDraftPayloadBytes) {
+        if (!mounted) return;
+        showAppSnackBar(
+          context,
+          'Attached images are too large for one message. Remove one or pick a smaller file.',
+        );
+        break;
+      }
+
+      final mimeType = _mimeTypeForImageName(file.name);
+      if (mimeType == null) {
+        if (!mounted) return;
+        showAppSnackBar(
+          context,
+          '${file.name.isEmpty ? 'That file' : file.name} is not a supported image.',
+        );
+        continue;
+      }
+
+      final dataUrl = 'data:$mimeType;base64,${base64Encode(bytes)}';
+      nextAttachments.add(
+        _ComposerImageAttachment(
+          id: 'draft-${DateTime.now().microsecondsSinceEpoch}-${nextAttachments.length}',
+          name: file.name.isEmpty ? 'image' : file.name,
+          mimeType: mimeType,
+          bytes: bytes,
+          dataUrl: dataUrl,
+        ),
+      );
+      totalBytes += bytes.length;
+    }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _draftAttachments = nextAttachments;
+    });
+  }
+
+  Future<Uint8List?> _readPickedFileBytes(PlatformFile file) async {
+    if (file.bytes != null) {
+      return file.bytes;
+    }
+    return file.xFile.readAsBytes();
+  }
+
+  void _removeDraftAttachment(String attachmentId) {
+    setState(() {
+      _draftAttachments = _draftAttachments
+          .where((item) => item.id != attachmentId)
+          .toList();
+    });
+  }
+
+  String? _mimeTypeForImageName(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    if (lower.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (lower.endsWith('.webp')) {
+      return 'image/webp';
+    }
+    if (lower.endsWith('.gif')) {
+      return 'image/gif';
+    }
+    if (lower.endsWith('.bmp')) {
+      return 'image/bmp';
+    }
+    if (lower.endsWith('.heic')) {
+      return 'image/heic';
+    }
+    if (lower.endsWith('.heif')) {
+      return 'image/heif';
+    }
+    return null;
+  }
+
+  List<SessionInputItem> _buildComposerInputItems(
+    String text,
+    List<_ComposerImageAttachment> attachments,
+  ) {
+    return <SessionInputItem>[
+      ...attachments.map((item) => SessionInputItem.image(item.dataUrl)),
+      if (text.isNotEmpty) SessionInputItem.text(text),
+    ];
+  }
+
+  List<SessionMessageAttachment> _buildDraftMessageAttachments(
+    List<_ComposerImageAttachment> attachments,
+  ) {
+    return attachments
+        .map(
+          (item) => SessionMessageAttachment(type: 'image', url: item.dataUrl),
+        )
+        .toList(growable: false);
+  }
+
   Future<void> _sendInput() async {
     final text = _composerController.text.trim();
-    if (text.isEmpty || _sending) {
+    final draftAttachments = List<_ComposerImageAttachment>.from(
+      _draftAttachments,
+    );
+    if ((text.isEmpty && draftAttachments.isEmpty) || _sending) {
       return;
     }
 
     final wasRunning = _running;
+    final inputItems = _buildComposerInputItems(text, draftAttachments);
     final optimisticMessage = SessionMessage(
       id: 'local-${DateTime.now().microsecondsSinceEpoch}',
       role: 'user',
       text: text,
+      attachments: _buildDraftMessageAttachments(draftAttachments),
       createdAt: DateTime.now(),
       seq: _nextTimelineSeq(),
     );
@@ -685,6 +865,7 @@ class _SessionScreenState extends State<SessionScreen>
       _sending = true;
       _running = true;
       _awaitingAssistantReply = true;
+      _draftAttachments = const <_ComposerImageAttachment>[];
       _clearLiveAssistantMessage();
       _upsertOptimisticMessage(optimisticMessage);
     });
@@ -696,6 +877,7 @@ class _SessionScreenState extends State<SessionScreen>
         widget.host,
         sessionId: widget.session.id,
         text: text,
+        input: inputItems,
         clientMessageId: optimisticMessage.id,
         approvalPolicy: policy.approval?.wire,
         sandboxMode: policy.sandbox?.wire,
@@ -713,11 +895,15 @@ class _SessionScreenState extends State<SessionScreen>
         offset: _composerController.text.length,
       );
       final stillHasPending = _pendingAction != null;
+      final restoredAttachments = List<_ComposerImageAttachment>.from(
+        draftAttachments,
+      );
       showAppSnackBar(context, "Failed to send: ${friendlyError(error)}");
       setState(() {
         _optimisticMessages = _optimisticMessages
             .where((message) => message.id != optimisticMessage.id)
             .toList();
+        _draftAttachments = restoredAttachments;
         _running = wasRunning;
         _awaitingAssistantReply =
             wasRunning && _liveAssistantText.isEmpty && !stillHasPending;
@@ -1191,9 +1377,29 @@ class _SessionScreenState extends State<SessionScreen>
   ) {
     return persisted.role == optimistic.role &&
         persisted.text.trim() == optimistic.text.trim() &&
+        _sameMessageAttachments(persisted.attachments, optimistic.attachments) &&
         (persisted.createdAt.difference(optimistic.createdAt).inSeconds)
                 .abs() <=
             90;
+  }
+
+  bool _sameMessageAttachments(
+    List<SessionMessageAttachment> left,
+    List<SessionMessageAttachment> right,
+  ) {
+    if (left.length != right.length) {
+      return false;
+    }
+    for (var index = 0; index < left.length; index += 1) {
+      final leftItem = left[index];
+      final rightItem = right[index];
+      if (leftItem.type != rightItem.type ||
+          leftItem.url != rightItem.url ||
+          leftItem.path != rightItem.path) {
+        return false;
+      }
+    }
+    return true;
   }
 
   @override
@@ -1479,7 +1685,10 @@ class _SessionScreenState extends State<SessionScreen>
             _ComposerStatusStrip(thinking: _thinkingNotifier),
             _Composer(
               controller: _composerController,
+              attachments: _draftAttachments,
               sending: _sending,
+              onPickImages: _pickComposerImages,
+              onRemoveAttachment: _removeDraftAttachment,
               onSend: _sendInput,
               onDismiss: _dismissKeyboard,
               submitOnEnter: widget.topPadding != null,
@@ -1930,14 +2139,20 @@ class _HistoryTruncationCard extends StatelessWidget {
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
+    required this.attachments,
     required this.sending,
+    required this.onPickImages,
+    required this.onRemoveAttachment,
     required this.onSend,
     required this.onDismiss,
     this.submitOnEnter = false,
   });
 
   final TextEditingController controller;
+  final List<_ComposerImageAttachment> attachments;
   final bool sending;
+  final VoidCallback onPickImages;
+  final ValueChanged<String> onRemoveAttachment;
   final VoidCallback onSend;
   final VoidCallback onDismiss;
   final bool submitOnEnter;
@@ -1999,6 +2214,14 @@ class _Composer extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            IconButton(
+              onPressed: sending ? null : onPickImages,
+              tooltip: 'Attach images',
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              color: colors.accent,
+              visualDensity: VisualDensity.compact,
+            ),
+            const SizedBox(width: 6),
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
@@ -2006,11 +2229,36 @@ class _Composer extends StatelessWidget {
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(color: colors.border),
                 ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 2,
+                padding: const EdgeInsets.fromLTRB(
+                  14,
+                  8,
+                  14,
+                  2,
                 ),
-                child: field,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (attachments.isNotEmpty) ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: attachments
+                              .map(
+                                (attachment) => _ComposerAttachmentChip(
+                                  attachment: attachment,
+                                  onRemove: onRemoveAttachment,
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    field,
+                  ],
+                ),
               ),
             ),
             const SizedBox(width: 10),
@@ -2069,6 +2317,101 @@ class _SendButton extends StatelessWidget {
   }
 }
 
+class _ComposerAttachmentChip extends StatelessWidget {
+  const _ComposerAttachmentChip({
+    required this.attachment,
+    required this.onRemove,
+  });
+
+  final _ComposerImageAttachment attachment;
+  final ValueChanged<String> onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.border),
+      ),
+      padding: const EdgeInsets.fromLTRB(6, 6, 8, 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.memory(
+              attachment.bytes,
+              width: 36,
+              height: 36,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+            ),
+          ),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 140),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  attachment.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _formatByteCount(attachment.byteLength),
+                  style: monoStyle(
+                    color: colors.textTertiary,
+                    fontSize: 10.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+          InkWell(
+            onTap: () => onRemove(attachment.id),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(
+                Icons.close_rounded,
+                size: 16,
+                color: colors.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ComposerImageAttachment {
+  const _ComposerImageAttachment({
+    required this.id,
+    required this.name,
+    required this.mimeType,
+    required this.bytes,
+    required this.dataUrl,
+  });
+
+  final String id;
+  final String name;
+  final String mimeType;
+  final Uint8List bytes;
+  final String dataUrl;
+
+  int get byteLength => bytes.length;
+}
+
 class _LiveAssistantMessageState {
   const _LiveAssistantMessageState({
     required this.id,
@@ -2105,6 +2448,7 @@ class _LiveAssistantMessageState {
     id: id,
     role: 'assistant',
     text: text,
+    attachments: const <SessionMessageAttachment>[],
     createdAt: createdAt,
     seq: seq,
     phase: phase,
@@ -2252,6 +2596,7 @@ class _MessageBubble extends StatelessWidget {
     final colors = context.colors;
     final isUser = message.role == 'user';
     final isAssistant = message.role == 'assistant';
+    final hasText = message.text.trim().isNotEmpty;
 
     final bubbleColor = switch (message.role) {
       'user' => colors.userBubble,
@@ -2307,22 +2652,27 @@ class _MessageBubble extends StatelessWidget {
                         ],
                       ),
                     ),
-                  if (isAssistant)
-                    _MarkdownMessageBody(
-                      text: message.text,
-                      textColor: textColor,
-                      onOpenFile: onOpenFile,
-                    )
-                  else
-                    _LinkifiedSelectableText(
-                      text: message.text,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: textColor,
-                        height: 1.45,
+                  if (message.attachments.isNotEmpty) ...[
+                    _MessageAttachmentsSection(attachments: message.attachments),
+                    if (hasText) const SizedBox(height: 10),
+                  ],
+                  if (hasText)
+                    if (isAssistant)
+                      _MarkdownMessageBody(
+                        text: message.text,
+                        textColor: textColor,
+                        onOpenFile: onOpenFile,
+                      )
+                    else
+                      _LinkifiedSelectableText(
+                        text: message.text,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: textColor,
+                          height: 1.45,
+                        ),
+                        linkColor: colors.accent,
                       ),
-                      linkColor: colors.accent,
-                    ),
-                  if (!isUser && message.text.trim().isNotEmpty)
+                  if (!isUser && hasText)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Align(
@@ -2339,6 +2689,187 @@ class _MessageBubble extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MessageAttachmentsSection extends StatelessWidget {
+  const _MessageAttachmentsSection({required this.attachments});
+
+  final List<SessionMessageAttachment> attachments;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final itemWidth = attachments.length == 1
+            ? constraints.maxWidth
+            : ((constraints.maxWidth - 8) / 2).clamp(
+                120.0,
+                constraints.maxWidth,
+              ).toDouble();
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: attachments.map((attachment) {
+            return SizedBox(
+              width: attachment.isLocalImage ? constraints.maxWidth : itemWidth,
+              child: _MessageAttachmentTile(attachment: attachment),
+            );
+          }).toList(growable: false),
+        );
+      },
+    );
+  }
+}
+
+class _MessageAttachmentTile extends StatelessWidget {
+  const _MessageAttachmentTile({required this.attachment});
+
+  final SessionMessageAttachment attachment;
+
+  @override
+  Widget build(BuildContext context) {
+    if (attachment.isImage && attachment.url != null) {
+      return _MessageImageAttachmentTile(url: attachment.url!);
+    }
+    if (attachment.isLocalImage && attachment.path != null) {
+      return _LocalImageAttachmentTile(path: attachment.path!);
+    }
+    return const SizedBox.shrink();
+  }
+}
+
+class _MessageImageAttachmentTile extends StatefulWidget {
+  const _MessageImageAttachmentTile({required this.url});
+
+  final String url;
+
+  @override
+  State<_MessageImageAttachmentTile> createState() =>
+      _MessageImageAttachmentTileState();
+}
+
+class _MessageImageAttachmentTileState extends State<_MessageImageAttachmentTile> {
+  Uint8List? _dataUrlBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _decodeDataUrlIfNeeded();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MessageImageAttachmentTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _decodeDataUrlIfNeeded();
+    }
+  }
+
+  void _decodeDataUrlIfNeeded() {
+    if (!_isInlineImageDataUrl(widget.url)) {
+      _dataUrlBytes = null;
+      return;
+    }
+    _dataUrlBytes = _decodeInlineImageDataUrl(widget.url);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final imageChild = _dataUrlBytes != null
+        ? Image.memory(
+            _dataUrlBytes!,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+          )
+        : (!_isInlineImageDataUrl(widget.url)
+              ? Image.network(
+                  widget.url,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) =>
+                      _AttachmentLoadError(colors: colors),
+                )
+              : _AttachmentLoadError(colors: colors));
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(15),
+        child: AspectRatio(aspectRatio: 1.35, child: imageChild),
+      ),
+    );
+  }
+}
+
+class _LocalImageAttachmentTile extends StatelessWidget {
+  const _LocalImageAttachmentTile({required this.path});
+
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.image_outlined, color: colors.accent, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _basename(path),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  path,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AttachmentLoadError extends StatelessWidget {
+  const _AttachmentLoadError({required this.colors});
+
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: colors.surfaceMuted,
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.broken_image_outlined,
+        color: colors.textTertiary,
+        size: 28,
       ),
     );
   }
@@ -2473,6 +3004,32 @@ class _MarkdownMessageBody extends StatelessWidget {
       },
     );
   }
+}
+
+bool _isInlineImageDataUrl(String value) => value.startsWith('data:image/');
+
+Uint8List? _decodeInlineImageDataUrl(String value) {
+  try {
+    return UriData.parse(value).contentAsBytes();
+  } catch (_) {
+    return null;
+  }
+}
+
+String _basename(String path) {
+  final normalized = path.replaceAll('\\', '/');
+  final parts = normalized.split('/');
+  return parts.isEmpty ? path : parts.last;
+}
+
+String _formatByteCount(int bytes) {
+  if (bytes < 1024) {
+    return '$bytes B';
+  }
+  if (bytes < 1024 * 1024) {
+    return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  }
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
 Future<void> _openLink(BuildContext context, String href) async {

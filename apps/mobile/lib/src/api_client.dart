@@ -81,6 +81,7 @@ class ApiClient {
     HostProfile host, {
     required String cwd,
     required String prompt,
+    List<SessionInputItem>? input,
     String? model,
     String? approvalPolicy,
     String? sandboxMode,
@@ -88,6 +89,9 @@ class ApiClient {
     String? profile,
   }) async {
     final body = <String, dynamic>{'cwd': cwd, 'prompt': prompt};
+    if (input != null && input.isNotEmpty) {
+      body['input'] = input.map((item) => item.toJson()).toList();
+    }
     if ((model ?? '').isNotEmpty) {
       body['model'] = model;
     }
@@ -111,22 +115,34 @@ class ApiClient {
   Future<void> sendInput(
     HostProfile host, {
     required String sessionId,
-    required String text,
+    String text = '',
+    List<SessionInputItem>? input,
     String? clientMessageId,
     String? approvalPolicy,
     String? sandboxMode,
     bool? networkAccess,
   }) async {
+    final body = <String, dynamic>{
+      if (text.isNotEmpty) 'text': text,
+      if (input != null && input.isNotEmpty)
+        'input': input.map((item) => item.toJson()).toList(),
+      ...?clientMessageId == null
+          ? null
+          : <String, dynamic>{'clientMessageId': clientMessageId},
+      ...?approvalPolicy == null
+          ? null
+          : <String, dynamic>{'approvalPolicy': approvalPolicy},
+      ...?sandboxMode == null
+          ? null
+          : <String, dynamic>{'sandbox': sandboxMode},
+      ...?networkAccess == null
+          ? null
+          : <String, dynamic>{'networkAccess': networkAccess},
+    };
     await _post(
       host,
       '/api/sessions/$sessionId/input',
-      body: {
-        'text': text,
-        'clientMessageId': clientMessageId,
-        if (approvalPolicy != null) 'approvalPolicy': approvalPolicy,
-        if (sandboxMode != null) 'sandbox': sandboxMode,
-        if (networkAccess != null) 'networkAccess': networkAccess,
-      },
+      body: body,
     );
   }
 
