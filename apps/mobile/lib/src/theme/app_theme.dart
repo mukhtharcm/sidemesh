@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import 'app_colors.dart';
 
@@ -33,10 +32,12 @@ ThemeData _buildTheme(Brightness brightness, AppColors palette) {
     splashFactory: InkSparkle.splashFactory,
   );
 
-  final textTheme = GoogleFonts.spaceGroteskTextTheme(base.textTheme).apply(
-    bodyColor: palette.textPrimary,
-    displayColor: palette.textPrimary,
-  );
+  final textTheme = base.textTheme
+      .apply(
+        fontFamily: 'SpaceGrotesk',
+        bodyColor: palette.textPrimary,
+        displayColor: palette.textPrimary,
+      );
 
   return base.copyWith(
     textTheme: textTheme,
@@ -189,7 +190,8 @@ TextStyle monoStyle({
   double height = 1.45,
   FontWeight fontWeight = FontWeight.w500,
 }) {
-  return GoogleFonts.jetBrainsMono(
+  return TextStyle(
+    fontFamily: 'JetBrainsMono',
     color: color,
     fontSize: fontSize,
     height: height,

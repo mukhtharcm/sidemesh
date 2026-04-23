@@ -32,7 +32,6 @@ dependencies:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
-  google_fonts: ^6.3.2
   http: ^1.5.0
   shared_preferences: ^2.5.3
   web_socket_channel: ^3.0.3
@@ -62,6 +61,18 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  fonts:
+    - family: SpaceGrotesk
+      fonts:
+        - asset: assets/fonts/SpaceGrotesk-VF.ttf
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Regular.ttf
+        - asset: assets/fonts/JetBrainsMono-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/JetBrainsMono-Bold.ttf
+          weight: 700
 
   # To add assets to your application, add an assets section, like this:
   # assets:
