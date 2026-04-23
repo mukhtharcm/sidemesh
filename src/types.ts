@@ -31,6 +31,7 @@ export interface SessionMessage {
   role: "user" | "assistant" | "system";
   text: string;
   createdAt: number;
+  seq: number;
   phase?: "commentary" | "final_answer";
 }
 
@@ -46,6 +47,7 @@ export interface SessionActivityBase {
   type: "command" | "file_change" | "turn_diff";
   turnId: string | null;
   createdAt: number;
+  seq: number;
   status: "in_progress" | "completed" | "failed" | "declined";
 }
 
@@ -173,6 +175,7 @@ export interface RolloutLog {
   runtime: SessionRuntimeSummary | null;
   totalMessages: number;
   totalActivities: number;
+  nextSeq: number;
 }
 
 export interface SessionRuntimeSummary {

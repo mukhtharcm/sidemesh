@@ -46,6 +46,7 @@ interface SessionLogCacheEntry {
   activities: SessionActivity[];
   runtime: SessionRuntimeSummary | null;
   history: SessionHistorySummary;
+  nextSeq: number;
 }
 
 interface SessionHistorySummary {
@@ -80,7 +81,21 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const liveActivities = new Map<string, Map<string, SessionActivity>>();
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
   const logCache = new Map<string, SessionLogCacheEntry>();
+  const sessionSeqCursor = new Map<string, number>();
   let codexVersion = "unknown";
+
+  function allocSeq(sessionId: string): number {
+    const current = sessionSeqCursor.get(sessionId) ?? 0;
+    sessionSeqCursor.set(sessionId, current + 1);
+    return current;
+  }
+
+  function ensureSeqCursor(sessionId: string, minimum: number): void {
+    const current = sessionSeqCursor.get(sessionId) ?? 0;
+    if (minimum > current) {
+      sessionSeqCursor.set(sessionId, minimum);
+    }
+  }
 
   bridge.on("stderr", (line) => {
     process.stderr.write(line);
@@ -122,9 +137,11 @@ export async function startServer(config: NodeConfig): Promise<void> {
       const item = (params as any)?.item;
       const turnId = asString((params as any)?.turnId);
       if (item && typeof item === "object") {
+        const existingSeq = liveActivities.get(sessionId)?.get(asString((item as any)?.id) || "")?.seq;
         const activity = buildActivityFromThreadItem(item as any, {
           turnId,
           createdAt: Date.now(),
+          seq: existingSeq ?? allocSeq(sessionId),
         });
         if (activity) {
           const next = upsertLiveActivity(liveActivities, sessionId, activity);
@@ -197,6 +214,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         itemId,
         turnId,
         (params as any)?.changes,
+        () => allocSeq(sessionId),
       );
       if (next) {
         broadcast(socketsBySession, sessionId, {
@@ -216,7 +234,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
         return;
       }
 
-      const next = updateLiveTurnDiffActivity(liveActivities, sessionId, turnId, diff);
+      const next = updateLiveTurnDiffActivity(liveActivities, sessionId, turnId, diff, () =>
+        allocSeq(sessionId),
+      );
       if (next) {
         broadcast(socketsBySession, sessionId, {
           type: "activity_updated",
@@ -235,6 +255,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         activeTurns.delete(sessionId);
         liveActivities.delete(sessionId);
         clearSessionLogCache(logCache, sessionId);
+        sessionSeqCursor.delete(sessionId);
         clearActionsForSession(pendingActions, socketsBySession, sessionId);
         broadcast(socketsBySession, sessionId, {
           type: "turn_completed",
@@ -330,6 +351,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     if (cached) {
       const session = await readSession(bridge, sessionId, false);
       if (cached.threadUpdatedAt === session.updatedAt) {
+        ensureSeqCursor(sessionId, cached.nextSeq);
         runtimeCache.set(session.id, {
           threadUpdatedAt: session.updatedAt,
           runtime: cached.runtime,
@@ -356,6 +378,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       messageLimit,
       activityLimit,
     );
+    ensureSeqCursor(sessionId, log.nextSeq);
     const activities = mergeSessionActivities(
       log.activities,
       liveActivities.get(sessionId)?.values() || [],
@@ -373,6 +396,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       activities: log.activities,
       runtime: log.runtime,
       history,
+      nextSeq: log.nextSeq,
     });
     runtimeCache.set(session.id, {
       threadUpdatedAt: session.updatedAt,
@@ -457,7 +481,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return;
     }
 
-    const submittedMessage = buildSubmittedUserMessage(text, clientMessageId);
+    const submittedMessage = buildSubmittedUserMessage(text, clientMessageId, allocSeq(sessionId));
     const state = await loadRunState(bridge, sessionId, activeTurns);
     if (state.turnId) {
       const steer = (await bridge.request("turn/steer", {
@@ -548,6 +572,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     activeTurns.delete(sessionId);
     liveActivities.delete(sessionId);
     clearSessionLogCache(logCache, sessionId);
+    sessionSeqCursor.delete(sessionId);
     response.json({ archived: true });
   }));
 
@@ -865,6 +890,7 @@ function updateLiveFileChangeActivity(
   itemId: string,
   turnId: string | null,
   rawChanges: unknown,
+  allocSeq: () => number,
 ): SessionActivity {
   const sessionActivities = liveActivities.get(sessionId) || new Map<string, SessionActivity>();
   const existing = sessionActivities.get(itemId);
@@ -873,6 +899,7 @@ function updateLiveFileChangeActivity(
     type: "file_change",
     turnId,
     createdAt: existing?.createdAt || Date.now(),
+    seq: existing?.seq ?? allocSeq(),
     status: existing?.type === "file_change" ? existing.status : "in_progress",
     changes: buildFileChangeChanges(rawChanges),
   };
@@ -887,9 +914,12 @@ function updateLiveTurnDiffActivity(
   sessionId: string,
   turnId: string,
   diff: string,
+  allocSeq: () => number,
 ): SessionActivity | null {
   const sessionActivities = liveActivities.get(sessionId) || new Map<string, SessionActivity>();
-  const incoming = buildTurnDiffActivity(turnId, diff, Date.now());
+  const probeId = `${turnId}::turn_diff`;
+  const existingSeq = sessionActivities.get(probeId)?.seq;
+  const incoming = buildTurnDiffActivity(turnId, diff, Date.now(), existingSeq ?? allocSeq());
   if (!incoming) {
     return null;
   }
@@ -938,12 +968,17 @@ function asInteger(value: unknown): number | null {
   return null;
 }
 
-function buildSubmittedUserMessage(text: string, clientMessageId: string | null): SessionMessage {
+function buildSubmittedUserMessage(
+  text: string,
+  clientMessageId: string | null,
+  seq: number,
+): SessionMessage {
   return {
     id: clientMessageId || randomUUID(),
     role: "user",
     text,
     createdAt: Date.now(),
+    seq,
   };
 }
 

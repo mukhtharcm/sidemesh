@@ -155,6 +155,7 @@ class SessionMessage {
     required this.role,
     required this.text,
     required this.createdAt,
+    required this.seq,
     this.phase,
   });
 
@@ -162,6 +163,7 @@ class SessionMessage {
   final String role;
   final String text;
   final DateTime createdAt;
+  final int seq;
   final String? phase;
 
   factory SessionMessage.fromJson(Map<String, dynamic> json) => SessionMessage(
@@ -169,6 +171,7 @@ class SessionMessage {
     role: _stringValue(json['role']),
     text: _stringValue(json['text']),
     createdAt: _dateValue(json['createdAt']),
+    seq: _intOrNull(json['seq']) ?? 0,
     phase: json['phase'] as String?,
   );
 }
@@ -213,6 +216,7 @@ class SessionActivity {
     required this.id,
     required this.type,
     required this.createdAt,
+    required this.seq,
     required this.status,
     required this.turnId,
     required this.command,
@@ -232,6 +236,7 @@ class SessionActivity {
   final String id;
   final String type;
   final DateTime createdAt;
+  final int seq;
   final String status;
   final String? turnId;
   final String? command;
@@ -256,6 +261,7 @@ class SessionActivity {
         id: _stringValue(json['id']),
         type: _stringValue(json['type']),
         createdAt: _dateValue(json['createdAt']),
+        seq: _intOrNull(json['seq']) ?? 0,
         status: _stringValue(json['status']),
         turnId: _stringOrNull(json['turnId']),
         command: _stringOrNull(json['command']),

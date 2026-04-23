@@ -29,6 +29,7 @@ export function extractSessionActivities(
 
   if (!boundedLimit) {
     const activities: SessionActivity[] = [];
+    let seq = 0;
     for (const turn of turns) {
       const items = Array.isArray(turn.items) ? turn.items : [];
       const baseCreatedAt = pickTurnTimestamp(
@@ -41,6 +42,7 @@ export function extractSessionActivities(
         const activity = buildActivityFromThreadItem(item, {
           turnId: turn.id,
           createdAt: baseCreatedAt + index,
+          seq: seq++,
         });
         if (activity) {
           activities.push(activity);
@@ -48,13 +50,14 @@ export function extractSessionActivities(
       }
     }
     return {
-      activities: activities.sort((left, right) => left.createdAt - right.createdAt),
+      activities: activities.sort((left, right) => left.seq - right.seq),
       totalCount: activities.length,
     };
   }
 
   let totalCount = 0;
   const activities: SessionActivity[] = [];
+  let seq = 0;
 
   for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
     const turn = turns[turnIndex];
@@ -76,6 +79,7 @@ export function extractSessionActivities(
       const activity = buildActivityFromThreadItem(item, {
         turnId: turn.id,
         createdAt: baseCreatedAt + itemIndex,
+        seq: seq++,
       });
       if (activity) {
         activities.push(activity);
@@ -83,13 +87,13 @@ export function extractSessionActivities(
     }
   }
 
-  activities.sort((left, right) => left.createdAt - right.createdAt);
+  activities.sort((left, right) => left.seq - right.seq);
   return { activities, totalCount };
 }
 
 export function buildActivityFromThreadItem(
   item: ThreadItemRecord,
-  context: { turnId: string | null; createdAt: number },
+  context: { turnId: string | null; createdAt: number; seq: number },
 ): SessionActivity | null {
   if (item.type === "commandExecution") {
     const source = normalizeCommandSource(item.source);
@@ -99,6 +103,7 @@ export function buildActivityFromThreadItem(
       type: "command",
       turnId: context.turnId,
       createdAt: context.createdAt,
+      seq: context.seq,
       status,
       command: asString(item.command) || "",
       cwd: asString(item.cwd) || "",
@@ -120,6 +125,7 @@ export function buildActivityFromThreadItem(
       type: "file_change",
       turnId: context.turnId,
       createdAt: context.createdAt,
+      seq: context.seq,
       status: normalizeStatus(item.status),
       changes: buildFileChangeChanges(item.changes),
     };
@@ -141,6 +147,7 @@ export function mergeActivity(
     return {
       ...incoming,
       createdAt: existing.createdAt,
+      seq: existing.seq,
       output: incoming.output ?? existingCommand.output,
       exitCode: incoming.exitCode ?? existingCommand.exitCode,
       durationMs: incoming.durationMs ?? existingCommand.durationMs,
@@ -163,6 +170,7 @@ export function mergeActivity(
     return {
       ...incoming,
       createdAt: existing.createdAt,
+      seq: existing.seq,
       diff: incoming.diff ?? existingTurnDiff.diff,
     };
   }
@@ -171,6 +179,7 @@ export function mergeActivity(
   return {
     ...incoming,
     createdAt: existing.createdAt,
+    seq: existing.seq,
     changes:
       incoming.changes.length > 0
         ? incoming.changes
@@ -189,7 +198,7 @@ export function mergeSessionActivities(
   for (const activity of live) {
     merged.set(activity.id, mergeActivity(merged.get(activity.id), activity));
   }
-  return [...merged.values()].sort((left, right) => left.createdAt - right.createdAt);
+  return [...merged.values()].sort((left, right) => left.seq - right.seq);
 }
 
 export function appendCommandActivityOutput(
@@ -228,6 +237,7 @@ export function buildTurnDiffActivity(
   turnId: string | null,
   diff: string,
   createdAt: number,
+  seq: number,
 ): TurnDiffActivity | null {
   const normalized = truncateNullableText(diff, MAX_DIFF_CHARS);
   if (!turnId || !normalized) {
@@ -239,6 +249,7 @@ export function buildTurnDiffActivity(
     type: "turn_diff",
     turnId,
     createdAt,
+    seq,
     status: "in_progress",
     diff: normalized,
   };
@@ -247,6 +258,7 @@ export function buildTurnDiffActivity(
 export function buildCommandActivityFromRolloutEvent(
   payload: unknown,
   createdAt: number,
+  seq: number,
 ): CommandActivity | null {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -272,6 +284,7 @@ export function buildCommandActivityFromRolloutEvent(
     type: "command",
     turnId: asString(typed.turn_id) || asString(typed.turnId),
     createdAt,
+    seq,
     status,
     command,
     cwd,
@@ -293,6 +306,7 @@ export function buildCommandActivityFromRolloutEvent(
 export function buildCommandActivityFromGuardianAssessment(
   payload: unknown,
   createdAt: number,
+  seq: number,
 ): CommandActivity | null {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -328,6 +342,7 @@ export function buildCommandActivityFromGuardianAssessment(
     type: "command",
     turnId: asString(typed.turn_id) || asString(typed.turnId),
     createdAt,
+    seq,
     status,
     command,
     cwd,
@@ -345,6 +360,7 @@ export function buildCommandActivityFromGuardianAssessment(
 export function buildFileChangeActivityFromRolloutEvent(
   payload: unknown,
   createdAt: number,
+  seq: number,
 ): FileChangeActivity | null {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -361,6 +377,7 @@ export function buildFileChangeActivityFromRolloutEvent(
     type: "file_change",
     turnId: asString(typed.turn_id) || asString(typed.turnId),
     createdAt,
+    seq,
     status: normalizeStatus(typed.status),
     changes: buildFileChangeChangesFromPatchMap(typed.changes),
   };
