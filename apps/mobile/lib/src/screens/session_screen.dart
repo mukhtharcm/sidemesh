@@ -75,6 +75,18 @@ class _SessionScreenState extends State<SessionScreen> {
   IOWebSocketChannel? _channel;
   StreamSubscription? _subscription;
   Timer? _liveFlushTimer;
+  Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
+  bool _disposed = false;
+  int? _lastEventSeq;
+  // Incremented whenever a fresh snapshot is requested so in-flight responses
+  // from older requests can be discarded.
+  int _snapshotRequestId = 0;
+  // Buffer live events that arrive while a snapshot is in flight so we can
+  // replay them after the snapshot's setState runs — prevents a stale
+  // snapshot from clobbering an already-delivered action_opened / activity.
+  final List<LiveEvent> _pendingLiveEvents = <LiveEvent>[];
+  bool _snapshotInFlight = false;
 
   // Memoized timeline entries so rebuilds that don't change list inputs skip
   // the list+sort work.
@@ -97,6 +109,8 @@ class _SessionScreenState extends State<SessionScreen> {
 
   @override
   void dispose() {
+    _disposed = true;
+    _reconnectTimer?.cancel();
     _composerController.dispose();
     _scrollController.dispose();
     _subscription?.cancel();
@@ -114,6 +128,8 @@ class _SessionScreenState extends State<SessionScreen> {
   }) async {
     final resolvedMessageLimit = messageLimit ?? _messageLimit;
     final resolvedActivityLimit = activityLimit ?? _activityLimit;
+    final requestId = ++_snapshotRequestId;
+    _snapshotInFlight = true;
     try {
       final log = await widget.api.fetchLog(
         widget.host,
@@ -121,10 +137,14 @@ class _SessionScreenState extends State<SessionScreen> {
         messageLimit: resolvedMessageLimit,
         activityLimit: resolvedActivityLimit,
       );
-      if (!mounted) {
+      if (!mounted || requestId != _snapshotRequestId) {
         return;
       }
       final pendingAction = log.pendingAction;
+      // Capture any live events delivered while the snapshot was in flight —
+      // we'll replay them after the snapshot setState so they aren't clobbered.
+      final bufferedEvents = List<LiveEvent>.from(_pendingLiveEvents);
+      _pendingLiveEvents.clear();
       setState(() {
         _session = log.session;
         _messages = log.messages;
@@ -133,22 +153,30 @@ class _SessionScreenState extends State<SessionScreen> {
         _history = log.history;
         _messageLimit = resolvedMessageLimit;
         _activityLimit = resolvedActivityLimit;
-        _pendingAction = pendingAction;
+        // Prefer a live-delivered pendingAction over a stale snapshot "none".
+        // The server only exposes the most-recent action, so if live says one
+        // is open we trust it until action_resolved arrives.
+        _pendingAction = pendingAction ?? _pendingAction;
         _running = log.session.isActive;
         _loading = false;
         _awaitingAssistantReply =
             log.session.isActive &&
             _liveAssistantText.isEmpty &&
-            pendingAction == null;
+            _pendingAction == null;
         if (!_running) {
           _liveAssistantText = '';
         }
       });
+      // Replay live events that landed during the fetch so action_opened /
+      // activity_updated aren't silently dropped.
+      for (final event in bufferedEvents) {
+        _handleEvent(event);
+      }
       if (scrollToBottom) {
         await _scrollToBottom();
       }
     } catch (error) {
-      if (!mounted) {
+      if (!mounted || requestId != _snapshotRequestId) {
         return;
       }
       setState(() {
@@ -158,6 +186,8 @@ class _SessionScreenState extends State<SessionScreen> {
         context,
         "Failed to load session: ${friendlyError(error)}",
       );
+    } finally {
+      _snapshotInFlight = false;
     }
   }
 
@@ -208,21 +238,108 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   void _connectLive() {
+    if (_disposed) return;
+    _subscription?.cancel();
+    _channel?.sink.close();
+    _subscription = null;
+    _channel = null;
     try {
-      _channel = widget.api.openLive(widget.host, widget.session.id);
-      _subscription = _channel!.stream.listen((raw) {
-        final decoded = jsonDecode(raw as String) as Map<String, dynamic>;
-        final event = LiveEvent.fromJson(decoded);
-        _handleEvent(event);
-      }, onError: (_) {});
+      final channel = widget.api.openLive(widget.host, widget.session.id);
+      _channel = channel;
+      _subscription = channel.stream.listen(
+        _handleRawEvent,
+        onError: (_) => _scheduleReconnect(),
+        onDone: () {
+          if (!_disposed) _scheduleReconnect();
+        },
+        cancelOnError: false,
+      );
+      // Successful connect — reset the backoff counter. If the stream dies
+      // immediately onDone will re-arm it.
+      _reconnectAttempts = 0;
     } catch (_) {
       _channel = null;
+      _scheduleReconnect();
     }
+  }
+
+  void _handleRawEvent(dynamic raw) {
+    LiveEvent? event;
+    try {
+      final decoded = jsonDecode(raw as String) as Map<String, dynamic>;
+      event = LiveEvent.fromJson(decoded);
+    } catch (_) {
+      // Swallow malformed frames — don't tear down the stream for a single
+      // bad line. Transport-level errors land in onError / onDone instead.
+      return;
+    }
+    _handleEvent(event);
+  }
+
+  void _scheduleReconnect() {
+    if (_disposed || !mounted) return;
+    _reconnectTimer?.cancel();
+    _reconnectAttempts = (_reconnectAttempts + 1).clamp(1, 6);
+    // 0.5s, 1s, 2s, 4s, 8s, 15s
+    final delayMs = switch (_reconnectAttempts) {
+      1 => 500,
+      2 => 1000,
+      3 => 2000,
+      4 => 4000,
+      5 => 8000,
+      _ => 15000,
+    };
+    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
+      if (!mounted || _disposed) return;
+      // Re-sync on every reconnect: the session may have advanced while we
+      // were disconnected, and we have no replay mechanism.
+      unawaited(
+        _loadSnapshot(
+          messageLimit: _messageLimit,
+          activityLimit: _activityLimit,
+          scrollToBottom: false,
+        ),
+      );
+      _connectLive();
+    });
   }
 
   void _handleEvent(LiveEvent event) {
     if (!mounted || event.sessionId != widget.session.id) {
       return;
+    }
+
+    // If a snapshot is in flight, queue non-hello events so the snapshot's
+    // setState can't clobber them. They'll be replayed when the snapshot
+    // completes.
+    if (_snapshotInFlight && event.type != 'hello') {
+      _pendingLiveEvents.add(event);
+      return;
+    }
+
+    // Track server seq; if we detect a gap relative to what the server tells
+    // us it has emitted, trigger a snapshot re-fetch to re-sync.
+    if (event.type == 'hello') {
+      final nextSeq = event.nextSeq;
+      final last = _lastEventSeq;
+      if (nextSeq != null && last != null && nextSeq > last + 1) {
+        // We missed events while disconnected; re-sync from authoritative log.
+        unawaited(
+          _loadSnapshot(
+            messageLimit: _messageLimit,
+            activityLimit: _activityLimit,
+            scrollToBottom: false,
+          ),
+        );
+      }
+      return;
+    }
+    final seq = event.seq;
+    if (seq != null) {
+      final last = _lastEventSeq;
+      if (last == null || seq > last) {
+        _lastEventSeq = seq;
+      }
     }
 
     switch (event.type) {

@@ -108,6 +108,8 @@ export interface LiveEvent {
     | "action_resolved"
     | "error";
   sessionId: string;
+  seq?: number;
+  nextSeq?: number;
   turnId?: string;
   delta?: string;
   status?: string;
