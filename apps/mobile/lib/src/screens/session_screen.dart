@@ -1196,55 +1196,52 @@ class _HistoryTruncationCard extends StatelessWidget {
     if (hiddenActivities > 0) {
       hiddenParts.add('$hiddenActivities older actions');
     }
-    final shownParts = <String>[
-      '${history.returnedMessages}/${history.totalMessages} messages',
-      '${history.returnedActivities}/${history.totalActivities} actions',
-    ];
 
-    return MeshCard(
-      tone: MeshCardTone.muted,
-      borderColor: colors.info.withValues(alpha: 0.35),
-      accentStrip: colors.info,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.speed_rounded, color: colors.info, size: 18),
-          const SizedBox(width: 10),
+          Icon(Icons.history_rounded, size: 14, color: colors.textSecondary),
+          const SizedBox(width: 8),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Recent history loaded',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  hiddenParts.isEmpty
-                      ? 'Loaded ${shownParts.join(' and ')}.'
-                      : 'Loaded ${shownParts.join(' and ')}. Hidden for speed: ${hiddenParts.join(' and ')}.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.35,
-                  ),
-                ),
-              ],
+            child: Text(
+              hiddenParts.isEmpty
+                  ? '${history.returnedMessages} msgs · ${history.returnedActivities} actions loaded'
+                  : '${hiddenParts.join(' · ')} hidden',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                fontSize: 11.5,
+              ),
             ),
           ),
-          const SizedBox(width: 12),
-          FilledButton.tonal(
-            onPressed: loading ? null : onLoadOlderHistory,
-            child: loading
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Load older'),
-          ),
+          const SizedBox(width: 8),
+          if (loading)
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.5),
+            )
+          else
+            InkWell(
+              onTap: onLoadOlderHistory,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 4,
+                ),
+                child: Text(
+                  'Load older',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.accent,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
