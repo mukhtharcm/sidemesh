@@ -30,13 +30,55 @@ class HostStore {
   static const _legacyHostsKey = 'sidemesh_hosts_v1';
   static const _hostsMetaKey = 'sidemesh_hosts_v2';
   static const _tokenKeyPrefix = 'sidemesh_host_token_';
+  static const _tokensBundleKey = 'sidemesh_host_tokens_v1';
   static const _migrationDoneKey = 'sidemesh_hosts_v2_migrated';
+  static const _tokenConsolidationDoneKey = 'sidemesh_tokens_consolidated_v1';
 
   final FlutterSecureStorage _secure;
+
+  // In-memory cache of the single keychain bundle. Populated on first read;
+  // kept in sync with saveHosts(). Lets us avoid re-prompting mid-session if
+  // the keychain ACL ever rejects "Always Allow" (e.g. after a code-sign
+  // change).
+  Map<String, String>? _tokenCache;
+
+  Future<Map<String, String>> _readTokenBundle() async {
+    final cached = _tokenCache;
+    if (cached != null) return cached;
+    final raw = await _secure.read(key: _tokensBundleKey);
+    if (raw == null || raw.isEmpty) {
+      _tokenCache = <String, String>{};
+      return _tokenCache!;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        _tokenCache = {
+          for (final entry in decoded.entries)
+            if (entry.value is String) entry.key: entry.value as String,
+        };
+        return _tokenCache!;
+      }
+    } catch (_) {
+      // Malformed bundle — reset to empty, caller will rewrite on save.
+    }
+    _tokenCache = <String, String>{};
+    return _tokenCache!;
+  }
+
+  Future<void> _writeTokenBundle(Map<String, String> tokens) async {
+    _tokenCache = Map<String, String>.from(tokens);
+    if (tokens.isEmpty) {
+      await _secure.delete(key: _tokensBundleKey);
+    } else {
+      await _secure.write(key: _tokensBundleKey, value: jsonEncode(tokens));
+    }
+  }
 
   Future<List<HostProfile>> loadHosts() async {
     final prefs = await SharedPreferences.getInstance();
     await _migrateLegacyIfNeeded(prefs);
+    await _consolidateTokensIfNeeded(prefs);
 
     final raw = prefs.getString(_hostsMetaKey);
     if (raw == null || raw.isEmpty) {
@@ -48,6 +90,7 @@ class HostStore {
       return const [];
     }
 
+    final tokens = await _readTokenBundle();
     final hosts = <HostProfile>[];
     for (final entry in decoded.whereType<Map<String, dynamic>>()) {
       final id = entry['id'] as String?;
@@ -56,12 +99,11 @@ class HostStore {
       if (id == null || label == null || baseUrl == null) {
         continue;
       }
-      final token = await _secure.read(key: '$_tokenKeyPrefix$id') ?? '';
       hosts.add(HostProfile(
         id: id,
         label: label,
         baseUrl: baseUrl,
-        token: token,
+        token: tokens[id] ?? '',
       ));
     }
     hosts.sort((left, right) =>
@@ -80,29 +122,20 @@ class HostStore {
         .toList();
     await prefs.setString(_hostsMetaKey, jsonEncode(metadata));
 
-    final previousRaw = prefs.getString(_hostsMetaKey);
-    final previousIds = <String>{};
-    if (previousRaw != null && previousRaw.isNotEmpty) {
-      final decoded = jsonDecode(previousRaw);
-      if (decoded is List<dynamic>) {
-        for (final entry in decoded.whereType<Map<String, dynamic>>()) {
-          final id = entry['id'];
-          if (id is String) {
-            previousIds.add(id);
-          }
-        }
-      }
-    }
-
     final keepIds = hosts.map((host) => host.id).toSet();
-    for (final host in hosts) {
-      await _secure.write(
-        key: '$_tokenKeyPrefix${host.id}',
-        value: host.token,
-      );
-    }
-    for (final id in previousIds.difference(keepIds)) {
-      await _secure.delete(key: '$_tokenKeyPrefix$id');
+    final tokens = <String, String>{
+      for (final host in hosts)
+        if (host.token.isNotEmpty) host.id: host.token,
+    };
+    await _writeTokenBundle(tokens);
+
+    // Best-effort cleanup of any stale per-id items left over from the old
+    // scheme. Ignore failures — the consolidation flag ensures we won't try
+    // again on next launch.
+    for (final id in keepIds) {
+      try {
+        await _secure.delete(key: '$_tokenKeyPrefix$id');
+      } catch (_) {}
     }
   }
 
@@ -120,6 +153,7 @@ class HostStore {
       final decoded = jsonDecode(legacyRaw);
       if (decoded is List<dynamic>) {
         final metadata = <Map<String, dynamic>>[];
+        final tokens = await _readTokenBundle();
         for (final entry in decoded.whereType<Map<String, dynamic>>()) {
           final id = entry['id'] as String?;
           final label = entry['label'] as String?;
@@ -130,12 +164,10 @@ class HostStore {
           }
           metadata.add({'id': id, 'label': label, 'baseUrl': baseUrl});
           if (token != null && token.isNotEmpty) {
-            await _secure.write(
-              key: '$_tokenKeyPrefix$id',
-              value: token,
-            );
+            tokens[id] = token;
           }
         }
+        await _writeTokenBundle(tokens);
         await prefs.setString(_hostsMetaKey, jsonEncode(metadata));
       }
     } catch (_) {
@@ -145,5 +177,59 @@ class HostStore {
 
     await prefs.remove(_legacyHostsKey);
     await prefs.setBool(_migrationDoneKey, true);
+  }
+
+  /// One-shot migration from the old per-host keychain entries
+  /// (`sidemesh_host_token_<id>`) to the consolidated bundle. Each legacy
+  /// item read here triggers its own keychain prompt exactly once; after the
+  /// flag flips we never touch those keys again.
+  Future<void> _consolidateTokensIfNeeded(SharedPreferences prefs) async {
+    if (prefs.getBool(_tokenConsolidationDoneKey) == true) {
+      return;
+    }
+
+    final metaRaw = prefs.getString(_hostsMetaKey);
+    final ids = <String>[];
+    if (metaRaw != null && metaRaw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(metaRaw);
+        if (decoded is List<dynamic>) {
+          for (final entry in decoded.whereType<Map<String, dynamic>>()) {
+            final id = entry['id'];
+            if (id is String) ids.add(id);
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (ids.isEmpty) {
+      await prefs.setBool(_tokenConsolidationDoneKey, true);
+      return;
+    }
+
+    try {
+      final tokens = await _readTokenBundle();
+      var changed = false;
+      for (final id in ids) {
+        if (tokens.containsKey(id)) continue;
+        final legacy = await _secure.read(key: '$_tokenKeyPrefix$id');
+        if (legacy != null && legacy.isNotEmpty) {
+          tokens[id] = legacy;
+          changed = true;
+        }
+      }
+      if (changed) {
+        await _writeTokenBundle(tokens);
+      }
+      for (final id in ids) {
+        try {
+          await _secure.delete(key: '$_tokenKeyPrefix$id');
+        } catch (_) {}
+      }
+      await prefs.setBool(_tokenConsolidationDoneKey, true);
+    } catch (_) {
+      // Leave the flag unset so we retry on next launch; but don't crash
+      // the app if the keychain is temporarily unavailable.
+    }
   }
 }
