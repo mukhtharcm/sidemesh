@@ -762,7 +762,7 @@ class _CloseSessionButton extends StatelessWidget {
   }
 }
 
-class _SidebarSearchField extends StatelessWidget {
+class _SidebarSearchField extends StatefulWidget {
   const _SidebarSearchField({
     required this.controller,
     required this.focusNode,
@@ -774,27 +774,82 @@ class _SidebarSearchField extends StatelessWidget {
   final VoidCallback onClear;
 
   @override
+  State<_SidebarSearchField> createState() => _SidebarSearchFieldState();
+}
+
+class _SidebarSearchFieldState extends State<_SidebarSearchField> {
+  bool _focused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.focusNode.addListener(_handleFocus);
+    _focused = widget.focusNode.hasFocus;
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode.removeListener(_handleFocus);
+    super.dispose();
+  }
+
+  void _handleFocus() {
+    if (!mounted) return;
+    if (widget.focusNode.hasFocus != _focused) {
+      setState(() => _focused = widget.focusNode.hasFocus);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 140),
       decoration: BoxDecoration(
         color: colors.composerBackground,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: colors.border),
+        border: Border.all(
+          color: _focused ? colors.accent : colors.border,
+          width: _focused ? 1.5 : 1,
+        ),
+        boxShadow: _focused
+            ? [
+                BoxShadow(
+                  color: colors.accent.withValues(alpha: 0.18),
+                  blurRadius: 0,
+                  spreadRadius: 2,
+                ),
+              ]
+            : const [],
       ),
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
         children: [
-          Icon(Icons.search_rounded, size: 15, color: colors.textTertiary),
+          Icon(
+            Icons.search_rounded,
+            size: 15,
+            color: _focused ? colors.accent : colors.textTertiary,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
-              controller: controller,
-              focusNode: focusNode,
+              controller: widget.controller,
+              focusNode: widget.focusNode,
               style: TextStyle(fontSize: 12.5, color: colors.textPrimary),
+              cursorColor: colors.accent,
+              // Kill the default underline + Material focus halo so our
+              // outer AnimatedContainer owns the focus visual.
               decoration: InputDecoration(
                 isDense: true,
                 border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                disabledBorder: InputBorder.none,
+                errorBorder: InputBorder.none,
+                focusedErrorBorder: InputBorder.none,
+                filled: false,
+                hoverColor: Colors.transparent,
+                focusColor: Colors.transparent,
                 hintText: 'Search (⌘F)',
                 hintStyle: TextStyle(
                   color: colors.textTertiary,
@@ -805,14 +860,14 @@ class _SidebarSearchField extends StatelessWidget {
             ),
           ),
           AnimatedBuilder(
-            animation: controller,
+            animation: widget.controller,
             builder: (context, _) {
-              if (controller.text.isEmpty) {
+              if (widget.controller.text.isEmpty) {
                 return const SizedBox.shrink();
               }
               return InkWell(
                 borderRadius: BorderRadius.circular(10),
-                onTap: onClear,
+                onTap: widget.onClear,
                 child: Padding(
                   padding: const EdgeInsets.all(4),
                   child: Icon(
