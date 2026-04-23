@@ -63,6 +63,20 @@ ThemeData _buildTheme(Brightness brightness, AppColors palette) {
         side: BorderSide(color: palette.border),
       ),
     ),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: palette.surface,
+      contentTextStyle: textTheme.bodyMedium?.copyWith(
+        color: palette.textPrimary,
+        fontWeight: FontWeight.w500,
+      ),
+      elevation: 6,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: palette.border),
+      ),
+      actionTextColor: palette.accent,
+    ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: palette.surface,
       surfaceTintColor: Colors.transparent,
@@ -140,15 +154,6 @@ ThemeData _buildTheme(Brightness brightness, AppColors palette) {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     ),
     dividerTheme: DividerThemeData(color: palette.border, space: 1),
-    snackBarTheme: SnackBarThemeData(
-      backgroundColor: palette.surfaceElevated,
-      contentTextStyle: TextStyle(color: palette.textPrimary),
-      actionTextColor: palette.accent,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
-    ),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
       backgroundColor: palette.accent,
       foregroundColor: palette.accentOn,

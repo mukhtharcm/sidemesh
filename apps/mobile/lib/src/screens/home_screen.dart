@@ -11,6 +11,7 @@ import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
+import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import 'host_detail_screen.dart';
 import 'session_screen.dart';
@@ -893,8 +894,9 @@ class _InboxPaneState extends State<InboxPane> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to resolve action: ${friendlyError(error)}')),
+      showAppSnackBar(
+        context,
+        'Failed to resolve action: ${friendlyError(error)}',
       );
     }
   }
