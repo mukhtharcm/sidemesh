@@ -1711,6 +1711,7 @@ class _ActivityCard extends StatefulWidget {
 class _ActivityCardState extends State<_ActivityCard> {
   static const _collapsedLineLimit = 15;
   bool _outputExpanded = false;
+  bool _diffExpanded = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1901,20 +1902,21 @@ class _ActivityCardState extends State<_ActivityCard> {
                   ..._buildCommandBody(context, activity)
                 else if (activity.isTurnDiff) ...[
                   if ((activity.diff ?? '').isNotEmpty)
-                    DiffView(diff: activity.diff!)
+                    _buildLazyDiff(
+                      context,
+                      label:
+                          'Show turn diff (${_diffLineCount(activity.diff!)} lines)',
+                      diff: activity.diff!,
+                    )
                   else
                     _waitingText(context, 'Waiting for turn diff.'),
                 ] else if (activity.changes.isEmpty) ...[
                   _waitingText(context, 'Waiting for patch details.'),
                 ] else ...[
-                  ...activity.changes.map(
-                    (change) => Padding(
-                      padding: const EdgeInsets.only(bottom: 14),
-                      child: _FileChangeBlock(
-                        change: change,
-                        sessionCwd: sessionCwd,
-                      ),
-                    ),
+                  _buildLazyFileChanges(
+                    context,
+                    changes: activity.changes,
+                    sessionCwd: sessionCwd,
                   ),
                 ],
               ],
@@ -1994,6 +1996,134 @@ class _ActivityCardState extends State<_ActivityCard> {
         style: Theme.of(
           context,
         ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+      ),
+    );
+  }
+
+  int _diffLineCount(String diff) {
+    if (diff.isEmpty) return 0;
+    return '\n'.allMatches(diff).length + 1;
+  }
+
+  Widget _buildLazyDiff(
+    BuildContext context, {
+    required String label,
+    required String diff,
+  }) {
+    if (_diffExpanded) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          DiffView(diff: diff),
+          const SizedBox(height: 6),
+          _DiffToggle(
+            expanded: true,
+            label: label,
+            expandedLabel: 'Hide diff',
+            onToggle: () => setState(() => _diffExpanded = false),
+          ),
+        ],
+      );
+    }
+    return _DiffToggle(
+      expanded: false,
+      label: label,
+      expandedLabel: 'Hide diff',
+      onToggle: () => setState(() => _diffExpanded = true),
+    );
+  }
+
+  Widget _buildLazyFileChanges(
+    BuildContext context, {
+    required List<SessionActivityChange> changes,
+    required String sessionCwd,
+  }) {
+    final totalLines = changes.fold<int>(
+      0,
+      (sum, c) => sum + _diffLineCount(c.diff),
+    );
+    final label = changes.length == 1
+        ? 'Show diff ($totalLines lines)'
+        : 'Show ${changes.length} file diffs ($totalLines lines)';
+    if (_diffExpanded) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final change in changes)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: _FileChangeBlock(
+                change: change,
+                sessionCwd: sessionCwd,
+              ),
+            ),
+          _DiffToggle(
+            expanded: true,
+            label: label,
+            expandedLabel: 'Hide diffs',
+            onToggle: () => setState(() => _diffExpanded = false),
+          ),
+        ],
+      );
+    }
+    return _DiffToggle(
+      expanded: false,
+      label: label,
+      expandedLabel: 'Hide diffs',
+      onToggle: () => setState(() => _diffExpanded = true),
+    );
+  }
+}
+
+class _DiffToggle extends StatelessWidget {
+  const _DiffToggle({
+    required this.expanded,
+    required this.label,
+    required this.expandedLabel,
+    required this.onToggle,
+  });
+
+  final bool expanded;
+  final String label;
+  final String expandedLabel;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: GestureDetector(
+        onTap: onToggle,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: colors.accentMuted,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                expanded
+                    ? Icons.unfold_less_rounded
+                    : Icons.unfold_more_rounded,
+                size: 16,
+                color: colors.accent,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                expanded ? expandedLabel : label,
+                style: monoStyle(
+                  color: colors.accent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
