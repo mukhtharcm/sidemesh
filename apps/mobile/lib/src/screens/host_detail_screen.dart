@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../api_client.dart';
 import '../models.dart';
 import '../session_favorites_store.dart';
+import '../session_overrides_store.dart';
 import '../session_read_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
@@ -92,7 +93,10 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   }
 
   List<SessionSummary> _sortSessions(List<SessionSummary> sessions) {
-    final sorted = [...sessions];
+    final overrides = SessionOverridesStore.instance;
+    final sorted = sessions
+        .map((s) => overrides.overlay(widget.host.id, s))
+        .toList();
     sorted.sort((left, right) {
       final leftFavorite = _favorites.isFavorite(widget.host, left.id);
       final rightFavorite = _favorites.isFavorite(widget.host, right.id);
@@ -211,7 +215,10 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
         }
         final data = snapshot.data!;
         return ListenableBuilder(
-          listenable: _favorites,
+          listenable: Listenable.merge([
+            _favorites,
+            SessionOverridesStore.instance,
+          ]),
           builder: (context, _) {
             final sortedSessions = _sortSessions(data.sessions);
             return RefreshIndicator(
