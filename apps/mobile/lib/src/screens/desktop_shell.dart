@@ -495,33 +495,36 @@ class _Sidebar extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Draggable titlebar area with traffic-light inset.
-            SizedBox(height: titlebarInset + 8),
+            SizedBox(height: titlebarInset + 10),
             Padding(
-              padding: const EdgeInsets.fromLTRB(76, 0, 8, 10),
+              padding: const EdgeInsets.fromLTRB(14, 0, 8, 12),
               child: Row(
                 children: [
                   Container(
-                    width: 22,
-                    height: 22,
+                    width: 24,
+                    height: 24,
                     decoration: BoxDecoration(
                       color: colors.accentMuted,
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(7),
                     ),
                     alignment: Alignment.center,
                     child: Icon(
                       Icons.hub_rounded,
-                      size: 14,
+                      size: 15,
                       color: colors.accent,
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'Sidemesh',
                       style: Theme.of(context)
                           .textTheme
                           .titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w700),
+                          ?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.1,
+                          ),
                     ),
                   ),
                   _SidebarIconAction(
