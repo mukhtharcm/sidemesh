@@ -550,6 +550,7 @@ class RecentPane extends StatefulWidget {
     this.query = '',
     this.selectedSessionId,
     this.padding,
+    this.dense = false,
   });
 
   final List<HostProfile> hosts;
@@ -559,6 +560,7 @@ class RecentPane extends StatefulWidget {
   final String query;
   final String? selectedSessionId;
   final EdgeInsets? padding;
+  final bool dense;
 
   @override
   State<RecentPane> createState() => _RecentPaneState();
@@ -709,7 +711,10 @@ class _RecentPaneState extends State<RecentPane> {
         final hasFailures = _failedHostLabels.isNotEmpty;
         final noResults = sortedEntries.isEmpty;
         final basePadding =
-            widget.padding ?? const EdgeInsets.fromLTRB(16, 8, 16, 32);
+            widget.padding ??
+            (widget.dense
+                ? const EdgeInsets.fromLTRB(8, 4, 8, 24)
+                : const EdgeInsets.fromLTRB(16, 8, 16, 32));
         Future<void> handleRefresh() async {
           _kickoffLoad();
         }
@@ -755,7 +760,8 @@ class _RecentPaneState extends State<RecentPane> {
           child: ListView.separated(
             padding: basePadding,
             itemCount: sortedEntries.length + leadingStrips,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            separatorBuilder: (_, _) =>
+                SizedBox(height: widget.dense ? 4 : 10),
             itemBuilder: (context, index) {
               var offset = 0;
               if (isRefreshing) {
@@ -785,6 +791,7 @@ class _RecentPaneState extends State<RecentPane> {
                   entry.session.id,
                 ),
                 selected: widget.selectedSessionId == entry.session.id,
+                dense: widget.dense,
                 onTap: () => widget.onOpenSession(entry.host, entry.session),
                 onToggleFavorite: () {
                   _favorites.toggleFavorite(entry.host, entry.session.id);
@@ -806,12 +813,14 @@ class _SessionRowCard extends StatelessWidget {
     required this.onTap,
     required this.onToggleFavorite,
     this.selected = false,
+    this.dense = false,
   });
 
   final HostProfile host;
   final SessionSummary session;
   final bool favorite;
   final bool selected;
+  final bool dense;
   final VoidCallback onTap;
   final VoidCallback onToggleFavorite;
 
@@ -819,6 +828,77 @@ class _SessionRowCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final running = session.isActive;
+    if (dense) {
+      // Compact variant used in the desktop sidebar. Skips preview / runtime
+      // pills and trims typography so many rows fit without feeling
+      // overstuffed.
+      return MeshCard(
+        onTap: onTap,
+        padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+        accentStrip: running
+            ? colors.success
+            : (selected ? colors.accent : null),
+        borderColor: selected ? colors.accent : null,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            if (running) ...[
+              _RunningDot(color: colors.success),
+              const SizedBox(width: 6),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    session.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${host.label} · ${session.cwd}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: monoStyle(
+                      color: colors.textTertiary,
+                      fontSize: 10.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (favorite)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Icon(
+                  Icons.star_rounded,
+                  size: 14,
+                  color: colors.warning,
+                ),
+              )
+            else
+              InkWell(
+                onTap: onToggleFavorite,
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.star_outline_rounded,
+                    size: 14,
+                    color: colors.textTertiary,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
     return MeshCard(
       onTap: onTap,
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
@@ -910,6 +990,7 @@ class InboxPane extends StatefulWidget {
     required this.onOpenSession,
     required this.onInboxCountChanged,
     this.query = '',
+    this.dense = false,
   });
 
   final List<HostProfile> hosts;
@@ -917,6 +998,7 @@ class InboxPane extends StatefulWidget {
   final void Function(HostProfile host, PendingAction action) onOpenSession;
   final ValueChanged<int> onInboxCountChanged;
   final String query;
+  final bool dense;
 
   @override
   State<InboxPane> createState() => _InboxPaneState();
@@ -1105,9 +1187,11 @@ class _InboxPaneState extends State<InboxPane> {
       color: colors.accent,
       onRefresh: _refresh,
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        padding: widget.dense
+            ? const EdgeInsets.fromLTRB(8, 4, 8, 24)
+            : const EdgeInsets.fromLTRB(16, 8, 16, 32),
         itemCount: entries.length + leadingStrips,
-        separatorBuilder: (_, _) => const SizedBox(height: 10),
+        separatorBuilder: (_, _) => SizedBox(height: widget.dense ? 4 : 10),
         itemBuilder: (context, index) {
           var offset = 0;
           if (isRefreshing) {
@@ -1131,6 +1215,7 @@ class _InboxPaneState extends State<InboxPane> {
           final entry = entries[index - offset];
           return _InboxCard(
             entry: entry,
+            dense: widget.dense,
             onOpenSession: () =>
                 widget.onOpenSession(entry.host, entry.action),
             onRespond: (decision) =>
@@ -1147,16 +1232,63 @@ class _InboxCard extends StatelessWidget {
     required this.entry,
     required this.onOpenSession,
     required this.onRespond,
+    this.dense = false,
   });
 
   final PendingActionEntry entry;
   final VoidCallback onOpenSession;
   final ValueChanged<String> onRespond;
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final action = entry.action;
+    if (dense) {
+      // Compact row for the desktop sidebar — tap the card to open the
+      // session; approve/decline remain available once opened.
+      return MeshCard(
+        onTap: onOpenSession,
+        tone: MeshCardTone.surface,
+        borderColor: colors.warning.withValues(alpha: 0.35),
+        accentStrip: colors.warning,
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    action.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                MeshPill(
+                  label: _actionKindLabel(action.kind),
+                  tone: MeshPillTone.warning,
+                  mono: true,
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${entry.host.label} · ${action.sessionTitle ?? action.sessionId}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+            ),
+          ],
+        ),
+      );
+    }
     return MeshCard(
       tone: MeshCardTone.surface,
       borderColor: colors.warning.withValues(alpha: 0.35),
@@ -1279,6 +1411,7 @@ class HostsPane extends StatelessWidget {
     required this.onRemoveHost,
     required this.onAddHost,
     this.query = '',
+    this.dense = false,
   });
 
   final List<HostProfile> hosts;
@@ -1287,6 +1420,7 @@ class HostsPane extends StatelessWidget {
   final ValueChanged<HostProfile> onRemoveHost;
   final VoidCallback onAddHost;
   final String query;
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
@@ -1333,13 +1467,16 @@ class HostsPane extends StatelessWidget {
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+      padding: dense
+          ? const EdgeInsets.fromLTRB(8, 4, 8, 24)
+          : const EdgeInsets.fromLTRB(16, 8, 16, 120),
       itemCount: visibleHosts.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      separatorBuilder: (_, _) => SizedBox(height: dense ? 4 : 10),
       itemBuilder: (context, index) {
         final host = visibleHosts[index];
         return _HostRowCard(
           host: host,
+          dense: dense,
           onTap: () => onOpenHost(host),
           onEdit: () => onEditHost(host),
           onRemove: () => onRemoveHost(host),
@@ -1355,12 +1492,14 @@ class _HostRowCard extends StatelessWidget {
     required this.onTap,
     required this.onEdit,
     required this.onRemove,
+    this.dense = false,
   });
 
   final HostProfile host;
   final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onRemove;
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
@@ -1369,6 +1508,92 @@ class _HostRowCard extends StatelessWidget {
       listenable: HostStatusStore.instance,
       builder: (context, _) {
         final status = HostStatusStore.instance.statusFor(host.id);
+        if (dense) {
+          return MeshCard(
+            onTap: onTap,
+            padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+            child: Row(
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: colors.accentMuted,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(
+                        Icons.dns_rounded,
+                        color: colors.accent,
+                        size: 14,
+                      ),
+                    ),
+                    Positioned(
+                      right: -2,
+                      bottom: -2,
+                      child: _HostStatusDot(status: status),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        host.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        host.baseUrl,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: monoStyle(
+                          color: colors.textTertiary,
+                          fontSize: 10.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                InkWell(
+                  onTap: onEdit,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(
+                      Icons.edit_outlined,
+                      size: 14,
+                      color: colors.textTertiary,
+                    ),
+                  ),
+                ),
+                InkWell(
+                  onTap: onRemove,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(
+                      Icons.delete_outline,
+                      size: 14,
+                      color: colors.textTertiary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
         return MeshCard(
           onTap: onTap,
           padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),

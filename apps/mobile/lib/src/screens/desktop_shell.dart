@@ -529,6 +529,14 @@ class _Sidebar extends StatelessWidget {
                     tooltip: 'Add host',
                     onTap: onAddHost,
                   ),
+                  const SizedBox(width: 2),
+                  _SidebarIconAction(
+                    icon: Icons.keyboard_rounded,
+                    tooltip: 'Keyboard shortcuts (⌘/)',
+                    onTap: onShowShortcuts,
+                  ),
+                  const SizedBox(width: 2),
+                  const _ThemeToggleButton(),
                 ],
               ),
             ),
@@ -541,9 +549,9 @@ class _Sidebar extends StatelessWidget {
                 onSelect: onSelectSection,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
               child: _SidebarSearchField(
                 controller: searchController,
                 focusNode: searchFocus,
@@ -568,11 +576,6 @@ class _Sidebar extends StatelessWidget {
                       onActiveCountChanged: onActiveCountChanged,
                       onInboxCountChanged: onInboxCountChanged,
                     ),
-            ),
-            Container(height: 1, color: colors.border),
-            _SidebarFooter(
-              onAddHost: onAddHost,
-              onShowShortcuts: onShowShortcuts,
             ),
           ],
         ),
@@ -615,22 +618,22 @@ class _SidebarSegments extends StatelessWidget {
               onTap: () => onSelect(s),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 7,
+                  horizontal: 6,
+                  vertical: 5,
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
                       icon,
-                      size: 15,
+                      size: 14,
                       color: selected ? colors.accent : colors.textSecondary,
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 5),
                     Text(
                       label,
                       style: TextStyle(
-                        fontSize: 12.5,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: selected ? colors.accent : colors.textSecondary,
                       ),
@@ -639,7 +642,7 @@ class _SidebarSegments extends StatelessWidget {
                       const SizedBox(width: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
+                          horizontal: 5,
                           vertical: 1,
                         ),
                         decoration: BoxDecoration(
@@ -726,6 +729,7 @@ class _SidebarPane extends StatelessWidget {
           onActiveCountChanged: onActiveCountChanged,
           query: query,
           selectedSessionId: selectedSessionId,
+          dense: true,
         );
       case _SidebarSection.inbox:
         return InboxPane(
@@ -734,6 +738,7 @@ class _SidebarPane extends StatelessWidget {
           onOpenSession: onOpenSessionFromAction,
           onInboxCountChanged: onInboxCountChanged,
           query: query,
+          dense: true,
         );
       case _SidebarSection.hosts:
         return HostsPane(
@@ -747,42 +752,9 @@ class _SidebarPane extends StatelessWidget {
           onRemoveHost: onRemoveHost,
           onAddHost: onAddHost,
           query: query,
+          dense: true,
         );
     }
-  }
-}
-
-class _SidebarFooter extends StatelessWidget {
-  const _SidebarFooter({required this.onAddHost, required this.onShowShortcuts});
-
-  final VoidCallback onAddHost;
-  final VoidCallback onShowShortcuts;
-
-  @override
-  Widget build(BuildContext context) {
-    // Slim status-bar footer. The prominent "Add host" action lives in the
-    // sidebar header as a compact "+" so this row stays balanced with the
-    // session composer on the detail pane.
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
-      child: Row(
-        children: [
-          _SidebarIconAction(
-            icon: Icons.add_link_rounded,
-            tooltip: 'Add host',
-            onTap: onAddHost,
-          ),
-          const Spacer(),
-          _SidebarIconAction(
-            icon: Icons.keyboard_rounded,
-            tooltip: 'Keyboard shortcuts (⌘/)',
-            onTap: onShowShortcuts,
-          ),
-          const SizedBox(width: 6),
-          const _ThemeToggleButton(),
-        ],
-      ),
-    );
   }
 }
 
