@@ -449,12 +449,18 @@ class RecentPane extends StatefulWidget {
     required this.api,
     required this.onOpenSession,
     required this.onActiveCountChanged,
+    this.query = '',
+    this.selectedSessionId,
+    this.padding,
   });
 
   final List<HostProfile> hosts;
   final ApiClient api;
   final void Function(HostProfile host, SessionSummary session) onOpenSession;
   final ValueChanged<int> onActiveCountChanged;
+  final String query;
+  final String? selectedSessionId;
+  final EdgeInsets? padding;
 
   @override
   State<RecentPane> createState() => _RecentPaneState();
@@ -510,7 +516,19 @@ class _RecentPaneState extends State<RecentPane> {
   }
 
   List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
-    final sorted = [...entries];
+    final query = widget.query.trim().toLowerCase();
+    Iterable<RemoteSessionEntry> visible = entries;
+    if (query.isNotEmpty) {
+      visible = entries.where((entry) {
+        final session = entry.session;
+        final host = entry.host;
+        return session.title.toLowerCase().contains(query) ||
+            session.preview.toLowerCase().contains(query) ||
+            session.cwd.toLowerCase().contains(query) ||
+            host.label.toLowerCase().contains(query);
+      });
+    }
+    final sorted = visible.toList();
     sorted.sort((left, right) {
       final leftFavorite = _favorites.isFavorite(left.host, left.session.id);
       final rightFavorite = _favorites.isFavorite(right.host, right.session.id);
@@ -565,6 +583,27 @@ class _RecentPaneState extends State<RecentPane> {
           listenable: _favorites,
           builder: (context, _) {
             final sortedEntries = _sortEntries(entries);
+            if (sortedEntries.isEmpty) {
+              return RefreshIndicator(
+                color: context.colors.accent,
+                onRefresh: () async {
+                  setState(() => _future = _loadRecent());
+                  await _future;
+                },
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    const SizedBox(height: 80),
+                    MeshEmptyState(
+                      icon: Icons.search_off_rounded,
+                      title: 'No matches',
+                      body:
+                          'No sessions match "${widget.query.trim()}". Clear the filter to see everything.',
+                    ),
+                  ],
+                ),
+              );
+            }
             return RefreshIndicator(
               color: context.colors.accent,
               onRefresh: () async {
@@ -572,7 +611,8 @@ class _RecentPaneState extends State<RecentPane> {
                 await _future;
               },
               child: ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                padding:
+                    widget.padding ?? const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 itemCount: sortedEntries.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
@@ -584,6 +624,8 @@ class _RecentPaneState extends State<RecentPane> {
                       entry.host,
                       entry.session.id,
                     ),
+                    selected:
+                        widget.selectedSessionId == entry.session.id,
                     onTap: () =>
                         widget.onOpenSession(entry.host, entry.session),
                     onToggleFavorite: () {
@@ -607,11 +649,13 @@ class _SessionRowCard extends StatelessWidget {
     required this.favorite,
     required this.onTap,
     required this.onToggleFavorite,
+    this.selected = false,
   });
 
   final HostProfile host;
   final SessionSummary session;
   final bool favorite;
+  final bool selected;
   final VoidCallback onTap;
   final VoidCallback onToggleFavorite;
 
@@ -622,7 +666,10 @@ class _SessionRowCard extends StatelessWidget {
     return MeshCard(
       onTap: onTap,
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-      accentStrip: running ? colors.success : null,
+      accentStrip: running
+          ? colors.success
+          : (selected ? colors.accent : null),
+      borderColor: selected ? colors.accent : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -702,12 +749,14 @@ class InboxPane extends StatefulWidget {
     required this.api,
     required this.onOpenSession,
     required this.onInboxCountChanged,
+    this.query = '',
   });
 
   final List<HostProfile> hosts;
   final ApiClient api;
   final void Function(HostProfile host, PendingAction action) onOpenSession;
   final ValueChanged<int> onInboxCountChanged;
+  final String query;
 
   @override
   State<InboxPane> createState() => _InboxPaneState();
@@ -805,21 +854,39 @@ class _InboxPaneState extends State<InboxPane> {
           return const MeshLoader();
         }
 
-        final entries = snapshot.data ?? const [];
+        final allEntries = snapshot.data ?? const [];
+        final query = widget.query.trim().toLowerCase();
+        final entries = query.isEmpty
+            ? allEntries
+            : allEntries.where((entry) {
+                final a = entry.action;
+                return (a.sessionTitle ?? '').toLowerCase().contains(query) ||
+                    a.detail.toLowerCase().contains(query) ||
+                    (a.cwd ?? '').toLowerCase().contains(query) ||
+                    entry.host.label.toLowerCase().contains(query);
+              }).toList();
         if (entries.isEmpty) {
           return RefreshIndicator(
             color: colors.accent,
             onRefresh: _refresh,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              children: const [
-                SizedBox(height: 80),
-                MeshEmptyState(
-                  icon: Icons.verified_rounded,
-                  title: 'No pending approvals',
-                  body:
-                      'Command, file, and permission prompts from your Codex nodes will appear here.',
-                ),
+              children: [
+                const SizedBox(height: 80),
+                if (query.isNotEmpty)
+                  MeshEmptyState(
+                    icon: Icons.search_off_rounded,
+                    title: 'No matches',
+                    body:
+                        'No pending actions match "${widget.query.trim()}".',
+                  )
+                else
+                  const MeshEmptyState(
+                    icon: Icons.verified_rounded,
+                    title: 'No pending approvals',
+                    body:
+                        'Command, file, and permission prompts from your Codex nodes will appear here.',
+                  ),
               ],
             ),
           );
@@ -985,6 +1052,7 @@ class HostsPane extends StatelessWidget {
     required this.onEditHost,
     required this.onRemoveHost,
     required this.onAddHost,
+    this.query = '',
   });
 
   final List<HostProfile> hosts;
@@ -992,6 +1060,7 @@ class HostsPane extends StatelessWidget {
   final ValueChanged<HostProfile> onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
   final VoidCallback onAddHost;
+  final String query;
 
   @override
   Widget build(BuildContext context) {
@@ -1020,12 +1089,29 @@ class HostsPane extends StatelessWidget {
       );
     }
 
+    final q = query.trim().toLowerCase();
+    final visibleHosts = q.isEmpty
+        ? hosts
+        : hosts
+              .where(
+                (h) =>
+                    h.label.toLowerCase().contains(q) ||
+                    h.baseUrl.toLowerCase().contains(q),
+              )
+              .toList();
+    if (visibleHosts.isEmpty) {
+      return MeshEmptyState(
+        icon: Icons.search_off_rounded,
+        title: 'No matching hosts',
+        body: 'No hosts match "${query.trim()}".',
+      );
+    }
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
-      itemCount: hosts.length,
+      itemCount: visibleHosts.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
-        final host = hosts[index];
+        final host = visibleHosts[index];
         return _HostRowCard(
           host: host,
           onTap: () => onOpenHost(host),

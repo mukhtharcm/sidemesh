@@ -31,6 +31,8 @@ class _ActiveSession {
 class _DesktopShellState extends State<DesktopShell> {
   final HostStore _store = HostStore();
   final ApiClient _api = ApiClient();
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode(debugLabel: 'sidebar-search');
 
   List<HostProfile> _hosts = const [];
   bool _loading = true;
@@ -38,6 +40,7 @@ class _DesktopShellState extends State<DesktopShell> {
   _ActiveSession? _active;
   int _inboxCount = 0;
   int _activeCount = 0;
+  String _query = '';
   // Used to trigger refresh of sidebar panes after a host/session mutation.
   int _refreshTick = 0;
 
@@ -49,6 +52,19 @@ class _DesktopShellState extends State<DesktopShell> {
   void initState() {
     super.initState();
     _loadHosts();
+    _searchController.addListener(() {
+      final next = _searchController.text;
+      if (next != _query) {
+        setState(() => _query = next);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocus.dispose();
+    super.dispose();
   }
 
   Future<void> _loadHosts() async {
@@ -120,6 +136,10 @@ class _DesktopShellState extends State<DesktopShell> {
         shortcuts: const <ShortcutActivator, Intent>{
           SingleActivator(LogicalKeyboardKey.keyR, meta: true):
               _RefreshIntent(),
+          SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+              _FocusSearchIntent(),
+          SingleActivator(LogicalKeyboardKey.keyW, meta: true):
+              _CloseActiveSessionIntent(),
           SingleActivator(LogicalKeyboardKey.digit1, meta: true):
               _SwitchSectionIntent(_SidebarSection.recent),
           SingleActivator(LogicalKeyboardKey.digit2, meta: true):
@@ -136,6 +156,25 @@ class _DesktopShellState extends State<DesktopShell> {
                 return null;
               },
             ),
+            _FocusSearchIntent: CallbackAction<_FocusSearchIntent>(
+              onInvoke: (_) {
+                _searchFocus.requestFocus();
+                _searchController.selection = TextSelection(
+                  baseOffset: 0,
+                  extentOffset: _searchController.text.length,
+                );
+                return null;
+              },
+            ),
+            _CloseActiveSessionIntent:
+                CallbackAction<_CloseActiveSessionIntent>(
+                  onInvoke: (_) {
+                    if (_active != null) {
+                      setState(() => _active = null);
+                    }
+                    return null;
+                  },
+                ),
             _SwitchSectionIntent: CallbackAction<_SwitchSectionIntent>(
               onInvoke: (intent) {
                 setState(() => _section = intent.section);
@@ -158,6 +197,12 @@ class _DesktopShellState extends State<DesktopShell> {
                   inboxCount: _inboxCount,
                   activeCount: _activeCount,
                   selectedSessionId: _active?.session.id,
+                  searchController: _searchController,
+                  searchFocus: _searchFocus,
+                  query: _query,
+                  onClearSearch: () {
+                    _searchController.clear();
+                  },
                   onSelectSection: (s) => setState(() => _section = s),
                   onOpenSession: _openSession,
                   onOpenSessionFromAction: (host, action) =>
@@ -196,6 +241,14 @@ class _RefreshIntent extends Intent {
   const _RefreshIntent();
 }
 
+class _FocusSearchIntent extends Intent {
+  const _FocusSearchIntent();
+}
+
+class _CloseActiveSessionIntent extends Intent {
+  const _CloseActiveSessionIntent();
+}
+
 class _SwitchSectionIntent extends Intent {
   const _SwitchSectionIntent(this.section);
   final _SidebarSection section;
@@ -212,6 +265,10 @@ class _Sidebar extends StatelessWidget {
     required this.inboxCount,
     required this.activeCount,
     required this.selectedSessionId,
+    required this.searchController,
+    required this.searchFocus,
+    required this.query,
+    required this.onClearSearch,
     required this.onSelectSection,
     required this.onOpenSession,
     required this.onOpenSessionFromAction,
@@ -231,6 +288,10 @@ class _Sidebar extends StatelessWidget {
   final int inboxCount;
   final int activeCount;
   final String? selectedSessionId;
+  final TextEditingController searchController;
+  final FocusNode searchFocus;
+  final String query;
+  final VoidCallback onClearSearch;
   final ValueChanged<_SidebarSection> onSelectSection;
   final void Function(HostProfile, SessionSummary) onOpenSession;
   final void Function(HostProfile, PendingAction) onOpenSessionFromAction;
@@ -291,6 +352,14 @@ class _Sidebar extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+              child: _SidebarSearchField(
+                controller: searchController,
+                focusNode: searchFocus,
+                onClear: onClearSearch,
+              ),
+            ),
             Expanded(
               child: loading
                   ? const MeshLoader()
@@ -300,6 +369,7 @@ class _Sidebar extends StatelessWidget {
                       hosts: hosts,
                       api: api,
                       selectedSessionId: selectedSessionId,
+                      query: query,
                       onOpenSession: onOpenSession,
                       onOpenSessionFromAction: onOpenSessionFromAction,
                       onEditHost: onEditHost,
@@ -429,6 +499,7 @@ class _SidebarPane extends StatelessWidget {
     required this.hosts,
     required this.api,
     required this.selectedSessionId,
+    required this.query,
     required this.onOpenSession,
     required this.onOpenSessionFromAction,
     required this.onEditHost,
@@ -442,6 +513,7 @@ class _SidebarPane extends StatelessWidget {
   final List<HostProfile> hosts;
   final ApiClient api;
   final String? selectedSessionId;
+  final String query;
   final void Function(HostProfile, SessionSummary) onOpenSession;
   final void Function(HostProfile, PendingAction) onOpenSessionFromAction;
   final ValueChanged<HostProfile> onEditHost;
@@ -459,6 +531,8 @@ class _SidebarPane extends StatelessWidget {
           api: api,
           onOpenSession: onOpenSession,
           onActiveCountChanged: onActiveCountChanged,
+          query: query,
+          selectedSessionId: selectedSessionId,
         );
       case _SidebarSection.inbox:
         return InboxPane(
@@ -466,6 +540,7 @@ class _SidebarPane extends StatelessWidget {
           api: api,
           onOpenSession: onOpenSessionFromAction,
           onInboxCountChanged: onInboxCountChanged,
+          query: query,
         );
       case _SidebarSection.hosts:
         return HostsPane(
@@ -478,6 +553,7 @@ class _SidebarPane extends StatelessWidget {
           onEditHost: onEditHost,
           onRemoveHost: onRemoveHost,
           onAddHost: onAddHost,
+          query: query,
         );
     }
   }
@@ -681,6 +757,74 @@ class _CloseSessionButton extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SidebarSearchField extends StatelessWidget {
+  const _SidebarSearchField({
+    required this.controller,
+    required this.focusNode,
+    required this.onClear,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.composerBackground,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colors.border),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Row(
+        children: [
+          Icon(Icons.search_rounded, size: 15, color: colors.textTertiary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              style: TextStyle(fontSize: 12.5, color: colors.textPrimary),
+              decoration: InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                hintText: 'Search (⌘F)',
+                hintStyle: TextStyle(
+                  color: colors.textTertiary,
+                  fontSize: 12.5,
+                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 9),
+              ),
+            ),
+          ),
+          AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) {
+              if (controller.text.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              return InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: onClear,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 14,
+                    color: colors.textTertiary,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
     );
   }
