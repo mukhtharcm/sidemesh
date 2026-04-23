@@ -1251,15 +1251,16 @@ class _InboxCard extends StatelessWidget {
     final colors = context.colors;
     final action = entry.action;
     if (dense) {
-      // Compact row for the desktop sidebar — tap the card to open the
-      // session; approve/decline remain available once opened.
+      // Compact row for the desktop sidebar — tap the row to open the
+      // session; inline ✓/✕ buttons let the user resolve without leaving
+      // the sidebar. Long-press on approve surfaces "approve for session".
       return Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onOpenSession,
           borderRadius: BorderRadius.circular(10),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+            padding: const EdgeInsets.fromLTRB(10, 9, 6, 10),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1315,6 +1316,11 @@ class _InboxCard extends StatelessWidget {
                       ),
                     ],
                   ),
+                ),
+                const SizedBox(width: 4),
+                _InboxDenseActions(
+                  action: action,
+                  onRespond: onRespond,
                 ),
               ],
             ),
@@ -1433,6 +1439,112 @@ String _actionKindLabel(String kind) {
     'permissions' => 'permissions',
     _ => kind,
   };
+}
+
+/// Compact approve/decline cluster used by the dense inbox rows in the
+/// desktop sidebar so users can resolve pending actions without having
+/// to open the chat.
+class _InboxDenseActions extends StatelessWidget {
+  const _InboxDenseActions({required this.action, required this.onRespond});
+
+  final PendingAction action;
+  final ValueChanged<String> onRespond;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final canExtended = action.canApproveForSession;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (action.canApprove)
+          _SquareIconAction(
+            icon: Icons.check_rounded,
+            tooltip: canExtended
+                ? 'Approve (right-click for more)'
+                : 'Approve',
+            foreground: colors.success,
+            background: colors.success.withValues(alpha: 0.12),
+            onTap: () => onRespond('accept'),
+            onSecondaryTap: canExtended
+                ? (pos) => _showExtendedMenu(context, pos)
+                : null,
+          ),
+        if (action.canDecline) ...[
+          const SizedBox(width: 4),
+          _SquareIconAction(
+            icon: Icons.close_rounded,
+            tooltip: 'Decline',
+            foreground: colors.danger,
+            background: colors.danger.withValues(alpha: 0.12),
+            onTap: () => onRespond('decline'),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _showExtendedMenu(BuildContext context, Offset globalPos) async {
+    final result = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        globalPos.dx,
+        globalPos.dy,
+        globalPos.dx,
+        globalPos.dy,
+      ),
+      items: const [
+        PopupMenuItem(value: 'accept', child: Text('Approve once')),
+        PopupMenuItem(
+          value: 'acceptForSession',
+          child: Text('Approve for session'),
+        ),
+      ],
+    );
+    if (result != null) onRespond(result);
+  }
+}
+
+class _SquareIconAction extends StatelessWidget {
+  const _SquareIconAction({
+    required this.icon,
+    required this.tooltip,
+    required this.foreground,
+    required this.background,
+    required this.onTap,
+    this.onSecondaryTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final Color foreground;
+  final Color background;
+  final VoidCallback onTap;
+  final void Function(Offset globalPos)? onSecondaryTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 400),
+      child: Material(
+        color: background,
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: onTap,
+          onSecondaryTapDown: onSecondaryTap == null
+              ? null
+              : (details) => onSecondaryTap!(details.globalPosition),
+          child: SizedBox(
+            width: 26,
+            height: 26,
+            child: Icon(icon, size: 16, color: foreground),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class HostsPane extends StatelessWidget {
