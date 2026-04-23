@@ -1004,13 +1004,26 @@ class _SessionScreenState extends State<SessionScreen>
           children: [
             ListenableBuilder(
               listenable: _favorites,
-              builder: (context, _) => _SessionHeader(
-                host: widget.host,
-                session: session,
-                running: _running,
-                favorite: _favorites.isFavorite(widget.host, session.id),
-                onDetails: () => _showSessionDetailsSheet(session),
-              ),
+              builder: (context, _) {
+                final isCompact = MediaQuery.of(context).size.width < 600;
+                final favorite = _favorites.isFavorite(widget.host, session.id);
+                if (isCompact) {
+                  return _SessionHeaderStrip(
+                    host: widget.host,
+                    session: session,
+                    running: _running,
+                    favorite: favorite,
+                    onDetails: () => _showSessionDetailsSheet(session),
+                  );
+                }
+                return _SessionHeader(
+                  host: widget.host,
+                  session: session,
+                  running: _running,
+                  favorite: favorite,
+                  onDetails: () => _showSessionDetailsSheet(session),
+                );
+              },
             ),
             if ((_history?.isTruncated ?? false))
               Padding(
@@ -1038,12 +1051,27 @@ class _SessionScreenState extends State<SessionScreen>
                       keyboardDismissBehavior:
                           ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                      itemCount: timelineEntries.length,
+                      // +1 for the live-stream sentinel that pins the
+                      // currently-streaming assistant bubble / thinking
+                      // indicator at the bottom of the transcript. Keeping
+                      // it inside the list means a long commentary scrolls
+                      // naturally instead of pushing the composer off
+                      // screen.
+                      itemCount: timelineEntries.length + 1,
                       itemBuilder: (context, index) {
-                        // Reverse the mapping: index 0 (bottom) shows the
-                        // newest entry.
+                        if (index == 0) {
+                          return KeyedSubtree(
+                            key: const ValueKey('__live_stream__'),
+                            child: _LiveStreamArea(
+                              liveText: _liveAssistantNotifier,
+                              thinking: _thinkingNotifier,
+                            ),
+                          );
+                        }
+                        // Reverse the mapping: index 1 (just above the
+                        // live sentinel) shows the newest entry.
                         final entry =
-                            timelineEntries[timelineEntries.length - 1 - index];
+                            timelineEntries[timelineEntries.length - index];
                         return KeyedSubtree(
                           key: ValueKey(entry.keyId),
                           child: switch (entry.kind) {
@@ -1062,10 +1090,6 @@ class _SessionScreenState extends State<SessionScreen>
                         );
                       },
                     ),
-            ),
-            _LiveStreamArea(
-              liveText: _liveAssistantNotifier,
-              thinking: _thinkingNotifier,
             ),
             _Composer(
               controller: _composerController,
@@ -1210,6 +1234,89 @@ class _SessionHeader extends StatelessWidget {
   }
 }
 
+/// Compact single-line header used on mobile. Everything that isn't
+/// immediately useful at a glance lives behind the tune button (session
+/// details sheet) so the chat surface gets maximum vertical real estate.
+class _SessionHeaderStrip extends StatelessWidget {
+  const _SessionHeaderStrip({
+    required this.host,
+    required this.session,
+    required this.running,
+    required this.favorite,
+    required this.onDetails,
+  });
+
+  final HostProfile host;
+  final SessionSummary session;
+  final bool running;
+  final bool favorite;
+  final VoidCallback onDetails;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 8, 6),
+      child: InkWell(
+        onTap: onDetails,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Row(
+            children: [
+              _HeaderStatusDot(
+                color: running ? colors.success : colors.textTertiary,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  host.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    color: colors.textSecondary,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text(
+                '  ·  ',
+                style: monoStyle(
+                  color: colors.textTertiary,
+                  fontSize: 11.5,
+                ),
+              ),
+              Flexible(
+                flex: 2,
+                child: Text(
+                  session.cwd,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    color: colors.textTertiary,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ),
+              if (favorite) ...[
+                const SizedBox(width: 6),
+                Icon(Icons.star_rounded, size: 13, color: colors.warning),
+              ],
+              const SizedBox(width: 6),
+              Icon(
+                Icons.tune_rounded,
+                size: 14,
+                color: colors.accent,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HeaderStatusDot extends StatelessWidget {
   const _HeaderStatusDot({required this.color});
   final Color color;
@@ -1233,79 +1340,99 @@ class _PendingActionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final mq = MediaQuery.of(context);
+    // Cap the card at ~38% of available height so a verbose approval
+    // payload (e.g. a long shell command or write-file preview) can never
+    // push the composer off the screen on mobile. Internal scroll keeps
+    // every button reachable.
+    final maxHeight = mq.size.height * 0.38;
     return MeshCard(
       tone: MeshCardTone.surface,
       borderColor: colors.warning.withValues(alpha: 0.5),
       accentStrip: colors.warning,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.shield_rounded, color: colors.warning, size: 18),
-              const SizedBox(width: 8),
-              Text(
-                'Approval required',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colors.warning,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.6,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.shield_rounded, color: colors.warning, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  'Approval required',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: colors.warning,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      action.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      action.detail,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            action.title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            action.detail,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: colors.textSecondary),
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (action.canApprove)
-                FilledButton.icon(
-                  onPressed: () => onRespond('accept'),
-                  icon: const Icon(Icons.check_rounded, size: 18),
-                  label: const Text('Approve'),
-                ),
-              if (action.canApproveForSession)
-                OutlinedButton.icon(
-                  onPressed: () => onRespond('acceptForSession'),
-                  icon: const Icon(Icons.all_inclusive_rounded, size: 18),
-                  label: const Text('Approve for session'),
-                ),
-              if (action.canDecline)
-                OutlinedButton.icon(
-                  onPressed: () => onRespond('decline'),
-                  icon: Icon(
-                    Icons.close_rounded,
-                    size: 18,
-                    color: colors.danger,
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (action.canApprove)
+                  FilledButton.icon(
+                    onPressed: () => onRespond('accept'),
+                    icon: const Icon(Icons.check_rounded, size: 18),
+                    label: const Text('Approve'),
                   ),
-                  label: Text(
-                    'Decline',
-                    style: TextStyle(color: colors.danger),
+                if (action.canApproveForSession)
+                  OutlinedButton.icon(
+                    onPressed: () => onRespond('acceptForSession'),
+                    icon: const Icon(Icons.all_inclusive_rounded, size: 18),
+                    label: const Text('Approve for session'),
                   ),
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(
-                      color: colors.danger.withValues(alpha: 0.5),
+                if (action.canDecline)
+                  OutlinedButton.icon(
+                    onPressed: () => onRespond('decline'),
+                    icon: Icon(
+                      Icons.close_rounded,
+                      size: 18,
+                      color: colors.danger,
+                    ),
+                    label: Text(
+                      'Decline',
+                      style: TextStyle(color: colors.danger),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(
+                        color: colors.danger.withValues(alpha: 0.5),
+                      ),
                     ),
                   ),
-                ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1583,7 +1710,7 @@ class _LiveStreamArea extends StatelessWidget {
       builder: (context, text, _) {
         if (text.isNotEmpty) {
           return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.only(bottom: 4),
             child: _MessageBubble(
               message: SessionMessage(
                 id: 'live',
@@ -1602,7 +1729,7 @@ class _LiveStreamArea extends StatelessWidget {
           builder: (context, show, _) {
             if (!show) return const SizedBox.shrink();
             return const Padding(
-              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: EdgeInsets.only(bottom: 4),
               child: _ThinkingBubble(),
             );
           },
