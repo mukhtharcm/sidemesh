@@ -578,8 +578,15 @@ export async function startServer(config: NodeConfig): Promise<void> {
     if (turnOverrides.approvalPolicy) {
       turnStartParams.approvalPolicy = turnOverrides.approvalPolicy;
     }
-    if (turnOverrides.sandboxMode) {
-      turnStartParams.sandbox = turnOverrides.sandboxMode;
+    // NOTE: turn/start expects a tagged `sandboxPolicy` object (v2 protocol),
+    // NOT the simple kebab string that thread/start accepts as `sandbox`.
+    // Sending `sandbox: "workspace-write"` here silently no-ops and leaves the
+    // session's existing sandbox in place.
+    if (turnOverrides.sandboxMode || turnOverrides.networkAccess !== null) {
+      turnStartParams.sandboxPolicy = buildSandboxPolicyV2(
+        turnOverrides.sandboxMode,
+        turnOverrides.networkAccess,
+      );
     }
     const turn = (await bridge.request("turn/start", turnStartParams)) as any;
     const turnId = asString(turn.turn?.id);
@@ -1308,6 +1315,7 @@ function parseCreateSessionOverrides(value: unknown): CreateSessionOverrides {
 interface TurnOverrides {
   approvalPolicy: ApprovalPolicyValue | null;
   sandboxMode: SandboxModeValue | null;
+  networkAccess: boolean | null;
 }
 
 function parseTurnOverrides(value: unknown): TurnOverrides {
@@ -1315,7 +1323,45 @@ function parseTurnOverrides(value: unknown): TurnOverrides {
   return {
     approvalPolicy: parseApprovalPolicy(typed.approvalPolicy),
     sandboxMode: parseSandboxMode(typed.sandbox ?? typed.sandboxMode),
+    networkAccess: parseOptionalBool(typed.networkAccess),
   };
+}
+
+function parseOptionalBool(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+/**
+ * Build the v2 `SandboxPolicy` tagged object that `turn/start` expects.
+ * The wire format uses camelCase variant tags (`workspaceWrite`, etc.) and
+ * typed fields like `networkAccess`. This is deliberately different from
+ * `thread/start`, which takes a simpler `SandboxMode` string enum.
+ */
+function buildSandboxPolicyV2(
+  mode: SandboxModeValue | null,
+  networkAccess: boolean | null,
+): Record<string, unknown> | null {
+  // If only networkAccess was provided without a mode, we can't build a policy
+  // (we don't know which variant to pick). Skip instead of guessing.
+  if (!mode) {
+    return null;
+  }
+  switch (mode) {
+    case "danger-full-access":
+      return { type: "dangerFullAccess" };
+    case "read-only":
+      return {
+        type: "readOnly",
+        networkAccess: networkAccess ?? false,
+      };
+    case "workspace-write":
+      return {
+        type: "workspaceWrite",
+        networkAccess: networkAccess ?? false,
+      };
+    default:
+      return null;
+  }
 }
 
 function parseApprovalPolicy(value: unknown): ApprovalPolicyValue | null {

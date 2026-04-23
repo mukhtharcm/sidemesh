@@ -647,6 +647,7 @@ class _SessionScreenState extends State<SessionScreen>
         clientMessageId: optimisticMessage.id,
         approvalPolicy: policy.approval?.wire,
         sandboxMode: policy.sandbox?.wire,
+        networkAccess: policy.networkAccess,
       );
       if (!mounted) {
         return;
@@ -906,6 +907,7 @@ class _SessionScreenState extends State<SessionScreen>
         session: session,
         runtimeApproval: ApprovalPolicy.fromWire(runtime?.approvalPolicy),
         runtimeSandbox: SandboxMode.fromWire(runtime?.sandboxMode),
+        runtimeNetworkAccess: runtime?.networkAccess,
         store: _policyStore,
       ),
     );
@@ -3032,6 +3034,7 @@ class SessionPolicySheet extends StatefulWidget {
     required this.session,
     required this.runtimeApproval,
     required this.runtimeSandbox,
+    required this.runtimeNetworkAccess,
     required this.store,
   });
 
@@ -3039,6 +3042,7 @@ class SessionPolicySheet extends StatefulWidget {
   final SessionSummary session;
   final ApprovalPolicy? runtimeApproval;
   final SandboxMode? runtimeSandbox;
+  final bool? runtimeNetworkAccess;
   final SessionPolicyStore store;
 
   @override
@@ -3060,10 +3064,19 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
   SandboxMode get _effectiveSandbox =>
       _policy.sandbox ?? widget.runtimeSandbox ?? SandboxMode.workspaceWrite;
 
+  /// Whether outbound network is on for the effective sandbox.
+  /// `danger-full-access` always has network regardless of the flag.
+  bool get _effectiveNetworkOn {
+    if (_effectiveSandbox == SandboxMode.dangerFullAccess) return true;
+    return _policy.networkAccess ?? widget.runtimeNetworkAccess ?? false;
+  }
+
+  bool get _networkToggleDisabled =>
+      _effectiveSandbox == SandboxMode.dangerFullAccess;
+
   bool get _isAutopilot =>
       _effectiveApproval == ApprovalPolicy.never &&
-      (_effectiveSandbox == SandboxMode.workspaceWrite ||
-          _effectiveSandbox == SandboxMode.dangerFullAccess);
+      _effectiveSandbox == SandboxMode.dangerFullAccess;
 
   Future<void> _save() async {
     await widget.store.setPolicy(widget.host, widget.session.id, _policy);
@@ -3077,7 +3090,7 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
     );
   }
 
-  Future<void> _reset() async {
+  void _reset() {
     setState(() => _policy = const SessionPolicy());
   }
 
@@ -3085,7 +3098,8 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
     setState(() {
       _policy = _policy.copyWith(
         approval: ApprovalPolicy.never,
-        sandbox: SandboxMode.workspaceWrite,
+        sandbox: SandboxMode.dangerFullAccess,
+        networkAccess: true,
       );
     });
   }
@@ -3119,7 +3133,7 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Change how Codex handles approvals and file access for this session. Applied on your next message; Codex remembers it for the rest of the thread.',
+                'Change how Codex handles approvals, file access and network for this session. Applied on your next message; Codex remembers it for the rest of the thread.',
                 style: theme.textTheme.bodyMedium
                     ?.copyWith(color: colors.textSecondary, height: 1.4),
               ),
@@ -3172,6 +3186,28 @@ class _SessionPolicySheetState extends State<SessionPolicySheet> {
                     });
                   },
                 ),
+              const SizedBox(height: 18),
+              Text(
+                'Network',
+                style: theme.textTheme.labelLarge
+                    ?.copyWith(color: colors.textSecondary, letterSpacing: 0.4),
+              ),
+              const SizedBox(height: 8),
+              _PolicyNetworkTile(
+                value: _effectiveNetworkOn,
+                disabled: _networkToggleDisabled,
+                subtitle: _networkToggleDisabled
+                    ? 'Full access already grants network. Toggle locked.'
+                    : (_effectiveSandbox == SandboxMode.workspaceWrite ||
+                            _effectiveSandbox == SandboxMode.readOnly)
+                        ? 'Allow outbound network for tools like gh, curl, pip. Off by default for read-only / workspace-write.'
+                        : 'Allow outbound network.',
+                onChanged: (value) {
+                  setState(() {
+                    _policy = _policy.copyWith(networkAccess: value);
+                  });
+                },
+              ),
               const SizedBox(height: 22),
               Row(
                 children: [
@@ -3245,7 +3281,7 @@ class _PolicyAutopilotCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Approval = never · Sandbox = workspace write. Codex runs without pausing for approvals.',
+                    'Approval = never · Sandbox = full access · Network = on. Codex runs without pausing for approvals and can hit the internet.',
                     style: Theme.of(context).textTheme.bodySmall
                         ?.copyWith(color: colors.textSecondary, height: 1.35),
                   ),
@@ -3261,6 +3297,71 @@ class _PolicyAutopilotCard extends StatelessWidget {
     );
   }
 }
+
+class _PolicyNetworkTile extends StatelessWidget {
+  const _PolicyNetworkTile({
+    required this.value,
+    required this.disabled,
+    required this.subtitle,
+    required this.onChanged,
+  });
+
+  final bool value;
+  final bool disabled;
+  final String subtitle;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: value ? colors.accentMuted.withValues(alpha: 0.45) : null,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: value ? colors.accent : colors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(
+            value ? Icons.public_rounded : Icons.public_off_rounded,
+            size: 20,
+            color: value ? colors.accent : colors.textSecondary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Allow outbound network',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: colors.textPrimary,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                        height: 1.35,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: disabled ? null : onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
 class _PolicyRadioTile<T> extends StatelessWidget {
   const _PolicyRadioTile({
