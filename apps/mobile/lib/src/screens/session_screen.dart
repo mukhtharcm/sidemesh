@@ -1428,8 +1428,7 @@ class _SessionScreenState extends State<SessionScreen>
                                       _ActivityCard(
                                         activity: entry.activity!,
                                         sessionCwd: session.cwd,
-                                        defaultCollapsed:
-                                            widget.topPadding == null,
+                                        defaultCollapsed: true,
                                         onOpenFile: _openWorkspaceFile,
                                       ),
                                     _TimelineEntryKind.liveAssistant =>
@@ -2643,7 +2642,7 @@ class _ActivityCard extends StatefulWidget {
   const _ActivityCard({
     required this.activity,
     required this.sessionCwd,
-    this.defaultCollapsed = false,
+    this.defaultCollapsed = true,
     this.onOpenFile,
   });
 
