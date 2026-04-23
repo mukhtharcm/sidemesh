@@ -425,14 +425,47 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   Future<void> _stopSession() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Stop session?'),
+        content: const Text(
+          'The running task will be interrupted. In-flight tool calls may not complete cleanly.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep running'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.colors.danger,
+              foregroundColor: context.colors.accentOn,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Stop'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (!mounted) return;
     try {
       await widget.api.stopSession(widget.host, widget.session.id);
       if (!mounted) {
         return;
       }
+      HapticFeedback.mediumImpact();
       setState(() {
         _running = false;
       });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Session stopped.'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -551,9 +584,23 @@ class _SessionScreenState extends State<SessionScreen> {
       if (!mounted) {
         return;
       }
+      HapticFeedback.selectionClick();
       setState(() {
         _pendingAction = null;
       });
+      final label = switch (decision) {
+        'approved' => 'Approved this step',
+        'approvedForSession' => 'Approved for the rest of the session',
+        'denied' => 'Declined',
+        _ => 'Decision sent',
+      };
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(label),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -1494,65 +1541,83 @@ class _MessageBubble extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 10),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: bubbleColor,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: live
-                    ? colors.accent
-                    : (isUser
-                          ? colors.userBubble
-                          : colors.assistantBubbleBorder),
-                width: live ? 1.4 : 1,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onLongPress: message.text.trim().isEmpty
+                ? null
+                : () => _copyMessage(context, message.text),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: bubbleColor,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: live
+                      ? colors.accent
+                      : (isUser
+                            ? colors.userBubble
+                            : colors.assistantBubbleBorder),
+                  width: live ? 1.4 : 1,
+                ),
               ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (message.phase != null && isAssistant)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        children: [
-                          if (live) ...[
-                            const LivePulse(),
-                            const SizedBox(width: 6),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (message.phase != null && isAssistant)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: [
+                            if (live) ...[
+                              const LivePulse(),
+                              const SizedBox(width: 6),
+                            ],
+                            Text(
+                              message.phase == 'commentary'
+                                  ? 'COMMENTARY'
+                                  : 'ANSWER',
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(
+                                    color: colors.textTertiary,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 1.1,
+                                  ),
+                            ),
                           ],
-                          Text(
-                            message.phase == 'commentary'
-                                ? 'COMMENTARY'
-                                : 'ANSWER',
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: colors.textTertiary,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.1,
-                                ),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                  if (isAssistant)
-                    _MarkdownMessageBody(
-                      text: message.text,
-                      textColor: textColor,
-                    )
-                  else
-                    SelectableText(
-                      message.text,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: textColor,
-                        height: 1.45,
+                    if (isAssistant)
+                      _MarkdownMessageBody(
+                        text: message.text,
+                        textColor: textColor,
+                      )
+                    else
+                      SelectableText(
+                        message.text,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: textColor,
+                          height: 1.45,
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _copyMessage(BuildContext context, String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    HapticFeedback.selectionClick();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Message copied'),
+        duration: Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
