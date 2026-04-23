@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
@@ -12,7 +13,7 @@ import '../theme/app_theme.dart';
 /// - Dark theme: atom-one-dark syntax palette.
 /// - Light theme: GitHub light syntax palette.
 /// - Language is optional; when unknown we fall back to plaintext.
-class SyntaxCodeBlock extends StatelessWidget {
+class SyntaxCodeBlock extends StatefulWidget {
   const SyntaxCodeBlock({
     super.key,
     required this.text,
@@ -27,12 +28,31 @@ class SyntaxCodeBlock extends StatelessWidget {
   final EdgeInsetsGeometry padding;
 
   @override
+  State<SyntaxCodeBlock> createState() => _SyntaxCodeBlockState();
+}
+
+class _SyntaxCodeBlockState extends State<SyntaxCodeBlock> {
+  bool _justCopied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    HapticFeedback.selectionClick();
+    if (!mounted) return;
+    setState(() => _justCopied = true);
+    Future.delayed(const Duration(milliseconds: 1400), () {
+      if (!mounted) return;
+      setState(() => _justCopied = false);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final theme = isDark ? _tuneTheme(atomOneDarkTheme, colors)
                          : _tuneTheme(githubTheme, colors);
-    final lang = _normalizeLanguage(language);
+    final lang = _normalizeLanguage(widget.language);
+    final showHeader = widget.showLanguageBadge;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -43,51 +63,105 @@ class SyntaxCodeBlock extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (showLanguageBadge && lang != null)
+          if (showHeader)
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+              padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
               child: Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
+                  if (lang != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colors.surfaceMuted,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Text(
+                        lang,
+                        style: monoStyle(
+                          color: colors.textSecondary,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                        ).copyWith(letterSpacing: 0.6),
+                      ),
                     ),
-                    decoration: BoxDecoration(
-                      color: colors.surfaceMuted,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: colors.border),
-                    ),
-                    child: Text(
-                      lang,
-                      style: monoStyle(
-                        color: colors.textSecondary,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                      ).copyWith(letterSpacing: 0.6),
-                    ),
+                  const Spacer(),
+                  _CopyIconButton(
+                    copied: _justCopied,
+                    onPressed: _copy,
+                    colors: colors,
                   ),
                 ],
               ),
             ),
           Padding(
-            padding: padding,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: HighlightView(
-                text,
-                language: lang ?? 'plaintext',
-                theme: theme,
-                padding: EdgeInsets.zero,
-                textStyle: monoStyle(
-                  color: colors.codeForeground,
-                  fontSize: 12.5,
-                  height: 1.5,
+            padding: widget.padding,
+            child: SelectionArea(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: HighlightView(
+                  widget.text,
+                  language: lang ?? 'plaintext',
+                  theme: theme,
+                  padding: EdgeInsets.zero,
+                  textStyle: monoStyle(
+                    color: colors.codeForeground,
+                    fontSize: 12.5,
+                    height: 1.5,
+                  ),
                 ),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CopyIconButton extends StatelessWidget {
+  const _CopyIconButton({
+    required this.copied,
+    required this.onPressed,
+    required this.colors,
+  });
+
+  final bool copied;
+  final VoidCallback onPressed;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: copied ? 'Copied' : 'Copy',
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                copied ? Icons.check_rounded : Icons.copy_rounded,
+                size: 14,
+                color: copied ? colors.accent : colors.textSecondary,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                copied ? 'Copied' : 'Copy',
+                style: monoStyle(
+                  color: copied ? colors.accent : colors.textSecondary,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                ).copyWith(letterSpacing: 0.6),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
