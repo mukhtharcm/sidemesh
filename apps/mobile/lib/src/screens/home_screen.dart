@@ -713,7 +713,7 @@ class _RecentPaneState extends State<RecentPane> {
         final basePadding =
             widget.padding ??
             (widget.dense
-                ? const EdgeInsets.fromLTRB(8, 4, 8, 24)
+                ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
                 : const EdgeInsets.fromLTRB(16, 8, 16, 32));
         Future<void> handleRefresh() async {
           _kickoffLoad();
@@ -761,7 +761,7 @@ class _RecentPaneState extends State<RecentPane> {
             padding: basePadding,
             itemCount: sortedEntries.length + leadingStrips,
             separatorBuilder: (_, _) =>
-                SizedBox(height: widget.dense ? 4 : 10),
+                SizedBox(height: widget.dense ? 2 : 10),
             itemBuilder: (context, index) {
               var offset = 0;
               if (isRefreshing) {
@@ -829,73 +829,121 @@ class _SessionRowCard extends StatelessWidget {
     final colors = context.colors;
     final running = session.isActive;
     if (dense) {
-      // Compact variant used in the desktop sidebar. Skips preview / runtime
-      // pills and trims typography so many rows fit without feeling
-      // overstuffed.
-      return MeshCard(
-        onTap: onTap,
-        padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
-        accentStrip: running
-            ? colors.success
-            : (selected ? colors.accent : null),
-        borderColor: selected ? colors.accent : null,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            if (running) ...[
-              _RunningDot(color: colors.success),
-              const SizedBox(width: 6),
-            ],
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    session.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      height: 1.2,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${host.label} · ${session.cwd}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: monoStyle(
-                      color: colors.textTertiary,
-                      fontSize: 10.5,
-                    ),
-                  ),
-                ],
-              ),
+      // Compact variant used in the desktop sidebar. Uses a plain
+      // InkWell + tinted fill for selection rather than the old accent
+      // strip — closer to modern macOS sidebars (Raycast/Linear).
+      final bgColor = selected
+          ? colors.accentMuted
+          : Colors.transparent;
+      final borderColor = selected
+          ? colors.accent.withValues(alpha: 0.35)
+          : Colors.transparent;
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            padding: const EdgeInsets.fromLTRB(10, 9, 8, 10),
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: borderColor),
             ),
-            if (favorite)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Icon(
-                  Icons.star_rounded,
-                  size: 14,
-                  color: colors.warning,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: running
+                      ? _RunningDot(color: colors.success)
+                      : Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? colors.accent
+                                : colors.textTertiary.withValues(alpha: 0.35),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
                 ),
-              )
-            else
-              InkWell(
-                onTap: onToggleFavorite,
-                borderRadius: BorderRadius.circular(6),
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Icon(
-                    Icons.star_outline_rounded,
-                    size: 14,
-                    color: colors.textTertiary,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        session.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              height: 1.25,
+                              color: selected
+                                  ? colors.accent
+                                  : colors.textPrimary,
+                            ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${host.label} · ${session.cwd}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: monoStyle(
+                          color: colors.textTertiary,
+                          fontSize: 10.5,
+                        ),
+                      ),
+                      if (session.preview.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          session.preview,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: colors.textSecondary,
+                                height: 1.3,
+                                fontSize: 11.5,
+                              ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-              ),
-          ],
+                if (favorite)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6, top: 2),
+                    child: Icon(
+                      Icons.star_rounded,
+                      size: 13,
+                      color: colors.warning,
+                    ),
+                  )
+                else
+                  InkWell(
+                    onTap: onToggleFavorite,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.star_outline_rounded,
+                        size: 13,
+                        color: colors.textTertiary,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       );
     }
@@ -1247,45 +1295,72 @@ class _InboxCard extends StatelessWidget {
     if (dense) {
       // Compact row for the desktop sidebar — tap the card to open the
       // session; approve/decline remain available once opened.
-      return MeshCard(
-        onTap: onOpenSession,
-        tone: MeshCardTone.surface,
-        borderColor: colors.warning.withValues(alpha: 0.35),
-        accentStrip: colors.warning,
-        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onOpenSession,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    action.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      height: 1.2,
+                Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: colors.warning,
+                      shape: BoxShape.circle,
                     ),
                   ),
                 ),
-                const SizedBox(width: 6),
-                MeshPill(
-                  label: _actionKindLabel(action.kind),
-                  tone: MeshPillTone.warning,
-                  mono: true,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              action.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(
+                                context,
+                              ).textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                height: 1.25,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          MeshPill(
+                            label: _actionKindLabel(action.kind),
+                            tone: MeshPillTone.warning,
+                            mono: true,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${entry.host.label} · ${action.sessionTitle ?? action.sessionId}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: monoStyle(
+                          color: colors.textTertiary,
+                          fontSize: 10.5,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 2),
-            Text(
-              '${entry.host.label} · ${action.sessionTitle ?? action.sessionId}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
-            ),
-          ],
+          ),
         ),
       );
     }
@@ -1468,10 +1543,10 @@ class HostsPane extends StatelessWidget {
     }
     return ListView.separated(
       padding: dense
-          ? const EdgeInsets.fromLTRB(8, 4, 8, 24)
+          ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
           : const EdgeInsets.fromLTRB(16, 8, 16, 120),
       itemCount: visibleHosts.length,
-      separatorBuilder: (_, _) => SizedBox(height: dense ? 4 : 10),
+      separatorBuilder: (_, _) => SizedBox(height: dense ? 2 : 10),
       itemBuilder: (context, index) {
         final host = visibleHosts[index];
         return _HostRowCard(
@@ -1509,88 +1584,96 @@ class _HostRowCard extends StatelessWidget {
       builder: (context, _) {
         final status = HostStatusStore.instance.statusFor(host.id);
         if (dense) {
-          return MeshCard(
-            onTap: onTap,
-            padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
-            child: Row(
-              children: [
-                Stack(
-                  clipBehavior: Clip.none,
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 9, 6, 10),
+                child: Row(
                   children: [
-                    Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: colors.accentMuted,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(
-                        Icons.dns_rounded,
-                        color: colors.accent,
-                        size: 14,
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: colors.accentMuted,
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.dns_rounded,
+                            color: colors.accent,
+                            size: 15,
+                          ),
+                        ),
+                        Positioned(
+                          right: -2,
+                          bottom: -2,
+                          child: _HostStatusDot(status: status),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            host.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              height: 1.25,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            host.baseUrl,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: monoStyle(
+                              color: colors.textTertiary,
+                              fontSize: 10.5,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    Positioned(
-                      right: -2,
-                      bottom: -2,
-                      child: _HostStatusDot(status: status),
+                    InkWell(
+                      onTap: onEdit,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Icon(
+                          Icons.edit_outlined,
+                          size: 14,
+                          color: colors.textTertiary,
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: onRemove,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Icon(
+                          Icons.delete_outline,
+                          size: 14,
+                          color: colors.textTertiary,
+                        ),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        host.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        host.baseUrl,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
-                          color: colors.textTertiary,
-                          fontSize: 10.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                InkWell(
-                  onTap: onEdit,
-                  borderRadius: BorderRadius.circular(6),
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Icon(
-                      Icons.edit_outlined,
-                      size: 14,
-                      color: colors.textTertiary,
-                    ),
-                  ),
-                ),
-                InkWell(
-                  onTap: onRemove,
-                  borderRadius: BorderRadius.circular(6),
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Icon(
-                      Icons.delete_outline,
-                      size: 14,
-                      color: colors.textTertiary,
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           );
         }
