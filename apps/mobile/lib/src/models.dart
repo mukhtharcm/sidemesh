@@ -418,6 +418,8 @@ class LiveEvent {
   const LiveEvent({
     required this.type,
     required this.sessionId,
+    this.seq,
+    this.nextSeq,
     this.turnId,
     this.delta,
     this.status,
@@ -430,6 +432,8 @@ class LiveEvent {
 
   final String type;
   final String sessionId;
+  final int? seq;
+  final int? nextSeq;
   final String? turnId;
   final String? delta;
   final String? status;
@@ -442,6 +446,8 @@ class LiveEvent {
   factory LiveEvent.fromJson(Map<String, dynamic> json) => LiveEvent(
     type: _stringValue(json['type']),
     sessionId: _stringValue(json['sessionId']),
+    seq: _intOrNull(json['seq']),
+    nextSeq: _intOrNull(json['nextSeq']),
     turnId: json['turnId'] as String?,
     delta: json['delta'] as String?,
     status: json['status'] as String?,

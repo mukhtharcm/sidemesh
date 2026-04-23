@@ -97,6 +97,17 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
   }
 
+  // Wrap each broadcast so every live event carries a monotonically
+  // increasing `seq` — this lets clients detect gaps after a reconnect
+  // and decide whether they need a fresh snapshot.
+  function broadcastLive(sessionId: string, event: LiveEvent): void {
+    const stamped: LiveEvent =
+      event.seq === undefined
+        ? { ...event, seq: allocSeq(sessionId) }
+        : event;
+    broadcast(socketsBySession, sessionId, stamped);
+  }
+
   bridge.on("stderr", (line) => {
     process.stderr.write(line);
   });
@@ -111,7 +122,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       const turnId = asString((params as any)?.turn?.id);
       if (turnId) {
         activeTurns.set(sessionId, { turnId, startedAt: Date.now() });
-        broadcast(socketsBySession, sessionId, {
+        broadcastLive(sessionId, {
           type: "turn_started",
           sessionId,
           turnId,
@@ -123,7 +134,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     if (method === "item/agentMessage/delta") {
       const delta = asString((params as any)?.delta);
       if (delta) {
-        broadcast(socketsBySession, sessionId, {
+        broadcastLive(sessionId, {
           type: "assistant_delta",
           sessionId,
           delta,
@@ -145,7 +156,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         });
         if (activity) {
           const next = upsertLiveActivity(liveActivities, sessionId, activity);
-          broadcast(socketsBySession, sessionId, {
+          broadcastLive(sessionId, {
             type: "activity_updated",
             sessionId,
             turnId: turnId || undefined,
@@ -166,7 +177,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
       const next = updateLiveCommandActivity(liveActivities, sessionId, itemId, delta);
       if (next) {
-        broadcast(socketsBySession, sessionId, {
+        broadcastLive(sessionId, {
           type: "activity_updated",
           sessionId,
           turnId: turnId || undefined,
@@ -191,7 +202,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         stdin,
       );
       if (next) {
-        broadcast(socketsBySession, sessionId, {
+        broadcastLive(sessionId, {
           type: "activity_updated",
           sessionId,
           turnId: turnId || undefined,
@@ -217,7 +228,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         () => allocSeq(sessionId),
       );
       if (next) {
-        broadcast(socketsBySession, sessionId, {
+        broadcastLive(sessionId, {
           type: "activity_updated",
           sessionId,
           turnId: turnId || undefined,
@@ -238,7 +249,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         allocSeq(sessionId),
       );
       if (next) {
-        broadcast(socketsBySession, sessionId, {
+        broadcastLive(sessionId, {
           type: "activity_updated",
           sessionId,
           turnId,
@@ -252,17 +263,28 @@ export async function startServer(config: NodeConfig): Promise<void> {
       const turn = (params as any)?.turn;
       const turnId = asString(turn?.id);
       if (turnId) {
-        activeTurns.delete(sessionId);
-        liveActivities.delete(sessionId);
-        clearSessionLogCache(logCache, sessionId);
-        sessionSeqCursor.delete(sessionId);
-        clearActionsForSession(pendingActions, socketsBySession, sessionId);
-        broadcast(socketsBySession, sessionId, {
+        // Broadcast the completion first so any concurrent snapshot reader
+        // sees both the rollout-flushed history AND the live state still in
+        // memory. Clearing liveActivities before the broadcast can briefly
+        // leave both the snapshot and live stream blank for a second client.
+        broadcastLive(sessionId, {
           type: "turn_completed",
           sessionId,
           turnId,
           status: asString(turn?.status) || "completed",
         });
+        clearActionsForSession(
+          pendingActions,
+          socketsBySession,
+          sessionId,
+          broadcastLive,
+        );
+        activeTurns.delete(sessionId);
+        liveActivities.delete(sessionId);
+        clearSessionLogCache(logCache, sessionId);
+        // NOTE: do NOT reset sessionSeqCursor between turns — clients rely on
+        // a monotonically increasing seq across the whole session lifetime to
+        // detect gaps after a reconnect.
       }
     }
   });
@@ -283,7 +305,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
     const action = buildPendingAction(method, params, id);
     pendingActions.set(action.id, action);
-    broadcast(socketsBySession, sessionId, {
+    broadcastLive(sessionId, {
       type: "action_opened",
       sessionId,
       action,
@@ -489,7 +511,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         input: [{ type: "text", text, text_elements: [] }],
         expectedTurnId: state.turnId,
       })) as any;
-      broadcast(socketsBySession, sessionId, {
+      broadcastLive(sessionId, {
         type: "user_message_submitted",
         sessionId,
         turnId: state.turnId,
@@ -517,7 +539,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     if (turnId) {
       activeTurns.set(sessionId, { turnId, startedAt: Date.now() });
     }
-    broadcast(socketsBySession, sessionId, {
+    broadcastLive(sessionId, {
       type: "user_message_submitted",
       sessionId,
       turnId: turnId || undefined,
@@ -599,7 +621,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
     bridge.respond(action.jsonRpcId, result);
     pendingActions.delete(actionId);
-    broadcast(socketsBySession, action.sessionId, {
+    broadcastLive(action.sessionId, {
       type: "action_resolved",
       sessionId: action.sessionId,
       actionId,
@@ -636,6 +658,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       sendEvent(ws, {
         type: "hello",
         sessionId,
+        nextSeq: sessionSeqCursor.get(sessionId) ?? 0,
       });
       ws.on("close", () => {
         const current = socketsBySession.get(sessionId);
@@ -1173,13 +1196,14 @@ function buildActionResponse(action: PendingActionRecord, decision: string | nul
 
 function clearActionsForSession(
   pendingActions: Map<string, PendingActionRecord>,
-  socketsBySession: Map<string, Set<WebSocket>>,
+  _socketsBySession: Map<string, Set<WebSocket>>,
   sessionId: string,
+  broadcastLive: (sessionId: string, event: LiveEvent) => void,
 ): void {
   const toDelete = [...pendingActions.values()].filter((action) => action.sessionId === sessionId);
   for (const action of toDelete) {
     pendingActions.delete(action.id);
-    broadcast(socketsBySession, sessionId, {
+    broadcastLive(sessionId, {
       type: "action_resolved",
       sessionId,
       actionId: action.id,
