@@ -97,6 +97,15 @@ class _SessionScreenState extends State<SessionScreen>
   List<_TimelineEntry> _cachedEntries = const [];
 
   String get _liveAssistantText => _liveAssistantNotifier.value;
+  // Surfaces a "↓ New" pill when the user has scrolled away from the
+  // bottom of the transcript so they can jump back to the live area.
+  final ValueNotifier<bool> _showJumpToLatest = ValueNotifier<bool>(false);
+
+  // Tracks which old-snapshot history banners the user has dismissed
+  // this session. Reset whenever a brand-new snapshot arrives so the
+  // banner can reappear if the truncation window changes.
+  bool _historyBannerDismissed = false;
+
   set _liveAssistantText(String value) => _liveAssistantNotifier.value = value;
 
   @override
@@ -105,6 +114,7 @@ class _SessionScreenState extends State<SessionScreen>
     WidgetsBinding.instance.addObserver(this);
     _favorites.ensureLoaded();
     _session = widget.session;
+    _scrollController.addListener(_onTranscriptScroll);
     _loadSnapshot();
     _connectLive();
   }
@@ -115,13 +125,25 @@ class _SessionScreenState extends State<SessionScreen>
     WidgetsBinding.instance.removeObserver(this);
     _reconnectTimer?.cancel();
     _composerController.dispose();
+    _scrollController.removeListener(_onTranscriptScroll);
     _scrollController.dispose();
     _subscription?.cancel();
     _liveFlushTimer?.cancel();
     _channel?.sink.close();
     _liveAssistantNotifier.dispose();
     _thinkingNotifier.dispose();
+    _showJumpToLatest.dispose();
     super.dispose();
+  }
+
+  void _onTranscriptScroll() {
+    if (!_scrollController.hasClients) return;
+    // Reverse ListView: offset > 0 means the user has scrolled up away
+    // from the newest message.
+    final shouldShow = _scrollController.offset > 240;
+    if (shouldShow != _showJumpToLatest.value) {
+      _showJumpToLatest.value = shouldShow;
+    }
   }
 
   @override
@@ -176,6 +198,7 @@ class _SessionScreenState extends State<SessionScreen>
         _history = log.history;
         _messageLimit = resolvedMessageLimit;
         _activityLimit = resolvedActivityLimit;
+        _historyBannerDismissed = false;
         // Prefer a live-delivered pendingAction over a stale snapshot "none".
         // The server only exposes the most-recent action, so if live says one
         // is open we trust it until action_resolved arrives.
@@ -1025,13 +1048,20 @@ class _SessionScreenState extends State<SessionScreen>
                 );
               },
             ),
-            if ((_history?.isTruncated ?? false))
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: _HistoryTruncationCard(
-                  history: _history!,
-                  loading: _loadingOlderHistory,
-                  onLoadOlderHistory: _loadOlderTranscript,
+            if ((_history?.isTruncated ?? false) && !_historyBannerDismissed)
+              Dismissible(
+                key: ValueKey('history_banner_${session.id}'),
+                direction: DismissDirection.horizontal,
+                onDismissed: (_) {
+                  setState(() => _historyBannerDismissed = true);
+                },
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: _HistoryTruncationCard(
+                    history: _history!,
+                    loading: _loadingOlderHistory,
+                    onLoadOlderHistory: _loadOlderTranscript,
+                  ),
                 ),
               ),
             if (_pendingAction != null)
@@ -1045,50 +1075,85 @@ class _SessionScreenState extends State<SessionScreen>
             Expanded(
               child: (_loading && timelineEntries.isEmpty)
                   ? const MeshLoader()
-                  : ListView.builder(
-                      controller: _scrollController,
-                      reverse: true,
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                      // +1 for the live-stream sentinel that pins the
-                      // currently-streaming assistant bubble / thinking
-                      // indicator at the bottom of the transcript. Keeping
-                      // it inside the list means a long commentary scrolls
-                      // naturally instead of pushing the composer off
-                      // screen.
-                      itemCount: timelineEntries.length + 1,
-                      itemBuilder: (context, index) {
-                        if (index == 0) {
-                          return KeyedSubtree(
-                            key: const ValueKey('__live_stream__'),
-                            child: _LiveStreamArea(
-                              liveText: _liveAssistantNotifier,
-                              thinking: _thinkingNotifier,
-                            ),
-                          );
-                        }
-                        // Reverse the mapping: index 1 (just above the
-                        // live sentinel) shows the newest entry.
-                        final entry =
-                            timelineEntries[timelineEntries.length - index];
-                        return KeyedSubtree(
-                          key: ValueKey(entry.keyId),
-                          child: switch (entry.kind) {
-                            _TimelineEntryKind.message => _MessageBubble(
-                              message: entry.message!,
-                            ),
-                            _TimelineEntryKind.activity => _ActivityCard(
-                              activity: entry.activity!,
-                              sessionCwd: session.cwd,
-                            ),
-                            _TimelineEntryKind.thinking =>
-                              const _ThinkingBubble(),
-                            _TimelineEntryKind.liveAssistant =>
-                              const SizedBox.shrink(),
-                          },
-                        );
-                      },
+                  : Stack(
+                      children: [
+                        RefreshIndicator(
+                          onRefresh: () => _loadSnapshot(scrollToBottom: false),
+                          edgeOffset: 0,
+                          displacement: 28,
+                          child: ListView.builder(
+                            controller: _scrollController,
+                            reverse: true,
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                            physics:
+                                const AlwaysScrollableScrollPhysics(),
+                            itemCount: timelineEntries.length + 1,
+                            itemBuilder: (context, index) {
+                              if (index == 0) {
+                                return KeyedSubtree(
+                                  key: const ValueKey('__live_stream__'),
+                                  child: _LiveStreamArea(
+                                    liveText: _liveAssistantNotifier,
+                                    thinking: _thinkingNotifier,
+                                  ),
+                                );
+                              }
+                              final entry = timelineEntries[timelineEntries
+                                      .length -
+                                  index];
+                              return KeyedSubtree(
+                                key: ValueKey(entry.keyId),
+                                child: switch (entry.kind) {
+                                  _TimelineEntryKind.message => _MessageBubble(
+                                    message: entry.message!,
+                                  ),
+                                  _TimelineEntryKind.activity => _ActivityCard(
+                                    activity: entry.activity!,
+                                    sessionCwd: session.cwd,
+                                  ),
+                                  _TimelineEntryKind.thinking =>
+                                    const _ThinkingBubble(),
+                                  _TimelineEntryKind.liveAssistant =>
+                                    const SizedBox.shrink(),
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                        Positioned(
+                          right: 16,
+                          bottom: 12,
+                          child: ValueListenableBuilder<bool>(
+                            valueListenable: _showJumpToLatest,
+                            builder: (context, show, _) {
+                              return IgnorePointer(
+                                ignoring: !show,
+                                child: AnimatedOpacity(
+                                  opacity: show ? 1 : 0,
+                                  duration: const Duration(milliseconds: 160),
+                                  curve: Curves.easeOut,
+                                  child: _JumpToLatestPill(
+                                    onTap: () {
+                                      if (!_scrollController.hasClients) {
+                                        return;
+                                      }
+                                      _scrollController.animateTo(
+                                        0,
+                                        duration: const Duration(
+                                          milliseconds: 240,
+                                        ),
+                                        curve: Curves.easeOut,
+                                      );
+                                    },
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
             ),
             _Composer(
@@ -1237,6 +1302,48 @@ class _SessionHeader extends StatelessWidget {
 /// Compact single-line header used on mobile. Everything that isn't
 /// immediately useful at a glance lives behind the tune button (session
 /// details sheet) so the chat surface gets maximum vertical real estate.
+class _JumpToLatestPill extends StatelessWidget {
+  const _JumpToLatestPill({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Material(
+      color: colors.accent,
+      shape: const StadiumBorder(),
+      elevation: 4,
+      shadowColor: Colors.black.withValues(alpha: 0.25),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.arrow_downward_rounded,
+                size: 16,
+                color: colors.userBubbleOn,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Jump to latest',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: colors.userBubbleOn,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SessionHeaderStrip extends StatelessWidget {
   const _SessionHeaderStrip({
     required this.host,
@@ -1969,6 +2076,7 @@ class _ActivityCardState extends State<_ActivityCard> {
   static const _collapsedLineLimit = 15;
   bool _outputExpanded = false;
   bool _diffExpanded = false;
+  bool _cardCollapsed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -2038,72 +2146,96 @@ class _ActivityCardState extends State<_ActivityCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: colors.accentMuted,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(activityIcon, size: 18, color: colors.accent),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            activityLabel,
-                            style: monoStyle(
-                              color: colors.accent,
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w800,
-                            ).copyWith(letterSpacing: 1.2),
+                InkWell(
+                  onTap: () {
+                    setState(() => _cardCollapsed = !_cardCollapsed);
+                  },
+                  borderRadius: BorderRadius.circular(10),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: colors.accentMuted,
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          const SizedBox(height: 3),
-                          Text(
-                            title,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                                (activity.isCommand
-                                        ? monoStyle(
-                                            color: colors.textPrimary,
-                                            fontSize: 13,
-                                          )
-                                        : Theme.of(
-                                            context,
-                                          ).textTheme.titleSmall?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ))
-                                    ?.copyWith(height: 1.35),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            activityIcon,
+                            size: 18,
+                            color: colors.accent,
                           ),
-                          if (subtitle != null && subtitle.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              subtitle,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: colors.textSecondary),
-                            ),
-                          ],
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                activityLabel,
+                                style: monoStyle(
+                                  color: colors.accent,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                ).copyWith(letterSpacing: 1.2),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                title,
+                                maxLines: _cardCollapsed ? 1 : 3,
+                                overflow: TextOverflow.ellipsis,
+                                style:
+                                    (activity.isCommand
+                                            ? monoStyle(
+                                                color: colors.textPrimary,
+                                                fontSize: 13,
+                                              )
+                                            : Theme.of(
+                                                context,
+                                              ).textTheme.titleSmall?.copyWith(
+                                                fontWeight: FontWeight.w700,
+                                              ))
+                                        ?.copyWith(height: 1.35),
+                              ),
+                              if (!_cardCollapsed &&
+                                  subtitle != null &&
+                                  subtitle.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  subtitle,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: colors.textSecondary),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        MeshPill(
+                          label: statusLabel,
+                          tone: statusTone,
+                          icon: statusIcon,
+                          mono: true,
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          _cardCollapsed
+                              ? Icons.unfold_more_rounded
+                              : Icons.unfold_less_rounded,
+                          size: 16,
+                          color: colors.textTertiary,
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    MeshPill(
-                      label: statusLabel,
-                      tone: statusTone,
-                      icon: statusIcon,
-                      mono: true,
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-                Wrap(
+                if (!_cardCollapsed) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
                   spacing: 6,
                   runSpacing: 6,
                   children: [
@@ -2175,6 +2307,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                     changes: activity.changes,
                     sessionCwd: sessionCwd,
                   ),
+                ],
                 ],
               ],
             ),
