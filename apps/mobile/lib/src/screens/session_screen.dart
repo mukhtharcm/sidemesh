@@ -1255,16 +1255,18 @@ class _SessionScreenState extends State<SessionScreen>
                           onRefresh: () => _loadSnapshot(scrollToBottom: false),
                           edgeOffset: 0,
                           displacement: 28,
-                          child: ListView.builder(
-                            controller: _scrollController,
-                            reverse: true,
-                            keyboardDismissBehavior:
-                                ScrollViewKeyboardDismissBehavior.onDrag,
-                            padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                            physics:
-                                const AlwaysScrollableScrollPhysics(),
-                            itemCount: timelineEntries.length + 1,
-                            itemBuilder: (context, index) {
+                          child: SelectionArea(
+                            child: ListView.builder(
+                              controller: _scrollController,
+                              reverse: true,
+                              keyboardDismissBehavior:
+                                  ScrollViewKeyboardDismissBehavior.onDrag,
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                              physics:
+                                  const AlwaysScrollableScrollPhysics(),
+                              itemCount: timelineEntries.length + 1,
+                              itemBuilder: (context, index) {
                               if (index == 0) {
                                 return KeyedSubtree(
                                   key: const ValueKey('__live_stream__'),
@@ -1294,7 +1296,8 @@ class _SessionScreenState extends State<SessionScreen>
                                     const SizedBox.shrink(),
                                 },
                               );
-                            },
+                              },
+                            ),
                           ),
                         ),
                         Positioned(
@@ -2291,7 +2294,7 @@ class _MarkdownMessageBodyState extends State<_MarkdownMessageBody> {
 
     return MarkdownBody(
       data: widget.text,
-      selectable: true,
+      selectable: false,
       shrinkWrap: true,
       softLineBreak: true,
       styleSheet: _cached!,
