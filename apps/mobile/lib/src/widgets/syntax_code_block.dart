@@ -99,17 +99,24 @@ class _SyntaxCodeBlockState extends State<SyntaxCodeBlock> {
             ),
           Padding(
             padding: widget.padding,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: HighlightView(
-                widget.text,
-                language: lang ?? 'plaintext',
-                theme: theme,
-                padding: EdgeInsets.zero,
-                textStyle: monoStyle(
-                  color: colors.codeForeground,
-                  fontSize: 12.5,
-                  height: 1.5,
+            // Local selection scope: the horizontal scroller inside a
+            // code block competes with the outer SelectionArea's pan,
+            // so cross-message drag-selection otherwise skips over the
+            // block. Keeping a local area lets users drag inside the
+            // block, and the Copy button handles whole-block copy.
+            child: SelectionArea(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: HighlightView(
+                  widget.text,
+                  language: lang ?? 'plaintext',
+                  theme: theme,
+                  padding: EdgeInsets.zero,
+                  textStyle: monoStyle(
+                    color: colors.codeForeground,
+                    fontSize: 12.5,
+                    height: 1.5,
+                  ),
                 ),
               ),
             ),
