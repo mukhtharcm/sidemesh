@@ -22,6 +22,9 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 
 ## Current Wave
 
+- [ ] Add local notifications for approval-required and task-finished events.
+- [ ] Harden reconnect/background resume so approvals and final answers never disappear after a socket drop.
+- [ ] Surface blocked, running, and finished states more clearly across `Recent`, `Hosts`, and `Inbox`.
 - [ ] Tighten full approval parity.
 - [ ] Add first-class model/account discovery.
 - [ ] Add advanced thread lifecycle controls.
