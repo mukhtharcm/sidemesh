@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:web_socket_channel/io.dart';
 
@@ -889,6 +890,7 @@ class _SessionScreenState extends State<SessionScreen> {
               sending: _sending,
               onSend: _sendInput,
               onDismiss: _dismissKeyboard,
+              submitOnEnter: widget.topPadding != null,
             ),
           ],
         ),
@@ -1186,16 +1188,61 @@ class _Composer extends StatelessWidget {
     required this.sending,
     required this.onSend,
     required this.onDismiss,
+    this.submitOnEnter = false,
   });
 
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
   final VoidCallback onDismiss;
+  final bool submitOnEnter;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    Widget field = TextField(
+      controller: controller,
+      minLines: 1,
+      maxLines: 6,
+      onTapOutside: (_) => onDismiss(),
+      style: Theme.of(context).textTheme.bodyMedium,
+      decoration: InputDecoration(
+        hintText: submitOnEnter
+            ? 'Message this session — Enter to send, Shift+Enter for newline'
+            : 'Message this session',
+        hintStyle: TextStyle(color: colors.textTertiary),
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        contentPadding: const EdgeInsets.symmetric(vertical: 14),
+      ),
+    );
+    if (submitOnEnter) {
+      // Desktop affordance: bare Enter sends, Shift+Enter inserts a newline.
+      // Wrapping the TextField with CallbackShortcuts at a higher priority
+      // than its default newline handler.
+      field = CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.enter): () {
+            if (!sending) onSend();
+          },
+          const SingleActivator(LogicalKeyboardKey.enter, shift: true): () {
+            final selection = controller.selection;
+            final text = controller.text;
+            final start = selection.start < 0 ? text.length : selection.start;
+            final end = selection.end < 0 ? text.length : selection.end;
+            final before = text.substring(0, start);
+            final after = text.substring(end);
+            final next = '$before\n$after';
+            controller.value = TextEditingValue(
+              text: next,
+              selection: TextSelection.collapsed(offset: start + 1),
+            );
+          },
+        },
+        child: field,
+      );
+    }
     return SafeArea(
       top: false,
       child: Container(
@@ -1218,21 +1265,7 @@ class _Composer extends StatelessWidget {
                   horizontal: 14,
                   vertical: 2,
                 ),
-                child: TextField(
-                  controller: controller,
-                  minLines: 1,
-                  maxLines: 6,
-                  onTapOutside: (_) => onDismiss(),
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  decoration: InputDecoration(
-                    hintText: 'Message this session',
-                    hintStyle: TextStyle(color: colors.textTertiary),
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                ),
+                child: field,
               ),
             ),
             const SizedBox(width: 10),
