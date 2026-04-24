@@ -54,6 +54,24 @@ export interface SkillCatalogEntry {
   errors: SkillErrorInfo[];
 }
 
+export interface ModelReasoningEffortSummary {
+  reasoningEffort: string;
+  description: string;
+}
+
+export interface ModelSummary {
+  id: string;
+  model: string;
+  displayName: string;
+  description: string;
+  defaultReasoningEffort: string;
+  supportedReasoningEfforts: ModelReasoningEffortSummary[];
+  supportsPersonality: boolean;
+  additionalSpeedTiers: string[];
+  inputModalities: string[];
+  isDefault: boolean;
+}
+
 export interface SessionMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -238,6 +256,7 @@ export interface RolloutLog {
 
 export interface SessionRuntimeSummary {
   model?: string;
+  serviceTier?: string;
   reasoningEffort?: string;
   approvalPolicy?: string;
   sandboxMode?: string;

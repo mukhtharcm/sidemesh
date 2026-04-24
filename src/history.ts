@@ -96,7 +96,7 @@ async function scanRolloutFile(
 
     const nextRuntime = parseRuntime(parsed);
     if (nextRuntime) {
-      runtime = nextRuntime;
+      runtime = mergeRuntime(runtime, nextRuntime);
     }
 
     if (options.includeMessages) {
@@ -259,7 +259,42 @@ function parseActivity(parsed: any, seq: number): SessionActivity | null {
 }
 
 function parseRuntime(parsed: any): SessionRuntimeSummary | null {
-  if (!parsed || parsed.type !== "turn_context") {
+  if (!parsed) {
+    return null;
+  }
+
+  if (parsed.type === "session_configured") {
+    const payload = parsed.payload;
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+
+    const typed = payload as Record<string, any>;
+    const runtime = {
+      model: asOptionalString(typed.model),
+      serviceTier: asOptionalString(typed.service_tier),
+      reasoningEffort: asOptionalString(typed.reasoning_effort),
+      approvalPolicy: asOptionalString(typed.approval_policy),
+      sandboxMode: asOptionalString(typed.sandbox_policy?.type),
+      networkAccess: asOptionalBoolean(typed.sandbox_policy?.network_access),
+      updatedAt: parseTimestamp(parsed.timestamp),
+    };
+
+    if (
+      !runtime.model &&
+      !runtime.serviceTier &&
+      !runtime.reasoningEffort &&
+      !runtime.approvalPolicy &&
+      !runtime.sandboxMode &&
+      runtime.networkAccess === undefined
+    ) {
+      return null;
+    }
+
+    return runtime;
+  }
+
+  if (parsed.type !== "turn_context") {
     return null;
   }
 
@@ -279,6 +314,7 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
 
   const runtime = {
     model: asOptionalString(typed.model) || asOptionalString(collaborationSettings?.model),
+    serviceTier: undefined,
     reasoningEffort:
       asOptionalString(typed.effort) || asOptionalString(collaborationSettings?.reasoning_effort),
     approvalPolicy: asOptionalString(typed.approval_policy),
@@ -291,6 +327,7 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
 
   if (
     !runtime.model &&
+    !runtime.serviceTier &&
     !runtime.reasoningEffort &&
     !runtime.approvalPolicy &&
     !runtime.sandboxMode &&
@@ -302,6 +339,27 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
   }
 
   return runtime;
+}
+
+function mergeRuntime(
+  previous: SessionRuntimeSummary | null,
+  next: SessionRuntimeSummary,
+): SessionRuntimeSummary {
+  if (!previous) {
+    return next;
+  }
+
+  return {
+    model: next.model ?? previous.model,
+    serviceTier: next.serviceTier ?? previous.serviceTier,
+    reasoningEffort: next.reasoningEffort ?? previous.reasoningEffort,
+    approvalPolicy: next.approvalPolicy ?? previous.approvalPolicy,
+    sandboxMode: next.sandboxMode ?? previous.sandboxMode,
+    networkAccess: next.networkAccess ?? previous.networkAccess,
+    summaryMode: next.summaryMode ?? previous.summaryMode,
+    personality: next.personality ?? previous.personality,
+    updatedAt: next.updatedAt ?? previous.updatedAt,
+  };
 }
 
 function appendBounded<T>(entries: T[], next: T, limit: number | null): void {
