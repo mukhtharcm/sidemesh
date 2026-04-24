@@ -10,6 +10,7 @@ import type {
   ThreadItemRecord,
   ThreadRecord,
   TurnDiffActivity,
+  WebSearchActivity,
 } from "./types.js";
 
 const MAX_COMMAND_OUTPUT_CHARS = 12_000;
@@ -132,6 +133,10 @@ export function buildActivityFromThreadItem(
     };
   }
 
+  if (item.type === "webSearch") {
+    return buildWebSearchActivity(item, context);
+  }
+
   if (item.type === "imageGeneration") {
     return {
       id: item.id,
@@ -186,6 +191,20 @@ export function mergeActivity(
       createdAt: existing.createdAt,
       seq: existing.seq,
       diff: incoming.diff ?? existingTurnDiff.diff,
+    };
+  }
+
+  if (incoming.type === "web_search") {
+    const existingSearch = existing as WebSearchActivity;
+    return {
+      ...incoming,
+      createdAt: existing.createdAt,
+      seq: existing.seq,
+      query: incoming.query ?? existingSearch.query,
+      queries:
+        incoming.queries.length > 0 ? incoming.queries : existingSearch.queries,
+      targetUrl: incoming.targetUrl ?? existingSearch.targetUrl,
+      pattern: incoming.pattern ?? existingSearch.pattern,
     };
   }
 
@@ -408,6 +427,42 @@ export function buildFileChangeActivityFromRolloutEvent(
   };
 }
 
+export function buildWebSearchActivityFromRolloutEvent(
+  payload: unknown,
+  createdAt: number,
+  seq: number,
+): WebSearchActivity | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const typed = payload as Record<string, unknown>;
+  const id = asString(typed.call_id) || asString(typed.callId);
+  if (!id) {
+    return null;
+  }
+
+  const action = normalizeWebSearchAction(typed.action);
+  const hasCompletedAction =
+    action.queries.length > 0 ||
+    action.targetUrl !== null ||
+    action.pattern !== null ||
+    action.query !== null;
+
+  return {
+    id,
+    type: "web_search",
+    turnId: asString(typed.turn_id) || asString(typed.turnId),
+    createdAt,
+    seq,
+    status: hasCompletedAction ? "completed" : "in_progress",
+    query: asString(typed.query) || action.query,
+    queries: action.queries,
+    targetUrl: action.targetUrl,
+    pattern: action.pattern,
+  };
+}
+
 export function buildImageGenerationActivityFromRolloutEvent(
   payload: unknown,
   createdAt: number,
@@ -529,8 +584,71 @@ function isActivityThreadItem(item: ThreadItemRecord): boolean {
   return (
     item.type === "commandExecution" ||
     item.type === "fileChange" ||
+    item.type === "webSearch" ||
     item.type === "imageGeneration"
   );
+}
+
+function buildWebSearchActivity(
+  item: ThreadItemRecord,
+  context: { turnId: string | null; createdAt: number; seq: number },
+): WebSearchActivity | null {
+  const id = asString(item.id);
+  if (!id) {
+    return null;
+  }
+
+  const action = normalizeWebSearchAction(item.action);
+  const query = asString(item.query) || action.query;
+  const hasCompletedAction =
+    action.queries.length > 0 ||
+    action.targetUrl !== null ||
+    action.pattern !== null ||
+    query !== null;
+
+  return {
+    id,
+    type: "web_search",
+    turnId: context.turnId,
+    createdAt: context.createdAt,
+    seq: context.seq,
+    status: hasCompletedAction ? "completed" : "in_progress",
+    query,
+    queries: action.queries,
+    targetUrl: action.targetUrl,
+    pattern: action.pattern,
+  };
+}
+
+function normalizeWebSearchAction(raw: unknown): {
+  query: string | null;
+  queries: string[];
+  targetUrl: string | null;
+  pattern: string | null;
+} {
+  const typed =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : null;
+  if (!typed) {
+    return {
+      query: null,
+      queries: [],
+      targetUrl: null,
+      pattern: null,
+    };
+  }
+
+  return {
+    query: asString(typed.query),
+    queries: Array.isArray(typed.queries)
+      ? typed.queries
+          .map((value) => asString(value))
+          .filter((value): value is string => value !== null)
+      : [],
+    targetUrl: asString(typed.url),
+    pattern: asString(typed.pattern),
+  };
 }
 
 function normalizeStatus(value: unknown): SessionActivity["status"] {

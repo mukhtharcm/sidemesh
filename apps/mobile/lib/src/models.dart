@@ -421,6 +421,10 @@ class SessionActivity {
     required this.terminalInput,
     required this.changes,
     required this.diff,
+    required this.query,
+    required this.queries,
+    required this.targetUrl,
+    required this.pattern,
     required this.revisedPrompt,
     required this.savedPath,
   });
@@ -443,12 +447,17 @@ class SessionActivity {
   final String? terminalInput;
   final List<SessionActivityChange> changes;
   final String? diff;
+  final String? query;
+  final List<String> queries;
+  final String? targetUrl;
+  final String? pattern;
   final String? revisedPrompt;
   final String? savedPath;
 
   bool get isCommand => type == 'command';
   bool get isFileChange => type == 'file_change';
   bool get isTurnDiff => type == 'turn_diff';
+  bool get isWebSearch => type == 'web_search';
   bool get isImageGeneration => type == 'image_generation';
 
   factory SessionActivity.fromJson(Map<String, dynamic> json) =>
@@ -482,6 +491,13 @@ class SessionActivity {
             )
             .toList(),
         diff: _stringOrNull(json['diff']),
+        query: _stringOrNull(json['query']),
+        queries: (json['queries'] as List<dynamic>? ?? const <dynamic>[])
+            .map((item) => _stringValue(item))
+            .where((item) => item.isNotEmpty)
+            .toList(),
+        targetUrl: _stringOrNull(json['targetUrl']),
+        pattern: _stringOrNull(json['pattern']),
         revisedPrompt: _stringOrNull(json['revisedPrompt']),
         savedPath: _stringOrNull(json['savedPath']),
       );

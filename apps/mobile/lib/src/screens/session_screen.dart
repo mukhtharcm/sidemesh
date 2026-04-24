@@ -3823,6 +3823,15 @@ String _formatByteCount(int bytes) {
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
+String _truncateMiddle(String value, int maxLength) {
+  if (value.length <= maxLength || maxLength < 7) {
+    return value;
+  }
+  final prefixLength = ((maxLength - 1) / 2).floor() - 1;
+  final suffixLength = maxLength - prefixLength - 1;
+  return '${value.substring(0, prefixLength)}…${value.substring(value.length - suffixLength)}';
+}
+
 Map<String, Object?> _compressDraftImagePayload(Map<String, Object?> payload) {
   final name = payload['name']! as String;
   final mimeType = payload['mimeType']! as String;
@@ -4190,6 +4199,7 @@ class _ActivityCardState extends State<_ActivityCard> {
             ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
             : 'Edited ${activity.changes.length} files',
       'turn_diff' => 'Live turn diff',
+      'web_search' => _webSearchTitle(activity),
       'image_generation' => 'Generated image',
       _ => 'Activity',
     };
@@ -4198,6 +4208,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'command' => _relativeSessionPath(activity.cwd ?? sessionCwd, sessionCwd),
       'file_change' => _activityFileSummary(activity.changes, sessionCwd),
       'turn_diff' => 'Aggregated patch snapshot for this turn',
+      'web_search' => _webSearchSubtitle(activity),
       'image_generation' =>
         (activity.savedPath ?? '').isNotEmpty
             ? _relativeSessionPath(activity.savedPath!, sessionCwd)
@@ -4209,6 +4220,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'command' => 'COMMAND',
       'file_change' => 'FILE CHANGE',
       'turn_diff' => 'TURN DIFF',
+      'web_search' => 'WEB SEARCH',
       'image_generation' => 'IMAGE',
       _ => 'ACTIVITY',
     };
@@ -4217,6 +4229,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'command' => Icons.terminal_rounded,
       'file_change' => Icons.edit_note_rounded,
       'turn_diff' => Icons.difference_rounded,
+      'web_search' => Icons.travel_explore_rounded,
       'image_generation' => Icons.image_rounded,
       _ => Icons.bolt_rounded,
     };
@@ -4393,6 +4406,12 @@ class _ActivityCardState extends State<_ActivityCard> {
                         ...activity.commandActions.map(
                           (action) => MeshPill(label: action.label, mono: true),
                         ),
+                      if (activity.isWebSearch)
+                        MeshPill(
+                          label: _webSearchKindLabel(activity),
+                          tone: MeshPillTone.info,
+                          mono: true,
+                        ),
                       if (activity.isImageGeneration &&
                           (activity.savedPath ?? '').isNotEmpty)
                         const MeshPill(
@@ -4405,6 +4424,9 @@ class _ActivityCardState extends State<_ActivityCard> {
                   const SizedBox(height: 12),
                   if (activity.isCommand)
                     ..._buildCommandBody(context, activity)
+                  else if (activity.isWebSearch) ...[
+                    _buildWebSearchBody(context, activity),
+                  ]
                   else if (activity.isImageGeneration) ...[
                     _buildImageGenerationBody(context, activity),
                   ]
@@ -4490,6 +4512,112 @@ class _ActivityCardState extends State<_ActivityCard> {
     return widgets;
   }
 
+  Widget _buildWebSearchBody(
+    BuildContext context,
+    SessionActivity activity,
+  ) {
+    final colors = context.colors;
+    final rows = <Widget>[];
+    final primaryQuery = (activity.query ?? '').trim();
+    final queryList = activity.queries
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    final targetUrl = (activity.targetUrl ?? '').trim();
+    final pattern = (activity.pattern ?? '').trim();
+
+    if (primaryQuery.isNotEmpty) {
+      rows.add(_activityInfoBlock(context, 'Query', primaryQuery));
+    }
+    if (queryList.isNotEmpty) {
+      rows.add(
+        _activityInfoBlock(
+          context,
+          queryList.length > 1 ? 'Queries' : 'Query',
+          queryList.join('\n'),
+        ),
+      );
+    }
+    if (targetUrl.isNotEmpty) {
+      rows.add(
+        _activityInfoBlock(
+          context,
+          pattern.isNotEmpty ? 'Page' : 'URL',
+          targetUrl,
+          linkify: true,
+        ),
+      );
+    }
+    if (pattern.isNotEmpty) {
+      rows.add(_activityInfoBlock(context, 'Pattern', pattern));
+    }
+
+    if (rows.isEmpty) {
+      return _waitingText(context, 'Waiting for search details.');
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ...rows.expand((row) => [row, const SizedBox(height: 10)]),
+        Text(
+          _webSearchStatusCopy(activity),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+        ),
+      ],
+    );
+  }
+
+  Widget _activityInfoBlock(
+    BuildContext context,
+    String label,
+    String text, {
+    bool linkify = false,
+  }) {
+    final colors = context.colors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ).copyWith(letterSpacing: 0.8),
+          ),
+          const SizedBox(height: 6),
+          linkify
+              ? _LinkifiedSelectableText(
+                  text: text,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textPrimary,
+                    height: 1.4,
+                  ),
+                  linkColor: colors.accent,
+                )
+              : SelectableText(
+                  text,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textPrimary,
+                    height: 1.4,
+                  ),
+                ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildImageGenerationBody(
     BuildContext context,
     SessionActivity activity,
@@ -4547,6 +4675,67 @@ class _ActivityCardState extends State<_ActivityCard> {
         ],
       ],
     );
+  }
+
+  String _webSearchTitle(SessionActivity activity) {
+    final primaryQuery = (activity.query ?? '').trim();
+    final targetUrl = (activity.targetUrl ?? '').trim();
+    final pattern = (activity.pattern ?? '').trim();
+    if (pattern.isNotEmpty && targetUrl.isNotEmpty) {
+      return 'Find "$pattern" in ${_truncateMiddle(targetUrl, 44)}';
+    }
+    if (targetUrl.isNotEmpty) {
+      return 'Open ${_truncateMiddle(targetUrl, 48)}';
+    }
+    if (primaryQuery.isNotEmpty) {
+      return primaryQuery;
+    }
+    if (activity.queries.isNotEmpty) {
+      return activity.queries.first;
+    }
+    return 'Web search';
+  }
+
+  String? _webSearchSubtitle(SessionActivity activity) {
+    final queries = activity.queries
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    if (queries.length > 1) {
+      return '${queries.length} related queries';
+    }
+    final targetUrl = (activity.targetUrl ?? '').trim();
+    if (targetUrl.isNotEmpty) {
+      return targetUrl;
+    }
+    final pattern = (activity.pattern ?? '').trim();
+    if (pattern.isNotEmpty) {
+      return 'Looking for "$pattern"';
+    }
+    return null;
+  }
+
+  String _webSearchKindLabel(SessionActivity activity) {
+    final targetUrl = (activity.targetUrl ?? '').trim();
+    final pattern = (activity.pattern ?? '').trim();
+    if (pattern.isNotEmpty && targetUrl.isNotEmpty) {
+      return 'find in page';
+    }
+    if (targetUrl.isNotEmpty) {
+      return 'open page';
+    }
+    return 'search';
+  }
+
+  String _webSearchStatusCopy(SessionActivity activity) {
+    if (activity.status == 'completed') {
+      return switch (_webSearchKindLabel(activity)) {
+        'find in page' => 'Finished searching within a page.',
+        'open page' => 'Opened a web page for more detail.',
+        _ => 'Finished web search.',
+      };
+    }
+    return 'Web search is running.';
   }
 
   Widget _waitingText(BuildContext context, String text) {
