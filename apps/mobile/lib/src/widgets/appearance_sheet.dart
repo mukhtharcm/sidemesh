@@ -84,55 +84,40 @@ class _AppearancePopover extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        return Stack(
-          children: [
-            // Invisible full-screen hit-target for outside-tap dismissal.
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: () => Navigator.of(context).maybePop(),
-              ),
-            ),
-            Positioned(
-              left: 0,
-              top: 0,
-              child: CompositedTransformFollower(
-                link: anchor,
-                showWhenUnlinked: false,
-                // Anchor the popover's bottom-left to the button's top-right,
-                // so it rises above-and-to-the-right of the sidebar footer.
-                targetAnchor: Alignment.topRight,
-                followerAnchor: Alignment.bottomLeft,
-                offset: const Offset(12, -8),
-                child: Material(
-                  color: Colors.transparent,
-                  child: Container(
-                    width: panelWidth,
-                    decoration: BoxDecoration(
-                      color: colors.surface,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: colors.border),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.28),
-                          blurRadius: 28,
-                          offset: const Offset(0, 12),
-                        ),
-                      ],
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(13),
-                      child: _AppearanceBody(
-                        controller: controller,
-                        crossAxisCount: 3,
-                        showHandle: false,
-                      ),
-                    ),
+        return CompositedTransformFollower(
+          link: anchor,
+          showWhenUnlinked: false,
+          // Anchor the popover's bottom-left to the button's top-right, then
+          // offset up-and-right so it reads as a detached panel.
+          targetAnchor: Alignment.topRight,
+          followerAnchor: Alignment.bottomLeft,
+          offset: const Offset(12, -8),
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: panelWidth,
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: colors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.28),
+                    blurRadius: 28,
+                    offset: const Offset(0, 12),
                   ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(13),
+                child: _AppearanceBody(
+                  controller: controller,
+                  crossAxisCount: 3,
+                  showHandle: false,
                 ),
               ),
             ),
-          ],
+          ),
         );
       },
     );
