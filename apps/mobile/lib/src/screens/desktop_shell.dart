@@ -60,12 +60,20 @@ class _DesktopShellState extends State<DesktopShell> {
   static const double _minSidebarWidth = 240;
   static const double _maxSidebarWidth = 440;
   static const String _sidebarWidthPref = 'sidemesh.desktop.sidebarWidth';
+  static const double _defaultInspectorWidth = 380;
+  static const double _minInspectorWidth = 320;
+  static const double _maxInspectorWidth = 640;
+  static const String _inspectorWidthPref =
+      'sidemesh.desktop.inspectorWidth';
+
+  double _inspectorWidth = _defaultInspectorWidth;
 
   @override
   void initState() {
     super.initState();
     _loadHosts();
     _loadSidebarWidth();
+    _loadInspectorWidth();
     _searchController.addListener(() {
       final next = _searchController.text;
       if (next == _query) return;
@@ -129,6 +137,48 @@ class _DesktopShellState extends State<DesktopShell> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setDouble(_sidebarWidthPref, _sidebarWidth);
+    } catch (_) {
+      // Best-effort persistence.
+    }
+  }
+
+  Future<void> _loadInspectorWidth() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getDouble(_inspectorWidthPref);
+      if (stored != null && mounted) {
+        setState(() {
+          _inspectorWidth = stored.clamp(
+            _minInspectorWidth,
+            _maxInspectorWidth,
+          );
+        });
+      }
+    } catch (_) {
+      // Preferences unavailable — stick with the default.
+    }
+  }
+
+  void _resizeInspector(double delta) {
+    // Dragging the handle right should shrink the inspector (detail grows).
+    final next = (_inspectorWidth - delta).clamp(
+      _minInspectorWidth,
+      _maxInspectorWidth,
+    );
+    if (next == _inspectorWidth) return;
+    setState(() => _inspectorWidth = next);
+  }
+
+  void _resetInspectorWidth() {
+    if (_inspectorWidth == _defaultInspectorWidth) return;
+    setState(() => _inspectorWidth = _defaultInspectorWidth);
+    _persistInspectorWidth();
+  }
+
+  Future<void> _persistInspectorWidth() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_inspectorWidthPref, _inspectorWidth);
     } catch (_) {
       // Best-effort persistence.
     }
@@ -314,18 +364,19 @@ class _DesktopShellState extends State<DesktopShell> {
     double total,
   ) {
     // Resizer is 6pt (see _SidebarResizer). When inspector is open,
-    // we render a 1pt divider to its left.
+    // the inspector pane gets its own resize handle on its left edge.
     const double resizer = 6;
-    const double inspectorMin = 320;
-    const double inspectorDefault = 380;
+    const double inspectorMin = _minInspectorWidth;
     const double detailMin = 560;
     final inspectorOpen = _inspector.current != null;
 
     double sidebar = _sidebarWidth.clamp(_minSidebarWidth, _maxSidebarWidth);
-    double inspector = inspectorOpen ? inspectorDefault : 0;
-    double inspectorDivider = inspectorOpen ? 1 : 0;
+    double inspector = inspectorOpen
+        ? _inspectorWidth.clamp(_minInspectorWidth, _maxInspectorWidth)
+        : 0;
+    double inspectorResizer = inspectorOpen ? resizer : 0;
 
-    double detail = total - sidebar - resizer - inspectorDivider - inspector;
+    double detail = total - sidebar - resizer - inspectorResizer - inspector;
 
     if (inspectorOpen && detail < detailMin) {
       // Shrink the sidebar toward its min first; session titles stay
@@ -564,7 +615,12 @@ class _DesktopShellState extends State<DesktopShell> {
                             ),
                           ),
                           if (_inspector.current != null) ...[
-                            Container(width: 1, color: colors.border),
+                            _SidebarResizer(
+                              color: colors.border,
+                              onDrag: _resizeInspector,
+                              onDragEnd: _persistInspectorWidth,
+                              onDoubleTap: _resetInspectorWidth,
+                            ),
                             SizedBox(
                               width: widths.inspector,
                               child: _InspectorPane(
@@ -1402,11 +1458,13 @@ class _SidebarResizer extends StatefulWidget {
     required this.color,
     required this.onDrag,
     required this.onDragEnd,
+    this.onDoubleTap,
   });
 
   final Color color;
   final ValueChanged<double> onDrag;
   final VoidCallback onDragEnd;
+  final VoidCallback? onDoubleTap;
 
   @override
   State<_SidebarResizer> createState() => _SidebarResizerState();
@@ -1425,6 +1483,7 @@ class _SidebarResizerState extends State<_SidebarResizer> {
       onExit: (_) => setState(() => _hover = false),
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
+        onDoubleTap: widget.onDoubleTap,
         onHorizontalDragStart: (_) => setState(() => _dragging = true),
         onHorizontalDragUpdate: (d) => widget.onDrag(d.delta.dx),
         onHorizontalDragEnd: (_) {
