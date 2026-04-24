@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sidemesh — command your coding fleet from anywhere</title>
+<meta name="description" content="Sidemesh is a fleet-first mobile control plane for Codex sessions. Drive your Macs and servers from your pocket — chat, approvals, sessions, files, live activity." />
+<meta name="theme-color" content="#F0E8D8" />
+<meta property="og:title" content="Sidemesh" />
+<meta property="og:description" content="A fleet-first mobile control plane for Codex sessions." />
+<meta property="og:image" content="/assets/app-icon.png" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" type="image/png" href="/assets/favicon.png" />
+<link rel="apple-touch-icon" href="/assets/favicon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #F0E8D8;
+    --bg-strong: #E7DDC8;
+    --ink: #202432;
+    --ink-soft: #3B4055;
+    --muted: #6B6F82;
+    --rust: #C66034;
+    --rust-soft: #E3844A;
+    --line: rgba(32, 36, 50, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.55;
+  }
+
+  a { color: inherit; }
+
+  .container {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* --- nav --- */
+  nav {
+    padding: 28px 0;
+  }
+  nav .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+    font-family: "Space Grotesk", sans-serif;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: -0.01em;
+  }
+  .brand img {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    box-shadow: 0 1px 0 var(--line), 0 8px 24px rgba(32, 36, 50, 0.08);
+  }
+  nav .links {
+    display: flex;
+    gap: 28px;
+    font-size: 15px;
+    color: var(--ink-soft);
+  }
+  nav .links a {
+    text-decoration: none;
+    opacity: 0.85;
+  }
+  nav .links a:hover { opacity: 1; }
+  @media (max-width: 640px) {
+    nav .links { display: none; }
+  }
+
+  /* --- hero --- */
+  header.hero {
+    padding: 64px 0 72px;
+    text-align: center;
+  }
+  .hero-icon {
+    width: 140px;
+    height: 140px;
+    border-radius: 30px;
+    margin: 0 auto 28px;
+    display: block;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.4) inset,
+      0 10px 30px rgba(32, 36, 50, 0.12),
+      0 2px 6px rgba(32, 36, 50, 0.06);
+  }
+  h1 {
+    font-family: "Space Grotesk", sans-serif;
+    font-weight: 700;
+    font-size: clamp(40px, 6vw, 64px);
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+    margin: 0 0 20px;
+  }
+  h1 .accent { color: var(--rust); }
+  .tagline {
+    font-size: clamp(17px, 1.8vw, 20px);
+    color: var(--ink-soft);
+    max-width: 640px;
+    margin: 0 auto 32px;
+  }
+  .cta-row {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 22px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 15px;
+    text-decoration: none;
+    transition: transform 120ms ease, background 120ms ease;
+    border: 1.5px solid transparent;
+  }
+  .btn.primary {
+    background: var(--ink);
+    color: var(--bg);
+  }
+  .btn.primary:hover { transform: translateY(-1px); background: #2A2F42; }
+  .btn.ghost {
+    background: transparent;
+    color: var(--ink);
+    border-color: var(--line);
+  }
+  .btn.ghost:hover { background: var(--bg-strong); }
+
+  /* --- prompt strip --- */
+  .prompt-strip {
+    margin: 16px auto 0;
+    max-width: 640px;
+    padding: 14px 18px;
+    background: var(--ink);
+    color: var(--bg);
+    border-radius: 14px;
+    font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+    font-size: 13px;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 8px 24px rgba(32, 36, 50, 0.12);
+  }
+  .prompt-strip .chev { color: var(--rust-soft); font-weight: 700; }
+  .prompt-strip .dim { opacity: 0.55; }
+  .blink {
+    display: inline-block;
+    width: 8px;
+    height: 16px;
+    background: var(--rust-soft);
+    vertical-align: -2px;
+    margin-left: 2px;
+    animation: blink 1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* --- section --- */
+  section {
+    padding: 72px 0;
+    border-top: 1px solid var(--line);
+  }
+  .eyebrow {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--rust);
+    margin: 0 0 12px;
+  }
+  h2 {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: clamp(28px, 3.6vw, 38px);
+    letter-spacing: -0.02em;
+    margin: 0 0 16px;
+  }
+  .lead {
+    font-size: 17px;
+    color: var(--ink-soft);
+    max-width: 640px;
+    margin: 0 0 40px;
+  }
+
+  /* --- feature grid --- */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--bg-strong);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 24px;
+  }
+  .card h3 {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 18px;
+    margin: 12px 0 8px;
+    letter-spacing: -0.01em;
+  }
+  .card p {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 15px;
+  }
+  .card .ico {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: var(--ink);
+    color: var(--rust-soft);
+    display: grid;
+    place-items: center;
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700;
+    font-size: 15px;
+  }
+
+  /* --- how it works --- */
+  .flow {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 20px;
+    align-items: stretch;
+    max-width: 840px;
+    margin: 0 auto;
+  }
+  .flow .node {
+    background: var(--bg-strong);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 22px;
+    text-align: center;
+  }
+  .flow .node strong {
+    display: block;
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 17px;
+    margin-bottom: 6px;
+  }
+  .flow .node span {
+    color: var(--ink-soft);
+    font-size: 14px;
+  }
+  .flow .link {
+    display: grid;
+    place-items: center;
+    color: var(--rust);
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+  @media (max-width: 720px) {
+    .flow { grid-template-columns: 1fr; }
+    .flow .link { transform: rotate(90deg); padding: 4px 0; }
+  }
+
+  /* --- downloads --- */
+  .downloads {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
+  .dl {
+    background: var(--bg-strong);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    opacity: 0.9;
+  }
+  .dl strong {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 18px;
+  }
+  .dl .hint {
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .dl .badge {
+    margin-top: 8px;
+    align-self: flex-start;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    background: var(--ink);
+    color: var(--rust-soft);
+    padding: 6px 10px;
+    border-radius: 999px;
+  }
+
+  /* --- footer --- */
+  footer {
+    padding: 48px 0 56px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 14px;
+  }
+  footer .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  footer a { color: var(--ink-soft); text-decoration: none; }
+  footer a:hover { color: var(--ink); }
+
+</style>
+</head>
+<body>
+  <div class="container">
+    <nav>
+      <div class="row">
+        <a class="brand" href="/">
+          <img src="/assets/app-icon.png" alt="" />
+          <span>Sidemesh</span>
+        </a>
+        <div class="links">
+          <a href="#features">Features</a>
+          <a href="#how">How it works</a>
+          <a href="#download">Download</a>
+        </div>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <img class="hero-icon" src="/assets/app-icon.png" alt="Sidemesh app icon" />
+      <h1>Command your coding<br/>fleet <span class="accent">from anywhere</span>.</h1>
+      <p class="tagline">Sidemesh is a fleet-first mobile control plane for <strong>Codex</strong> sessions. Drive your Macs and servers from your pocket — chat, approvals, sessions, workspace files, and live activity, all in one calm surface.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="#download">Get notified</a>
+        <a class="btn ghost" href="https://github.com/mukhtharcm/sidemesh" target="_blank" rel="noopener">Source on GitHub</a>
+      </div>
+      <div class="prompt-strip" aria-hidden="true">
+        <span class="chev">&gt;</span>
+        <span><span class="dim">mbp ~</span> run tests on laptop while I commute<span class="blink"></span></span>
+      </div>
+    </header>
+
+    <section id="features">
+      <p class="eyebrow">What it does</p>
+      <h2>One calm surface for every peer in your fleet.</h2>
+      <p class="lead">Register a machine once, reach it forever. Sidemesh keeps each host alive in its own lane so you can hop between a MacBook, a VPS, and a lab box without ceremony.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="ico">⌁</div>
+          <h3>Multi-host, side-by-side</h3>
+          <p>Add any machine with a label, a URL, and a shared token. Switch between them without pairing servers or cloud brokers.</p>
+        </div>
+        <div class="card">
+          <div class="ico">&gt;_</div>
+          <h3>Sessions that persist</h3>
+          <p>Start a Codex session on your desk, check in from the couch, resume on the train. Transcripts and live activity follow you.</p>
+        </div>
+        <div class="card">
+          <div class="ico">✓</div>
+          <h3>Approvals in your pocket</h3>
+          <p>Risky commands and edits are surfaced as approvals you can grant or decline without opening a laptop.</p>
+        </div>
+        <div class="card">
+          <div class="ico">ƒ</div>
+          <h3>Workspace files</h3>
+          <p>Browse, read, and edit files inside each session's workspace. No scp, no copy-paste, no detours.</p>
+        </div>
+        <div class="card">
+          <div class="ico">~</div>
+          <h3>Live activity</h3>
+          <p>A streaming feed of what each agent is doing — commands, file writes, status — so nothing happens in the dark.</p>
+        </div>
+        <div class="card">
+          <div class="ico">◊</div>
+          <h3>Private by default</h3>
+          <p>Runs over your own network. Works great over Tailscale. No third-party relay, no account to create.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="how">
+      <p class="eyebrow">How it works</p>
+      <h2>A tiny daemon per machine. One app for all of them.</h2>
+      <p class="lead">Each machine runs a small Node daemon that owns a local <code style="font-family:'JetBrains Mono',monospace;background:var(--bg-strong);padding:2px 6px;border-radius:6px;">codex app-server</code>. The Sidemesh app connects to each daemon over your network — no pairing server, no middleman.</p>
+      <div class="flow">
+        <div class="node">
+          <strong>Phone / Mac</strong>
+          <span>Sidemesh app — your control surface</span>
+        </div>
+        <div class="link">── token ──&gt;</div>
+        <div class="node">
+          <strong>Daemon on peer</strong>
+          <span>Owns a Codex app-server over stdio</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="download">
+      <p class="eyebrow">Download</p>
+      <h2>Apps are landing soon.</h2>
+      <p class="lead">We're polishing the first builds for iOS, Android, and macOS. Star the repo or drop your email to be the first to know when they ship.</p>
+      <div class="downloads">
+        <div class="dl">
+          <strong>iOS</strong>
+          <span class="hint">iPhone &amp; iPad · App Store</span>
+          <span class="badge">Coming soon</span>
+        </div>
+        <div class="dl">
+          <strong>Android</strong>
+          <span class="hint">Phone &amp; tablet · Play Store</span>
+          <span class="badge">Coming soon</span>
+        </div>
+        <div class="dl">
+          <strong>macOS</strong>
+          <span class="hint">Apple silicon &amp; Intel</span>
+          <span class="badge">Coming soon</span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <div class="container row">
+      <div>© <span id="year"></span> Sidemesh. Built for hackers who ship from anywhere.</div>
+      <div>
+        <a href="https://github.com/mukhtharcm/sidemesh" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
