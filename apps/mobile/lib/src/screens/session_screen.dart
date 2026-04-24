@@ -3921,7 +3921,13 @@ class _Composer extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 10),
-            _SendButton(sending: sending, onSend: onSend),
+            _SendButton(
+              sending: sending,
+              controller: controller,
+              hasAttachments: attachments.isNotEmpty,
+              hasSkills: skills.isNotEmpty,
+              onSend: onSend,
+            ),
           ],
         ),
       ),
@@ -3930,48 +3936,73 @@ class _Composer extends StatelessWidget {
 }
 
 class _SendButton extends StatelessWidget {
-  const _SendButton({required this.sending, required this.onSend});
+  const _SendButton({
+    required this.sending,
+    required this.controller,
+    required this.hasAttachments,
+    required this.hasSkills,
+    required this.onSend,
+  });
 
   final bool sending;
+  final TextEditingController controller;
+  final bool hasAttachments;
+  final bool hasSkills;
   final VoidCallback onSend;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: sending ? null : onSend,
-        child: Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            color: sending ? colors.surfaceMuted : colors.accent,
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final hasText = controller.text.trim().isNotEmpty;
+        final canSend = !sending && (hasText || hasAttachments || hasSkills);
+        final showActive = sending || canSend;
+        final bgColor = sending
+            ? colors.surfaceMuted
+            : (canSend ? colors.accent : colors.surfaceMuted);
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
             borderRadius: BorderRadius.circular(18),
-            boxShadow: sending
-                ? const []
-                : [
-                    BoxShadow(
-                      color: colors.accent.withValues(alpha: 0.3),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
+            onTap: canSend ? onSend : null,
+            child: Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: showActive && canSend
+                    ? [
+                        BoxShadow(
+                          color: colors.accent.withValues(alpha: 0.3),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ]
+                    : const [],
+              ),
+              alignment: Alignment.center,
+              child: sending
+                  ? SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: colors.textSecondary,
+                      ),
+                    )
+                  : Icon(
+                      Icons.arrow_upward_rounded,
+                      color: canSend
+                          ? colors.accentOn
+                          : colors.textTertiary,
                     ),
-                  ],
+            ),
           ),
-          alignment: Alignment.center,
-          child: sending
-              ? SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: colors.textSecondary,
-                  ),
-                )
-              : Icon(Icons.arrow_upward_rounded, color: colors.accentOn),
-        ),
-      ),
+        );
+      },
     );
   }
 }
