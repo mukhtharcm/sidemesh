@@ -2595,18 +2595,6 @@ class _SessionHeader extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: monoStyle(color: colors.textSecondary, fontSize: 11),
                   ),
-                  if (_metaLine(session).isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      _metaLine(session),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: monoStyle(
-                        color: colors.textTertiary,
-                        fontSize: 10.5,
-                      ),
-                    ),
-                  ],
                   if (_gitHeaderLabel(session, gitStatus) != null) ...[
                     const SizedBox(height: 7),
                     _GitSummaryPill(
@@ -2631,17 +2619,6 @@ class _SessionHeader extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  static String _metaLine(SessionSummary session) {
-    final parts = <String>[session.source];
-    final model = session.runtime?.model;
-    if (model != null && model.isNotEmpty) parts.add(model);
-    final approval = session.runtime?.approvalPolicy;
-    if (approval != null && approval.isNotEmpty) {
-      parts.add('approval $approval');
-    }
-    return parts.join(' · ');
   }
 }
 
