@@ -84,49 +84,63 @@ class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    if (_inViewerMode && _selected != null) {
-      return Container(
-        color: colors.canvas,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _ViewerToolbar(
-              path: _selected!,
-              viewerObservable: _viewerObservable,
-              viewerKey: _viewerKey,
-              onBack: _backToTree,
-            ),
-            Divider(height: 1, color: colors.border),
-            Expanded(
-              child: FileViewerPane(
-                key: _viewerKey,
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Always kept mounted so the tree's fetched directory state is
+        // preserved when the user toggles back from a file viewer.
+        Offstage(
+          offstage: _inViewerMode,
+          child: TickerMode(
+            enabled: !_inViewerMode,
+            child: Container(
+              color: colors.surfaceElevated,
+              child: FileBrowserTree(
                 host: widget.host,
                 api: widget.api,
-                path: _selected!,
-                observable: _viewerObservable,
-                dense: true,
-                liveStream: _liveStream,
+                root: widget.root,
+                selectedPath: _selected,
+                onOpenFile: (path, liveStream) {
+                  setState(() {
+                    _selected = path;
+                    _liveStream = liveStream;
+                    _inViewerMode = true;
+                  });
+                },
               ),
             ),
-          ],
+          ),
         ),
-      );
-    }
-    return Container(
-      color: colors.surfaceElevated,
-      child: FileBrowserTree(
-        host: widget.host,
-        api: widget.api,
-        root: widget.root,
-        selectedPath: _selected,
-        onOpenFile: (path, liveStream) {
-          setState(() {
-            _selected = path;
-            _liveStream = liveStream;
-            _inViewerMode = true;
-          });
-        },
-      ),
+        if (_inViewerMode && _selected != null)
+          Positioned.fill(
+            child: Container(
+              color: colors.canvas,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _ViewerToolbar(
+                    path: _selected!,
+                    viewerObservable: _viewerObservable,
+                    viewerKey: _viewerKey,
+                    onBack: _backToTree,
+                  ),
+                  Divider(height: 1, color: colors.border),
+                  Expanded(
+                    child: FileViewerPane(
+                      key: _viewerKey,
+                      host: widget.host,
+                      api: widget.api,
+                      path: _selected!,
+                      observable: _viewerObservable,
+                      dense: true,
+                      liveStream: _liveStream,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
