@@ -106,7 +106,7 @@ class _SessionScreenState extends State<SessionScreen>
   bool _sending = false;
   bool _awaitingAssistantReply = false;
   bool _loadingSkills = false;
-  bool _searchOpen = false;
+  bool _searchPanelOpen = false;
   String _searchQuery = '';
   String? _skillsError;
   IOWebSocketChannel? _channel;
@@ -220,32 +220,58 @@ class _SessionScreenState extends State<SessionScreen>
     setState(() => _searchQuery = query);
   }
 
-  void _openSearch() {
-    if (!_searchOpen) {
-      setState(() => _searchOpen = true);
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _disposed) return;
-      _searchFocusNode.requestFocus();
-    });
-  }
-
-  void _closeSearch() {
-    _searchFocusNode.unfocus();
-    if (_searchController.text.isNotEmpty) {
-      _searchController.clear();
-    }
-    if (_searchOpen || _searchQuery.isNotEmpty) {
-      setState(() {
-        _searchOpen = false;
-        _searchQuery = '';
+  void _openSearchPanel() {
+    final width = MediaQuery.of(context).size.width;
+    if (width >= 900) {
+      if (!_searchPanelOpen) {
+        setState(() => _searchPanelOpen = true);
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _disposed) return;
+        _searchFocusNode.requestFocus();
       });
+      return;
+    }
+    final records = _buildSearchRecords();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final size = MediaQuery.of(sheetContext).size;
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+          ),
+          child: SizedBox(
+            height: size.height * 0.85,
+            child: _SearchPanel(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              records: records,
+              onClose: () => Navigator.of(sheetContext).maybePop(),
+              inSheet: true,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _closeSearchPanel() {
+    _searchFocusNode.unfocus();
+    if (_searchPanelOpen) {
+      setState(() => _searchPanelOpen = false);
     }
   }
 
-  void _clearSearchQuery() {
-    _searchController.clear();
-    _searchFocusNode.requestFocus();
+  void _toggleSearchPanel() {
+    if (_searchPanelOpen) {
+      _closeSearchPanel();
+    } else {
+      _openSearchPanel();
+    }
   }
 
   void _onTranscriptScroll() {
@@ -1962,35 +1988,40 @@ class _SessionScreenState extends State<SessionScreen>
     return entries;
   }
 
-  List<_TimelineEntry> _filterTimelineEntriesForSearch(
-    List<_TimelineEntry> entries,
-    String query,
-  ) {
-    final needle = query.trim().toLowerCase();
-    if (needle.isEmpty) {
-      return entries;
+  List<_SearchRecord> _buildSearchRecords() {
+    final entries = _buildTimelineEntries();
+    final records = <_SearchRecord>[];
+    final session = _session ?? widget.session;
+    for (final entry in entries) {
+      if (entry.kind == _TimelineEntryKind.liveAssistant) continue;
+      if (entry.kind == _TimelineEntryKind.message) {
+        final message = entry.message!;
+        records.add(
+          _SearchRecord(
+            id: entry.keyId,
+            kind: _SearchRecordKind.message,
+            createdAt: entry.createdAt,
+            haystack: _messageSearchHaystack(message),
+            title: _messageSearchTitle(message),
+            message: message,
+          ),
+        );
+      } else if (entry.kind == _TimelineEntryKind.activity) {
+        final activity = entry.activity!;
+        records.add(
+          _SearchRecord(
+            id: entry.keyId,
+            kind: _SearchRecordKind.activity,
+            createdAt: entry.createdAt,
+            haystack: _activitySearchHaystack(activity),
+            title: _activitySearchTitle(activity),
+            activity: activity,
+            sessionCwd: session.cwd,
+          ),
+        );
+      }
     }
-    return entries
-        .where((entry) => _timelineEntryMatchesSearch(entry, needle))
-        .toList(growable: false);
-  }
-
-  bool _timelineEntryMatchesSearch(_TimelineEntry entry, String needle) {
-    return switch (entry.kind) {
-      _TimelineEntryKind.message => _messageMatchesSearch(
-        entry.message!,
-        needle,
-      ),
-      _TimelineEntryKind.liveAssistant =>
-        _liveAssistantMessage == null
-            ? false
-            : _messageMatchesSearch(_liveAssistantMessage!.toMessage(), needle),
-      _TimelineEntryKind.activity => false,
-    };
-  }
-
-  bool _messageMatchesSearch(SessionMessage message, String needle) {
-    return _messageSearchHaystack(message).contains(needle);
+    return records;
   }
 
   String _messageSearchHaystack(SessionMessage message) {
@@ -2006,14 +2037,57 @@ class _SessionScreenState extends State<SessionScreen>
     ].join('\n').toLowerCase();
   }
 
-  int _loadedSearchableMessageCount(List<_TimelineEntry> entries) {
-    return entries
-        .where(
-          (entry) =>
-              entry.kind == _TimelineEntryKind.message ||
-              entry.kind == _TimelineEntryKind.liveAssistant,
-        )
-        .length;
+  String _messageSearchTitle(SessionMessage message) {
+    final role = message.role == 'user' ? 'You' : 'Assistant';
+    final phase = (message.phase ?? '').trim();
+    if (phase.isEmpty || phase == 'answer') return role;
+    return '$role · ${phase.toUpperCase()}';
+  }
+
+  String _activitySearchHaystack(SessionActivity activity) {
+    final output = activity.output ?? '';
+    final tail = output.length > 800
+        ? output.substring(output.length - 800)
+        : output;
+    final changesText = activity.changes
+        .expand((c) => [c.path, c.movePath ?? ''])
+        .join('\n');
+    return [
+      activity.type,
+      activity.status,
+      activity.command ?? '',
+      activity.cwd ?? '',
+      activity.query ?? '',
+      activity.queries.join(' '),
+      activity.targetUrl ?? '',
+      activity.pattern ?? '',
+      activity.savedPath ?? '',
+      activity.terminalInput ?? '',
+      changesText,
+      tail,
+    ].join('\n').toLowerCase();
+  }
+
+  String _activitySearchTitle(SessionActivity activity) {
+    switch (activity.type) {
+      case 'command':
+        final cmd = (activity.command ?? '').trim();
+        return cmd.isEmpty ? 'Command' : cmd;
+      case 'file_change':
+        if (activity.changes.length == 1) {
+          return activity.changes.first.path;
+        }
+        return 'Edited ${activity.changes.length} files';
+      case 'turn_diff':
+        return 'Turn diff';
+      case 'web_search':
+        final q = (activity.query ?? '').trim();
+        return q.isEmpty ? 'Web search' : 'Web: $q';
+      case 'image_generation':
+        return 'Generated image';
+      default:
+        return activity.type;
+    }
   }
 
   bool _matchesPersistedMessage(
@@ -2055,16 +2129,7 @@ class _SessionScreenState extends State<SessionScreen>
     final session = _session ?? widget.session;
     final colors = context.colors;
     final timelineEntries = _buildTimelineEntries();
-    final searchQuery = _searchQuery.trim();
-    final searchActive = searchQuery.isNotEmpty;
-    final visibleTimelineEntries = _filterTimelineEntriesForSearch(
-      timelineEntries,
-      searchQuery,
-    );
-    final searchMatchCount = searchActive ? visibleTimelineEntries.length : 0;
-    final loadedSearchableMessages = _loadedSearchableMessageCount(
-      timelineEntries,
-    );
+    final visibleTimelineEntries = timelineEntries;
     final pinnedMessages = _pinsStore.pinsFor(widget.host, session.id);
     final bodyContent = Column(
       children: [
@@ -2128,26 +2193,9 @@ class _SessionScreenState extends State<SessionScreen>
               onUnpin: _unpinMessage,
             ),
           ),
-        if (_searchOpen)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _SessionSearchBar(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              matchCount: searchActive ? searchMatchCount : null,
-              loadedMessageCount: loadedSearchableMessages,
-              onClear: _clearSearchQuery,
-              onClose: _closeSearch,
-            ),
-          ),
         Expanded(
-          child: (_loading && timelineEntries.isEmpty && !searchActive)
+          child: (_loading && timelineEntries.isEmpty)
               ? const MeshLoader()
-              : (searchActive && visibleTimelineEntries.isEmpty)
-              ? _SessionSearchEmptyState(
-                  query: searchQuery,
-                  loadedMessageCount: loadedSearchableMessages,
-                )
               : Stack(
                   children: [
                     RefreshIndicator(
@@ -2170,12 +2218,11 @@ class _SessionScreenState extends State<SessionScreen>
                             final prev = chronoIndex > 0
                                 ? visibleTimelineEntries[chronoIndex - 1]
                                 : null;
-                            final showDay = !searchActive &&
-                                (prev == null ||
-                                    !_sameCalendarDay(
-                                      prev.createdAt,
-                                      entry.createdAt,
-                                    ));
+                            final showDay = prev == null ||
+                                !_sameCalendarDay(
+                                  prev.createdAt,
+                                  entry.createdAt,
+                                );
                             final child = KeyedSubtree(
                               key: ValueKey(entry.keyId),
                               child: switch (entry.kind) {
@@ -2225,8 +2272,7 @@ class _SessionScreenState extends State<SessionScreen>
                         ),
                       ),
                     ),
-                    if (!searchActive)
-                      Positioned(
+                    Positioned(
                         right: 16,
                         bottom: 12,
                         child: ValueListenableBuilder<bool>(
@@ -2281,6 +2327,26 @@ class _SessionScreenState extends State<SessionScreen>
         ),
       ],
     );
+    final mediaWidth = MediaQuery.of(context).size.width;
+    final showSidePanel = _searchPanelOpen && mediaWidth >= 900;
+    final layoutBody = showSidePanel
+        ? Row(
+            children: [
+              Expanded(child: bodyContent),
+              Container(width: 1, color: colors.border),
+              SizedBox(
+                width: 420,
+                child: _SearchPanel(
+                  controller: _searchController,
+                  focusNode: _searchFocusNode,
+                  records: _buildSearchRecords(),
+                  onClose: _closeSearchPanel,
+                  inSheet: false,
+                ),
+              ),
+            ],
+          )
+        : bodyContent;
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -2365,11 +2431,7 @@ class _SessionScreenState extends State<SessionScreen>
                 onSelected: (value) {
                   switch (value) {
                     case 'search':
-                      if (_searchOpen) {
-                        _closeSearch();
-                      } else {
-                        _openSearch();
-                      }
+                      _toggleSearchPanel();
                       break;
                     case 'favorite':
                       _toggleFavorite();
@@ -2415,13 +2477,17 @@ class _SessionScreenState extends State<SessionScreen>
                     child: Row(
                       children: [
                         Icon(
-                          _searchOpen
+                          _searchPanelOpen
                               ? Icons.search_off_rounded
                               : Icons.search_rounded,
                           size: 18,
                         ),
                         const SizedBox(width: 10),
-                        Text(_searchOpen ? 'Close search' : 'Search messages'),
+                        Text(
+                          _searchPanelOpen
+                              ? 'Close search'
+                              : 'Search messages',
+                        ),
                       ],
                     ),
                   ),
@@ -2504,9 +2570,9 @@ class _SessionScreenState extends State<SessionScreen>
           ? GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: _dismissKeyboard,
-              child: bodyContent,
+              child: layoutBody,
             )
-          : bodyContent,
+          : layoutBody,
     );
     if (widget.topPadding == null) {
       return scaffold;
@@ -3158,117 +3224,6 @@ String _gitDiffTitle(SessionGitDiff diff) {
     'remote' => 'Remote diff',
     _ => 'Working diff',
   };
-}
-
-class _SessionSearchBar extends StatelessWidget {
-  const _SessionSearchBar({
-    required this.controller,
-    required this.focusNode,
-    required this.matchCount,
-    required this.loadedMessageCount,
-    required this.onClear,
-    required this.onClose,
-  });
-
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final int? matchCount;
-  final int loadedMessageCount;
-  final VoidCallback onClear;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final hasQuery = controller.text.trim().isNotEmpty;
-    final label = hasQuery
-        ? '${matchCount ?? 0} match${matchCount == 1 ? '' : 'es'}'
-        : '$loadedMessageCount loaded messages';
-    return MeshCard(
-      tone: MeshCardTone.elevated,
-      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-      borderColor: colors.accent.withValues(alpha: 0.35),
-      child: Row(
-        children: [
-          Icon(Icons.search_rounded, size: 19, color: colors.accent),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              focusNode: focusNode,
-              minLines: 1,
-              maxLines: 1,
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration.collapsed(
-                hintText: 'Search loaded messages',
-                hintStyle: TextStyle(color: colors.textTertiary),
-              ),
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: colors.textPrimary,
-                height: 1.25,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          MeshPill(
-            label: label,
-            tone: hasQuery && (matchCount ?? 0) == 0
-                ? MeshPillTone.warning
-                : MeshPillTone.info,
-            bold: true,
-          ),
-          if (hasQuery) ...[
-            const SizedBox(width: 6),
-            InkWell(
-              onTap: onClear,
-              borderRadius: BorderRadius.circular(10),
-              child: Padding(
-                padding: const EdgeInsets.all(7),
-                child: Icon(
-                  Icons.close_rounded,
-                  size: 18,
-                  color: colors.textSecondary,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(width: 2),
-          InkWell(
-            onTap: onClose,
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.all(7),
-              child: Icon(
-                Icons.keyboard_arrow_up_rounded,
-                size: 20,
-                color: colors.textSecondary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SessionSearchEmptyState extends StatelessWidget {
-  const _SessionSearchEmptyState({
-    required this.query,
-    required this.loadedMessageCount,
-  });
-
-  final String query;
-  final int loadedMessageCount;
-
-  @override
-  Widget build(BuildContext context) {
-    return MeshEmptyState(
-      icon: Icons.search_off_rounded,
-      title: 'No loaded messages match',
-      body:
-          'Searched $loadedMessageCount loaded messages for "$query". Load older history if the message is outside the current transcript window.',
-    );
-  }
 }
 
 class _PinnedMessagesStrip extends StatelessWidget {
@@ -7929,6 +7884,669 @@ class _DaySeparator extends StatelessWidget {
             ),
           ),
           Expanded(child: Divider(color: colors.border, height: 1)),
+        ],
+      ),
+    );
+  }
+}
+
+enum _SearchRecordKind { message, activity }
+
+enum _SearchFilter { all, messages, activities }
+
+class _SearchRecord {
+  _SearchRecord({
+    required this.id,
+    required this.kind,
+    required this.createdAt,
+    required this.haystack,
+    required this.title,
+    this.message,
+    this.activity,
+    this.sessionCwd,
+  });
+
+  final String id;
+  final _SearchRecordKind kind;
+  final DateTime createdAt;
+  final String haystack;
+  final String title;
+  final SessionMessage? message;
+  final SessionActivity? activity;
+  final String? sessionCwd;
+}
+
+class _SearchPanel extends StatefulWidget {
+  const _SearchPanel({
+    required this.controller,
+    required this.focusNode,
+    required this.records,
+    required this.onClose,
+    required this.inSheet,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final List<_SearchRecord> records;
+  final VoidCallback onClose;
+  final bool inSheet;
+
+  @override
+  State<_SearchPanel> createState() => _SearchPanelState();
+}
+
+class _SearchPanelState extends State<_SearchPanel> {
+  _SearchFilter _filter = _SearchFilter.all;
+  String _query = '';
+  Timer? _debounce;
+  final Set<String> _expanded = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _query = widget.controller.text;
+    widget.controller.addListener(_onQueryChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.focusNode.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    widget.controller.removeListener(_onQueryChanged);
+    super.dispose();
+  }
+
+  void _onQueryChanged() {
+    final text = widget.controller.text;
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 120), () {
+      if (!mounted) return;
+      if (text == _query) return;
+      setState(() => _query = text);
+    });
+  }
+
+  List<_SearchRecord> _filteredRecords() {
+    final needle = _query.trim().toLowerCase();
+    return widget.records.where((r) {
+      final kindOk = switch (_filter) {
+        _SearchFilter.all => true,
+        _SearchFilter.messages => r.kind == _SearchRecordKind.message,
+        _SearchFilter.activities => r.kind == _SearchRecordKind.activity,
+      };
+      if (!kindOk) return false;
+      if (needle.isEmpty) return true;
+      return r.haystack.contains(needle);
+    }).toList(growable: false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final theme = Theme.of(context);
+    final results = _filteredRecords();
+    final hasQuery = _query.trim().isNotEmpty;
+    return Material(
+      color: colors.canvas,
+      shape: widget.inSheet
+          ? const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+            )
+          : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.inSheet)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: colors.border,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 8, 6),
+            child: Row(
+              children: [
+                Icon(Icons.search_rounded, size: 20, color: colors.accent),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: widget.controller,
+                    focusNode: widget.focusNode,
+                    autofocus: true,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration.collapsed(
+                      hintText: 'Search messages and activities',
+                      hintStyle: TextStyle(color: colors.textTertiary),
+                    ),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colors.textPrimary,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
+                if (hasQuery)
+                  IconButton(
+                    tooltip: 'Clear',
+                    onPressed: () {
+                      widget.controller.clear();
+                    },
+                    icon: Icon(
+                      Icons.close_rounded,
+                      size: 18,
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                IconButton(
+                  tooltip: 'Close search',
+                  onPressed: widget.onClose,
+                  icon: Icon(
+                    Icons.close_fullscreen_rounded,
+                    size: 18,
+                    color: colors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 2, 14, 6),
+            child: Row(
+              children: [
+                _SearchFilterChip(
+                  label: 'All',
+                  selected: _filter == _SearchFilter.all,
+                  onTap: () => setState(() => _filter = _SearchFilter.all),
+                ),
+                const SizedBox(width: 6),
+                _SearchFilterChip(
+                  label: 'Messages',
+                  selected: _filter == _SearchFilter.messages,
+                  onTap: () =>
+                      setState(() => _filter = _SearchFilter.messages),
+                ),
+                const SizedBox(width: 6),
+                _SearchFilterChip(
+                  label: 'Activities',
+                  selected: _filter == _SearchFilter.activities,
+                  onTap: () =>
+                      setState(() => _filter = _SearchFilter.activities),
+                ),
+                const Spacer(),
+                Text(
+                  hasQuery
+                      ? '${results.length} match${results.length == 1 ? '' : 'es'}'
+                      : '${results.length} entr${results.length == 1 ? 'y' : 'ies'}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: colors.textTertiary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: colors.border),
+          Expanded(
+            child: results.isEmpty
+                ? _SearchPanelEmptyState(
+                    query: _query.trim(),
+                    totalRecords: widget.records.length,
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: results.length,
+                    separatorBuilder: (_, _) =>
+                        Divider(height: 1, color: colors.border),
+                    itemBuilder: (context, index) {
+                      final record = results[index];
+                      return _SearchResultRow(
+                        record: record,
+                        query: _query.trim(),
+                        expanded: _expanded.contains(record.id),
+                        onToggle: () {
+                          setState(() {
+                            if (!_expanded.add(record.id)) {
+                              _expanded.remove(record.id);
+                            }
+                          });
+                        },
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchFilterChip extends StatelessWidget {
+  const _SearchFilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected ? colors.accent : colors.surfaceMuted,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: selected ? colors.accent : colors.border,
+              width: 1,
+            ),
+          ),
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: selected ? colors.accentOn : colors.textSecondary,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchPanelEmptyState extends StatelessWidget {
+  const _SearchPanelEmptyState({
+    required this.query,
+    required this.totalRecords,
+  });
+
+  final String query;
+  final int totalRecords;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final hasQuery = query.isNotEmpty;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              hasQuery ? Icons.search_off_rounded : Icons.search_rounded,
+              color: colors.textTertiary,
+              size: 36,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              hasQuery
+                  ? 'No matches for "$query"'
+                  : 'Search messages and activities',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: colors.textPrimary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              hasQuery
+                  ? 'Try a different term or switch filter.'
+                  : 'Searching $totalRecords loaded entries.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textTertiary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchResultRow extends StatelessWidget {
+  const _SearchResultRow({
+    required this.record,
+    required this.query,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final _SearchRecord record;
+  final String query;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final theme = Theme.of(context);
+    final isMessage = record.kind == _SearchRecordKind.message;
+    final leadingIcon = isMessage
+        ? (record.message!.role == 'user'
+              ? Icons.person_outline_rounded
+              : Icons.auto_awesome_rounded)
+        : _iconForActivity(record.activity!.type);
+    final snippet = _SnippetText(
+      body: record.kind == _SearchRecordKind.message
+          ? record.message!.text
+          : _activityPreviewBody(record.activity!),
+      query: query,
+    );
+    return InkWell(
+      onTap: onToggle,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: colors.surfaceMuted,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    leadingIcon,
+                    size: 16,
+                    color: isMessage
+                        ? (record.message!.role == 'user'
+                              ? colors.accent
+                              : colors.textSecondary)
+                        : colors.textSecondary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              record.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: colors.textPrimary,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _formatMessageTime(record.createdAt),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colors.textTertiary,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      snippet,
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  expanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  size: 18,
+                  color: colors.textTertiary,
+                ),
+              ],
+            ),
+            if (expanded) ...[
+              const SizedBox(height: 10),
+              _SearchResultExpanded(record: record, query: query),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  static IconData _iconForActivity(String type) {
+    switch (type) {
+      case 'command':
+        return Icons.terminal_rounded;
+      case 'file_change':
+        return Icons.edit_note_rounded;
+      case 'turn_diff':
+        return Icons.difference_rounded;
+      case 'web_search':
+        return Icons.travel_explore_rounded;
+      case 'image_generation':
+        return Icons.image_rounded;
+      default:
+        return Icons.bolt_rounded;
+    }
+  }
+
+  static String _activityPreviewBody(SessionActivity activity) {
+    switch (activity.type) {
+      case 'command':
+        final out = (activity.output ?? '').trim();
+        return out.isEmpty ? (activity.command ?? '') : out;
+      case 'file_change':
+        return activity.changes.map((c) => c.path).join('\n');
+      case 'turn_diff':
+        return activity.changes.map((c) => c.path).join('\n');
+      case 'web_search':
+        return [
+          if ((activity.query ?? '').isNotEmpty) activity.query!,
+          ...activity.queries,
+          if ((activity.targetUrl ?? '').isNotEmpty) activity.targetUrl!,
+        ].join('\n');
+      case 'image_generation':
+        return activity.savedPath ?? '';
+      default:
+        return (activity.output ?? activity.command ?? '').trim();
+    }
+  }
+}
+
+class _SnippetText extends StatelessWidget {
+  const _SnippetText({required this.body, required this.query});
+
+  final String body;
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final theme = Theme.of(context);
+    final baseStyle = theme.textTheme.bodySmall?.copyWith(
+      color: colors.textSecondary,
+      height: 1.3,
+    );
+    final lowerBody = body.toLowerCase();
+    final lowerQuery = query.toLowerCase();
+    if (query.isEmpty || !lowerBody.contains(lowerQuery)) {
+      final oneLine = body.replaceAll('\n', ' ').trim();
+      final clipped = oneLine.length > 140
+          ? '${oneLine.substring(0, 140)}…'
+          : oneLine;
+      return Text(
+        clipped.isEmpty ? '—' : clipped,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: baseStyle,
+      );
+    }
+    final idx = lowerBody.indexOf(lowerQuery);
+    const radius = 70;
+    final start = (idx - radius).clamp(0, body.length);
+    final end = (idx + query.length + radius).clamp(0, body.length);
+    final leading = start > 0 ? '…' : '';
+    final trailing = end < body.length ? '…' : '';
+    final before = body.substring(start, idx).replaceAll('\n', ' ');
+    final match = body.substring(idx, idx + query.length);
+    final after = body
+        .substring(idx + query.length, end)
+        .replaceAll('\n', ' ');
+    return RichText(
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        style: baseStyle,
+        children: [
+          TextSpan(text: '$leading$before'),
+          TextSpan(
+            text: match,
+            style: baseStyle?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.w800,
+              backgroundColor: colors.accent.withValues(alpha: 0.25),
+            ),
+          ),
+          TextSpan(text: '$after$trailing'),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchResultExpanded extends StatelessWidget {
+  const _SearchResultExpanded({required this.record, required this.query});
+
+  final _SearchRecord record;
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (record.kind == _SearchRecordKind.message) {
+      final message = record.message!;
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.surfaceMuted,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: colors.border),
+        ),
+        child: SelectableText(
+          message.text.isEmpty ? '—' : message.text,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: colors.textPrimary,
+            height: 1.4,
+          ),
+        ),
+      );
+    }
+    final activity = record.activity!;
+    final meta = <Widget>[];
+    void addLine(String label, String value) {
+      if (value.trim().isEmpty) return;
+      meta.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: RichText(
+            text: TextSpan(
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+              ),
+              children: [
+                TextSpan(
+                  text: '$label ',
+                  style: TextStyle(
+                    color: colors.textTertiary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                TextSpan(
+                  text: value,
+                  style: monoStyle(color: colors.textSecondary, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    addLine('type', activity.type);
+    addLine('status', activity.status);
+    if ((activity.command ?? '').isNotEmpty) {
+      addLine('command', activity.command!);
+    }
+    if ((activity.cwd ?? '').isNotEmpty) addLine('cwd', activity.cwd!);
+    if ((activity.query ?? '').isNotEmpty) addLine('query', activity.query!);
+    if (activity.queries.isNotEmpty) {
+      addLine('queries', activity.queries.join(' · '));
+    }
+    if ((activity.targetUrl ?? '').isNotEmpty) {
+      addLine('url', activity.targetUrl!);
+    }
+    if ((activity.savedPath ?? '').isNotEmpty) {
+      addLine('saved', activity.savedPath!);
+    }
+    if (activity.changes.isNotEmpty) {
+      addLine(
+        'paths',
+        activity.changes.map((c) => c.path).join('\n  '),
+      );
+    }
+    final output = (activity.output ?? '').trim();
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ...meta,
+          if (output.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: colors.canvas,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: colors.border),
+              ),
+              child: SelectableText(
+                output.length > 4000
+                    ? '…${output.substring(output.length - 4000)}'
+                    : output,
+                style: monoStyle(color: colors.textPrimary, fontSize: 12),
+              ),
+            ),
+          ],
         ],
       ),
     );
