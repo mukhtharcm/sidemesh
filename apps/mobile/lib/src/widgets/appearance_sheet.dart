@@ -220,7 +220,7 @@ class _SwatchGrid extends StatelessWidget {
       crossAxisCount: crossAxisCount,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: 1.35,
+      childAspectRatio: crossAxisCount == 3 ? 1.15 : 1.05,
       mainAxisSpacing: 12,
       crossAxisSpacing: 12,
       children: [
