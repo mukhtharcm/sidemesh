@@ -162,6 +162,12 @@ class _SessionScreenState extends State<SessionScreen>
   bool _inspectorRestoreAttempted = false;
   bool _inspectorSawOurSurface = false;
 
+  // Ticks whenever the timeline inputs change so pane-3 surfaces
+  // (currently the search panel) can rebuild with fresh records. A
+  // simple ValueNotifier<int> is the lightest way to bridge the
+  // session screen's state into a sibling pane.
+  final ValueNotifier<int> _timelineRevision = ValueNotifier<int>(0);
+
   void _clearLiveAssistantMessage() {
     _liveAssistantNotifier.value = null;
   }
@@ -217,10 +223,23 @@ class _SessionScreenState extends State<SessionScreen>
     final ownerKey = _inspectorOwnerKey();
     final kind = await InspectorPersistence.load(ownerKey);
     if (!mounted || _disposed) return;
-    if (kind == null) return;
+    final cur = controller.current;
+    // If a previous session's surface is still mounted in the pane, close
+    // it now that our owner is active — otherwise we'd be inspecting the
+    // wrong session.
+    void closeOrphan() {
+      final lingering = controller.current;
+      if (lingering != null && lingering.ownerKey != ownerKey) {
+        controller.closeForOwner(lingering.ownerKey);
+      }
+    }
+
+    if (kind == null) {
+      closeOrphan();
+      return;
+    }
     // If something else has already opened a surface for this owner
     // (e.g. the shell's debug shortcut) don't stomp it.
-    final cur = controller.current;
     if (cur != null && cur.ownerKey == ownerKey) return;
     switch (kind) {
       case InspectorSurfaceKind.search:
@@ -230,6 +249,7 @@ class _SessionScreenState extends State<SessionScreen>
             controller: _searchController,
             focusNode: _searchFocusNode,
             recordsBuilder: _buildSearchRecords,
+            refresh: _timelineRevision,
           ),
         );
         break;
@@ -302,6 +322,7 @@ class _SessionScreenState extends State<SessionScreen>
     _liveAssistantNotifier.dispose();
     _thinkingNotifier.dispose();
     _showJumpToLatest.dispose();
+    _timelineRevision.dispose();
     super.dispose();
   }
 
@@ -326,6 +347,7 @@ class _SessionScreenState extends State<SessionScreen>
           controller: _searchController,
           focusNode: _searchFocusNode,
           recordsBuilder: _buildSearchRecords,
+          refresh: _timelineRevision,
         ),
       );
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2091,6 +2113,12 @@ class _SessionScreenState extends State<SessionScreen>
     _entriesActivitiesRef = _activities;
     _entriesLiveAssistantId = liveAssistant?.id;
     _cachedEntries = entries;
+    // Notify pane-3 surfaces (search) that records should be rebuilt.
+    // Scheduled post-frame so we don't call notifyListeners during build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_disposed) return;
+      _timelineRevision.value++;
+    });
     return entries;
   }
 
