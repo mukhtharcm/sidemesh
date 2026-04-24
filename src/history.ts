@@ -7,6 +7,7 @@ import {
   buildCommandActivityFromGuardianAssessment,
   buildCommandActivityFromRolloutEvent,
   buildFileChangeActivityFromRolloutEvent,
+  buildImageGenerationActivityFromRolloutEvent,
 } from "./activity.js";
 import type {
   RolloutLog,
@@ -233,6 +234,18 @@ function parseActivity(parsed: any, seq: number): SessionActivity | null {
       return buildCommandActivityFromRolloutEvent(payload, createdAt, seq);
     case "patch_apply_end":
       return buildFileChangeActivityFromRolloutEvent(payload, createdAt, seq);
+    case "image_generation_begin":
+      return buildImageGenerationActivityFromRolloutEvent(
+        { ...payload, status: "in_progress" },
+        createdAt,
+        seq,
+      );
+    case "image_generation_end":
+      return buildImageGenerationActivityFromRolloutEvent(
+        payload,
+        createdAt,
+        seq,
+      );
     case "guardian_assessment":
       return buildCommandActivityFromGuardianAssessment(payload, createdAt, seq);
     default:
