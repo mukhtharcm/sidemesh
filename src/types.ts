@@ -26,6 +26,34 @@ export interface WorkspaceSummary {
   lastUsedAt: number;
 }
 
+export interface SkillInterfaceSummary {
+  displayName?: string | null;
+  shortDescription?: string | null;
+  brandColor?: string | null;
+  defaultPrompt?: string | null;
+}
+
+export interface SkillSummary {
+  name: string;
+  description: string;
+  shortDescription?: string | null;
+  interface?: SkillInterfaceSummary | null;
+  path: string;
+  scope: "user" | "repo" | "system" | "admin" | string;
+  enabled: boolean;
+}
+
+export interface SkillErrorInfo {
+  path: string;
+  message: string;
+}
+
+export interface SkillCatalogEntry {
+  cwd: string;
+  skills: SkillSummary[];
+  errors: SkillErrorInfo[];
+}
+
 export interface SessionMessage {
   id: string;
   role: "user" | "assistant" | "system";
