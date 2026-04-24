@@ -5346,7 +5346,36 @@ class _ActivityCardState extends State<_ActivityCard> {
   static const _collapsedLineLimit = 15;
   bool _outputExpanded = false;
   bool _diffExpanded = false;
-  late bool _cardCollapsed = widget.defaultCollapsed;
+  late bool _cardCollapsed = _resolveInitialCollapsed();
+  bool _userOverrode = false;
+
+  bool get _activityRunning {
+    const terminal = {'completed', 'failed', 'declined'};
+    return !terminal.contains(widget.activity.status);
+  }
+
+  bool _resolveInitialCollapsed() {
+    if (widget.activity.type == 'image_generation') {
+      return widget.defaultCollapsed;
+    }
+    if (_activityRunning) return false;
+    return widget.defaultCollapsed;
+  }
+
+  @override
+  void didUpdateWidget(covariant _ActivityCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_userOverrode) return;
+    if (widget.activity.type == 'image_generation') return;
+    const terminal = {'completed', 'failed', 'declined'};
+    final wasRunning = !terminal.contains(oldWidget.activity.status);
+    final isRunning = _activityRunning;
+    if (wasRunning && !isRunning && !_cardCollapsed) {
+      setState(() => _cardCollapsed = true);
+    } else if (!wasRunning && isRunning && _cardCollapsed) {
+      setState(() => _cardCollapsed = false);
+    }
+  }
 
   void _openWorkspaceFile(String path) => widget.onOpenFile?.call(path);
 
@@ -5431,7 +5460,10 @@ class _ActivityCardState extends State<_ActivityCard> {
               children: [
                 InkWell(
                   onTap: () {
-                    setState(() => _cardCollapsed = !_cardCollapsed);
+                    setState(() {
+                      _cardCollapsed = !_cardCollapsed;
+                      _userOverrode = true;
+                    });
                   },
                   borderRadius: BorderRadius.circular(10),
                   child: Padding(
