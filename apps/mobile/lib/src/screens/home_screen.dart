@@ -176,8 +176,12 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   Future<void> _openSession(HostProfile host, SessionSummary session) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (context) =>
-            SessionScreen(host: host, session: session, api: _api),
+        builder: (context) => SessionScreen(
+          host: host,
+          session: session,
+          api: _api,
+          onOpenSession: (next) => unawaited(_openSession(host, next)),
+        ),
       ),
     );
     if (!mounted) {
