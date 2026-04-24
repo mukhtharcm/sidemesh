@@ -1753,6 +1753,162 @@ class _SessionScreenState extends State<SessionScreen>
     final session = _session ?? widget.session;
     final colors = context.colors;
     final timelineEntries = _buildTimelineEntries();
+    final bodyContent = Column(
+      children: [
+        ListenableBuilder(
+          listenable: _favorites,
+          builder: (context, _) {
+            final isCompact = MediaQuery.of(context).size.width < 600;
+            final favorite = _favorites.isFavorite(widget.host, session.id);
+            if (isCompact) {
+              return _SessionHeaderStrip(
+                host: widget.host,
+                session: session,
+                running: _running,
+                favorite: favorite,
+                onDetails: () => _showSessionDetailsSheet(session),
+              );
+            }
+            return _SessionHeader(
+              host: widget.host,
+              session: session,
+              running: _running,
+              favorite: favorite,
+              onDetails: () => _showSessionDetailsSheet(session),
+            );
+          },
+        ),
+        if ((_history?.isTruncated ?? false) && !_historyBannerDismissed)
+          Dismissible(
+            key: ValueKey('history_banner_${session.id}'),
+            direction: DismissDirection.horizontal,
+            onDismissed: (_) {
+              setState(() => _historyBannerDismissed = true);
+            },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: _HistoryTruncationCard(
+                history: _history!,
+                loading: _loadingOlderHistory,
+                onLoadOlderHistory: _loadOlderTranscript,
+              ),
+            ),
+          ),
+        if (_pendingAction != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: _PendingActionCard(
+              action: _pendingAction!,
+              onRespond: _respondAction,
+            ),
+          ),
+        Expanded(
+          child: (_loading && timelineEntries.isEmpty)
+              ? const MeshLoader()
+              : Stack(
+                  children: [
+                    RefreshIndicator(
+                      onRefresh: () => _loadSnapshot(scrollToBottom: false),
+                      edgeOffset: 0,
+                      displacement: 28,
+                      child: SelectionArea(
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          reverse: true,
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          itemCount: timelineEntries.length,
+                          itemBuilder: (context, index) {
+                            final entry =
+                                timelineEntries[timelineEntries.length -
+                                    index -
+                                    1];
+                            return KeyedSubtree(
+                              key: ValueKey(entry.keyId),
+                              child: switch (entry.kind) {
+                                _TimelineEntryKind.message => _MessageBubble(
+                                  host: widget.host,
+                                  api: widget.api,
+                                  message: entry.message!,
+                                  onOpenFile: _openWorkspaceFile,
+                                ),
+                                _TimelineEntryKind.activity => _ActivityCard(
+                                  host: widget.host,
+                                  api: widget.api,
+                                  activity: entry.activity!,
+                                  sessionCwd: session.cwd,
+                                  defaultCollapsed:
+                                      entry.activity!.type !=
+                                      'image_generation',
+                                  onOpenFile: _openWorkspaceFile,
+                                ),
+                                _TimelineEntryKind.liveAssistant =>
+                                  _LiveAssistantBubble(
+                                    host: widget.host,
+                                    api: widget.api,
+                                    message: _liveAssistantNotifier,
+                                    onOpenFile: _openWorkspaceFile,
+                                  ),
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      right: 16,
+                      bottom: 12,
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: _showJumpToLatest,
+                        builder: (context, show, _) {
+                          return IgnorePointer(
+                            ignoring: !show,
+                            child: AnimatedOpacity(
+                              opacity: show ? 1 : 0,
+                              duration: const Duration(milliseconds: 160),
+                              curve: Curves.easeOut,
+                              child: _JumpToLatestPill(
+                                onTap: () {
+                                  if (!_scrollController.hasClients) {
+                                    return;
+                                  }
+                                  _scrollController.animateTo(
+                                    0,
+                                    duration: const Duration(milliseconds: 240),
+                                    curve: Curves.easeOut,
+                                  );
+                                },
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+        _ComposerStatusStrip(thinking: _thinkingNotifier),
+        _Composer(
+          controller: _composerController,
+          attachments: _draftAttachments,
+          skills: _draftSkillMentions,
+          activeSkillQuery: _activeSkillQuery?.query,
+          skillSuggestions: _skillSuggestions,
+          loadingSkills: _loadingSkills,
+          skillError: _skillsError,
+          sending: _sending,
+          onPickImages: _pickComposerImages,
+          onRemoveAttachment: _removeDraftAttachment,
+          onSelectSkill: _insertSkillMention,
+          onRemoveSkill: _removeDraftSkillMention,
+          onSend: _sendInput,
+          onDismiss: _dismissKeyboard,
+          submitOnEnter: widget.topPadding != null,
+        ),
+      ],
+    );
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -1898,170 +2054,13 @@ class _SessionScreenState extends State<SessionScreen>
           const SizedBox(width: 4),
         ],
       ),
-      body: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: _dismissKeyboard,
-        child: Column(
-          children: [
-            ListenableBuilder(
-              listenable: _favorites,
-              builder: (context, _) {
-                final isCompact = MediaQuery.of(context).size.width < 600;
-                final favorite = _favorites.isFavorite(widget.host, session.id);
-                if (isCompact) {
-                  return _SessionHeaderStrip(
-                    host: widget.host,
-                    session: session,
-                    running: _running,
-                    favorite: favorite,
-                    onDetails: () => _showSessionDetailsSheet(session),
-                  );
-                }
-                return _SessionHeader(
-                  host: widget.host,
-                  session: session,
-                  running: _running,
-                  favorite: favorite,
-                  onDetails: () => _showSessionDetailsSheet(session),
-                );
-              },
-            ),
-            if ((_history?.isTruncated ?? false) && !_historyBannerDismissed)
-              Dismissible(
-                key: ValueKey('history_banner_${session.id}'),
-                direction: DismissDirection.horizontal,
-                onDismissed: (_) {
-                  setState(() => _historyBannerDismissed = true);
-                },
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: _HistoryTruncationCard(
-                    history: _history!,
-                    loading: _loadingOlderHistory,
-                    onLoadOlderHistory: _loadOlderTranscript,
-                  ),
-                ),
-              ),
-            if (_pendingAction != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                child: _PendingActionCard(
-                  action: _pendingAction!,
-                  onRespond: _respondAction,
-                ),
-              ),
-            Expanded(
-              child: (_loading && timelineEntries.isEmpty)
-                  ? const MeshLoader()
-                  : Stack(
-                      children: [
-                        RefreshIndicator(
-                          onRefresh: () => _loadSnapshot(scrollToBottom: false),
-                          edgeOffset: 0,
-                          displacement: 28,
-                          child: SelectionArea(
-                            child: ListView.builder(
-                              controller: _scrollController,
-                              reverse: true,
-                              keyboardDismissBehavior:
-                                  ScrollViewKeyboardDismissBehavior.onDrag,
-                              padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                              physics: const AlwaysScrollableScrollPhysics(),
-                              itemCount: timelineEntries.length,
-                              itemBuilder: (context, index) {
-                                final entry =
-                                    timelineEntries[timelineEntries.length -
-                                        index -
-                                        1];
-                                return KeyedSubtree(
-                                  key: ValueKey(entry.keyId),
-                                  child: switch (entry.kind) {
-                                    _TimelineEntryKind.message =>
-                                      _MessageBubble(
-                                        host: widget.host,
-                                        api: widget.api,
-                                        message: entry.message!,
-                                        onOpenFile: _openWorkspaceFile,
-                                      ),
-                                    _TimelineEntryKind.activity =>
-                                      _ActivityCard(
-                                        host: widget.host,
-                                        api: widget.api,
-                                        activity: entry.activity!,
-                                        sessionCwd: session.cwd,
-                                        defaultCollapsed:
-                                            entry.activity!.type !=
-                                            'image_generation',
-                                        onOpenFile: _openWorkspaceFile,
-                                      ),
-                                    _TimelineEntryKind.liveAssistant =>
-                                      _LiveAssistantBubble(
-                                        host: widget.host,
-                                        api: widget.api,
-                                        message: _liveAssistantNotifier,
-                                        onOpenFile: _openWorkspaceFile,
-                                      ),
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          right: 16,
-                          bottom: 12,
-                          child: ValueListenableBuilder<bool>(
-                            valueListenable: _showJumpToLatest,
-                            builder: (context, show, _) {
-                              return IgnorePointer(
-                                ignoring: !show,
-                                child: AnimatedOpacity(
-                                  opacity: show ? 1 : 0,
-                                  duration: const Duration(milliseconds: 160),
-                                  curve: Curves.easeOut,
-                                  child: _JumpToLatestPill(
-                                    onTap: () {
-                                      if (!_scrollController.hasClients) {
-                                        return;
-                                      }
-                                      _scrollController.animateTo(
-                                        0,
-                                        duration: const Duration(
-                                          milliseconds: 240,
-                                        ),
-                                        curve: Curves.easeOut,
-                                      );
-                                    },
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-            ),
-            _ComposerStatusStrip(thinking: _thinkingNotifier),
-            _Composer(
-              controller: _composerController,
-              attachments: _draftAttachments,
-              skills: _draftSkillMentions,
-              activeSkillQuery: _activeSkillQuery?.query,
-              skillSuggestions: _skillSuggestions,
-              loadingSkills: _loadingSkills,
-              skillError: _skillsError,
-              sending: _sending,
-              onPickImages: _pickComposerImages,
-              onRemoveAttachment: _removeDraftAttachment,
-              onSelectSkill: _insertSkillMention,
-              onRemoveSkill: _removeDraftSkillMention,
-              onSend: _sendInput,
-              onDismiss: _dismissKeyboard,
-              submitOnEnter: widget.topPadding != null,
-            ),
-          ],
-        ),
-      ),
+      body: widget.topPadding == null
+          ? GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _dismissKeyboard,
+              child: bodyContent,
+            )
+          : bodyContent,
     );
     if (widget.topPadding == null) {
       return scaffold;
@@ -2540,14 +2539,17 @@ class _Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final isMacDesktop =
+        submitOnEnter && defaultTargetPlatform == TargetPlatform.macOS;
+    final enableDesktopSubmitShortcut = submitOnEnter && !isMacDesktop;
     Widget field = TextField(
       controller: controller,
       minLines: 1,
       maxLines: 6,
-      onTapOutside: (_) => onDismiss(),
+      onTapOutside: isMacDesktop ? null : (_) => onDismiss(),
       style: Theme.of(context).textTheme.bodyMedium,
       decoration: InputDecoration(
-        hintText: submitOnEnter
+        hintText: enableDesktopSubmitShortcut
             ? 'Message this session — Enter to send, Shift+Enter for newline'
             : 'Message this session',
         hintStyle: TextStyle(color: colors.textTertiary),
@@ -2557,7 +2559,7 @@ class _Composer extends StatelessWidget {
         contentPadding: const EdgeInsets.symmetric(vertical: 14),
       ),
     );
-    if (submitOnEnter) {
+    if (enableDesktopSubmitShortcut) {
       // Desktop affordance: bare Enter sends, Shift+Enter inserts a newline.
       // Wrapping the TextField with CallbackShortcuts at a higher priority
       // than its default newline handler.
