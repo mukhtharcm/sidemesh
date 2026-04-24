@@ -98,6 +98,27 @@ class ApiClient {
     return SessionStatus.fromJson(_decodeObject(response));
   }
 
+  Future<SessionGitStatus> fetchGitStatus(
+    HostProfile host,
+    String sessionId,
+  ) async {
+    final response = await _get(host, '/api/sessions/$sessionId/git');
+    return SessionGitStatus.fromJson(_decodeObject(response));
+  }
+
+  Future<SessionGitDiff> fetchGitDiff(
+    HostProfile host,
+    String sessionId, {
+    required String kind,
+  }) async {
+    final response = await _get(
+      host,
+      '/api/sessions/$sessionId/git/diff',
+      queryParameters: {'kind': kind},
+    );
+    return SessionGitDiff.fromJson(_decodeObject(response));
+  }
+
   Future<SessionSummary> createSession(
     HostProfile host, {
     required String cwd,

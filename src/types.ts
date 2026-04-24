@@ -17,6 +17,50 @@ export interface SessionSummary {
   status: string;
   rolloutPath: string | null;
   runtime: SessionRuntimeSummary | null;
+  gitInfo: GitInfoSummary | null;
+}
+
+export interface GitInfoSummary {
+  sha: string | null;
+  branch: string | null;
+  originUrl: string | null;
+}
+
+export interface SessionGitFileStatus {
+  path: string;
+  originalPath: string | null;
+  indexStatus: string;
+  worktreeStatus: string;
+}
+
+export interface SessionGitStatus {
+  isRepo: boolean;
+  cwd: string;
+  repoRoot: string | null;
+  branch: string | null;
+  sha: string | null;
+  shortSha: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  changed: number;
+  originUrl: string | null;
+  files: SessionGitFileStatus[];
+  filesTruncated: boolean;
+  refreshedAt: number;
+  error: string | null;
+}
+
+export interface SessionGitDiff {
+  kind: "working" | "staged" | "unstaged" | "remote";
+  diff: string;
+  baseSha: string | null;
+  truncated: boolean;
+  maxChars: number;
 }
 
 export interface WorkspaceSummary {
@@ -217,6 +261,7 @@ export interface ThreadRecord {
   source: string | { custom?: string; subAgent?: unknown };
   path: string | null;
   status: ThreadStatus;
+  gitInfo?: GitInfoSummary | null;
   turns?: Array<TurnRecord>;
 }
 

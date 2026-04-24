@@ -74,13 +74,10 @@ class _DesktopShellState extends State<DesktopShell> {
         setState(() => _query = '');
         return;
       }
-      _searchDebounce = Timer(
-        const Duration(milliseconds: 140),
-        () {
-          if (!mounted) return;
-          setState(() => _query = _searchController.text);
-        },
-      );
+      _searchDebounce = Timer(const Duration(milliseconds: 140), () {
+        if (!mounted) return;
+        setState(() => _query = _searchController.text);
+      });
     });
   }
 
@@ -173,9 +170,7 @@ class _DesktopShellState extends State<DesktopShell> {
                       const SizedBox(width: 8),
                       Text(
                         'Keyboard shortcuts',
-                        style: Theme.of(dialogContext)
-                            .textTheme
-                            .titleMedium
+                        style: Theme.of(dialogContext).textTheme.titleMedium
                             ?.copyWith(
                               color: colors.textPrimary,
                               fontWeight: FontWeight.w600,
@@ -293,6 +288,7 @@ class _DesktopShellState extends State<DesktopShell> {
       source: 'appServer',
       status: 'pendingApproval',
       runtime: null,
+      gitInfo: null,
     );
   }
 
@@ -543,13 +539,10 @@ class _Sidebar extends StatelessWidget {
                   Expanded(
                     child: Text(
                       'Sidemesh',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.1,
-                          ),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.1,
+                      ),
                     ),
                   ),
                   _SidebarIconAction(
@@ -647,10 +640,7 @@ class _SidebarSegments extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
               onTap: () => onSelect(s),
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 5,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -955,10 +945,8 @@ class _DetailPaneState extends State<_DetailPane> {
       duration: const Duration(milliseconds: 180),
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
-      transitionBuilder: (child, animation) => FadeTransition(
-        opacity: animation,
-        child: child,
-      ),
+      transitionBuilder: (child, animation) =>
+          FadeTransition(opacity: animation, child: child),
       child: child,
     );
   }
@@ -1066,8 +1054,7 @@ class _DetailPaneState extends State<_DetailPane> {
               api: widget.api,
               embedded: true,
               topPadding: widget.titlebarInset + 6,
-              onOpenSession: (session) =>
-                  widget.onOpenSession(host, session),
+              onOpenSession: (session) => widget.onOpenSession(host, session),
             ),
           ),
           Positioned(

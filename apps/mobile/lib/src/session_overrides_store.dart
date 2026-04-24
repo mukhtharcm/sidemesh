@@ -50,6 +50,7 @@ class SessionOverridesStore extends ChangeNotifier {
       source: incoming.source,
       status: incoming.status,
       runtime: incoming.runtime,
+      gitInfo: incoming.gitInfo,
     );
   }
 }

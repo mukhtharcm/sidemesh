@@ -141,6 +141,10 @@ class _SessionScreenState extends State<SessionScreen>
   // this session. Reset whenever a brand-new snapshot arrives so the
   // banner can reappear if the truncation window changes.
   bool _historyBannerDismissed = false;
+  SessionGitStatus? _gitStatus;
+  bool _gitStatusLoading = false;
+  String? _gitStatusError;
+  int _gitStatusRequestId = 0;
 
   void _clearLiveAssistantMessage() {
     _liveAssistantNotifier.value = null;
@@ -159,6 +163,7 @@ class _SessionScreenState extends State<SessionScreen>
     _markCurrentSessionSeen();
     _loadSnapshot();
     _loadSkills();
+    unawaited(_loadGitStatus(silent: true));
     _connectLive();
   }
 
@@ -236,6 +241,39 @@ class _SessionScreenState extends State<SessionScreen>
       setState(() {
         _loadingSkills = false;
         _skillsError = friendlyError(error);
+      });
+    }
+  }
+
+  Future<void> _loadGitStatus({bool silent = false}) async {
+    final requestId = ++_gitStatusRequestId;
+    if (!silent && mounted) {
+      setState(() {
+        _gitStatusLoading = true;
+        _gitStatusError = null;
+      });
+    }
+
+    try {
+      final status = await widget.api.fetchGitStatus(
+        widget.host,
+        widget.session.id,
+      );
+      if (!mounted || requestId != _gitStatusRequestId) {
+        return;
+      }
+      setState(() {
+        _gitStatus = status;
+        _gitStatusLoading = false;
+        _gitStatusError = status.error;
+      });
+    } catch (error) {
+      if (!mounted || requestId != _gitStatusRequestId) {
+        return;
+      }
+      setState(() {
+        _gitStatusLoading = false;
+        _gitStatusError = friendlyError(error);
       });
     }
   }
@@ -812,6 +850,7 @@ class _SessionScreenState extends State<SessionScreen>
               scrollToBottom: false,
             ),
           );
+          unawaited(_loadGitStatus(silent: true));
         });
       case 'activity_updated':
         final activity = event.activity;
@@ -1476,6 +1515,54 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
+  Future<void> _showGitSheet(
+    SessionSummary session, {
+    bool forceRefresh = false,
+  }) async {
+    if (forceRefresh || _gitStatus == null) {
+      await _loadGitStatus();
+    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.colors.surface,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (sheetContext) => _GitDetailsSheet(
+        session: session,
+        status: _gitStatus,
+        loading: _gitStatusLoading,
+        error: _gitStatusError,
+        onRefresh: () {
+          Navigator.of(sheetContext).pop();
+          unawaited(_showGitSheet(session, forceRefresh: true));
+        },
+        onShowDiff: (kind) {
+          Navigator.of(sheetContext).pop();
+          unawaited(_showGitDiffSheet(kind));
+        },
+      ),
+    );
+  }
+
+  Future<void> _showGitDiffSheet(String kind) async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.colors.surface,
+      showDragHandle: true,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => _GitDiffSheet(
+        future: widget.api.fetchGitDiff(
+          widget.host,
+          widget.session.id,
+          kind: kind,
+        ),
+      ),
+    );
+  }
+
   Future<void> _showSessionDetailsSheet(SessionSummary session) async {
     final colors = context.colors;
     await showModalBottomSheet<void>(
@@ -1500,6 +1587,24 @@ class _SessionScreenState extends State<SessionScreen>
               _DetailRow(label: 'Working dir', value: session.cwd),
               _DetailRow(label: 'Status', value: _running ? 'Running' : 'Idle'),
               _DetailRow(label: 'Source', value: session.source),
+              if (_gitHeaderLabel(session, _gitStatus) != null) ...[
+                _DetailRow(
+                  label: 'Git',
+                  value: _gitHeaderLabel(session, _gitStatus)!,
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      unawaited(_showGitSheet(session));
+                    },
+                    icon: const Icon(Icons.account_tree_outlined, size: 18),
+                    label: const Text('Open Git details'),
+                  ),
+                ),
+                const SizedBox(height: 4),
+              ],
               if (session.runtime != null) ...[
                 const SizedBox(height: 14),
                 _SessionRuntimeDetails(runtime: session.runtime!),
@@ -1805,17 +1910,21 @@ class _SessionScreenState extends State<SessionScreen>
               return _SessionHeaderStrip(
                 host: widget.host,
                 session: session,
+                gitStatus: _gitStatus,
                 running: _running,
                 favorite: favorite,
                 onDetails: () => _showSessionDetailsSheet(session),
+                onGitDetails: () => _showGitSheet(session),
               );
             }
             return _SessionHeader(
               host: widget.host,
               session: session,
+              gitStatus: _gitStatus,
               running: _running,
               favorite: favorite,
               onDetails: () => _showSessionDetailsSheet(session),
+              onGitDetails: () => _showGitSheet(session),
             );
           },
         ),
@@ -2021,6 +2130,18 @@ class _SessionScreenState extends State<SessionScreen>
               },
             ),
           ),
+          if (_gitHeaderLabel(session, _gitStatus) != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: MeshIconButton(
+                icon: Icons.account_tree_outlined,
+                tooltip: 'Git details',
+                color: (_gitStatus?.dirty ?? false)
+                    ? colors.warning
+                    : colors.textSecondary,
+                onTap: () => _showGitSheet(session),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.only(right: 10),
             child: MeshIconButton(
@@ -2118,16 +2239,20 @@ class _SessionHeader extends StatelessWidget {
   const _SessionHeader({
     required this.host,
     required this.session,
+    required this.gitStatus,
     required this.running,
     required this.favorite,
     required this.onDetails,
+    required this.onGitDetails,
   });
 
   final HostProfile host;
   final SessionSummary session;
+  final SessionGitStatus? gitStatus;
   final bool running;
   final bool favorite;
   final VoidCallback onDetails;
+  final VoidCallback onGitDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -2199,6 +2324,14 @@ class _SessionHeader extends StatelessWidget {
                       ),
                     ),
                   ],
+                  if (_gitHeaderLabel(session, gitStatus) != null) ...[
+                    const SizedBox(height: 7),
+                    _GitSummaryPill(
+                      label: _gitHeaderLabel(session, gitStatus)!,
+                      dirty: gitStatus?.dirty ?? false,
+                      onTap: onGitDetails,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -2226,6 +2359,53 @@ class _SessionHeader extends StatelessWidget {
       parts.add('approval $approval');
     }
     return parts.join(' · ');
+  }
+}
+
+String? _gitHeaderLabel(SessionSummary session, SessionGitStatus? status) {
+  final branch = status?.branch ?? session.gitInfo?.branch;
+  final shortSha = status?.shortSha ?? session.gitInfo?.shortSha;
+  final label = (branch ?? shortSha ?? '').trim();
+  if (label.isEmpty) {
+    return null;
+  }
+  final changed = status?.changed ?? 0;
+  if (changed > 0) {
+    return '$label · $changed changed';
+  }
+  if ((status?.ahead ?? 0) > 0 || (status?.behind ?? 0) > 0) {
+    final ahead = status!.ahead > 0 ? '↑${status.ahead}' : null;
+    final behind = status.behind > 0 ? '↓${status.behind}' : null;
+    return [label, ahead, behind].whereType<String>().join(' · ');
+  }
+  return label;
+}
+
+class _GitSummaryPill extends StatelessWidget {
+  const _GitSummaryPill({
+    required this.label,
+    required this.dirty,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool dirty;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: GestureDetector(
+        onTap: onTap,
+        child: MeshPill(
+          label: label,
+          icon: Icons.account_tree_outlined,
+          tone: dirty ? MeshPillTone.warning : MeshPillTone.neutral,
+          mono: true,
+        ),
+      ),
+    );
   }
 }
 
@@ -2278,16 +2458,20 @@ class _SessionHeaderStrip extends StatelessWidget {
   const _SessionHeaderStrip({
     required this.host,
     required this.session,
+    required this.gitStatus,
     required this.running,
     required this.favorite,
     required this.onDetails,
+    required this.onGitDetails,
   });
 
   final HostProfile host;
   final SessionSummary session;
+  final SessionGitStatus? gitStatus;
   final bool running;
   final bool favorite;
   final VoidCallback onDetails;
+  final VoidCallback onGitDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -2334,6 +2518,20 @@ class _SessionHeaderStrip extends StatelessWidget {
                 const SizedBox(width: 6),
                 Icon(Icons.star_rounded, size: 13, color: colors.warning),
               ],
+              if (_gitHeaderLabel(session, gitStatus) != null) ...[
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: onGitDetails,
+                  child: MeshPill(
+                    label: _gitHeaderLabel(session, gitStatus)!,
+                    icon: Icons.account_tree_outlined,
+                    tone: (gitStatus?.dirty ?? false)
+                        ? MeshPillTone.warning
+                        : MeshPillTone.neutral,
+                    mono: true,
+                  ),
+                ),
+              ],
               const SizedBox(width: 6),
               Icon(Icons.tune_rounded, size: 14, color: colors.accent),
             ],
@@ -2356,6 +2554,350 @@ class _HeaderStatusDot extends StatelessWidget {
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
+}
+
+class _GitDetailsSheet extends StatelessWidget {
+  const _GitDetailsSheet({
+    required this.session,
+    required this.status,
+    required this.loading,
+    required this.error,
+    required this.onRefresh,
+    required this.onShowDiff,
+  });
+
+  final SessionSummary session;
+  final SessionGitStatus? status;
+  final bool loading;
+  final String? error;
+  final VoidCallback onRefresh;
+  final ValueChanged<String> onShowDiff;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final gitInfo = session.gitInfo;
+    final branch = status?.branch ?? gitInfo?.branch;
+    final shortSha = status?.shortSha ?? gitInfo?.shortSha;
+    final originUrl = status?.originUrl ?? gitInfo?.originUrl;
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Git details',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: loading ? null : onRefresh,
+                  icon: const Icon(Icons.refresh_rounded),
+                  tooltip: 'Refresh git status',
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (loading && status == null)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 28),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (status != null && !status!.isRepo)
+              MeshEmptyState(
+                icon: Icons.account_tree_outlined,
+                title: 'No Git repo found',
+                body:
+                    'This session working directory is not inside a Git worktree.',
+              )
+            else ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  MeshPill(
+                    label: branch ?? 'detached',
+                    icon: Icons.account_tree_outlined,
+                    tone: MeshPillTone.accent,
+                    mono: true,
+                  ),
+                  if (shortSha != null)
+                    MeshPill(
+                      label: shortSha,
+                      icon: Icons.tag_rounded,
+                      tone: MeshPillTone.neutral,
+                      mono: true,
+                    ),
+                  if (status != null)
+                    MeshPill(
+                      label: status!.dirty
+                          ? '${status!.changed} changed'
+                          : 'clean',
+                      icon: status!.dirty
+                          ? Icons.warning_amber_rounded
+                          : Icons.check_rounded,
+                      tone: status!.dirty
+                          ? MeshPillTone.warning
+                          : MeshPillTone.success,
+                      mono: true,
+                    ),
+                  if ((status?.ahead ?? 0) > 0)
+                    MeshPill(
+                      label: 'ahead ${status!.ahead}',
+                      tone: MeshPillTone.info,
+                      mono: true,
+                    ),
+                  if ((status?.behind ?? 0) > 0)
+                    MeshPill(
+                      label: 'behind ${status!.behind}',
+                      tone: MeshPillTone.info,
+                      mono: true,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              MeshCard(
+                tone: MeshCardTone.muted,
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _DetailRow(label: 'Working dir', value: session.cwd),
+                    if (status?.repoRoot != null)
+                      _DetailRow(label: 'Repo root', value: status!.repoRoot!),
+                    if (status?.upstream != null)
+                      _DetailRow(label: 'Upstream', value: status!.upstream!),
+                    if (originUrl != null)
+                      _DetailRow(label: 'Origin', value: originUrl),
+                    if (error != null)
+                      Text(
+                        error!,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: colors.warning),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => onShowDiff('working'),
+                    icon: const Icon(Icons.difference_rounded, size: 18),
+                    label: const Text('Working diff'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => onShowDiff('staged'),
+                    icon: const Icon(Icons.inventory_2_outlined, size: 18),
+                    label: const Text('Staged diff'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => onShowDiff('remote'),
+                    icon: const Icon(Icons.cloud_outlined, size: 18),
+                    label: const Text('Remote diff'),
+                  ),
+                ],
+              ),
+              if (status != null && status!.files.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Text(
+                  'Changed files',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                MeshCard(
+                  padding: EdgeInsets.zero,
+                  child: Column(
+                    children: [
+                      for (final file in status!.files.take(40))
+                        _GitFileStatusRow(file: file),
+                      if (status!.files.length > 40 || status!.filesTruncated)
+                        Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Text(
+                            status!.filesTruncated
+                                ? 'More files omitted by server cap.'
+                                : '${status!.files.length - 40} more files omitted.',
+                            style: monoStyle(
+                              color: colors.textSecondary,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GitFileStatusRow extends StatelessWidget {
+  const _GitFileStatusRow({required this.file});
+
+  final SessionGitFileStatus file;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final status = file.isUntracked
+        ? '??'
+        : '${file.indexStatus}${file.worktreeStatus}';
+    final path = file.originalPath == null
+        ? file.path
+        : '${file.originalPath} -> ${file.path}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 34,
+            child: Text(
+              status,
+              style: monoStyle(
+                color: file.isUntracked
+                    ? colors.warning
+                    : file.isStaged
+                    ? colors.success
+                    : colors.textSecondary,
+                fontWeight: FontWeight.w800,
+                fontSize: 11.5,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              path,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: monoStyle(color: colors.textPrimary, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GitDiffSheet extends StatelessWidget {
+  const _GitDiffSheet({required this.future});
+
+  final Future<SessionGitDiff> future;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.86,
+      child: FutureBuilder<SessionGitDiff>(
+        future: future,
+        builder: (context, snapshot) {
+          final title = snapshot.data == null
+              ? 'Git diff'
+              : _gitDiffTitle(snapshot.data!);
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: Builder(
+                    builder: (context) {
+                      if (snapshot.connectionState != ConnectionState.done) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return MeshEmptyState(
+                          icon: Icons.error_outline_rounded,
+                          title: 'Could not load diff',
+                          body: friendlyError(
+                            snapshot.error ?? 'Unknown error',
+                          ),
+                        );
+                      }
+                      final diff = snapshot.data!;
+                      if (diff.diff.trim().isEmpty) {
+                        return MeshEmptyState(
+                          icon: Icons.check_rounded,
+                          title: 'No diff',
+                          body: 'Git did not report changes for this view.',
+                        );
+                      }
+                      return SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (diff.truncated)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: MeshPill(
+                                  label:
+                                      'Truncated after ${diff.maxChars} chars',
+                                  icon: Icons.content_cut_rounded,
+                                  tone: MeshPillTone.warning,
+                                  mono: true,
+                                ),
+                              ),
+                            if (diff.baseSha != null)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Text(
+                                  'Base ${diff.baseSha}',
+                                  style: monoStyle(
+                                    color: colors.textSecondary,
+                                    fontSize: 11.5,
+                                  ),
+                                ),
+                              ),
+                            DiffView(diff: diff.diff),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+String _gitDiffTitle(SessionGitDiff diff) {
+  return switch (diff.kind) {
+    'staged' => 'Staged diff',
+    'unstaged' => 'Unstaged diff',
+    'remote' => 'Remote diff',
+    _ => 'Working diff',
+  };
 }
 
 class _PendingActionCard extends StatelessWidget {
