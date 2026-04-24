@@ -8006,88 +8006,82 @@ class _SearchPanelState extends State<_SearchPanel> {
               ),
             ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 10, 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colors.surfaceMuted,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: colors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.search_rounded,
-                          size: 18,
-                          color: colors.textTertiary,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: widget.controller,
-                            focusNode: widget.focusNode,
-                            autofocus: true,
-                            textInputAction: TextInputAction.search,
-                            cursorColor: colors.accent,
-                            decoration: InputDecoration(
-                              isCollapsed: true,
-                              border: InputBorder.none,
-                              hintText: 'Search transcript',
-                              hintStyle: TextStyle(
-                                color: colors.textTertiary,
-                                fontSize: 14,
-                              ),
-                            ),
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: colors.textPrimary,
-                              fontSize: 14,
-                              height: 1.4,
-                            ),
-                          ),
-                        ),
-                        if (hasQuery) ...[
-                          const SizedBox(width: 6),
-                          InkResponse(
-                            radius: 16,
-                            onTap: () {
-                              widget.controller.clear();
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.all(4),
-                              child: Icon(
-                                Icons.close_rounded,
-                                size: 16,
-                                color: colors.textSecondary,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+              decoration: BoxDecoration(
+                color: colors.surfaceMuted,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: colors.border),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.search_rounded,
+                    size: 18,
+                    color: colors.textTertiary,
                   ),
-                ),
-                if (!widget.inSheet) ...[
-                  const SizedBox(width: 4),
-                  InkResponse(
-                    radius: 20,
-                    onTap: widget.onClose,
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Icon(
-                        Icons.close_fullscreen_rounded,
-                        size: 18,
-                        color: colors.textSecondary,
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: widget.controller,
+                      focusNode: widget.focusNode,
+                      autofocus: true,
+                      textInputAction: TextInputAction.search,
+                      cursorColor: colors.accent,
+                      decoration: InputDecoration(
+                        isCollapsed: true,
+                        border: InputBorder.none,
+                        hintText: 'Search transcript',
+                        hintStyle: TextStyle(
+                          color: colors.textTertiary,
+                          fontSize: 14,
+                        ),
+                      ),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colors.textPrimary,
+                        fontSize: 14,
+                        height: 1.4,
                       ),
                     ),
                   ),
+                  if (hasQuery)
+                    InkResponse(
+                      radius: 16,
+                      onTap: () {
+                        widget.controller.clear();
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 16,
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  if (!widget.inSheet) ...[
+                    Container(
+                      width: 1,
+                      height: 18,
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      color: colors.border,
+                    ),
+                    InkResponse(
+                      radius: 18,
+                      onTap: widget.onClose,
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 16,
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
           Padding(
