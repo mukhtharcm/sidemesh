@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
 import { hostname, platform } from "node:os";
 import { randomUUID } from "node:crypto";
+import { access, stat } from "node:fs/promises";
+import nodePath from "node:path";
 
 import cors from "cors";
 import express, { type Request, type Response, type NextFunction } from "express";
@@ -591,16 +593,20 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
 
     const forceReload = parseQueryBool(query.forceReload);
+    const workspaceSkillRoots = await findWorkspaceSkillRoots(cwd);
     const payload = (await bridge.request("skills/list", {
       cwds: [cwd],
-      forceReload,
-      perCwdExtraUserRoots: null,
+      forceReload: forceReload || workspaceSkillRoots.length > 0,
+      perCwdExtraUserRoots:
+        workspaceSkillRoots.length > 0
+          ? [{ cwd, extraUserRoots: workspaceSkillRoots }]
+          : null,
     })) as { data?: unknown[] };
     const rawEntries = Array.isArray(payload.data) ? payload.data : [];
     const rawEntry =
       rawEntries.find((entry) => asString((entry as Record<string, unknown>)?.cwd) === cwd) ??
       rawEntries[0];
-    response.json(normalizeSkillCatalogEntry(rawEntry, cwd));
+    response.json(normalizeSkillCatalogEntry(rawEntry, cwd, workspaceSkillRoots));
   }));
 
   app.post("/api/skills/config/write", asyncRoute(async (request, response) => {
@@ -1637,12 +1643,109 @@ function buildSubmittedUserMessageAttachments(input: SessionInputItem[]): Sessio
   return attachments;
 }
 
-function normalizeSkillCatalogEntry(raw: unknown, cwd: string): SkillCatalogEntry {
+async function findWorkspaceSkillRoots(cwd: string): Promise<string[]> {
+  const workspaceRoot = await findWorkspaceRoot(cwd);
+  if (!workspaceRoot) {
+    return [];
+  }
+
+  const cwdDir = await resolveDirectoryPath(cwd);
+  const dirs = dirsBetween(workspaceRoot, cwdDir ?? workspaceRoot);
+  const roots: string[] = [];
+  const seen = new Set<string>();
+  for (const dir of dirs) {
+    const candidate = nodePath.join(dir, "skills");
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    if (await isDirectory(candidate)) {
+      roots.push(candidate);
+    }
+  }
+  return roots;
+}
+
+async function findWorkspaceRoot(cwd: string): Promise<string | null> {
+  let current = await resolveDirectoryPath(cwd);
+  if (!current) {
+    current = nodePath.resolve(cwd);
+  }
+
+  for (;;) {
+    if (
+      (await pathExists(nodePath.join(current, ".git"))) ||
+      (await pathExists(nodePath.join(current, ".jj"))) ||
+      (await pathExists(nodePath.join(current, ".hg")))
+    ) {
+      return current;
+    }
+    const parent = nodePath.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+async function resolveDirectoryPath(rawPath: string): Promise<string | null> {
+  const resolved = nodePath.resolve(rawPath);
+  try {
+    const metadata = await stat(resolved);
+    return metadata.isDirectory() ? resolved : nodePath.dirname(resolved);
+  } catch {
+    return null;
+  }
+}
+
+function dirsBetween(root: string, cwd: string): string[] {
+  const resolvedRoot = nodePath.resolve(root);
+  const resolvedCwd = nodePath.resolve(cwd);
+  const dirs: string[] = [];
+  let current = resolvedCwd;
+  for (;;) {
+    dirs.push(current);
+    if (current === resolvedRoot) {
+      break;
+    }
+    const parent = nodePath.dirname(current);
+    if (parent === current) {
+      return [resolvedRoot];
+    }
+    current = parent;
+  }
+  return dirs.reverse();
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function normalizeSkillCatalogEntry(
+  raw: unknown,
+  cwd: string,
+  workspaceSkillRoots: string[] = [],
+): SkillCatalogEntry {
   const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
     cwd: asString(typed.cwd) || cwd,
     skills: Array.isArray(typed.skills)
-      ? typed.skills.map(normalizeSkillSummary).filter((skill): skill is SkillSummary => skill !== null)
+      ? typed.skills
+          .map((skill) => normalizeSkillSummary(skill, workspaceSkillRoots))
+          .filter((skill): skill is SkillSummary => skill !== null)
       : [],
     errors: Array.isArray(typed.errors)
       ? typed.errors.map(normalizeSkillErrorInfo).filter((item): item is SkillErrorInfo => item !== null)
@@ -1731,7 +1834,10 @@ function normalizeModelSummary(raw: unknown): ModelSummary | null {
   };
 }
 
-function normalizeSkillSummary(raw: unknown): SkillSummary | null {
+function normalizeSkillSummary(
+  raw: unknown,
+  workspaceSkillRoots: string[] = [],
+): SkillSummary | null {
   const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
   if (!typed) {
     return null;
@@ -1767,9 +1873,25 @@ function normalizeSkillSummary(raw: unknown): SkillSummary | null {
         }
       : null,
     path,
-    scope: asString(typed.scope) || "user",
+    scope: isUnderAnyPath(path, workspaceSkillRoots)
+      ? "repo"
+      : asString(typed.scope) || "user",
     enabled: typed.enabled !== false,
   };
+}
+
+function isUnderAnyPath(path: string, roots: string[]): boolean {
+  if (roots.length === 0) {
+    return false;
+  }
+  const resolvedPath = nodePath.resolve(path);
+  return roots.some((root) => {
+    const resolvedRoot = nodePath.resolve(root);
+    return (
+      resolvedPath === resolvedRoot ||
+      resolvedPath.startsWith(`${resolvedRoot}${nodePath.sep}`)
+    );
+  });
 }
 
 function normalizeSkillErrorInfo(raw: unknown): SkillErrorInfo | null {
