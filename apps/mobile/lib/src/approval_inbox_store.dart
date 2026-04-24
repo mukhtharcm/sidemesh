@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'api_client.dart';
 import 'host_status_store.dart';
+import 'local_notification_service.dart';
 import 'models.dart';
 
 /// Lightweight DTO used to group a [PendingAction] with the host it came
@@ -34,6 +35,7 @@ class ApprovalInboxStore extends ChangeNotifier {
   ApiClient? _api;
   List<HostProfile> _hosts = const [];
   List<PendingActionEntry> _entries = const [];
+  Set<String> _seenActionKeys = <String>{};
   Set<String> _pendingHostIds = <String>{};
   List<String> _failedHostLabels = const [];
   bool _hasLoadedOnce = false;
@@ -55,8 +57,8 @@ class ApprovalInboxStore extends ChangeNotifier {
     _api = api;
     final newIds = hosts.map((h) => h.id).toSet();
     final oldIds = _hosts.map((h) => h.id).toSet();
-    final hostsChanged = newIds.length != oldIds.length ||
-        !newIds.containsAll(oldIds);
+    final hostsChanged =
+        newIds.length != oldIds.length || !newIds.containsAll(oldIds);
     _hosts = List.unmodifiable(hosts);
     _ensureTimer();
     if (hostsChanged || !_hasLoadedOnce) {
@@ -78,6 +80,7 @@ class ApprovalInboxStore extends ChangeNotifier {
 
     if (hosts.isEmpty) {
       _entries = const [];
+      _seenActionKeys = <String>{};
       _pendingHostIds = <String>{};
       _failedHostLabels = const [];
       _hasLoadedOnce = true;
@@ -94,33 +97,37 @@ class ApprovalInboxStore extends ChangeNotifier {
 
     final collected = <PendingActionEntry>[];
     final failures = <String>[];
-    await Future.wait(hosts.map((host) async {
-      try {
-        final actions = await api.fetchPendingActions(host);
-        if (gen != _loadGen) return;
-        HostStatusStore.instance.markOnline(host.id);
-        collected.addAll(
-          actions.map((a) => PendingActionEntry(host: host, action: a)),
-        );
-      } catch (error) {
-        if (gen != _loadGen) return;
-        HostStatusStore.instance.markOffline(
-          host.id,
-          error: error.toString(),
-        );
-        failures.add(host.label);
-      } finally {
-        if (gen == _loadGen) {
-          _pendingHostIds = {..._pendingHostIds}..remove(host.id);
-          notifyListeners();
+    await Future.wait(
+      hosts.map((host) async {
+        try {
+          final actions = await api.fetchPendingActions(host);
+          if (gen != _loadGen) return;
+          HostStatusStore.instance.markOnline(host.id);
+          collected.addAll(
+            actions.map((a) => PendingActionEntry(host: host, action: a)),
+          );
+        } catch (error) {
+          if (gen != _loadGen) return;
+          HostStatusStore.instance.markOffline(
+            host.id,
+            error: error.toString(),
+          );
+          failures.add(host.label);
+        } finally {
+          if (gen == _loadGen) {
+            _pendingHostIds = {..._pendingHostIds}..remove(host.id);
+            notifyListeners();
+          }
         }
-      }
-    }));
+      }),
+    );
     if (gen != _loadGen) return;
     collected.sort(
       (a, b) => b.action.requestedAt.compareTo(a.action.requestedAt),
     );
+    _notifyForNewActions(collected);
     _entries = List.unmodifiable(collected);
+    _seenActionKeys = collected.map(_actionKey).toSet();
     _failedHostLabels = List.unmodifiable(failures);
     _hasLoadedOnce = true;
     notifyListeners();
@@ -135,5 +142,22 @@ class ApprovalInboxStore extends ChangeNotifier {
     if (next.length == _entries.length) return;
     _entries = List.unmodifiable(next);
     notifyListeners();
+  }
+
+  void _notifyForNewActions(List<PendingActionEntry> entries) {
+    if (!_hasLoadedOnce) return;
+    for (final entry in entries) {
+      if (_seenActionKeys.contains(_actionKey(entry))) continue;
+      unawaited(
+        LocalNotificationService.instance.showPendingApproval(
+          host: entry.host,
+          action: entry.action,
+        ),
+      );
+    }
+  }
+
+  String _actionKey(PendingActionEntry entry) {
+    return '${entry.host.id}:${entry.action.id}';
   }
 }
