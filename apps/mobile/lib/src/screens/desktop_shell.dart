@@ -11,6 +11,7 @@ import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/appearance_sheet.dart';
 import 'home_screen.dart';
 import 'host_detail_screen.dart';
 import 'inspector/inspector_controller.dart';
@@ -1071,11 +1072,7 @@ class _ThemeToggleButtonState extends State<_ThemeToggleButton> {
       ThemeMode.light => Icons.light_mode_rounded,
       ThemeMode.system => Icons.brightness_auto_rounded,
     };
-    final String tooltip = switch (controller.mode) {
-      ThemeMode.dark => 'Theme: dark (click for system)',
-      ThemeMode.light => 'Theme: light (click for dark)',
-      ThemeMode.system => 'Theme: system (click for light)',
-    };
+    const String tooltip = 'Appearance';
     return Tooltip(
       message: tooltip,
       child: MouseRegion(
@@ -1086,14 +1083,7 @@ class _ThemeToggleButtonState extends State<_ThemeToggleButton> {
           color: Colors.transparent,
           child: InkWell(
             borderRadius: BorderRadius.circular(8),
-            onTap: () {
-              final next = switch (controller.mode) {
-                ThemeMode.system => ThemeMode.light,
-                ThemeMode.light => ThemeMode.dark,
-                ThemeMode.dark => ThemeMode.system,
-              };
-              controller.setMode(next);
-            },
+            onTap: () => showAppearanceSheet(context),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 120),
               width: 28,

@@ -16,6 +16,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/appearance_sheet.dart';
 import '../widgets/mesh_widgets.dart';
 import 'host_detail_screen.dart';
 import 'session_screen.dart';
@@ -384,19 +385,8 @@ class _TopBar extends StatelessWidget {
               ThemeMode.light => Icons.light_mode_rounded,
               ThemeMode.system => Icons.brightness_auto_rounded,
             },
-            tooltip: switch (controller.mode) {
-              ThemeMode.dark => 'Theme: dark (tap for system)',
-              ThemeMode.light => 'Theme: light (tap for dark)',
-              ThemeMode.system => 'Theme: system (tap for light)',
-            },
-            onTap: () {
-              final next = switch (controller.mode) {
-                ThemeMode.system => ThemeMode.light,
-                ThemeMode.light => ThemeMode.dark,
-                ThemeMode.dark => ThemeMode.system,
-              };
-              controller.setMode(next);
-            },
+            tooltip: 'Appearance',
+            onTap: () => showAppearanceSheet(context),
           ),
           const SizedBox(width: 8),
           MeshIconButton(
