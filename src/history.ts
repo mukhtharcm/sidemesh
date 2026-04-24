@@ -26,23 +26,23 @@ export async function loadRolloutLog(
   activityLimit: number | null = null,
 ): Promise<RolloutLog> {
   const resolvedPath = await resolveRolloutPath(sessionId, rolloutPath, codexHomePath);
-  if (!resolvedPath) {
-    return {
-      messages: [],
-      activities: [],
-      runtime: null,
-      totalMessages: 0,
-      totalActivities: 0,
-      nextSeq: 0,
-    };
+  if (!resolvedPath || !(await rolloutExists(resolvedPath))) {
+    return emptyRolloutLog();
   }
 
-  return scanRolloutFile(resolvedPath, {
-    includeMessages: true,
-    messageLimit,
-    includeActivities: true,
-    activityLimit,
-  });
+  try {
+    return await scanRolloutFile(resolvedPath, {
+      includeMessages: true,
+      messageLimit,
+      includeActivities: true,
+      activityLimit,
+    });
+  } catch (error) {
+    if (isMissingRolloutFileError(error)) {
+      return emptyRolloutLog();
+    }
+    throw error;
+  }
 }
 
 export async function loadSessionRuntime(
@@ -51,15 +51,42 @@ export async function loadSessionRuntime(
   codexHomePath: string | null,
 ): Promise<SessionRuntimeSummary | null> {
   const resolvedPath = await resolveRolloutPath(sessionId, rolloutPath, codexHomePath);
-  if (!resolvedPath) {
+  if (!resolvedPath || !(await rolloutExists(resolvedPath))) {
     return null;
   }
 
-  const parsed = await scanRolloutFile(resolvedPath, {
-    includeMessages: false,
-    includeActivities: false,
-  });
-  return parsed.runtime;
+  try {
+    const parsed = await scanRolloutFile(resolvedPath, {
+      includeMessages: false,
+      includeActivities: false,
+    });
+    return parsed.runtime;
+  } catch (error) {
+    if (isMissingRolloutFileError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function emptyRolloutLog(): RolloutLog {
+  return {
+    messages: [],
+    activities: [],
+    runtime: null,
+    totalMessages: 0,
+    totalActivities: 0,
+    nextSeq: 0,
+  };
+}
+
+function isMissingRolloutFileError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  );
 }
 
 async function resolveRolloutPath(
