@@ -5,16 +5,123 @@ import '../theme/app_palettes.dart';
 import '../theme/theme_controller.dart';
 import 'mesh_widgets.dart';
 
-/// Opens the Appearance sheet — a single surface holding brightness +
-/// theme-variant controls. Used by both the mobile top-bar button and the
-/// desktop sidebar footer.
-Future<void> showAppearanceSheet(BuildContext context) {
+/// Opens the Appearance surface — a bottom sheet on phones, an anchored
+/// popover on desktop. Caller supplies [anchor] (a [LayerLink] attached to
+/// the triggering button) to use the popover; otherwise a modal bottom sheet
+/// is shown.
+Future<void> showAppearanceSheet(
+  BuildContext context, {
+  LayerLink? anchor,
+  Size? anchorSize,
+}) {
+  if (anchor != null) {
+    return _showAppearancePopover(
+      context,
+      anchor: anchor,
+      anchorSize: anchorSize ?? const Size(28, 28),
+    );
+  }
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (context) => const _AppearanceSheet(),
   );
+}
+
+Future<void> _showAppearancePopover(
+  BuildContext context, {
+  required LayerLink anchor,
+  required Size anchorSize,
+}) {
+  final controller = ThemeScope.of(context);
+  return Navigator.of(context).push(
+    PageRouteBuilder<void>(
+      opaque: false,
+      barrierColor: Colors.black.withValues(alpha: 0.12),
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      transitionDuration: const Duration(milliseconds: 140),
+      reverseTransitionDuration: const Duration(milliseconds: 100),
+      pageBuilder: (ctx, anim, _) {
+        return _AppearancePopover(
+          controller: controller,
+          anchor: anchor,
+          anchorSize: anchorSize,
+        );
+      },
+      transitionsBuilder: (_, anim, _, child) {
+        return FadeTransition(
+          opacity: anim,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.96, end: 1).animate(
+              CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
+            ),
+            alignment: Alignment.bottomLeft,
+            child: child,
+          ),
+        );
+      },
+    ),
+  );
+}
+
+class _AppearancePopover extends StatelessWidget {
+  const _AppearancePopover({
+    required this.controller,
+    required this.anchor,
+    required this.anchorSize,
+  });
+
+  final ThemeController controller;
+  final LayerLink anchor;
+  final Size anchorSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    const panelWidth = 360.0;
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        return CompositedTransformFollower(
+          link: anchor,
+          showWhenUnlinked: false,
+          // Anchor the popover's bottom-left to the button's top-right, then
+          // offset up-and-right so it reads as a detached panel.
+          targetAnchor: Alignment.topRight,
+          followerAnchor: Alignment.bottomLeft,
+          offset: const Offset(12, -8),
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: panelWidth,
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: colors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.28),
+                    blurRadius: 28,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(13),
+                child: _AppearanceBody(
+                  controller: controller,
+                  crossAxisCount: 3,
+                  showHandle: false,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _AppearanceSheet extends StatelessWidget {
@@ -48,51 +155,10 @@ class _AppearanceSheet extends StatelessWidget {
                 constraints: BoxConstraints(
                   maxHeight: MediaQuery.sizeOf(context).height * 0.85,
                 ),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _grabHandle(colors),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.palette_rounded,
-                            size: 20,
-                            color: colors.accent,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Appearance',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          const Spacer(),
-                          MeshIconButton(
-                            icon: Icons.close_rounded,
-                            tooltip: 'Close',
-                            onTap: () => Navigator.of(context).maybePop(),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 18),
-                      _SectionLabel(text: 'Brightness'),
-                      const SizedBox(height: 8),
-                      _BrightnessSegmented(controller: controller),
-                      const SizedBox(height: 22),
-                      _SectionLabel(text: 'Theme'),
-                      const SizedBox(height: 10),
-                      _SwatchGrid(
-                        controller: controller,
-                        crossAxisCount: crossAxisCount,
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                  ),
+                child: _AppearanceBody(
+                  controller: controller,
+                  crossAxisCount: crossAxisCount,
+                  showHandle: true,
                 ),
               ),
             ),
@@ -101,17 +167,80 @@ class _AppearanceSheet extends StatelessWidget {
       },
     );
   }
+}
 
-  Widget _grabHandle(AppColors colors) => Center(
-        child: Container(
-          width: 40,
-          height: 4,
-          decoration: BoxDecoration(
-            color: colors.border,
-            borderRadius: BorderRadius.circular(2),
+class _AppearanceBody extends StatelessWidget {
+  const _AppearanceBody({
+    required this.controller,
+    required this.crossAxisCount,
+    required this.showHandle,
+  });
+
+  final ThemeController controller;
+  final int crossAxisCount;
+  final bool showHandle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(20, showHandle ? 10 : 16, 20, 18),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (showHandle) ...[
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: colors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Row(
+            children: [
+              Icon(
+                Icons.palette_rounded,
+                size: 20,
+                color: colors.accent,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Appearance',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const Spacer(),
+              MeshIconButton(
+                icon: Icons.close_rounded,
+                tooltip: 'Close',
+                onTap: () => Navigator.of(context).maybePop(),
+              ),
+            ],
           ),
-        ),
-      );
+          const SizedBox(height: 18),
+          const _SectionLabel(text: 'Brightness'),
+          const SizedBox(height: 8),
+          _BrightnessSegmented(controller: controller),
+          const SizedBox(height: 22),
+          const _SectionLabel(text: 'Theme'),
+          const SizedBox(height: 10),
+          _SwatchGrid(
+            controller: controller,
+            crossAxisCount: crossAxisCount,
+          ),
+          const SizedBox(height: 4),
+        ],
+      ),
+    );
+  }
 }
 
 class _SectionLabel extends StatelessWidget {
