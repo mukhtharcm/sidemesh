@@ -2340,6 +2340,9 @@ class _SessionScreenState extends State<SessionScreen>
           builder: (context, _) {
             final isCompact = MediaQuery.of(context).size.width < 600;
             final favorite = _favorites.isFavorite(widget.host, session.id);
+            final pinnedActive = _isPinnedInspectorOpen(
+              InspectorScope.maybeOf(context),
+            );
             if (isCompact) {
               return _SessionHeaderStrip(
                 host: widget.host,
@@ -2347,6 +2350,9 @@ class _SessionScreenState extends State<SessionScreen>
                 gitStatus: _gitStatus,
                 running: _running,
                 favorite: favorite,
+                pinnedCount: pinnedMessages.length,
+                pinnedActive: pinnedActive,
+                onPinnedTap: _openPinnedPanel,
                 onDetails: () => _showSessionDetailsSheet(session),
                 onGitDetails: () => _showGitSheet(session),
               );
@@ -2357,6 +2363,9 @@ class _SessionScreenState extends State<SessionScreen>
               gitStatus: _gitStatus,
               running: _running,
               favorite: favorite,
+              pinnedCount: pinnedMessages.length,
+              pinnedActive: pinnedActive,
+              onPinnedTap: _openPinnedPanel,
               onDetails: () => _showSessionDetailsSheet(session),
               onGitDetails: () => _showGitSheet(session),
             );
@@ -2384,17 +2393,6 @@ class _SessionScreenState extends State<SessionScreen>
             child: _PendingActionCard(
               action: _pendingAction!,
               onRespond: _respondAction,
-            ),
-          ),
-        if (pinnedMessages.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _PinnedChip(
-              count: pinnedMessages.length,
-              active: _isPinnedInspectorOpen(
-                InspectorScope.maybeOf(context),
-              ),
-              onTap: _openPinnedPanel,
             ),
           ),
         Expanded(
@@ -2783,6 +2781,9 @@ class _SessionHeader extends StatelessWidget {
     required this.gitStatus,
     required this.running,
     required this.favorite,
+    required this.pinnedCount,
+    required this.pinnedActive,
+    required this.onPinnedTap,
     required this.onDetails,
     required this.onGitDetails,
   });
@@ -2792,6 +2793,9 @@ class _SessionHeader extends StatelessWidget {
   final SessionGitStatus? gitStatus;
   final bool running;
   final bool favorite;
+  final int pinnedCount;
+  final bool pinnedActive;
+  final VoidCallback onPinnedTap;
   final VoidCallback onDetails;
   final VoidCallback onGitDetails;
 
@@ -2853,12 +2857,26 @@ class _SessionHeader extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: monoStyle(color: colors.textSecondary, fontSize: 11),
                   ),
-                  if (_gitHeaderLabel(session, gitStatus) != null) ...[
+                  if (_gitHeaderLabel(session, gitStatus) != null ||
+                      pinnedCount > 0) ...[
                     const SizedBox(height: 7),
-                    _GitSummaryPill(
-                      label: _gitHeaderLabel(session, gitStatus)!,
-                      dirty: gitStatus?.dirty ?? false,
-                      onTap: onGitDetails,
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        if (_gitHeaderLabel(session, gitStatus) != null)
+                          _GitSummaryPill(
+                            label: _gitHeaderLabel(session, gitStatus)!,
+                            dirty: gitStatus?.dirty ?? false,
+                            onTap: onGitDetails,
+                          ),
+                        if (pinnedCount > 0)
+                          _PinnedSummaryPill(
+                            count: pinnedCount,
+                            active: pinnedActive,
+                            onTap: onPinnedTap,
+                          ),
+                      ],
                     ),
                   ],
                 ],
@@ -2912,16 +2930,38 @@ class _GitSummaryPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: GestureDetector(
-        onTap: onTap,
-        child: MeshPill(
-          label: label,
-          icon: Icons.account_tree_outlined,
-          tone: dirty ? MeshPillTone.warning : MeshPillTone.neutral,
-          mono: true,
-        ),
+    return GestureDetector(
+      onTap: onTap,
+      child: MeshPill(
+        label: label,
+        icon: Icons.account_tree_outlined,
+        tone: dirty ? MeshPillTone.warning : MeshPillTone.neutral,
+        mono: true,
+      ),
+    );
+  }
+}
+
+class _PinnedSummaryPill extends StatelessWidget {
+  const _PinnedSummaryPill({
+    required this.count,
+    required this.active,
+    required this.onTap,
+  });
+
+  final int count;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: MeshPill(
+        label: '$count pinned',
+        icon: Icons.push_pin_rounded,
+        tone: active ? MeshPillTone.accent : MeshPillTone.neutral,
+        mono: true,
       ),
     );
   }
@@ -2979,6 +3019,9 @@ class _SessionHeaderStrip extends StatelessWidget {
     required this.gitStatus,
     required this.running,
     required this.favorite,
+    required this.pinnedCount,
+    required this.pinnedActive,
+    required this.onPinnedTap,
     required this.onDetails,
     required this.onGitDetails,
   });
@@ -2988,6 +3031,9 @@ class _SessionHeaderStrip extends StatelessWidget {
   final SessionGitStatus? gitStatus;
   final bool running;
   final bool favorite;
+  final int pinnedCount;
+  final bool pinnedActive;
+  final VoidCallback onPinnedTap;
   final VoidCallback onDetails;
   final VoidCallback onGitDetails;
 
@@ -3045,6 +3091,20 @@ class _SessionHeaderStrip extends StatelessWidget {
                     icon: Icons.account_tree_outlined,
                     tone: (gitStatus?.dirty ?? false)
                         ? MeshPillTone.warning
+                        : MeshPillTone.neutral,
+                    mono: true,
+                  ),
+                ),
+              ],
+              if (pinnedCount > 0) ...[
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: onPinnedTap,
+                  child: MeshPill(
+                    label: '$pinnedCount',
+                    icon: Icons.push_pin_rounded,
+                    tone: pinnedActive
+                        ? MeshPillTone.accent
                         : MeshPillTone.neutral,
                     mono: true,
                   ),
@@ -3416,67 +3476,6 @@ String _gitDiffTitle(SessionGitDiff diff) {
     'remote' => 'Remote diff',
     _ => 'Working diff',
   };
-}
-
-class _PinnedChip extends StatelessWidget {
-  const _PinnedChip({
-    required this.count,
-    required this.active,
-    required this.onTap,
-  });
-
-  final int count;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final bg = active
-        ? colors.accent.withValues(alpha: 0.14)
-        : colors.surfaceElevated;
-    final border = active ? colors.accent : colors.border;
-    final iconColor = active ? colors.accent : colors.textSecondary;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Container(
-          height: 32,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: border),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.push_pin_rounded, size: 14, color: iconColor),
-              const SizedBox(width: 6),
-              Text(
-                '$count pinned',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colors.textPrimary,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.2,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Icon(
-                active
-                    ? Icons.expand_less_rounded
-                    : Icons.chevron_right_rounded,
-                size: 16,
-                color: colors.textTertiary,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class _PinnedListSheet extends StatelessWidget {
