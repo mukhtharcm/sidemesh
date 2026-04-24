@@ -2333,18 +2333,23 @@ class _SessionScreenState extends State<SessionScreen>
     final timelineEntries = _buildTimelineEntries();
     final visibleTimelineEntries = timelineEntries;
     final pinnedMessages = _pinsStore.pinsFor(widget.host, session.id);
+    final isCompact = MediaQuery.of(context).size.width < 600;
+    final pinnedActive = _isPinnedInspectorOpen(
+      InspectorScope.maybeOf(context),
+    );
+    final showHistoryBanner =
+        (_history?.isTruncated ?? false) && !_historyBannerDismissed;
     final bodyContent = Column(
       children: [
-        ListenableBuilder(
-          listenable: _favorites,
-          builder: (context, _) {
-            final isCompact = MediaQuery.of(context).size.width < 600;
-            final favorite = _favorites.isFavorite(widget.host, session.id);
-            final pinnedActive = _isPinnedInspectorOpen(
-              InspectorScope.maybeOf(context),
-            );
-            if (isCompact) {
-              return _SessionHeaderStrip(
+        if (!isCompact)
+          ListenableBuilder(
+            listenable: _favorites,
+            builder: (context, _) {
+              final favorite = _favorites.isFavorite(
+                widget.host,
+                session.id,
+              );
+              return _SessionHeader(
                 host: widget.host,
                 session: session,
                 gitStatus: _gitStatus,
@@ -2356,36 +2361,7 @@ class _SessionScreenState extends State<SessionScreen>
                 onDetails: () => _showSessionDetailsSheet(session),
                 onGitDetails: () => _showGitSheet(session),
               );
-            }
-            return _SessionHeader(
-              host: widget.host,
-              session: session,
-              gitStatus: _gitStatus,
-              running: _running,
-              favorite: favorite,
-              pinnedCount: pinnedMessages.length,
-              pinnedActive: pinnedActive,
-              onPinnedTap: _openPinnedPanel,
-              onDetails: () => _showSessionDetailsSheet(session),
-              onGitDetails: () => _showGitSheet(session),
-            );
-          },
-        ),
-        if ((_history?.isTruncated ?? false) && !_historyBannerDismissed)
-          Dismissible(
-            key: ValueKey('history_banner_${session.id}'),
-            direction: DismissDirection.horizontal,
-            onDismissed: (_) {
-              setState(() => _historyBannerDismissed = true);
             },
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: _HistoryTruncationCard(
-                history: _history!,
-                loading: _loadingOlderHistory,
-                onLoadOlderHistory: _loadOlderTranscript,
-              ),
-            ),
           ),
         if (_pendingAction != null)
           Padding(
@@ -2412,8 +2388,24 @@ class _SessionScreenState extends State<SessionScreen>
                               ScrollViewKeyboardDismissBehavior.onDrag,
                           padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
                           physics: const AlwaysScrollableScrollPhysics(),
-                          itemCount: visibleTimelineEntries.length,
+                          itemCount:
+                              visibleTimelineEntries.length +
+                              (showHistoryBanner ? 1 : 0),
                           itemBuilder: (context, index) {
+                            if (showHistoryBanner &&
+                                index == visibleTimelineEntries.length) {
+                              return Padding(
+                                padding: const EdgeInsets.fromLTRB(0, 10, 0, 6),
+                                child: _HistoryTruncationCard(
+                                  history: _history!,
+                                  loading: _loadingOlderHistory,
+                                  onLoadOlderHistory: _loadOlderTranscript,
+                                  onDismiss: () => setState(
+                                    () => _historyBannerDismissed = true,
+                                  ),
+                                ),
+                              );
+                            }
                             final chronoIndex =
                                 visibleTimelineEntries.length - index - 1;
                             final entry = visibleTimelineEntries[chronoIndex];
@@ -2537,6 +2529,23 @@ class _SessionScreenState extends State<SessionScreen>
       backgroundColor: colors.canvas,
       appBar: AppBar(
         backgroundColor: colors.canvas,
+        toolbarHeight: isCompact ? 52 : null,
+        bottom: isCompact
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(30),
+                child: _SessionAppBarSubtitle(
+                  host: widget.host,
+                  session: session,
+                  gitStatus: _gitStatus,
+                  running: _running,
+                  pinnedCount: pinnedMessages.length,
+                  pinnedActive: pinnedActive,
+                  onPinnedTap: _openPinnedPanel,
+                  onDetails: () => _showSessionDetailsSheet(session),
+                  onGitDetails: () => _showGitSheet(session),
+                ),
+              )
+            : null,
         title: Row(
           children: [
             if (_running) ...[const LivePulse(), const SizedBox(width: 10)],
@@ -3012,13 +3021,12 @@ class _JumpToLatestPill extends StatelessWidget {
   }
 }
 
-class _SessionHeaderStrip extends StatelessWidget {
-  const _SessionHeaderStrip({
+class _SessionAppBarSubtitle extends StatelessWidget {
+  const _SessionAppBarSubtitle({
     required this.host,
     required this.session,
     required this.gitStatus,
     required this.running,
-    required this.favorite,
     required this.pinnedCount,
     required this.pinnedActive,
     required this.onPinnedTap,
@@ -3030,64 +3038,74 @@ class _SessionHeaderStrip extends StatelessWidget {
   final SessionSummary session;
   final SessionGitStatus? gitStatus;
   final bool running;
-  final bool favorite;
   final int pinnedCount;
   final bool pinnedActive;
   final VoidCallback onPinnedTap;
   final VoidCallback onDetails;
   final VoidCallback onGitDetails;
 
+  String _shortFolder(String cwd) {
+    if (cwd.isEmpty) return '~';
+    final trimmed = cwd.endsWith('/') ? cwd.substring(0, cwd.length - 1) : cwd;
+    final slash = trimmed.lastIndexOf('/');
+    if (slash < 0 || slash == trimmed.length - 1) return trimmed;
+    return trimmed.substring(slash + 1);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 8, 6),
+    final folder = _shortFolder(session.cwd);
+    final gitLabel = _gitHeaderLabel(session, gitStatus);
+    return Material(
+      color: Colors.transparent,
       child: InkWell(
         onTap: onDetails,
-        borderRadius: BorderRadius.circular(8),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          padding: const EdgeInsets.fromLTRB(16, 0, 8, 6),
           child: Row(
             children: [
-              _HeaderStatusDot(
-                color: running ? colors.success : colors.textTertiary,
+              Icon(
+                Icons.dns_rounded,
+                size: 12,
+                color: colors.textTertiary,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               Flexible(
                 child: Text(
                   host.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: monoStyle(
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     color: colors.textSecondary,
-                    fontSize: 11.5,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
               Text(
                 '  ·  ',
-                style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
-              ),
-              Flexible(
-                flex: 2,
-                child: Text(
-                  session.cwd,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: colors.textTertiary,
                 ),
               ),
-              if (favorite) ...[
-                const SizedBox(width: 6),
-                Icon(Icons.star_rounded, size: 13, color: colors.warning),
-              ],
-              if (_gitHeaderLabel(session, gitStatus) != null) ...[
-                const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  folder,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (gitLabel != null) ...[
+                const SizedBox(width: 8),
                 GestureDetector(
                   onTap: onGitDetails,
                   child: MeshPill(
-                    label: _gitHeaderLabel(session, gitStatus)!,
+                    label: gitLabel,
                     icon: Icons.account_tree_outlined,
                     tone: (gitStatus?.dirty ?? false)
                         ? MeshPillTone.warning
@@ -3796,11 +3814,13 @@ class _HistoryTruncationCard extends StatelessWidget {
     required this.history,
     required this.loading,
     required this.onLoadOlderHistory,
+    this.onDismiss,
   });
 
   final SessionLogHistorySummary history;
   final bool loading;
   final VoidCallback onLoadOlderHistory;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -3860,6 +3880,19 @@ class _HistoryTruncationCard extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                     fontSize: 11.5,
                   ),
+                ),
+              ),
+            ),
+          if (onDismiss != null)
+            InkResponse(
+              radius: 18,
+              onTap: onDismiss,
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 14,
+                  color: colors.textTertiary,
                 ),
               ),
             ),
