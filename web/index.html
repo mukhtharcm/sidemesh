@@ -43,14 +43,50 @@
     <p class="lede">Sidemesh is a mobile control surface for Codex &mdash; a lightweight app in your hand, a small companion on every machine you code on. No cloud broker. No account. No middleman.</p>
 
     <p class="mono">get notified</p>
-    <form onsubmit="event.preventDefault(); this.querySelector('button').textContent='queued ✓'; this.querySelector('input').disabled=true; this.querySelector('button').disabled=true;">
-      <input type="email" required placeholder="you@wherever.dev" />
+    <form id="wl">
+      <input type="email" name="email" required placeholder="you@wherever.dev" />
       <button type="submit">Notify me</button>
     </form>
+    <p id="wl-msg" class="platforms" style="display:none;margin-top:-20px;margin-bottom:32px;"></p>
 
     <p class="platforms">iOS · Android · macOS</p>
   </div>
   <footer>© <span id="y"></span> sidemesh</footer>
-  <script>document.getElementById('y').textContent=new Date().getFullYear();</script>
+  <script>
+    document.getElementById('y').textContent = new Date().getFullYear();
+    const f = document.getElementById('wl');
+    const msg = document.getElementById('wl-msg');
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = f.querySelector('input');
+      const btn = f.querySelector('button');
+      const email = input.value.trim();
+      btn.disabled = true; input.disabled = true;
+      btn.textContent = 'sending…';
+      try {
+        const r = await fetch('/api/waitlist', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.ok) {
+          btn.textContent = 'queued ✓';
+          msg.textContent = "you're on the list. one email when it ships.";
+          msg.style.display = 'block';
+        } else {
+          btn.textContent = 'try again';
+          btn.disabled = false; input.disabled = false;
+          msg.textContent = j.error === 'invalid_email' ? 'that address looks off — double-check?' : 'something broke on our end. try once more?';
+          msg.style.display = 'block';
+        }
+      } catch {
+        btn.textContent = 'try again';
+        btn.disabled = false; input.disabled = false;
+        msg.textContent = 'no network. try once more?';
+        msg.style.display = 'block';
+      }
+    });
+  </script>
 </body>
 </html>
