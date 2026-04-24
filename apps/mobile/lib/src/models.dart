@@ -149,6 +149,122 @@ class WorkspaceSummary {
       );
 }
 
+class SkillCatalog {
+  const SkillCatalog({
+    required this.cwd,
+    required this.skills,
+    required this.errors,
+  });
+
+  final String cwd;
+  final List<SkillSummary> skills;
+  final List<SkillErrorInfo> errors;
+
+  factory SkillCatalog.fromJson(Map<String, dynamic> json) => SkillCatalog(
+    cwd: _stringValue(json['cwd']),
+    skills: (json['skills'] as List<dynamic>? ?? [])
+        .map((item) => SkillSummary.fromJson(item as Map<String, dynamic>))
+        .toList(),
+    errors: (json['errors'] as List<dynamic>? ?? [])
+        .map((item) => SkillErrorInfo.fromJson(item as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+class SkillInterfaceSummary {
+  const SkillInterfaceSummary({
+    this.displayName,
+    this.shortDescription,
+    this.brandColor,
+    this.defaultPrompt,
+  });
+
+  final String? displayName;
+  final String? shortDescription;
+  final String? brandColor;
+  final String? defaultPrompt;
+
+  factory SkillInterfaceSummary.fromJson(Map<String, dynamic> json) =>
+      SkillInterfaceSummary(
+        displayName: _stringOrNull(json['displayName']),
+        shortDescription: _stringOrNull(json['shortDescription']),
+        brandColor: _stringOrNull(json['brandColor']),
+        defaultPrompt: _stringOrNull(json['defaultPrompt']),
+      );
+}
+
+class SkillSummary {
+  const SkillSummary({
+    required this.name,
+    required this.description,
+    required this.path,
+    required this.scope,
+    required this.enabled,
+    this.shortDescription,
+    this.interface,
+  });
+
+  final String name;
+  final String description;
+  final String? shortDescription;
+  final SkillInterfaceSummary? interface;
+  final String path;
+  final String scope;
+  final bool enabled;
+
+  String get displayName {
+    final interfaceName = interface?.displayName?.trim();
+    if (interfaceName != null && interfaceName.isNotEmpty) {
+      return interfaceName;
+    }
+    final parts = name.split(':');
+    if (parts.length == 2 && parts[0].isNotEmpty && parts[1].isNotEmpty) {
+      return '${parts[1]} (${parts[0]})';
+    }
+    return name;
+  }
+
+  String get summaryDescription {
+    final interfaceSummary = interface?.shortDescription?.trim();
+    if (interfaceSummary != null && interfaceSummary.isNotEmpty) {
+      return interfaceSummary;
+    }
+    final legacySummary = shortDescription?.trim();
+    if (legacySummary != null && legacySummary.isNotEmpty) {
+      return legacySummary;
+    }
+    return description;
+  }
+
+  String get mentionToken => '\$$name';
+
+  factory SkillSummary.fromJson(Map<String, dynamic> json) => SkillSummary(
+    name: _stringValue(json['name']),
+    description: _stringValue(json['description']),
+    shortDescription: _stringOrNull(json['shortDescription']),
+    interface: json['interface'] is Map<String, dynamic>
+        ? SkillInterfaceSummary.fromJson(
+            json['interface'] as Map<String, dynamic>,
+          )
+        : null,
+    path: _stringValue(json['path']),
+    scope: _stringValue(json['scope']),
+    enabled: _boolValue(json['enabled']),
+  );
+}
+
+class SkillErrorInfo {
+  const SkillErrorInfo({required this.path, required this.message});
+
+  final String path;
+  final String message;
+
+  factory SkillErrorInfo.fromJson(Map<String, dynamic> json) => SkillErrorInfo(
+    path: _stringValue(json['path']),
+    message: _stringValue(json['message']),
+  );
+}
+
 class SessionMessage {
   const SessionMessage({
     required this.id,
@@ -177,9 +293,8 @@ class SessionMessage {
     text: _stringValue(json['text']),
     attachments: (json['attachments'] as List<dynamic>? ?? [])
         .map(
-          (item) => SessionMessageAttachment.fromJson(
-            item as Map<String, dynamic>,
-          ),
+          (item) =>
+              SessionMessageAttachment.fromJson(item as Map<String, dynamic>),
         )
         .toList(),
     createdAt: _dateValue(json['createdAt']),
@@ -189,11 +304,7 @@ class SessionMessage {
 }
 
 class SessionMessageAttachment {
-  const SessionMessageAttachment({
-    required this.type,
-    this.url,
-    this.path,
-  });
+  const SessionMessageAttachment({required this.type, this.url, this.path});
 
   final String type;
   final String? url;
@@ -215,20 +326,24 @@ class SessionInputItem {
     required this.type,
     this.text,
     this.url,
+    this.name,
     this.path,
   });
 
-  const SessionInputItem.text(String text)
-    : this._(type: 'text', text: text);
+  const SessionInputItem.text(String text) : this._(type: 'text', text: text);
 
   const SessionInputItem.image(String url) : this._(type: 'image', url: url);
 
   const SessionInputItem.localImage(String path)
     : this._(type: 'localImage', path: path);
 
+  const SessionInputItem.skill(String name, String path)
+    : this._(type: 'skill', name: name, path: path);
+
   final String type;
   final String? text;
   final String? url;
+  final String? name;
   final String? path;
 
   Map<String, dynamic> toJson() {
@@ -243,6 +358,8 @@ class SessionInputItem {
         return {'type': 'image', 'url': url ?? ''};
       case 'localImage':
         return {'type': 'localImage', 'path': path ?? ''};
+      case 'skill':
+        return {'type': 'skill', 'name': name ?? '', 'path': path ?? ''};
       default:
         return {'type': type};
     }
@@ -458,30 +575,25 @@ class SessionEventsDelta {
   final PendingAction? pendingAction;
   final SessionSummary? session;
 
-  factory SessionEventsDelta.fromJson(Map<String, dynamic> json) =>
-      SessionEventsDelta(
-        sessionId: _stringValue(json['sessionId']),
-        since: _intValue(json['since']),
-        nextSeq: _intValue(json['nextSeq']),
-        messages: (json['messages'] as List<dynamic>? ?? [])
-            .map((item) =>
-                SessionMessage.fromJson(item as Map<String, dynamic>))
-            .toList(),
-        activities: (json['activities'] as List<dynamic>? ?? [])
-            .map((item) =>
-                SessionActivity.fromJson(item as Map<String, dynamic>))
-            .toList(),
-        pendingAction: json['pendingAction'] == null
-            ? null
-            : PendingAction.fromJson(
-                json['pendingAction'] as Map<String, dynamic>,
-              ),
-        session: json['session'] == null
-            ? null
-            : SessionSummary.fromJson(
-                json['session'] as Map<String, dynamic>,
-              ),
-      );
+  factory SessionEventsDelta.fromJson(
+    Map<String, dynamic> json,
+  ) => SessionEventsDelta(
+    sessionId: _stringValue(json['sessionId']),
+    since: _intValue(json['since']),
+    nextSeq: _intValue(json['nextSeq']),
+    messages: (json['messages'] as List<dynamic>? ?? [])
+        .map((item) => SessionMessage.fromJson(item as Map<String, dynamic>))
+        .toList(),
+    activities: (json['activities'] as List<dynamic>? ?? [])
+        .map((item) => SessionActivity.fromJson(item as Map<String, dynamic>))
+        .toList(),
+    pendingAction: json['pendingAction'] == null
+        ? null
+        : PendingAction.fromJson(json['pendingAction'] as Map<String, dynamic>),
+    session: json['session'] == null
+        ? null
+        : SessionSummary.fromJson(json['session'] as Map<String, dynamic>),
+  );
 }
 
 class SessionLogHistorySummary {

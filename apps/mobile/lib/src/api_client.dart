@@ -21,6 +21,22 @@ class ApiClient {
     return _decodeList(response).map(WorkspaceSummary.fromJson).toList();
   }
 
+  Future<SkillCatalog> fetchSkills(
+    HostProfile host, {
+    required String cwd,
+    bool forceReload = false,
+  }) async {
+    final response = await _get(
+      host,
+      '/api/skills',
+      queryParameters: <String, String>{
+        'cwd': cwd,
+        if (forceReload) 'forceReload': 'true',
+      },
+    );
+    return SkillCatalog.fromJson(_decodeObject(response));
+  }
+
   Future<List<SessionSummary>> fetchSessions(
     HostProfile host, {
     int? limit,
@@ -139,11 +155,7 @@ class ApiClient {
           ? null
           : <String, dynamic>{'networkAccess': networkAccess},
     };
-    await _post(
-      host,
-      '/api/sessions/$sessionId/input',
-      body: body,
-    );
+    await _post(host, '/api/sessions/$sessionId/input', body: body);
   }
 
   Future<void> stopSession(HostProfile host, String sessionId) async {
@@ -209,8 +221,11 @@ class ApiClient {
   }
 
   Future<FsListing> listDirectory(HostProfile host, String path) async {
-    final response =
-        await _get(host, '/api/fs/list', queryParameters: {'path': path});
+    final response = await _get(
+      host,
+      '/api/fs/list',
+      queryParameters: {'path': path},
+    );
     return FsListing.fromJson(_decodeObject(response));
   }
 
@@ -224,8 +239,11 @@ class ApiClient {
   }
 
   Future<FsFile> readFile(HostProfile host, String path) async {
-    final response =
-        await _get(host, '/api/fs/read', queryParameters: {'path': path});
+    final response = await _get(
+      host,
+      '/api/fs/read',
+      queryParameters: {'path': path},
+    );
     return FsFile.fromJson(_decodeObject(response));
   }
 
@@ -294,7 +312,6 @@ class ApiClient {
       headers: {'Authorization': 'Bearer ${host.token}'},
     );
   }
-
 
   Future<http.Response> _get(
     HostProfile host,

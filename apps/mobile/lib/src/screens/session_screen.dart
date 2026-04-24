@@ -84,6 +84,10 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionActivity> _activities = const [];
   List<_ComposerImageAttachment> _draftAttachments =
       const <_ComposerImageAttachment>[];
+  List<_ComposerSkillMention> _draftSkillMentions =
+      const <_ComposerSkillMention>[];
+  List<SkillSummary> _skills = const <SkillSummary>[];
+  _ActiveComposerSkillQuery? _activeSkillQuery;
   SessionLogHistorySummary? _history;
   PendingAction? _pendingAction;
   int _messageLimit = _initialMessageLimit;
@@ -93,6 +97,8 @@ class _SessionScreenState extends State<SessionScreen>
   bool _loadingOlderHistory = false;
   bool _sending = false;
   bool _awaitingAssistantReply = false;
+  bool _loadingSkills = false;
+  String? _skillsError;
   IOWebSocketChannel? _channel;
   StreamSubscription? _subscription;
   Timer? _liveFlushTimer;
@@ -108,6 +114,7 @@ class _SessionScreenState extends State<SessionScreen>
   // snapshot from clobbering an already-delivered action_opened / activity.
   final List<LiveEvent> _pendingLiveEvents = <LiveEvent>[];
   bool _snapshotInFlight = false;
+  int _skillsRequestId = 0;
 
   // Memoized timeline entries so rebuilds that don't change list inputs skip
   // the list+sort work.
@@ -141,10 +148,12 @@ class _SessionScreenState extends State<SessionScreen>
     _favorites.ensureLoaded();
     _policyStore.ensureLoaded();
     _readStore.ensureLoaded();
+    _composerController.addListener(_handleComposerChanged);
     _session = widget.session;
     _scrollController.addListener(_onTranscriptScroll);
     _markCurrentSessionSeen();
     _loadSnapshot();
+    _loadSkills();
     _connectLive();
   }
 
@@ -163,6 +172,7 @@ class _SessionScreenState extends State<SessionScreen>
     unawaited(_readStore.flush());
     WidgetsBinding.instance.removeObserver(this);
     _reconnectTimer?.cancel();
+    _composerController.removeListener(_handleComposerChanged);
     _composerController.dispose();
     _scrollController.removeListener(_onTranscriptScroll);
     _scrollController.dispose();
@@ -183,6 +193,172 @@ class _SessionScreenState extends State<SessionScreen>
     if (shouldShow != _showJumpToLatest.value) {
       _showJumpToLatest.value = shouldShow;
     }
+  }
+
+  Future<void> _loadSkills({bool forceReload = false}) async {
+    final requestId = ++_skillsRequestId;
+    if (mounted) {
+      setState(() {
+        _loadingSkills = true;
+        _skillsError = null;
+      });
+    } else {
+      _loadingSkills = true;
+      _skillsError = null;
+    }
+
+    try {
+      final catalog = await widget.api.fetchSkills(
+        widget.host,
+        cwd: (_session ?? widget.session).cwd,
+        forceReload: forceReload,
+      );
+      if (!mounted || requestId != _skillsRequestId) {
+        return;
+      }
+      setState(() {
+        _skills = catalog.skills;
+        _skillsError = catalog.errors.isEmpty
+            ? null
+            : catalog.errors.map((item) => item.message).join('\n');
+        _loadingSkills = false;
+      });
+    } catch (error) {
+      if (!mounted || requestId != _skillsRequestId) {
+        return;
+      }
+      setState(() {
+        _loadingSkills = false;
+        _skillsError = friendlyError(error);
+      });
+    }
+  }
+
+  void _handleComposerChanged() {
+    final nextQuery = _extractActiveSkillQuery(_composerController.value);
+    final nextDraftSkillMentions = _draftSkillMentions
+        .where((item) => _composerController.text.contains(item.tokenText))
+        .toList(growable: false);
+    final queryChanged =
+        nextQuery?.start != _activeSkillQuery?.start ||
+        nextQuery?.end != _activeSkillQuery?.end ||
+        nextQuery?.query != _activeSkillQuery?.query;
+    final mentionsChanged = !listEquals(
+      nextDraftSkillMentions,
+      _draftSkillMentions,
+    );
+    if (queryChanged || mentionsChanged) {
+      if (!mounted) {
+        _activeSkillQuery = nextQuery;
+        _draftSkillMentions = nextDraftSkillMentions;
+      } else {
+        setState(() {
+          _activeSkillQuery = nextQuery;
+          _draftSkillMentions = nextDraftSkillMentions;
+        });
+      }
+    }
+    if (nextQuery != null && _skills.isEmpty && !_loadingSkills) {
+      unawaited(_loadSkills());
+    }
+  }
+
+  _ActiveComposerSkillQuery? _extractActiveSkillQuery(TextEditingValue value) {
+    final selection = value.selection;
+    if (!selection.isValid || !selection.isCollapsed) {
+      return null;
+    }
+
+    final text = value.text;
+    final cursor = math.min(math.max(selection.extentOffset, 0), text.length);
+    var start = cursor;
+    while (start > 0 && !_isComposerWhitespace(text.codeUnitAt(start - 1))) {
+      start -= 1;
+    }
+    var end = cursor;
+    while (end < text.length && !_isComposerWhitespace(text.codeUnitAt(end))) {
+      end += 1;
+    }
+    if (start >= end) {
+      return null;
+    }
+
+    final token = text.substring(start, end);
+    if (!token.startsWith(r'$')) {
+      return null;
+    }
+
+    return _ActiveComposerSkillQuery(
+      start: start,
+      end: end,
+      query: token.substring(1),
+    );
+  }
+
+  bool _isComposerWhitespace(int codeUnit) {
+    switch (codeUnit) {
+      case 0x09:
+      case 0x0A:
+      case 0x0B:
+      case 0x0C:
+      case 0x0D:
+      case 0x20:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  List<SkillSummary> get _skillSuggestions {
+    final active = _activeSkillQuery;
+    if (active == null) {
+      return const <SkillSummary>[];
+    }
+
+    final query = active.query.trim().toLowerCase();
+    final candidates = _skills.where((item) => item.enabled).toList();
+    if (candidates.isEmpty) {
+      return const <SkillSummary>[];
+    }
+
+    candidates.sort((left, right) {
+      final leftScore = _skillSuggestionScore(left, query);
+      final rightScore = _skillSuggestionScore(right, query);
+      final scoreCompare = leftScore.compareTo(rightScore);
+      if (scoreCompare != 0) {
+        return scoreCompare;
+      }
+      return left.displayName.toLowerCase().compareTo(
+        right.displayName.toLowerCase(),
+      );
+    });
+
+    return candidates
+        .where((item) => _skillSuggestionScore(item, query) < 100)
+        .take(6)
+        .toList(growable: false);
+  }
+
+  int _skillSuggestionScore(SkillSummary skill, String query) {
+    if (query.isEmpty) {
+      return 0;
+    }
+
+    final displayName = skill.displayName.toLowerCase();
+    final canonicalName = skill.name.toLowerCase();
+    if (displayName.startsWith(query)) {
+      return 0;
+    }
+    if (canonicalName.startsWith(query)) {
+      return 1;
+    }
+    if (displayName.contains(query)) {
+      return 2;
+    }
+    if (canonicalName.contains(query)) {
+      return 3;
+    }
+    return 100;
   }
 
   @override
@@ -721,12 +897,17 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted) {
         return;
       }
-      showAppSnackBar(context, 'Failed to attach images: ${friendlyError(error)}');
+      showAppSnackBar(
+        context,
+        'Failed to attach images: ${friendlyError(error)}',
+      );
     }
   }
 
   Future<void> _addPickedDraftAttachments(List<PlatformFile> files) async {
-    final nextAttachments = List<_ComposerImageAttachment>.from(_draftAttachments);
+    final nextAttachments = List<_ComposerImageAttachment>.from(
+      _draftAttachments,
+    );
     var totalBytes = nextAttachments.fold<int>(
       0,
       (sum, item) => sum + item.byteLength,
@@ -877,9 +1058,13 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionInputItem> _buildComposerInputItems(
     String text,
     List<_ComposerImageAttachment> attachments,
+    List<_ComposerSkillMention> skills,
   ) {
     return <SessionInputItem>[
       ...attachments.map((item) => SessionInputItem.image(item.dataUrl)),
+      ...skills.map(
+        (item) => SessionInputItem.skill(item.skill.name, item.skill.path),
+      ),
       if (text.isNotEmpty) SessionInputItem.text(text),
     ];
   }
@@ -894,17 +1079,100 @@ class _SessionScreenState extends State<SessionScreen>
         .toList(growable: false);
   }
 
+  void _insertSkillMention(SkillSummary skill) {
+    final active =
+        _activeSkillQuery ??
+        _extractActiveSkillQuery(_composerController.value);
+    if (active == null) {
+      return;
+    }
+
+    final tokenText = skill.mentionToken;
+    final value = _composerController.value;
+    final text = value.text;
+    final replaced = text.replaceRange(active.start, active.end, '$tokenText ');
+    final cursorOffset = active.start + tokenText.length + 1;
+    _composerController.value = value.copyWith(
+      text: replaced,
+      selection: TextSelection.collapsed(offset: cursorOffset),
+      composing: TextRange.empty,
+    );
+
+    final nextMentions = List<_ComposerSkillMention>.from(_draftSkillMentions);
+    if (!nextMentions.any((item) => item.skill.path == skill.path)) {
+      nextMentions.add(
+        _ComposerSkillMention(skill: skill, tokenText: tokenText),
+      );
+    }
+
+    HapticFeedback.selectionClick();
+    if (!mounted) {
+      _draftSkillMentions = nextMentions;
+      _activeSkillQuery = null;
+      return;
+    }
+    setState(() {
+      _draftSkillMentions = nextMentions;
+      _activeSkillQuery = null;
+    });
+  }
+
+  void _removeDraftSkillMention(String skillPath) {
+    _ComposerSkillMention? mention;
+    for (final item in _draftSkillMentions) {
+      if (item.skill.path == skillPath) {
+        mention = item;
+        break;
+      }
+    }
+    if (mention == null) {
+      return;
+    }
+
+    final nextText = _removeSkillTokenFromText(
+      _composerController.text,
+      mention.tokenText,
+    );
+    _composerController.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: nextText.length),
+    );
+    setState(() {
+      _draftSkillMentions = _draftSkillMentions
+          .where((item) => item.skill.path != skillPath)
+          .toList(growable: false);
+    });
+  }
+
+  String _removeSkillTokenFromText(String text, String tokenText) {
+    final escaped = RegExp.escape(tokenText);
+    var next = text.replaceAllMapped(
+      RegExp('(^|\\s)$escaped(?=\\s|\$)'),
+      (match) => match.group(1) ?? '',
+    );
+    next = next.replaceAll(RegExp(r'[ \t]{2,}'), ' ');
+    next = next.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    return next.trim();
+  }
+
   Future<void> _sendInput() async {
     final text = _composerController.text.trim();
     final draftAttachments = List<_ComposerImageAttachment>.from(
       _draftAttachments,
+    );
+    final draftSkillMentions = List<_ComposerSkillMention>.from(
+      _draftSkillMentions.where((item) => text.contains(item.tokenText)),
     );
     if ((text.isEmpty && draftAttachments.isEmpty) || _sending) {
       return;
     }
 
     final wasRunning = _running;
-    final inputItems = _buildComposerInputItems(text, draftAttachments);
+    final inputItems = _buildComposerInputItems(
+      text,
+      draftAttachments,
+      draftSkillMentions,
+    );
     final optimisticMessage = SessionMessage(
       id: 'local-${DateTime.now().microsecondsSinceEpoch}',
       role: 'user',
@@ -920,6 +1188,7 @@ class _SessionScreenState extends State<SessionScreen>
       _running = true;
       _awaitingAssistantReply = true;
       _draftAttachments = const <_ComposerImageAttachment>[];
+      _draftSkillMentions = const <_ComposerSkillMention>[];
       _clearLiveAssistantMessage();
       _upsertOptimisticMessage(optimisticMessage);
     });
@@ -952,12 +1221,16 @@ class _SessionScreenState extends State<SessionScreen>
       final restoredAttachments = List<_ComposerImageAttachment>.from(
         draftAttachments,
       );
+      final restoredSkillMentions = List<_ComposerSkillMention>.from(
+        draftSkillMentions,
+      );
       showAppSnackBar(context, "Failed to send: ${friendlyError(error)}");
       setState(() {
         _optimisticMessages = _optimisticMessages
             .where((message) => message.id != optimisticMessage.id)
             .toList();
         _draftAttachments = restoredAttachments;
+        _draftSkillMentions = restoredSkillMentions;
         _running = wasRunning;
         _awaitingAssistantReply =
             wasRunning && _liveAssistantText.isEmpty && !stillHasPending;
@@ -1431,7 +1704,10 @@ class _SessionScreenState extends State<SessionScreen>
   ) {
     return persisted.role == optimistic.role &&
         persisted.text.trim() == optimistic.text.trim() &&
-        _sameMessageAttachments(persisted.attachments, optimistic.attachments) &&
+        _sameMessageAttachments(
+          persisted.attachments,
+          optimistic.attachments,
+        ) &&
         (persisted.createdAt.difference(optimistic.createdAt).inSeconds)
                 .abs() <=
             90;
@@ -1740,9 +2016,16 @@ class _SessionScreenState extends State<SessionScreen>
             _Composer(
               controller: _composerController,
               attachments: _draftAttachments,
+              skills: _draftSkillMentions,
+              activeSkillQuery: _activeSkillQuery?.query,
+              skillSuggestions: _skillSuggestions,
+              loadingSkills: _loadingSkills,
+              skillError: _skillsError,
               sending: _sending,
               onPickImages: _pickComposerImages,
               onRemoveAttachment: _removeDraftAttachment,
+              onSelectSkill: _insertSkillMention,
+              onRemoveSkill: _removeDraftSkillMention,
               onSend: _sendInput,
               onDismiss: _dismissKeyboard,
               submitOnEnter: widget.topPadding != null,
@@ -2194,9 +2477,16 @@ class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
     required this.attachments,
+    required this.skills,
+    required this.activeSkillQuery,
+    required this.skillSuggestions,
+    required this.loadingSkills,
+    required this.skillError,
     required this.sending,
     required this.onPickImages,
     required this.onRemoveAttachment,
+    required this.onSelectSkill,
+    required this.onRemoveSkill,
     required this.onSend,
     required this.onDismiss,
     this.submitOnEnter = false,
@@ -2204,9 +2494,16 @@ class _Composer extends StatelessWidget {
 
   final TextEditingController controller;
   final List<_ComposerImageAttachment> attachments;
+  final List<_ComposerSkillMention> skills;
+  final String? activeSkillQuery;
+  final List<SkillSummary> skillSuggestions;
+  final bool loadingSkills;
+  final String? skillError;
   final bool sending;
   final VoidCallback onPickImages;
   final ValueChanged<String> onRemoveAttachment;
+  final ValueChanged<SkillSummary> onSelectSkill;
+  final ValueChanged<String> onRemoveSkill;
   final VoidCallback onSend;
   final VoidCallback onDismiss;
   final bool submitOnEnter;
@@ -2283,15 +2580,38 @@ class _Composer extends StatelessWidget {
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(color: colors.border),
                 ),
-                padding: const EdgeInsets.fromLTRB(
-                  14,
-                  8,
-                  14,
-                  2,
-                ),
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (activeSkillQuery != null) ...[
+                      _ComposerSkillSuggestionTray(
+                        query: activeSkillQuery!,
+                        suggestions: skillSuggestions,
+                        loading: loadingSkills,
+                        error: skillError,
+                        onSelectSkill: onSelectSkill,
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    if (skills.isNotEmpty) ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: skills
+                              .map(
+                                (skill) => _ComposerSkillChip(
+                                  mention: skill,
+                                  onRemove: onRemoveSkill,
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     if (attachments.isNotEmpty) ...[
                       Align(
                         alignment: Alignment.centerLeft,
@@ -2421,10 +2741,7 @@ class _ComposerAttachmentChip extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   _formatByteCount(attachment.byteLength),
-                  style: monoStyle(
-                    color: colors.textTertiary,
-                    fontSize: 10.5,
-                  ),
+                  style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
                 ),
               ],
             ),
@@ -2432,6 +2749,207 @@ class _ComposerAttachmentChip extends StatelessWidget {
           const SizedBox(width: 4),
           InkWell(
             onTap: () => onRemove(attachment.id),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(
+                Icons.close_rounded,
+                size: 16,
+                color: colors.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ComposerSkillSuggestionTray extends StatelessWidget {
+  const _ComposerSkillSuggestionTray({
+    required this.query,
+    required this.suggestions,
+    required this.loading,
+    required this.error,
+    required this.onSelectSkill,
+  });
+
+  final String query;
+  final List<SkillSummary> suggestions;
+  final bool loading;
+  final String? error;
+  final ValueChanged<SkillSummary> onSelectSkill;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    Widget child;
+    if (loading) {
+      child = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 10),
+        child: Center(
+          child: SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 1.8),
+          ),
+        ),
+      );
+    } else if (suggestions.isEmpty) {
+      final message = error == null || error!.trim().isEmpty
+          ? 'No skills match "\$$query".'
+          : 'Couldn\'t load skills: $error';
+      child = Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(
+              Icons.auto_awesome_outlined,
+              size: 16,
+              color: colors.textTertiary,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      child = Column(
+        mainAxisSize: MainAxisSize.min,
+        children: suggestions
+            .map(
+              (skill) => InkWell(
+                onTap: () => onSelectSkill(skill),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: colors.surfaceMuted,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: colors.border),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.auto_awesome_rounded,
+                          size: 15,
+                          color: colors.accent,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              skill.displayName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.labelLarge
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              skill.summaryDescription,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: colors.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        skill.mentionToken,
+                        style: monoStyle(
+                          color: colors.textTertiary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+            .toList(growable: false),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: child,
+    );
+  }
+}
+
+class _ComposerSkillChip extends StatelessWidget {
+  const _ComposerSkillChip({required this.mention, required this.onRemove});
+
+  final _ComposerSkillMention mention;
+  final ValueChanged<String> onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.border),
+      ),
+      padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.auto_awesome_rounded, size: 15, color: colors.accent),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  mention.skill.displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  mention.tokenText,
+                  style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          InkWell(
+            onTap: () => onRemove(mention.skill.path),
             borderRadius: BorderRadius.circular(12),
             child: Padding(
               padding: const EdgeInsets.all(4),
@@ -2464,6 +2982,35 @@ class _ComposerImageAttachment {
   final String dataUrl;
 
   int get byteLength => bytes.length;
+}
+
+class _ComposerSkillMention {
+  const _ComposerSkillMention({required this.skill, required this.tokenText});
+
+  final SkillSummary skill;
+  final String tokenText;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _ComposerSkillMention &&
+        other.skill.path == skill.path &&
+        other.tokenText == tokenText;
+  }
+
+  @override
+  int get hashCode => Object.hash(skill.path, tokenText);
+}
+
+class _ActiveComposerSkillQuery {
+  const _ActiveComposerSkillQuery({
+    required this.start,
+    required this.end,
+    required this.query,
+  });
+
+  final int start;
+  final int end;
+  final String query;
 }
 
 class _PreparedDraftImage {
@@ -2719,7 +3266,9 @@ class _MessageBubble extends StatelessWidget {
                       ),
                     ),
                   if (message.attachments.isNotEmpty) ...[
-                    _MessageAttachmentsSection(attachments: message.attachments),
+                    _MessageAttachmentsSection(
+                      attachments: message.attachments,
+                    ),
                     if (hasText) const SizedBox(height: 10),
                   ],
                   if (hasText)
@@ -2771,19 +3320,22 @@ class _MessageAttachmentsSection extends StatelessWidget {
       builder: (context, constraints) {
         final itemWidth = attachments.length == 1
             ? constraints.maxWidth
-            : ((constraints.maxWidth - 8) / 2).clamp(
-                120.0,
-                constraints.maxWidth,
-              ).toDouble();
+            : ((constraints.maxWidth - 8) / 2)
+                  .clamp(120.0, constraints.maxWidth)
+                  .toDouble();
         return Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: attachments.map((attachment) {
-            return SizedBox(
-              width: attachment.isLocalImage ? constraints.maxWidth : itemWidth,
-              child: _MessageAttachmentTile(attachment: attachment),
-            );
-          }).toList(growable: false),
+          children: attachments
+              .map((attachment) {
+                return SizedBox(
+                  width: attachment.isLocalImage
+                      ? constraints.maxWidth
+                      : itemWidth,
+                  child: _MessageAttachmentTile(attachment: attachment),
+                );
+              })
+              .toList(growable: false),
         );
       },
     );
@@ -2817,7 +3369,8 @@ class _MessageImageAttachmentTile extends StatefulWidget {
       _MessageImageAttachmentTileState();
 }
 
-class _MessageImageAttachmentTileState extends State<_MessageImageAttachmentTile> {
+class _MessageImageAttachmentTileState
+    extends State<_MessageImageAttachmentTile> {
   Uint8List? _dataUrlBytes;
 
   @override
@@ -2929,9 +3482,9 @@ class _LocalImageAttachmentTile extends StatelessWidget {
                   _basename(path),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -3197,7 +3750,9 @@ Map<String, Object?> _compressDraftImagePayload(Map<String, Object?> payload) {
   final longestEdge = math.max(baked.width, baked.height);
   final isPng = mimeType == 'image/png';
   final shouldKeepOriginal =
-      longestEdge <= 1800 && bytes.length <= 900 * 1024 && !mimeType.contains('bmp');
+      longestEdge <= 1800 &&
+      bytes.length <= 900 * 1024 &&
+      !mimeType.contains('bmp');
   if (shouldKeepOriginal) {
     return <String, Object?>{
       'name': name,
@@ -3221,8 +3776,9 @@ Map<String, Object?> _compressDraftImagePayload(Map<String, Object?> payload) {
       : Uint8List.fromList(img.encodeJpg(resized, quality: 84));
 
   final chosenBytes = encoded.length < bytes.length ? encoded : bytes;
-  final chosenMimeType =
-      identical(chosenBytes, encoded) ? outputMimeType : mimeType;
+  final chosenMimeType = identical(chosenBytes, encoded)
+      ? outputMimeType
+      : mimeType;
 
   return <String, Object?>{
     'name': name,
