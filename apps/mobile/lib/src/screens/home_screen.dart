@@ -145,8 +145,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       _hosts = hosts;
       _loading = false;
     });
-    ApprovalInboxStore.instance
-        .configure(hosts: hosts, api: _api);
+    ApprovalInboxStore.instance.configure(hosts: hosts, api: _api);
   }
 
   Future<void> _showHostEditor({HostProfile? initialHost}) async {
@@ -213,6 +212,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       source: 'appServer',
       status: 'pendingApproval',
       runtime: null,
+      gitInfo: null,
     );
   }
 
@@ -598,10 +598,7 @@ class _RecentPaneState extends State<RecentPane> {
     _favorites.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
     _kickoffLoad();
-    _refreshTimer = Timer.periodic(
-      _refreshInterval,
-      (_) => _silentRefresh(),
-    );
+    _refreshTimer = Timer.periodic(_refreshInterval, (_) => _silentRefresh());
   }
 
   @override
@@ -618,7 +615,8 @@ class _RecentPaneState extends State<RecentPane> {
     }
   }
 
-  void _kickoffLoad() {    final gen = ++_loadGen;
+  void _kickoffLoad() {
+    final gen = ++_loadGen;
     _initialLoadStarted = true;
     setState(() {
       _entries = const [];
@@ -691,9 +689,7 @@ class _RecentPaneState extends State<RecentPane> {
       _statuses.markOnline(host.id);
       final newEntries = sessions
           .take(20)
-          .map(
-            (session) => RemoteSessionEntry(host: host, session: session),
-          )
+          .map((session) => RemoteSessionEntry(host: host, session: session))
           .toList();
       setState(() {
         _entries = [..._entries, ...newEntries];
@@ -827,16 +823,14 @@ class _RecentPaneState extends State<RecentPane> {
             ),
           );
         }
-        final leadingStrips =
-            (isRefreshing ? 1 : 0) + (hasFailures ? 1 : 0);
+        final leadingStrips = (isRefreshing ? 1 : 0) + (hasFailures ? 1 : 0);
         return RefreshIndicator(
           color: context.colors.accent,
           onRefresh: handleRefresh,
           child: ListView.separated(
             padding: basePadding,
             itemCount: sortedEntries.length + leadingStrips,
-            separatorBuilder: (_, _) =>
-                SizedBox(height: widget.dense ? 2 : 10),
+            separatorBuilder: (_, _) => SizedBox(height: widget.dense ? 2 : 10),
             itemBuilder: (context, index) {
               var offset = 0;
               if (isRefreshing) {
@@ -861,10 +855,7 @@ class _RecentPaneState extends State<RecentPane> {
               return _SessionRowCard(
                 host: entry.host,
                 session: entry.session,
-                favorite: _favorites.isFavorite(
-                  entry.host,
-                  entry.session.id,
-                ),
+                favorite: _favorites.isFavorite(entry.host, entry.session.id),
                 selected: widget.selectedSessionId == entry.session.id,
                 dense: widget.dense,
                 onTap: () => widget.onOpenSession(entry.host, entry.session),
@@ -906,8 +897,8 @@ class _SessionRowCard extends StatelessWidget {
     return ListenableBuilder(
       listenable: SessionReadStore.instance,
       builder: (context, _) {
-        final unread = !selected &&
-            SessionReadStore.instance.isUnread(host, session);
+        final unread =
+            !selected && SessionReadStore.instance.isUnread(host, session);
         return _buildBody(context, colors, running, unread);
       },
     );
@@ -923,9 +914,7 @@ class _SessionRowCard extends StatelessWidget {
       // Compact variant used in the desktop sidebar. Uses a plain
       // InkWell + tinted fill for selection rather than the old accent
       // strip — closer to modern macOS sidebars (Raycast/Linear).
-      final bgColor = selected
-          ? colors.accentMuted
-          : Colors.transparent;
+      final bgColor = selected ? colors.accentMuted : Colors.transparent;
       final borderColor = selected
           ? colors.accent.withValues(alpha: 0.35)
           : Colors.transparent;
@@ -970,16 +959,11 @@ class _SessionRowCard extends StatelessWidget {
                         session.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              height: 1.25,
-                              color: selected
-                                  ? colors.accent
-                                  : colors.textPrimary,
-                            ),
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          height: 1.25,
+                          color: selected ? colors.accent : colors.textPrimary,
+                        ),
                       ),
                       const SizedBox(height: 3),
                       Text(
@@ -997,9 +981,7 @@ class _SessionRowCard extends StatelessWidget {
                           session.preview,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
+                          style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(
                                 color: colors.textSecondary,
                                 height: 1.3,
@@ -1049,9 +1031,7 @@ class _SessionRowCard extends StatelessWidget {
     return MeshCard(
       onTap: onTap,
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-      accentStrip: running
-          ? colors.success
-          : (selected ? colors.accent : null),
+      accentStrip: running ? colors.success : (selected ? colors.accent : null),
       borderColor: selected ? colors.accent : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1068,8 +1048,7 @@ class _SessionRowCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight:
-                        unread ? FontWeight.w800 : FontWeight.w700,
+                    fontWeight: unread ? FontWeight.w800 : FontWeight.w700,
                   ),
                 ),
               ),
@@ -1325,8 +1304,7 @@ class _InboxPaneState extends State<InboxPane> {
           return _InboxCard(
             entry: entry,
             dense: widget.dense,
-            onOpenSession: () =>
-                widget.onOpenSession(entry.host, entry.action),
+            onOpenSession: () => widget.onOpenSession(entry.host, entry.action),
             onRespond: (decision) =>
                 _respond(entry.host, entry.action, decision),
           );
@@ -1391,12 +1369,11 @@ class _InboxCard extends StatelessWidget {
                               action.title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: Theme.of(
-                                context,
-                              ).textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                height: 1.25,
-                              ),
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.25,
+                                  ),
                             ),
                           ),
                           const SizedBox(width: 6),
@@ -1421,10 +1398,7 @@ class _InboxCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 4),
-                _InboxDenseActions(
-                  action: action,
-                  onRespond: onRespond,
-                ),
+                _InboxDenseActions(action: action, onRespond: onRespond),
               ],
             ),
           ),
@@ -1549,9 +1523,7 @@ class _InboxDenseActions extends StatelessWidget {
         if (action.canApprove)
           _SquareIconAction(
             icon: Icons.check_rounded,
-            tooltip: canExtended
-                ? 'Approve (right-click for more)'
-                : 'Approve',
+            tooltip: canExtended ? 'Approve (right-click for more)' : 'Approve',
             foreground: colors.success,
             background: colors.success.withValues(alpha: 0.12),
             onTap: () => onRespond('accept'),
@@ -1796,9 +1768,7 @@ class _HostRowCard extends StatelessWidget {
                 duration: const Duration(milliseconds: 120),
                 padding: const EdgeInsets.fromLTRB(10, 9, 6, 10),
                 decoration: BoxDecoration(
-                  color: selected
-                      ? colors.accentMuted
-                      : Colors.transparent,
+                  color: selected ? colors.accentMuted : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: selected
@@ -1842,13 +1812,12 @@ class _HostRowCard extends StatelessWidget {
                             host.label,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              height: 1.25,
-                              color: selected ? colors.accent : null,
-                            ),
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.25,
+                                  color: selected ? colors.accent : null,
+                                ),
                           ),
                           const SizedBox(height: 2),
                           Text(
@@ -2229,10 +2198,7 @@ class _RecentProgressStrip extends StatelessWidget {
 }
 
 class _RecentErrorBanner extends StatelessWidget {
-  const _RecentErrorBanner({
-    required this.hostLabels,
-    required this.onRetry,
-  });
+  const _RecentErrorBanner({required this.hostLabels, required this.onRetry});
 
   final List<String> hostLabels;
   final VoidCallback onRetry;
@@ -2306,10 +2272,7 @@ class _HomeSearchBar extends StatelessWidget {
               filled: true,
               fillColor: colors.surface,
               hintText: hintText,
-              hintStyle: TextStyle(
-                color: colors.textTertiary,
-                fontSize: 14,
-              ),
+              hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
               prefixIcon: Icon(
                 Icons.search_rounded,
                 size: 18,
@@ -2374,10 +2337,7 @@ class _UnreadDot extends StatelessWidget {
     return Container(
       width: 8,
       height: 8,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-      ),
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
 }
