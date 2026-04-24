@@ -2290,17 +2290,17 @@ class _SessionScreenState extends State<SessionScreen>
                 label: Text('Stop', style: TextStyle(color: colors.danger)),
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: MeshIconButton(
-              icon: _searchOpen
-                  ? Icons.search_off_rounded
-                  : Icons.search_rounded,
-              tooltip: _searchOpen ? 'Close search' : 'Search loaded messages',
-              color: _searchOpen ? colors.accent : colors.textSecondary,
-              onTap: _searchOpen ? _closeSearch : _openSearch,
+          if (_gitHeaderLabel(session, _gitStatus) != null &&
+              (_gitStatus?.dirty ?? false))
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: MeshIconButton(
+                icon: Icons.account_tree_outlined,
+                tooltip: 'Git details',
+                color: colors.warning,
+                onTap: () => _showGitSheet(session),
+              ),
             ),
-          ),
           Padding(
             padding: const EdgeInsets.only(right: 10),
             child: ListenableBuilder(
@@ -2328,106 +2328,157 @@ class _SessionScreenState extends State<SessionScreen>
               },
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: ListenableBuilder(
-              listenable: _favorites,
-              builder: (context, _) {
-                final favorite = _favorites.isFavorite(widget.host, session.id);
-                return MeshIconButton(
-                  icon: favorite
-                      ? Icons.star_rounded
-                      : Icons.star_outline_rounded,
-                  tooltip: favorite ? 'Remove favorite' : 'Add favorite',
-                  color: favorite ? colors.warning : colors.textSecondary,
-                  onTap: _toggleFavorite,
-                );
-              },
-            ),
-          ),
-          if (_gitHeaderLabel(session, _gitStatus) != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 10),
-              child: MeshIconButton(
-                icon: Icons.account_tree_outlined,
-                tooltip: 'Git details',
-                color: (_gitStatus?.dirty ?? false)
-                    ? colors.warning
-                    : colors.textSecondary,
-                onTap: () => _showGitSheet(session),
-              ),
-            ),
-          Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: MeshIconButton(
-              icon: Icons.folder_outlined,
-              tooltip: 'Browse files',
-              onTap: () {
-                final isDesktop = widget.topPadding != null;
-                if (isDesktop) {
-                  showWorkspaceBrowserDialog(
-                    context,
-                    host: widget.host,
-                    api: widget.api,
-                    root: session.cwd,
-                  );
-                } else {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => FileBrowserScreen(
-                        host: widget.host,
-                        api: widget.api,
-                        root: session.cwd,
+          ListenableBuilder(
+            listenable: _favorites,
+            builder: (context, _) {
+              final favorite = _favorites.isFavorite(widget.host, session.id);
+              final gitAvailable =
+                  _gitHeaderLabel(session, _gitStatus) != null;
+              final gitDirty = _gitStatus?.dirty ?? false;
+              // Hide the 'Git details' menu item when it's already a visible
+              // icon (dirty state). Keep it hidden entirely if there is no
+              // git info to show.
+              final showGitInMenu = gitAvailable && !gitDirty;
+              return PopupMenuButton<String>(
+                tooltip: 'Session actions',
+                icon: Icon(
+                  Icons.more_vert_rounded,
+                  color: colors.textPrimary,
+                ),
+                onSelected: (value) {
+                  switch (value) {
+                    case 'search':
+                      if (_searchOpen) {
+                        _closeSearch();
+                      } else {
+                        _openSearch();
+                      }
+                      break;
+                    case 'favorite':
+                      _toggleFavorite();
+                      break;
+                    case 'git':
+                      _showGitSheet(session);
+                      break;
+                    case 'browse':
+                      final isDesktop = widget.topPadding != null;
+                      if (isDesktop) {
+                        showWorkspaceBrowserDialog(
+                          context,
+                          host: widget.host,
+                          api: widget.api,
+                          root: session.cwd,
+                        );
+                      } else {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => FileBrowserScreen(
+                              host: widget.host,
+                              api: widget.api,
+                              root: session.cwd,
+                            ),
+                          ),
+                        );
+                      }
+                      break;
+                    case 'reload':
+                      _loadSnapshot();
+                      break;
+                    case 'rename':
+                      _renameSession();
+                      break;
+                    case 'archive':
+                      _archiveSession();
+                      break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem<String>(
+                    value: 'search',
+                    child: Row(
+                      children: [
+                        Icon(
+                          _searchOpen
+                              ? Icons.search_off_rounded
+                              : Icons.search_rounded,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(_searchOpen ? 'Close search' : 'Search messages'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'favorite',
+                    child: Row(
+                      children: [
+                        Icon(
+                          favorite
+                              ? Icons.star_rounded
+                              : Icons.star_outline_rounded,
+                          size: 18,
+                          color: favorite ? colors.warning : null,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(favorite ? 'Remove favorite' : 'Add favorite'),
+                      ],
+                    ),
+                  ),
+                  if (showGitInMenu)
+                    const PopupMenuItem<String>(
+                      value: 'git',
+                      child: Row(
+                        children: [
+                          Icon(Icons.account_tree_outlined, size: 18),
+                          SizedBox(width: 10),
+                          Text('Git details'),
+                        ],
                       ),
                     ),
-                  );
-                }
-              },
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: MeshIconButton(
-              icon: Icons.refresh_rounded,
-              tooltip: 'Reload',
-              onTap: _loadSnapshot,
-            ),
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'Session actions',
-            icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
-            onSelected: (value) {
-              switch (value) {
-                case 'rename':
-                  _renameSession();
-                  break;
-                case 'archive':
-                  _archiveSession();
-                  break;
-              }
+                  const PopupMenuItem<String>(
+                    value: 'browse',
+                    child: Row(
+                      children: [
+                        Icon(Icons.folder_outlined, size: 18),
+                        SizedBox(width: 10),
+                        Text('Browse files'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem<String>(
+                    value: 'reload',
+                    child: Row(
+                      children: [
+                        Icon(Icons.refresh_rounded, size: 18),
+                        SizedBox(width: 10),
+                        Text('Reload'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem<String>(
+                    value: 'rename',
+                    child: Row(
+                      children: [
+                        Icon(Icons.drive_file_rename_outline, size: 18),
+                        SizedBox(width: 10),
+                        Text('Rename'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem<String>(
+                    value: 'archive',
+                    child: Row(
+                      children: [
+                        Icon(Icons.archive_outlined, size: 18),
+                        SizedBox(width: 10),
+                        Text('Archive'),
+                      ],
+                    ),
+                  ),
+                ],
+              );
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem<String>(
-                value: 'rename',
-                child: Row(
-                  children: [
-                    Icon(Icons.drive_file_rename_outline, size: 18),
-                    SizedBox(width: 10),
-                    Text('Rename'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem<String>(
-                value: 'archive',
-                child: Row(
-                  children: [
-                    Icon(Icons.archive_outlined, size: 18),
-                    SizedBox(width: 10),
-                    Text('Archive'),
-                  ],
-                ),
-              ),
-            ],
           ),
           const SizedBox(width: 4),
         ],
