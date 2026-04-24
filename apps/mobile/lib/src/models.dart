@@ -94,6 +94,7 @@ class SessionSummary {
 class SessionRuntimeSummary {
   const SessionRuntimeSummary({
     this.model,
+    this.serviceTier,
     this.reasoningEffort,
     this.approvalPolicy,
     this.sandboxMode,
@@ -104,6 +105,7 @@ class SessionRuntimeSummary {
   });
 
   final String? model;
+  final String? serviceTier;
   final String? reasoningEffort;
   final String? approvalPolicy;
   final String? sandboxMode;
@@ -115,6 +117,7 @@ class SessionRuntimeSummary {
   factory SessionRuntimeSummary.fromJson(Map<String, dynamic> json) =>
       SessionRuntimeSummary(
         model: json['model'] as String?,
+        serviceTier: json['serviceTier'] as String?,
         reasoningEffort: json['reasoningEffort'] as String?,
         approvalPolicy: json['approvalPolicy'] as String?,
         sandboxMode: json['sandboxMode'] as String?,
@@ -263,6 +266,77 @@ class SkillErrorInfo {
     path: _stringValue(json['path']),
     message: _stringValue(json['message']),
   );
+}
+
+class ModelCatalogEntry {
+  const ModelCatalogEntry({
+    required this.id,
+    required this.model,
+    required this.displayName,
+    required this.description,
+    required this.defaultReasoningEffort,
+    required this.supportedReasoningEfforts,
+    required this.supportsPersonality,
+    required this.additionalSpeedTiers,
+    required this.inputModalities,
+    required this.isDefault,
+  });
+
+  final String id;
+  final String model;
+  final String displayName;
+  final String description;
+  final String defaultReasoningEffort;
+  final List<ModelReasoningEffortOption> supportedReasoningEfforts;
+  final bool supportsPersonality;
+  final List<String> additionalSpeedTiers;
+  final List<String> inputModalities;
+  final bool isDefault;
+
+  bool get supportsFastMode => additionalSpeedTiers.contains('fast');
+  bool get isAutoModel => model.startsWith('codex-auto-');
+
+  factory ModelCatalogEntry.fromJson(
+    Map<String, dynamic> json,
+  ) => ModelCatalogEntry(
+    id: _stringValue(json['id']),
+    model: _stringValue(json['model']),
+    displayName: _stringValue(json['displayName']),
+    description: _stringValue(json['description']),
+    defaultReasoningEffort: _stringValue(json['defaultReasoningEffort']),
+    supportedReasoningEfforts:
+        (json['supportedReasoningEfforts'] as List<dynamic>? ?? [])
+            .map(
+              (item) => ModelReasoningEffortOption.fromJson(
+                item as Map<String, dynamic>,
+              ),
+            )
+            .toList(),
+    supportsPersonality: _boolValue(json['supportsPersonality']),
+    additionalSpeedTiers: (json['additionalSpeedTiers'] as List<dynamic>? ?? [])
+        .map(_stringValue)
+        .toList(),
+    inputModalities: (json['inputModalities'] as List<dynamic>? ?? [])
+        .map(_stringValue)
+        .toList(),
+    isDefault: _boolValue(json['isDefault']),
+  );
+}
+
+class ModelReasoningEffortOption {
+  const ModelReasoningEffortOption({
+    required this.reasoningEffort,
+    required this.description,
+  });
+
+  final String reasoningEffort;
+  final String description;
+
+  factory ModelReasoningEffortOption.fromJson(Map<String, dynamic> json) =>
+      ModelReasoningEffortOption(
+        reasoningEffort: _stringValue(json['reasoningEffort']),
+        description: _stringValue(json['description']),
+      );
 }
 
 class SessionMessage {

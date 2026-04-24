@@ -12,6 +12,11 @@ List<String> buildRuntimeHighlights(SessionRuntimeSummary? runtime) {
   if ((runtime.model ?? '').isNotEmpty) {
     labels.add(runtime.model!);
   }
+  if ((runtime.serviceTier ?? '').isNotEmpty) {
+    labels.add(
+      runtime.serviceTier == 'fast' ? 'fast mode' : runtime.serviceTier!,
+    );
+  }
   if ((runtime.reasoningEffort ?? '').isNotEmpty) {
     labels.add(runtime.reasoningEffort!);
   }
@@ -41,6 +46,16 @@ String runtimeNetworkValue(bool? value) {
   return value ? 'Enabled' : 'Blocked';
 }
 
+String runtimeServiceTierValue(String? value) {
+  if (value == null || value.trim().isEmpty) {
+    return 'Unknown';
+  }
+  return switch (value) {
+    'fast' => 'Fast',
+    _ => value,
+  };
+}
+
 class SessionRuntimeWrap extends StatelessWidget {
   const SessionRuntimeWrap({super.key, required this.runtime});
 
@@ -58,11 +73,8 @@ class SessionRuntimeWrap extends StatelessWidget {
       runSpacing: 6,
       children: labels
           .map(
-            (label) => MeshPill(
-              label: label,
-              tone: MeshPillTone.accent,
-              mono: true,
-            ),
+            (label) =>
+                MeshPill(label: label, tone: MeshPillTone.accent, mono: true),
           )
           .toList(),
     );
