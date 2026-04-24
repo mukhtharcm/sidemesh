@@ -79,7 +79,7 @@ export interface SessionActivityChange {
 
 export interface SessionActivityBase {
   id: string;
-  type: "command" | "file_change" | "turn_diff" | "image_generation";
+  type: "command" | "file_change" | "turn_diff" | "web_search" | "image_generation";
   turnId: string | null;
   createdAt: number;
   seq: number;
@@ -115,6 +115,14 @@ export interface TurnDiffActivity extends SessionActivityBase {
   diff: string | null;
 }
 
+export interface WebSearchActivity extends SessionActivityBase {
+  type: "web_search";
+  query: string | null;
+  queries: string[];
+  targetUrl: string | null;
+  pattern: string | null;
+}
+
 export interface ImageGenerationActivity extends SessionActivityBase {
   type: "image_generation";
   revisedPrompt: string | null;
@@ -125,6 +133,7 @@ export type SessionActivity =
   | CommandActivity
   | FileChangeActivity
   | TurnDiffActivity
+  | WebSearchActivity
   | ImageGenerationActivity;
 
 export interface PendingAction {
