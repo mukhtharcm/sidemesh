@@ -1957,18 +1957,26 @@ class _SessionScreenState extends State<SessionScreen>
                                   child: switch (entry.kind) {
                                     _TimelineEntryKind.message =>
                                       _MessageBubble(
+                                        host: widget.host,
+                                        api: widget.api,
                                         message: entry.message!,
                                         onOpenFile: _openWorkspaceFile,
                                       ),
                                     _TimelineEntryKind.activity =>
                                       _ActivityCard(
+                                        host: widget.host,
+                                        api: widget.api,
                                         activity: entry.activity!,
                                         sessionCwd: session.cwd,
-                                        defaultCollapsed: true,
+                                        defaultCollapsed:
+                                            entry.activity!.type !=
+                                            'image_generation',
                                         onOpenFile: _openWorkspaceFile,
                                       ),
                                     _TimelineEntryKind.liveAssistant =>
                                       _LiveAssistantBubble(
+                                        host: widget.host,
+                                        api: widget.api,
                                         message: _liveAssistantNotifier,
                                         onOpenFile: _openWorkspaceFile,
                                       ),
@@ -3113,8 +3121,15 @@ class _TimelineEntry {
 }
 
 class _LiveAssistantBubble extends StatelessWidget {
-  const _LiveAssistantBubble({required this.message, this.onOpenFile});
+  const _LiveAssistantBubble({
+    required this.host,
+    required this.api,
+    required this.message,
+    this.onOpenFile,
+  });
 
+  final HostProfile host;
+  final ApiClient api;
   final ValueListenable<_LiveAssistantMessageState?> message;
   final void Function(String path)? onOpenFile;
 
@@ -3129,6 +3144,8 @@ class _LiveAssistantBubble extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.only(bottom: 4),
           child: _MessageBubble(
+            host: host,
+            api: api,
             message: liveMessage.toMessage(),
             live: liveMessage.live,
             onOpenFile: onOpenFile,
@@ -3195,11 +3212,15 @@ class _ComposerStatusStrip extends StatelessWidget {
 
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
+    required this.host,
+    required this.api,
     required this.message,
     this.live = false,
     this.onOpenFile,
   });
 
+  final HostProfile host;
+  final ApiClient api;
   final SessionMessage message;
   final bool live;
   final void Function(String path)? onOpenFile;
@@ -3267,6 +3288,8 @@ class _MessageBubble extends StatelessWidget {
                     ),
                   if (message.attachments.isNotEmpty) ...[
                     _MessageAttachmentsSection(
+                      host: host,
+                      api: api,
                       attachments: message.attachments,
                     ),
                     if (hasText) const SizedBox(height: 10),
@@ -3310,8 +3333,14 @@ class _MessageBubble extends StatelessWidget {
 }
 
 class _MessageAttachmentsSection extends StatelessWidget {
-  const _MessageAttachmentsSection({required this.attachments});
+  const _MessageAttachmentsSection({
+    required this.host,
+    required this.api,
+    required this.attachments,
+  });
 
+  final HostProfile host;
+  final ApiClient api;
   final List<SessionMessageAttachment> attachments;
 
   @override
@@ -3332,7 +3361,11 @@ class _MessageAttachmentsSection extends StatelessWidget {
                   width: attachment.isLocalImage
                       ? constraints.maxWidth
                       : itemWidth,
-                  child: _MessageAttachmentTile(attachment: attachment),
+                  child: _MessageAttachmentTile(
+                    host: host,
+                    api: api,
+                    attachment: attachment,
+                  ),
                 );
               })
               .toList(growable: false),
@@ -3343,8 +3376,14 @@ class _MessageAttachmentsSection extends StatelessWidget {
 }
 
 class _MessageAttachmentTile extends StatelessWidget {
-  const _MessageAttachmentTile({required this.attachment});
+  const _MessageAttachmentTile({
+    required this.host,
+    required this.api,
+    required this.attachment,
+  });
 
+  final HostProfile host;
+  final ApiClient api;
   final SessionMessageAttachment attachment;
 
   @override
@@ -3353,7 +3392,11 @@ class _MessageAttachmentTile extends StatelessWidget {
       return _MessageImageAttachmentTile(url: attachment.url!);
     }
     if (attachment.isLocalImage && attachment.path != null) {
-      return _LocalImageAttachmentTile(path: attachment.path!);
+      return _LocalImageAttachmentTile(
+        host: host,
+        api: api,
+        path: attachment.path!,
+      );
     }
     return const SizedBox.shrink();
   }
@@ -3455,20 +3498,76 @@ class _MessageImageAttachmentTileState
 }
 
 class _LocalImageAttachmentTile extends StatelessWidget {
-  const _LocalImageAttachmentTile({required this.path});
+  const _LocalImageAttachmentTile({
+    required this.host,
+    required this.api,
+    required this.path,
+  });
 
+  final HostProfile host;
+  final ApiClient api;
   final String path;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final heroTag = _messageImageHeroTag('${host.id}:$path');
+    final imageProvider = NetworkImage(
+      api.fsBlobUri(host, path).toString(),
+      headers: api.authHeaders(host),
+    );
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: colors.border),
       ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(15),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => _FullscreenImageViewer(
+                    imageProvider: imageProvider,
+                    heroTag: heroTag,
+                  ),
+                ),
+              );
+            },
+            child: AspectRatio(
+              aspectRatio: 1.35,
+              child: Hero(
+                tag: heroTag,
+                child: Image(
+                  image: imageProvider,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  errorBuilder: (context, error, stackTrace) =>
+                      _LocalImageFallback(path: path, colors: colors),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LocalImageFallback extends StatelessWidget {
+  const _LocalImageFallback({required this.path, required this.colors});
+
+  final String path;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: colors.surfaceMuted,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       child: Row(
         children: [
           Icon(Icons.image_outlined, color: colors.accent, size: 18),
@@ -4051,12 +4150,16 @@ class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
 
 class _ActivityCard extends StatefulWidget {
   const _ActivityCard({
+    required this.host,
+    required this.api,
     required this.activity,
     required this.sessionCwd,
     this.defaultCollapsed = true,
     this.onOpenFile,
   });
 
+  final HostProfile host;
+  final ApiClient api;
   final SessionActivity activity;
   final String sessionCwd;
   final bool defaultCollapsed;
@@ -4087,6 +4190,7 @@ class _ActivityCardState extends State<_ActivityCard> {
             ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
             : 'Edited ${activity.changes.length} files',
       'turn_diff' => 'Live turn diff',
+      'image_generation' => 'Generated image',
       _ => 'Activity',
     };
 
@@ -4094,6 +4198,10 @@ class _ActivityCardState extends State<_ActivityCard> {
       'command' => _relativeSessionPath(activity.cwd ?? sessionCwd, sessionCwd),
       'file_change' => _activityFileSummary(activity.changes, sessionCwd),
       'turn_diff' => 'Aggregated patch snapshot for this turn',
+      'image_generation' =>
+        (activity.savedPath ?? '').isNotEmpty
+            ? _relativeSessionPath(activity.savedPath!, sessionCwd)
+            : 'Image generation output',
       _ => null,
     };
 
@@ -4101,6 +4209,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'command' => 'COMMAND',
       'file_change' => 'FILE CHANGE',
       'turn_diff' => 'TURN DIFF',
+      'image_generation' => 'IMAGE',
       _ => 'ACTIVITY',
     };
 
@@ -4108,6 +4217,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'command' => Icons.terminal_rounded,
       'file_change' => Icons.edit_note_rounded,
       'turn_diff' => Icons.difference_rounded,
+      'image_generation' => Icons.image_rounded,
       _ => Icons.bolt_rounded,
     };
 
@@ -4283,11 +4393,21 @@ class _ActivityCardState extends State<_ActivityCard> {
                         ...activity.commandActions.map(
                           (action) => MeshPill(label: action.label, mono: true),
                         ),
+                      if (activity.isImageGeneration &&
+                          (activity.savedPath ?? '').isNotEmpty)
+                        const MeshPill(
+                          label: 'saved image',
+                          tone: MeshPillTone.info,
+                          mono: true,
+                        ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   if (activity.isCommand)
                     ..._buildCommandBody(context, activity)
+                  else if (activity.isImageGeneration) ...[
+                    _buildImageGenerationBody(context, activity),
+                  ]
                   else if (activity.isTurnDiff) ...[
                     if ((activity.diff ?? '').isNotEmpty)
                       _buildLazyDiff(
@@ -4368,6 +4488,65 @@ class _ActivityCardState extends State<_ActivityCard> {
     }
 
     return widgets;
+  }
+
+  Widget _buildImageGenerationBody(
+    BuildContext context,
+    SessionActivity activity,
+  ) {
+    final colors = context.colors;
+    final prompt = (activity.revisedPrompt ?? '').trim();
+    final savedPath = (activity.savedPath ?? '').trim();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (prompt.isNotEmpty) ...[
+          Text(
+            'Prompt used',
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ).copyWith(letterSpacing: 0.8),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: colors.surfaceMuted,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.border),
+            ),
+            child: SelectableText(
+              prompt,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textPrimary,
+                height: 1.4,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (savedPath.isNotEmpty) ...[
+          _LocalImageAttachmentTile(
+            host: widget.host,
+            api: widget.api,
+            path: savedPath,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            savedPath,
+            style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+          ),
+        ] else if (activity.status == 'completed') ...[
+          _waitingText(context, 'Image completed, but no saved file was reported.'),
+        ] else ...[
+          _waitingText(context, 'Generating image...'),
+        ],
+      ],
+    );
   }
 
   Widget _waitingText(BuildContext context, String text) {

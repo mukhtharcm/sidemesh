@@ -210,6 +210,14 @@ class ApiClient {
     );
   }
 
+  Uri fsBlobUri(HostProfile host, String path) {
+    return _uri(host, '/api/fs/blob', queryParameters: {'path': path});
+  }
+
+  Map<String, String> authHeaders(HostProfile host) => {
+    'Authorization': 'Bearer ${host.token}',
+  };
+
   // -------------------------- Workspace filesystem --------------------------
 
   Future<List<String>> fetchFsRoots(HostProfile host) async {
