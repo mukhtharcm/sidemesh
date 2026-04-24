@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { access } from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 import readline from "node:readline";
 
 import type { JsonRpcMessage } from "./types.js";
@@ -15,7 +17,10 @@ interface InitializeResult {
   codexHome?: string;
 }
 
-function buildCodexSpawnEnv(): NodeJS.ProcessEnv {
+const SHELL_ENV_START_MARKER = "__SIDEMESH_SHELL_ENV_START__";
+const SHELL_ENV_END_MARKER = "__SIDEMESH_SHELL_ENV_END__";
+
+function buildSeededCodexSpawnEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
 
   // Service managers sometimes launch sidemesh with a stripped environment.
@@ -46,6 +51,152 @@ function buildCodexSpawnEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+async function buildCodexSpawnEnv(): Promise<NodeJS.ProcessEnv> {
+  const seeded = buildSeededCodexSpawnEnv();
+  const shellEnv = await captureLoginShellEnv(seeded);
+  if (!shellEnv) {
+    return seeded;
+  }
+
+  return {
+    ...seeded,
+    ...shellEnv,
+    HOME: shellEnv.HOME || seeded.HOME,
+    USER: shellEnv.USER || seeded.USER,
+    LOGNAME: shellEnv.LOGNAME || seeded.LOGNAME,
+    SHELL: shellEnv.SHELL || seeded.SHELL,
+    // Preserve the actual service cwd instead of the shell's startup dir.
+    PWD: seeded.PWD || process.cwd(),
+  };
+}
+
+async function captureLoginShellEnv(
+  baseEnv: NodeJS.ProcessEnv,
+): Promise<NodeJS.ProcessEnv | null> {
+  if (process.platform === "win32") {
+    return null;
+  }
+
+  const shellPath = await resolveShellPath(baseEnv);
+  if (!shellPath) {
+    return null;
+  }
+
+  const shellArgs = shellCaptureArgs(shellPath);
+  if (!shellArgs) {
+    return null;
+  }
+
+  const script = [
+    `printf '%s\\0' '${SHELL_ENV_START_MARKER}'`,
+    "env -0",
+    `printf '%s\\0' '${SHELL_ENV_END_MARKER}'`,
+  ].join("; ");
+
+  const captured = await runShellEnvCapture(shellPath, [...shellArgs, script], baseEnv);
+  if (!captured) {
+    return null;
+  }
+
+  return parseShellEnvCapture(captured);
+}
+
+async function resolveShellPath(baseEnv: NodeJS.ProcessEnv): Promise<string | null> {
+  const candidates = [
+    baseEnv.SHELL?.trim(),
+    "/bin/zsh",
+    "/usr/bin/zsh",
+    "/bin/bash",
+    "/usr/bin/bash",
+    "/bin/sh",
+    "/usr/bin/sh",
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // Try the next known shell path.
+    }
+  }
+
+  return null;
+}
+
+function shellCaptureArgs(shellPath: string): string[] | null {
+  switch (path.basename(shellPath).toLowerCase()) {
+    case "zsh":
+    case "bash":
+    case "sh":
+    case "ksh":
+    case "fish":
+      return ["-l", "-i", "-c"];
+    default:
+      return null;
+  }
+}
+
+async function runShellEnvCapture(
+  shellPath: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const stdoutChunks: Buffer[] = [];
+    const child = spawn(shellPath, args, {
+      env,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+
+    child.on("error", () => resolve(null));
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    child.on("close", () => {
+      if (stdoutChunks.length === 0) {
+        resolve(null);
+        return;
+      }
+      resolve(Buffer.concat(stdoutChunks));
+    });
+  });
+}
+
+function parseShellEnvCapture(buffer: Buffer): NodeJS.ProcessEnv | null {
+  const output = buffer.toString("utf8");
+  const startMarker = `${SHELL_ENV_START_MARKER}\0`;
+  const endMarker = `${SHELL_ENV_END_MARKER}\0`;
+  const startIndex = output.indexOf(startMarker);
+  if (startIndex === -1) {
+    return null;
+  }
+
+  const bodyStart = startIndex + startMarker.length;
+  const endIndex = output.indexOf(endMarker, bodyStart);
+  if (endIndex === -1) {
+    return null;
+  }
+
+  const body = output.slice(bodyStart, endIndex);
+  const env: NodeJS.ProcessEnv = {};
+  for (const entry of body.split("\0")) {
+    if (!entry) {
+      continue;
+    }
+    const separatorIndex = entry.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+    env[entry.slice(0, separatorIndex)] = entry.slice(separatorIndex + 1);
+  }
+
+  return Object.keys(env).length > 0 ? env : null;
+}
+
 export class CodexBridge extends EventEmitter<{
   notification: [message: { method: string; params: unknown }];
   serverRequest: [message: { id: number | string; method: string; params: unknown }];
@@ -66,8 +217,9 @@ export class CodexBridge extends EventEmitter<{
   }
 
   public async start(): Promise<void> {
+    const spawnEnv = await buildCodexSpawnEnv();
     this.process = spawn(this.codexBin, ["app-server"], {
-      env: buildCodexSpawnEnv(),
+      env: spawnEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
 
