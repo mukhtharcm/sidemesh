@@ -421,6 +421,8 @@ class SessionActivity {
     required this.terminalInput,
     required this.changes,
     required this.diff,
+    required this.revisedPrompt,
+    required this.savedPath,
   });
 
   final String id;
@@ -441,10 +443,13 @@ class SessionActivity {
   final String? terminalInput;
   final List<SessionActivityChange> changes;
   final String? diff;
+  final String? revisedPrompt;
+  final String? savedPath;
 
   bool get isCommand => type == 'command';
   bool get isFileChange => type == 'file_change';
   bool get isTurnDiff => type == 'turn_diff';
+  bool get isImageGeneration => type == 'image_generation';
 
   factory SessionActivity.fromJson(Map<String, dynamic> json) =>
       SessionActivity(
@@ -477,6 +482,8 @@ class SessionActivity {
             )
             .toList(),
         diff: _stringOrNull(json['diff']),
+        revisedPrompt: _stringOrNull(json['revisedPrompt']),
+        savedPath: _stringOrNull(json['savedPath']),
       );
 }
 
