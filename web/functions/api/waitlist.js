@@ -13,6 +13,27 @@ export async function onRequestPost({ request, env }) {
     return new Response(JSON.stringify({ ok: false, error: 'invalid_email' }), { status: 400, headers });
   }
 
+  // Turnstile verification (skipped if TURNSTILE_SECRET is unset, e.g. in local dev)
+  if (env.TURNSTILE_SECRET) {
+    const token = body.ts_token;
+    if (!token || typeof token !== 'string') {
+      return new Response(JSON.stringify({ ok: false, error: 'captcha_missing' }), { status: 400, headers });
+    }
+    const ip = request.headers.get('cf-connecting-ip') || '';
+    const form = new FormData();
+    form.append('secret', env.TURNSTILE_SECRET);
+    form.append('response', token);
+    if (ip) form.append('remoteip', ip);
+    const verify = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      body: form,
+    });
+    const v = await verify.json().catch(() => ({ success: false }));
+    if (!v.success) {
+      return new Response(JSON.stringify({ ok: false, error: 'captcha_failed' }), { status: 403, headers });
+    }
+  }
+
   const trim = (v, n = 255) => (typeof v === 'string' ? v.slice(0, n) : null);
   const h = request.headers;
   const cf = request.cf || {};
