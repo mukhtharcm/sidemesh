@@ -63,11 +63,23 @@
       const email = input.value.trim();
       btn.disabled = true; input.disabled = true;
       btn.textContent = 'sending…';
+
+      const qs = new URLSearchParams(location.search);
+      const payload = {
+        email,
+        screen: `${screen.width}x${screen.height}`,
+        dpr: window.devicePixelRatio || 1,
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+        utm_source: qs.get('utm_source'),
+        utm_medium: qs.get('utm_medium'),
+        utm_campaign: qs.get('utm_campaign'),
+      };
+
       try {
         const r = await fetch('/api/waitlist', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify(payload),
         });
         const j = await r.json().catch(() => ({}));
         if (r.ok && j.ok) {
