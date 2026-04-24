@@ -8,6 +8,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import type {
   ActiveTurnState,
+  GitInfoSummary,
   LiveEvent,
   SessionActivity,
   NodeConfig,
@@ -35,6 +36,7 @@ import {
   mergeSessionActivities,
 } from "./activity.js";
 import { CodexBridge } from "./codex-client.js";
+import { buildGitDiff, readGitDiff, readGitStatus, sanitizeGitUrl } from "./git.js";
 import { loadRolloutLog, loadSessionRuntime } from "./history.js";
 import {
   FsWatchRegistry,
@@ -547,6 +549,32 @@ export async function startServer(config: NodeConfig): Promise<void> {
       activeTurnId: state.turnId,
       pendingAction: findPendingActionForSession(pendingActions, sessionId),
     });
+  }));
+
+  app.get("/api/sessions/:sessionId/git", asyncRoute(async (request, response) => {
+    const sessionId = pathParam(request.params.sessionId);
+    const session = await readSession(bridge, sessionId, false);
+    response.json(await readGitStatus(session.cwd, mapGitInfo(session.gitInfo)));
+  }));
+
+  app.get("/api/sessions/:sessionId/git/diff", asyncRoute(async (request, response) => {
+    const sessionId = pathParam(request.params.sessionId);
+    const kind = parseGitDiffKind((request.query as Record<string, unknown>).kind);
+    if (!kind) {
+      response.status(400).json({ error: "kind must be working, staged, unstaged, or remote" });
+      return;
+    }
+
+    const session = await readSession(bridge, sessionId, false);
+    if (kind === "remote") {
+      const result = (await bridge.request("gitDiffToRemote", {
+        cwd: session.cwd,
+      })) as Record<string, unknown>;
+      response.json(buildGitDiff("remote", asString(result.diff) ?? "", normalizeGitSha(result.sha)));
+      return;
+    }
+
+    response.json(await readGitDiff(session.cwd, kind));
   }));
 
   app.get("/api/skills", asyncRoute(async (request, response) => {
@@ -1167,7 +1195,45 @@ function mapSession(
     status: thread.status?.type || "notLoaded",
     rolloutPath: thread.path,
     runtime,
+    gitInfo: mapGitInfo(thread.gitInfo),
   };
+}
+
+function mapGitInfo(raw: unknown): GitInfoSummary | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const typed = raw as Record<string, unknown>;
+  const info: GitInfoSummary = {
+    sha: asString(typed.sha),
+    branch: asString(typed.branch),
+    originUrl: sanitizeGitUrl(asString(typed.originUrl ?? typed.origin_url)),
+  };
+  return info.sha || info.branch || info.originUrl ? info : null;
+}
+
+function parseGitDiffKind(value: unknown): "working" | "staged" | "unstaged" | "remote" | null {
+  const kind = asString(value);
+  switch (kind) {
+    case "working":
+    case "staged":
+    case "unstaged":
+    case "remote":
+      return kind;
+    default:
+      return null;
+  }
+}
+
+function normalizeGitSha(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value || null;
+  }
+  if (value && typeof value === "object") {
+    const typed = value as Record<string, unknown>;
+    return asString(typed.sha ?? typed.value ?? typed["0"]) ?? null;
+  }
+  return null;
 }
 
 function sanitizeTitle(raw: string): string {

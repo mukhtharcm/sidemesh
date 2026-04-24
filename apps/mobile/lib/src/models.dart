@@ -47,6 +47,31 @@ class NodeInfo {
   );
 }
 
+class GitInfoSummary {
+  const GitInfoSummary({this.sha, this.branch, this.originUrl});
+
+  final String? sha;
+  final String? branch;
+  final String? originUrl;
+
+  bool get isEmpty =>
+      (sha ?? '').isEmpty &&
+      (branch ?? '').isEmpty &&
+      (originUrl ?? '').isEmpty;
+
+  String? get shortSha {
+    final value = sha;
+    if (value == null || value.isEmpty) return null;
+    return value.length <= 12 ? value : value.substring(0, 12);
+  }
+
+  factory GitInfoSummary.fromJson(Map<String, dynamic> json) => GitInfoSummary(
+    sha: _stringOrNull(json['sha']),
+    branch: _stringOrNull(json['branch']),
+    originUrl: _stringOrNull(json['originUrl']),
+  );
+}
+
 class SessionSummary {
   const SessionSummary({
     required this.id,
@@ -58,6 +83,7 @@ class SessionSummary {
     required this.source,
     required this.status,
     required this.runtime,
+    required this.gitInfo,
   });
 
   final String id;
@@ -69,6 +95,7 @@ class SessionSummary {
   final String source;
   final String status;
   final SessionRuntimeSummary? runtime;
+  final GitInfoSummary? gitInfo;
 
   /// Older Sidemesh builds used `running`, while Codex app-server reports
   /// active threads as `active`.
@@ -87,6 +114,9 @@ class SessionSummary {
         ? SessionRuntimeSummary.fromJson(
             json['runtime'] as Map<String, dynamic>,
           )
+        : null,
+    gitInfo: json['gitInfo'] is Map<String, dynamic>
+        ? GitInfoSummary.fromJson(json['gitInfo'] as Map<String, dynamic>)
         : null,
   );
 }
@@ -128,6 +158,129 @@ class SessionRuntimeSummary {
             ? null
             : _dateValue(json['updatedAt']),
       );
+}
+
+class SessionGitFileStatus {
+  const SessionGitFileStatus({
+    required this.path,
+    required this.originalPath,
+    required this.indexStatus,
+    required this.worktreeStatus,
+  });
+
+  final String path;
+  final String? originalPath;
+  final String indexStatus;
+  final String worktreeStatus;
+
+  bool get isUntracked => indexStatus == '?' && worktreeStatus == '?';
+  bool get isStaged => indexStatus.trim().isNotEmpty && indexStatus != '?';
+  bool get isUnstaged =>
+      worktreeStatus.trim().isNotEmpty && worktreeStatus != '?';
+
+  factory SessionGitFileStatus.fromJson(Map<String, dynamic> json) =>
+      SessionGitFileStatus(
+        path: _stringValue(json['path']),
+        originalPath: _stringOrNull(json['originalPath']),
+        indexStatus: _stringValue(json['indexStatus']),
+        worktreeStatus: _stringValue(json['worktreeStatus']),
+      );
+}
+
+class SessionGitStatus {
+  const SessionGitStatus({
+    required this.isRepo,
+    required this.cwd,
+    required this.repoRoot,
+    required this.branch,
+    required this.sha,
+    required this.shortSha,
+    required this.upstream,
+    required this.ahead,
+    required this.behind,
+    required this.dirty,
+    required this.staged,
+    required this.unstaged,
+    required this.untracked,
+    required this.changed,
+    required this.originUrl,
+    required this.files,
+    required this.filesTruncated,
+    required this.refreshedAt,
+    required this.error,
+  });
+
+  final bool isRepo;
+  final String cwd;
+  final String? repoRoot;
+  final String? branch;
+  final String? sha;
+  final String? shortSha;
+  final String? upstream;
+  final int ahead;
+  final int behind;
+  final bool dirty;
+  final int staged;
+  final int unstaged;
+  final int untracked;
+  final int changed;
+  final String? originUrl;
+  final List<SessionGitFileStatus> files;
+  final bool filesTruncated;
+  final DateTime refreshedAt;
+  final String? error;
+
+  factory SessionGitStatus.fromJson(Map<String, dynamic> json) =>
+      SessionGitStatus(
+        isRepo: _boolValue(json['isRepo']),
+        cwd: _stringValue(json['cwd']),
+        repoRoot: _stringOrNull(json['repoRoot']),
+        branch: _stringOrNull(json['branch']),
+        sha: _stringOrNull(json['sha']),
+        shortSha: _stringOrNull(json['shortSha']),
+        upstream: _stringOrNull(json['upstream']),
+        ahead: _intValue(json['ahead']),
+        behind: _intValue(json['behind']),
+        dirty: _boolValue(json['dirty']),
+        staged: _intValue(json['staged']),
+        unstaged: _intValue(json['unstaged']),
+        untracked: _intValue(json['untracked']),
+        changed: _intValue(json['changed']),
+        originUrl: _stringOrNull(json['originUrl']),
+        files: (json['files'] as List<dynamic>? ?? const [])
+            .map(
+              (item) =>
+                  SessionGitFileStatus.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(),
+        filesTruncated: _boolValue(json['filesTruncated']),
+        refreshedAt: _dateValue(json['refreshedAt']),
+        error: _stringOrNull(json['error']),
+      );
+}
+
+class SessionGitDiff {
+  const SessionGitDiff({
+    required this.kind,
+    required this.diff,
+    required this.baseSha,
+    required this.truncated,
+    required this.maxChars,
+  });
+
+  final String kind;
+  final String diff;
+  final String? baseSha;
+  final bool truncated;
+  final int maxChars;
+
+  factory SessionGitDiff.fromJson(Map<String, dynamic> json) => SessionGitDiff(
+    kind: _stringValue(json['kind']),
+    diff: _stringValue(json['diff']),
+    baseSha: _stringOrNull(json['baseSha']),
+    truncated: _boolValue(json['truncated']),
+    maxChars: _intValue(json['maxChars']),
+  );
 }
 
 class WorkspaceSummary {
