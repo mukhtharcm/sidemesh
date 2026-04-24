@@ -19,6 +19,7 @@ import 'file_viewer_pane.dart';
 import 'file_viewer_screen.dart';
 import 'inspector/inspector_controller.dart';
 import 'inspector/inspector_file_browser.dart';
+import 'inspector/inspector_persistence.dart';
 import 'inspector/inspector_search.dart';
 import 'workspace_browser_dialog.dart';
 import '../session_favorites_store.dart';
@@ -154,6 +155,13 @@ class _SessionScreenState extends State<SessionScreen>
   String? _gitStatusError;
   int _gitStatusRequestId = 0;
 
+  // Inspector (desktop pane-3) lifecycle tracking. Resolved in
+  // [didChangeDependencies] so we can addListener/removeListener around
+  // the same controller instance exposed by the shell's InspectorScope.
+  InspectorController? _inspectorController;
+  bool _inspectorRestoreAttempted = false;
+  bool _inspectorSawOurSurface = false;
+
   void _clearLiveAssistantMessage() {
     _liveAssistantNotifier.value = null;
   }
@@ -184,8 +192,94 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final controller = InspectorScope.maybeOf(context);
+    if (!identical(controller, _inspectorController)) {
+      _inspectorController?.removeListener(_onInspectorChanged);
+      _inspectorController = controller;
+      _inspectorController?.addListener(_onInspectorChanged);
+    }
+    if (!_inspectorRestoreAttempted && controller != null) {
+      _inspectorRestoreAttempted = true;
+      unawaited(_restoreInspectorSurface());
+    }
+  }
+
+  Future<void> _restoreInspectorSurface() async {
+    final controller = _inspectorController;
+    if (controller == null) return;
+    // Pane 3 only materializes on wide shells; skip restoration on phones
+    // so we don't surprise users with an unexpected sheet-equivalent on
+    // resize-back to a small window.
+    final width = MediaQuery.of(context).size.width;
+    if (width < 900) return;
+    final ownerKey = _inspectorOwnerKey();
+    final kind = await InspectorPersistence.load(ownerKey);
+    if (!mounted || _disposed) return;
+    if (kind == null) return;
+    // If something else has already opened a surface for this owner
+    // (e.g. the shell's debug shortcut) don't stomp it.
+    final cur = controller.current;
+    if (cur != null && cur.ownerKey == ownerKey) return;
+    switch (kind) {
+      case InspectorSurfaceKind.search:
+        controller.show(
+          buildInspectorSearchSurface(
+            ownerKey: ownerKey,
+            controller: _searchController,
+            focusNode: _searchFocusNode,
+            recordsBuilder: _buildSearchRecords,
+          ),
+        );
+        break;
+      case InspectorSurfaceKind.fileBrowser:
+        final session = _session ?? widget.session;
+        controller.show(
+          buildInspectorWorkspaceBrowserSurface(
+            ownerKey: ownerKey,
+            host: widget.host,
+            api: widget.api,
+            root: session.cwd,
+          ),
+        );
+        break;
+      case InspectorSurfaceKind.debug:
+      case InspectorSurfaceKind.gitDetails:
+      case InspectorSurfaceKind.sessionDetails:
+        // Not persisted / not owned by the session screen yet.
+        break;
+    }
+  }
+
+  void _onInspectorChanged() {
+    if (!mounted || _disposed) return;
+    final controller = _inspectorController;
+    if (controller == null) return;
+    final ownerKey = _inspectorOwnerKey();
+    final cur = controller.current;
+    if (cur != null && cur.ownerKey == ownerKey) {
+      _inspectorSawOurSurface = true;
+      unawaited(InspectorPersistence.save(ownerKey, cur.kind));
+      return;
+    }
+    // cur is null or belongs to a different owner. We only persist "closed"
+    // when the user actively dismissed OUR surface — a shell-driven
+    // closeForOwner (session switch) leaves the saved state alone so we
+    // can restore it next time the session becomes active again.
+    if (cur == null &&
+        _inspectorSawOurSurface &&
+        controller.lastCloseWasUserInitiated) {
+      unawaited(InspectorPersistence.save(ownerKey, null));
+    }
+    _inspectorSawOurSurface = false;
+  }
+
+  @override
   void dispose() {
     _disposed = true;
+    _inspectorController?.removeListener(_onInspectorChanged);
+    _inspectorController = null;
     // Stamp the most recent session state as seen before we unmount so
     // anything that streamed in during the last turn counts as read on
     // the way out.
