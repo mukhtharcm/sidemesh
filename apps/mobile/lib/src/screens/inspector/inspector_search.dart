@@ -40,19 +40,27 @@ InspectorSurface buildInspectorSearchSurface({
   required TextEditingController controller,
   required FocusNode focusNode,
   required List<SearchRecord> Function() recordsBuilder,
+  Listenable? refresh,
 }) {
   return InspectorSurface(
     kind: InspectorSurfaceKind.search,
     ownerKey: ownerKey,
     title: 'Search',
     icon: Icons.search_rounded,
-    bodyBuilder: (context) => SearchPanel(
-      controller: controller,
-      focusNode: focusNode,
-      records: recordsBuilder(),
-      showDragHandle: false,
-      showCloseButton: false,
-    ),
+    bodyBuilder: (context) {
+      Widget buildPanel() => SearchPanel(
+        controller: controller,
+        focusNode: focusNode,
+        records: recordsBuilder(),
+        showDragHandle: false,
+        showCloseButton: false,
+      );
+      if (refresh == null) return buildPanel();
+      return ListenableBuilder(
+        listenable: refresh,
+        builder: (context, _) => buildPanel(),
+      );
+    },
   );
 }
 

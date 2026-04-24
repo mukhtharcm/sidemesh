@@ -317,10 +317,11 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 
   void _openSession(HostProfile host, SessionSummary session) {
-    final current = _active;
-    if (current != null) {
-      _inspector.closeForOwner('${current.host.id}|${current.session.id}');
-    }
+    // We don't close the old session's inspector here — the newly mounted
+    // SessionScreen decides: it will either replace the surface with its
+    // own restored one (smooth swap) or close the orphan if it has no
+    // saved state. That avoids a close/open flash when crossing sessions
+    // that both want the inspector open.
     setState(() {
       _active = _ActiveSession(host: host, session: session);
       _activeHost = null;
