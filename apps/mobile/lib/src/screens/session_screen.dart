@@ -3904,14 +3904,11 @@ class _Composer extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            IconButton(
-              onPressed: sending ? null : onPickImages,
-              tooltip: 'Attach images',
-              icon: const Icon(Icons.add_photo_alternate_outlined),
-              color: colors.accent,
-              visualDensity: VisualDensity.compact,
+            _ComposerAttachButton(
+              enabled: !sending,
+              onPressed: onPickImages,
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
@@ -3974,7 +3971,7 @@ class _Composer extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             _SendButton(
               sending: sending,
               controller: controller,
@@ -3983,6 +3980,43 @@ class _Composer extends StatelessWidget {
               onSend: onSend,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerAttachButton extends StatelessWidget {
+  const _ComposerAttachButton({required this.enabled, required this.onPressed});
+
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: 'Attach images',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: enabled ? onPressed : null,
+          child: Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: colors.surfaceMuted,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: colors.border),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.add_photo_alternate_outlined,
+              color: enabled ? colors.accent : colors.textTertiary,
+              size: 22,
+            ),
+          ),
         ),
       ),
     );
