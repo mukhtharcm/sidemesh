@@ -2593,6 +2593,7 @@ class _Composer extends StatelessWidget {
     if (isMacDesktop) {
       field = MacosNativeComposerField(
         controller: controller,
+        focusNode: focusNode,
         onSend: onSend,
         hintText: hintText,
       );

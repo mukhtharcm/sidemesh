@@ -50,7 +50,7 @@ private final class SidemeshNativeComposerViewFactory: NSObject, FlutterPlatform
 private final class SidemeshNativeComposerView: NSView, NSTextViewDelegate {
   private let channel: FlutterMethodChannel
   private let scrollView = NSScrollView(frame: .zero)
-  private let textView = NSTextView(frame: .zero)
+  private let textView = FocusAwareTextView(frame: .zero)
   private let placeholderLabel = NSTextField(labelWithString: "")
   private var suppressOutgoingEdits = false
   private var shouldRestoreFocusAfterActivation = false
@@ -122,11 +122,16 @@ private final class SidemeshNativeComposerView: NSView, NSTextViewDelegate {
       width: 0,
       height: CGFloat.greatestFiniteMagnitude
     )
+    textView.onFocusChanged = { [weak self] focused in
+      self?.channel.invokeMethod("focusChanged", arguments: focused)
+    }
 
     placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
     placeholderLabel.textColor = NSColor.placeholderTextColor
     placeholderLabel.font = NSFont.systemFont(ofSize: 15)
     placeholderLabel.lineBreakMode = .byTruncatingTail
+    placeholderLabel.isEnabled = false
+    placeholderLabel.isSelectable = false
     placeholderLabel.isHidden = true
 
     addSubview(scrollView)
@@ -257,5 +262,30 @@ private final class SidemeshNativeComposerView: NSView, NSTextViewDelegate {
     }
     channel.invokeMethod("submit", arguments: nil)
     return true
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    focusTextView()
+    textView.mouseDown(with: event)
+  }
+}
+
+private final class FocusAwareTextView: NSTextView {
+  var onFocusChanged: ((Bool) -> Void)?
+
+  override func becomeFirstResponder() -> Bool {
+    let didBecome = super.becomeFirstResponder()
+    if didBecome {
+      onFocusChanged?(true)
+    }
+    return didBecome
+  }
+
+  override func resignFirstResponder() -> Bool {
+    let didResign = super.resignFirstResponder()
+    if didResign {
+      onFocusChanged?(false)
+    }
+    return didResign
   }
 }
