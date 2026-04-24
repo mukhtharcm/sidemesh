@@ -41,13 +41,11 @@ class WorkspaceBrowserPane extends StatefulWidget {
     required this.host,
     required this.api,
     required this.root,
-    this.treeWidth = 260,
   });
 
   final HostProfile host;
   final ApiClient api;
   final String root;
-  final double treeWidth;
 
   @override
   State<WorkspaceBrowserPane> createState() => _WorkspaceBrowserPaneState();
@@ -66,64 +64,69 @@ class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
     super.dispose();
   }
 
+  void _backToTree() {
+    setState(() {
+      _liveStream = null;
+      // Keep _selected so the tree can highlight the last-viewed file
+      // — makes sibling navigation fast.
+    });
+    _clearViewer();
+  }
+
+  void _clearViewer() {
+    // Force viewer teardown by bumping the state key to null on next
+    // build via _inViewerMode flag.
+    setState(() => _inViewerMode = false);
+  }
+
+  bool _inViewerMode = false;
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SizedBox(
-          width: widget.treeWidth,
-          child: Container(
-            color: colors.surfaceElevated,
-            child: FileBrowserTree(
-              host: widget.host,
-              api: widget.api,
-              root: widget.root,
-              selectedPath: _selected,
-              onOpenFile: (path, liveStream) {
-                setState(() {
-                  _selected = path;
-                  _liveStream = liveStream;
-                });
-              },
+    if (_inViewerMode && _selected != null) {
+      return Container(
+        color: colors.canvas,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _ViewerToolbar(
+              path: _selected!,
+              viewerObservable: _viewerObservable,
+              viewerKey: _viewerKey,
+              onBack: _backToTree,
             ),
-          ),
+            Divider(height: 1, color: colors.border),
+            Expanded(
+              child: FileViewerPane(
+                key: _viewerKey,
+                host: widget.host,
+                api: widget.api,
+                path: _selected!,
+                observable: _viewerObservable,
+                dense: true,
+                liveStream: _liveStream,
+              ),
+            ),
+          ],
         ),
-        VerticalDivider(width: 1, color: colors.border),
-        Expanded(
-          child: _selected == null
-              ? Center(
-                  child: MeshEmptyState(
-                    icon: Icons.description_outlined,
-                    title: 'Select a file',
-                    body: 'Pick a file on the left to view or edit.',
-                  ),
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _ViewerToolbar(
-                      path: _selected!,
-                      viewerObservable: _viewerObservable,
-                      viewerKey: _viewerKey,
-                    ),
-                    Divider(height: 1, color: colors.border),
-                    Expanded(
-                      child: FileViewerPane(
-                        key: _viewerKey,
-                        host: widget.host,
-                        api: widget.api,
-                        path: _selected!,
-                        observable: _viewerObservable,
-                        dense: true,
-                        liveStream: _liveStream,
-                      ),
-                    ),
-                  ],
-                ),
-        ),
-      ],
+      );
+    }
+    return Container(
+      color: colors.surfaceElevated,
+      child: FileBrowserTree(
+        host: widget.host,
+        api: widget.api,
+        root: widget.root,
+        selectedPath: _selected,
+        onOpenFile: (path, liveStream) {
+          setState(() {
+            _selected = path;
+            _liveStream = liveStream;
+            _inViewerMode = true;
+          });
+        },
+      ),
     );
   }
 }
@@ -133,11 +136,13 @@ class _ViewerToolbar extends StatelessWidget {
     required this.path,
     required this.viewerObservable,
     required this.viewerKey,
+    required this.onBack,
   });
 
   final String path;
   final ValueNotifier<int> viewerObservable;
   final GlobalKey<FileViewerPaneState> viewerKey;
+  final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -145,9 +150,21 @@ class _ViewerToolbar extends StatelessWidget {
     final language = languageForPath(path);
     return Container(
       color: colors.surface,
-      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      padding: const EdgeInsets.fromLTRB(4, 6, 6, 6),
       child: Row(
         children: [
+          InkResponse(
+            radius: 20,
+            onTap: onBack,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Icon(
+                Icons.arrow_back_rounded,
+                size: 18,
+                color: colors.textSecondary,
+              ),
+            ),
+          ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
