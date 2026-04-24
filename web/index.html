@@ -46,16 +46,34 @@
     <form id="wl">
       <input type="email" name="email" required placeholder="you@wherever.dev" />
       <button type="submit">Notify me</button>
+      <div id="ts-widget" data-sitekey="0x4AAAAAADCSzV2LR8P47G_e"></div>
     </form>
     <p id="wl-msg" class="platforms" style="display:none;margin-top:-20px;margin-bottom:32px;"></p>
 
     <p class="platforms">iOS · Android · macOS</p>
   </div>
   <footer>© <span id="y"></span> sidemesh</footer>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <script>
     document.getElementById('y').textContent = new Date().getFullYear();
     const f = document.getElementById('wl');
     const msg = document.getElementById('wl-msg');
+    let tsWidgetId = null;
+    let tsResolver = null;
+    function ensureTurnstile() {
+      if (!window.turnstile) return null;
+      if (tsWidgetId === null) {
+        tsWidgetId = window.turnstile.render('#ts-widget', {
+          sitekey: document.getElementById('ts-widget').dataset.sitekey,
+          size: 'invisible',
+          callback: (t) => { if (tsResolver) { tsResolver.resolve(t); tsResolver = null; } },
+          'error-callback': () => { if (tsResolver) { tsResolver.reject(new Error('captcha_error')); tsResolver = null; } },
+          'timeout-callback': () => { if (tsResolver) { tsResolver.reject(new Error('captcha_timeout')); tsResolver = null; } },
+        });
+      }
+      return tsWidgetId;
+    }
+
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
       const input = f.querySelector('input');
@@ -64,9 +82,32 @@
       btn.disabled = true; input.disabled = true;
       btn.textContent = 'sending…';
 
+      let tsToken = null;
+      const wid = ensureTurnstile();
+      if (wid !== null) {
+        try {
+          tsToken = await new Promise((resolve, reject) => {
+            const to = setTimeout(() => { tsResolver = null; reject(new Error('captcha_slow')); }, 15000);
+            tsResolver = {
+              resolve: (t) => { clearTimeout(to); resolve(t); },
+              reject: (e) => { clearTimeout(to); reject(e); },
+            };
+            window.turnstile.execute(wid);
+          });
+          window.turnstile.reset(wid);
+        } catch {
+          btn.textContent = 'try again';
+          btn.disabled = false; input.disabled = false;
+          msg.textContent = "captcha didn't load. try once more?";
+          msg.style.display = 'block';
+          return;
+        }
+      }
+
       const qs = new URLSearchParams(location.search);
       const payload = {
         email,
+        ts_token: tsToken,
         screen: `${screen.width}x${screen.height}`,
         dpr: window.devicePixelRatio || 1,
         tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,

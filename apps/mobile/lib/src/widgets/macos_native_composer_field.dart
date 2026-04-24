@@ -8,12 +8,14 @@ class MacosNativeComposerField extends StatefulWidget {
   const MacosNativeComposerField({
     super.key,
     required this.controller,
+    required this.focusNode,
     required this.onSend,
     required this.hintText,
     this.maxVisibleLines = 6,
   });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final VoidCallback onSend;
   final String hintText;
   final int maxVisibleLines;
@@ -32,30 +34,37 @@ class _MacosNativeComposerFieldState extends State<MacosNativeComposerField> {
 
   MethodChannel? _channel;
   bool _updatingControllerFromNative = false;
+  bool _updatingFocusFromNative = false;
   TextEditingValue _lastSyncedValue = const TextEditingValue();
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_handleControllerChanged);
+    widget.focusNode.addListener(_handleFocusNodeChanged);
     _lastSyncedValue = _normalizedValue(widget.controller.value);
   }
 
   @override
   void didUpdateWidget(covariant MacosNativeComposerField oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller == widget.controller) {
-      return;
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_handleControllerChanged);
+      widget.controller.addListener(_handleControllerChanged);
+      _lastSyncedValue = _normalizedValue(widget.controller.value);
+      _syncControllerToNative();
     }
-    oldWidget.controller.removeListener(_handleControllerChanged);
-    widget.controller.addListener(_handleControllerChanged);
-    _lastSyncedValue = _normalizedValue(widget.controller.value);
-    _syncControllerToNative();
+    if (oldWidget.focusNode != widget.focusNode) {
+      oldWidget.focusNode.removeListener(_handleFocusNodeChanged);
+      widget.focusNode.addListener(_handleFocusNodeChanged);
+      _syncFocusToNative();
+    }
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_handleControllerChanged);
+    widget.focusNode.removeListener(_handleFocusNodeChanged);
     _channel?.setMethodCallHandler(null);
     super.dispose();
   }
@@ -70,11 +79,19 @@ class _MacosNativeComposerFieldState extends State<MacosNativeComposerField> {
     }
   }
 
+  void _handleFocusNodeChanged() {
+    if (_updatingFocusFromNative) {
+      return;
+    }
+    _syncFocusToNative();
+  }
+
   Future<void> _handlePlatformViewCreated(int viewId) async {
     final channel = MethodChannel('$_channelPrefix$viewId');
     _channel = channel;
     channel.setMethodCallHandler(_handleMethodCall);
     _syncControllerToNative();
+    _syncFocusToNative();
   }
 
   Future<dynamic> _handleMethodCall(MethodCall call) async {
@@ -103,6 +120,18 @@ class _MacosNativeComposerFieldState extends State<MacosNativeComposerField> {
       case 'submit':
         widget.onSend();
         return null;
+      case 'focusChanged':
+        final focused = call.arguments == true;
+        _updatingFocusFromNative = true;
+        if (focused) {
+          if (!widget.focusNode.hasFocus) {
+            widget.focusNode.requestFocus();
+          }
+        } else if (widget.focusNode.hasFocus) {
+          widget.focusNode.unfocus();
+        }
+        _updatingFocusFromNative = false;
+        return null;
       default:
         return null;
     }
@@ -125,6 +154,15 @@ class _MacosNativeComposerFieldState extends State<MacosNativeComposerField> {
         'selectionEnd': nextValue.selection.end,
       }),
     );
+  }
+
+  void _syncFocusToNative() {
+    final channel = _channel;
+    if (channel == null) {
+      return;
+    }
+    final method = widget.focusNode.hasFocus ? 'focus' : 'unfocus';
+    unawaited(channel.invokeMethod<void>(method));
   }
 
   TextEditingValue _valueFromChannel(Map<String, dynamic> map) {
