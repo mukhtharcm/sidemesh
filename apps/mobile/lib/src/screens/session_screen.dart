@@ -2385,6 +2385,17 @@ class _SessionScreenState extends State<SessionScreen>
               ),
             ),
           Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: MeshIconButton(
+              icon: _searchPanelOpen
+                  ? Icons.search_off_rounded
+                  : Icons.search_rounded,
+              tooltip: _searchPanelOpen ? 'Close search' : 'Search',
+              color: _searchPanelOpen ? colors.accent : colors.textSecondary,
+              onTap: _toggleSearchPanel,
+            ),
+          ),
+          Padding(
             padding: const EdgeInsets.only(right: 10),
             child: ListenableBuilder(
               listenable: Listenable.merge([_policyStore, _turnConfigStore]),
@@ -2472,25 +2483,6 @@ class _SessionScreenState extends State<SessionScreen>
                   }
                 },
                 itemBuilder: (context) => [
-                  PopupMenuItem<String>(
-                    value: 'search',
-                    child: Row(
-                      children: [
-                        Icon(
-                          _searchPanelOpen
-                              ? Icons.search_off_rounded
-                              : Icons.search_rounded,
-                          size: 18,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          _searchPanelOpen
-                              ? 'Close search'
-                              : 'Search messages',
-                        ),
-                      ],
-                    ),
-                  ),
                   PopupMenuItem<String>(
                     value: 'favorite',
                     child: Row(
@@ -8014,7 +8006,7 @@ class _SearchPanelState extends State<_SearchPanel> {
               ),
             ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 8, 6),
+            padding: const EdgeInsets.fromLTRB(14, 12, 10, 6),
             child: Row(
               children: [
                 Icon(Icons.search_rounded, size: 20, color: colors.accent),
@@ -8026,7 +8018,7 @@ class _SearchPanelState extends State<_SearchPanel> {
                     autofocus: true,
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration.collapsed(
-                      hintText: 'Search messages and activities',
+                      hintText: 'Search transcript',
                       hintStyle: TextStyle(color: colors.textTertiary),
                     ),
                     style: theme.textTheme.bodyMedium?.copyWith(
@@ -8036,26 +8028,33 @@ class _SearchPanelState extends State<_SearchPanel> {
                   ),
                 ),
                 if (hasQuery)
-                  IconButton(
-                    tooltip: 'Clear',
-                    onPressed: () {
+                  InkResponse(
+                    radius: 18,
+                    onTap: () {
                       widget.controller.clear();
                     },
-                    icon: Icon(
-                      Icons.close_rounded,
-                      size: 18,
-                      color: colors.textSecondary,
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(
+                        Icons.close_rounded,
+                        size: 18,
+                        color: colors.textSecondary,
+                      ),
                     ),
                   ),
-                IconButton(
-                  tooltip: 'Close search',
-                  onPressed: widget.onClose,
-                  icon: Icon(
-                    Icons.close_fullscreen_rounded,
-                    size: 18,
-                    color: colors.textSecondary,
+                if (!widget.inSheet)
+                  InkResponse(
+                    radius: 18,
+                    onTap: widget.onClose,
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(
+                        Icons.close_fullscreen_rounded,
+                        size: 18,
+                        color: colors.textSecondary,
+                      ),
+                    ),
                   ),
-                ),
               ],
             ),
           ),
