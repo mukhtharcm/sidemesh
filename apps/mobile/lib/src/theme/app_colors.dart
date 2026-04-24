@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_palettes.dart';
+
 /// Theme extension that carries Sidemesh-specific semantic colors.
 ///
 /// These colors are used for the terminal-inspired UI surfaces (diffs,
@@ -91,89 +93,6 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color assistantBubbleBorder;
 
   final Color composerBackground;
-
-  /// Dark theme inspired by the Codex TUI: deep charcoal canvas, amber accent,
-  /// GitHub-style green/red diff tints.
-  static const dark = AppColors(
-    canvas: Color(0xFF0B0F14),
-    surface: Color(0xFF12171F),
-    surfaceElevated: Color(0xFF171D27),
-    surfaceMuted: Color(0xFF1D242F),
-    border: Color(0xFF232B37),
-    borderStrong: Color(0xFF30394A),
-    textPrimary: Color(0xFFE6EDF3),
-    textSecondary: Color(0xFF9AA7B4),
-    textTertiary: Color(0xFF6E7A87),
-    accent: Color(0xFFE78A3C),
-    accentMuted: Color(0xFF3A2818),
-    accentOn: Color(0xFF0B0F14),
-    success: Color(0xFF3FB950),
-    successMuted: Color(0xFF133A20),
-    danger: Color(0xFFF85149),
-    dangerMuted: Color(0xFF3B1418),
-    warning: Color(0xFFD29922),
-    warningMuted: Color(0xFF3A2E10),
-    info: Color(0xFF58A6FF),
-    infoMuted: Color(0xFF102A4A),
-    codeBackground: Color(0xFF0E131A),
-    codeBorder: Color(0xFF232B37),
-    codeForeground: Color(0xFFD6DEE6),
-    diffAddLine: Color(0xFF0F2A1A),
-    diffAddGutter: Color(0xFF123A22),
-    diffAddGlyph: Color(0xFF3FB950),
-    diffDelLine: Color(0xFF2C0F11),
-    diffDelGutter: Color(0xFF3B1418),
-    diffDelGlyph: Color(0xFFF85149),
-    diffMetaLine: Color(0xFF9AA7B4),
-    diffHunkLine: Color(0xFF58A6FF),
-    diffGutterText: Color(0xFF6E7A87),
-    userBubble: Color(0xFFE78A3C),
-    userBubbleOn: Color(0xFF0B0F14),
-    assistantBubble: Color(0xFF12171F),
-    assistantBubbleBorder: Color(0xFF232B37),
-    composerBackground: Color(0xFF12171F),
-  );
-
-  /// Light theme with warm cream palette; accents and diffs match GitHub-light.
-  static const light = AppColors(
-    canvas: Color(0xFFF6EFE2),
-    surface: Color(0xFFFFFBF3),
-    surfaceElevated: Color(0xFFFFFFFF),
-    surfaceMuted: Color(0xFFF1E7D3),
-    border: Color(0xFFE6D9BF),
-    borderStrong: Color(0xFFD1BF9E),
-    textPrimary: Color(0xFF1C1812),
-    textSecondary: Color(0xFF6D5B49),
-    textTertiary: Color(0xFF9A8A75),
-    accent: Color(0xFFCA6B1F),
-    accentMuted: Color(0xFFF4DCC0),
-    accentOn: Color(0xFFFFFBF3),
-    success: Color(0xFF1A7F37),
-    successMuted: Color(0xFFDCF3E0),
-    danger: Color(0xFFCF222E),
-    dangerMuted: Color(0xFFFBD6D3),
-    warning: Color(0xFF9A6700),
-    warningMuted: Color(0xFFFBEAC0),
-    info: Color(0xFF0969DA),
-    infoMuted: Color(0xFFDDEAFA),
-    codeBackground: Color(0xFFF6EEDD),
-    codeBorder: Color(0xFFE6D9BF),
-    codeForeground: Color(0xFF1C1812),
-    diffAddLine: Color(0xFFDAFBE1),
-    diffAddGutter: Color(0xFFACEEBB),
-    diffAddGlyph: Color(0xFF1A7F37),
-    diffDelLine: Color(0xFFFFEBE9),
-    diffDelGutter: Color(0xFFFFCECB),
-    diffDelGlyph: Color(0xFFCF222E),
-    diffMetaLine: Color(0xFF6D5B49),
-    diffHunkLine: Color(0xFF0969DA),
-    diffGutterText: Color(0xFF1F2328),
-    userBubble: Color(0xFFCA6B1F),
-    userBubbleOn: Color(0xFFFFFBF3),
-    assistantBubble: Color(0xFFFBF3E1),
-    assistantBubbleBorder: Color(0xFFD9C8A8),
-    composerBackground: Color(0xFFFFFBF3),
-  );
 
   @override
   AppColors copyWith({
@@ -308,5 +227,5 @@ class AppColors extends ThemeExtension<AppColors> {
 
 extension AppColorsX on BuildContext {
   AppColors get colors =>
-      Theme.of(this).extension<AppColors>() ?? AppColors.dark;
+      Theme.of(this).extension<AppColors>() ?? ThemeVariant.codexAmber.dark;
 }

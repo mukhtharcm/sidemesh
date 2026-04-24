@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
 
-/// Builds the Sidemesh light ThemeData.
-ThemeData buildLightTheme() => _buildTheme(Brightness.light, AppColors.light);
+/// Builds a light [ThemeData] from the given palette.
+ThemeData buildLightTheme(AppColors palette) =>
+    _buildTheme(Brightness.light, palette);
 
-/// Builds the Sidemesh dark ThemeData.
-ThemeData buildDarkTheme() => _buildTheme(Brightness.dark, AppColors.dark);
+/// Builds a dark [ThemeData] from the given palette.
+ThemeData buildDarkTheme(AppColors palette) =>
+    _buildTheme(Brightness.dark, palette);
 
 ThemeData _buildTheme(Brightness brightness, AppColors palette) {
   final colorScheme = ColorScheme(
