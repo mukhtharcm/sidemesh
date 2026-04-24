@@ -13,6 +13,9 @@ import type {
   NodeConfig,
   PendingAction,
   PendingActionRecord,
+  SkillCatalogEntry,
+  SkillErrorInfo,
+  SkillSummary,
   SessionMessageAttachment,
   SessionMessage,
   SessionRuntimeSummary,
@@ -87,6 +90,11 @@ type SessionInputItem =
     }
   | {
       type: "localImage";
+      path: string;
+    }
+  | {
+      type: "skill";
+      name: string;
       path: string;
     };
 
@@ -535,6 +543,48 @@ export async function startServer(config: NodeConfig): Promise<void> {
       activeTurnId: state.turnId,
       pendingAction: findPendingActionForSession(pendingActions, sessionId),
     });
+  }));
+
+  app.get("/api/skills", asyncRoute(async (request, response) => {
+    const query = request.query as Record<string, unknown>;
+    const cwd = asString(query.cwd);
+    if (!cwd) {
+      response.status(400).json({ error: "cwd is required" });
+      return;
+    }
+
+    const forceReload = parseQueryBool(query.forceReload);
+    const payload = (await bridge.request("skills/list", {
+      cwds: [cwd],
+      forceReload,
+      perCwdExtraUserRoots: null,
+    })) as { data?: unknown[] };
+    const rawEntries = Array.isArray(payload.data) ? payload.data : [];
+    const rawEntry =
+      rawEntries.find((entry) => asString((entry as Record<string, unknown>)?.cwd) === cwd) ??
+      rawEntries[0];
+    response.json(normalizeSkillCatalogEntry(rawEntry, cwd));
+  }));
+
+  app.post("/api/skills/config/write", asyncRoute(async (request, response) => {
+    const path = asString(request.body?.path);
+    const name = asString(request.body?.name);
+    const enabled = parseOptionalBool(request.body?.enabled);
+    if (enabled === null) {
+      response.status(400).json({ error: "enabled is required" });
+      return;
+    }
+    if ((path && name) || (!path && !name)) {
+      response.status(400).json({ error: "provide exactly one of path or name" });
+      return;
+    }
+
+    const result = await bridge.request("skills/config/write", {
+      path: path ?? undefined,
+      name: name ?? undefined,
+      enabled,
+    });
+    response.json(result);
   }));
 
   app.post("/api/sessions/create", asyncRoute(async (request, response) => {
@@ -1448,6 +1498,15 @@ function parseInputItems(value: unknown): SessionInputItem[] {
         items.push({ type: "localImage", path });
         break;
       }
+      case "skill": {
+        const name = asString(typed.name);
+        const path = asString(typed.path);
+        if (!name || !path) {
+          continue;
+        }
+        items.push({ type: "skill", name, path });
+        break;
+      }
       default:
         break;
     }
@@ -1478,6 +1537,75 @@ function buildSubmittedUserMessageAttachments(input: SessionInputItem[]): Sessio
   return attachments;
 }
 
+function normalizeSkillCatalogEntry(raw: unknown, cwd: string): SkillCatalogEntry {
+  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  return {
+    cwd: asString(typed.cwd) || cwd,
+    skills: Array.isArray(typed.skills)
+      ? typed.skills.map(normalizeSkillSummary).filter((skill): skill is SkillSummary => skill !== null)
+      : [],
+    errors: Array.isArray(typed.errors)
+      ? typed.errors.map(normalizeSkillErrorInfo).filter((item): item is SkillErrorInfo => item !== null)
+      : [],
+  };
+}
+
+function normalizeSkillSummary(raw: unknown): SkillSummary | null {
+  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  if (!typed) {
+    return null;
+  }
+
+  const name = asString(typed.name);
+  const description = asString(typed.description);
+  const path = asString(typed.path);
+  if (!name || !description || !path) {
+    return null;
+  }
+
+  const interfaceValue =
+    typed.interface && typeof typed.interface === "object"
+      ? (typed.interface as Record<string, unknown>)
+      : null;
+
+  return {
+    name,
+    description,
+    shortDescription: asString(typed.shortDescription) || asString(typed.short_description),
+    interface: interfaceValue
+      ? {
+          displayName:
+            asString(interfaceValue.displayName) || asString(interfaceValue.display_name),
+          shortDescription:
+            asString(interfaceValue.shortDescription) ||
+            asString(interfaceValue.short_description),
+          brandColor:
+            asString(interfaceValue.brandColor) || asString(interfaceValue.brand_color),
+          defaultPrompt:
+            asString(interfaceValue.defaultPrompt) || asString(interfaceValue.default_prompt),
+        }
+      : null,
+    path,
+    scope: asString(typed.scope) || "user",
+    enabled: typed.enabled !== false,
+  };
+}
+
+function normalizeSkillErrorInfo(raw: unknown): SkillErrorInfo | null {
+  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  if (!typed) {
+    return null;
+  }
+
+  const path = asString(typed.path);
+  const message = asString(typed.message);
+  if (!path || !message) {
+    return null;
+  }
+
+  return { path, message };
+}
+
 function parseCreateSessionOverrides(value: unknown): CreateSessionOverrides {
   const typed = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return {
@@ -1506,6 +1634,24 @@ function parseTurnOverrides(value: unknown): TurnOverrides {
 
 function parseOptionalBool(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function parseQueryBool(value: unknown): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return false;
+  }
+  switch (value.trim().toLowerCase()) {
+    case "1":
+    case "true":
+    case "yes":
+    case "on":
+      return true;
+    default:
+      return false;
+  }
 }
 
 /**
