@@ -1995,15 +1995,11 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _startSessionFromCurrent() async {
     final session = _session ?? widget.session;
-    final created = await showModalBottomSheet<SessionSummary>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => CreateSessionSheet(
-        host: widget.host,
-        api: widget.api,
-        initialCwd: session.cwd,
-      ),
+    final created = await showCreateSessionLauncher(
+      context,
+      host: widget.host,
+      api: widget.api,
+      initialCwd: session.cwd,
     );
     if (!mounted || created == null) return;
 
@@ -2603,7 +2599,7 @@ class _SessionScreenState extends State<SessionScreen>
           Padding(
             padding: const EdgeInsets.only(right: 6),
             child: MeshIconButton(
-              icon: Icons.add_comment_outlined,
+              icon: Icons.terminal_rounded,
               tooltip: 'New session',
               color: colors.textSecondary,
               onTap: _startSessionFromCurrent,

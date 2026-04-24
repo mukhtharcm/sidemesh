@@ -18,6 +18,7 @@ import '../theme/theme_controller.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/appearance_sheet.dart';
 import '../widgets/mesh_widgets.dart';
+import 'create_session_sheet.dart';
 import 'host_detail_screen.dart';
 import 'session_screen.dart';
 
@@ -206,6 +207,22 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     await _refreshHosts();
   }
 
+  Future<void> _startSessionFromHome() async {
+    if (_hosts.isEmpty) {
+      await _showHostEditor();
+      return;
+    }
+    final result = await showCreateSessionHostLauncher(
+      context,
+      hosts: _hosts,
+      api: _api,
+    );
+    if (!mounted || result == null) {
+      return;
+    }
+    await _openSession(result.host, result.session);
+  }
+
   SessionSummary _sessionFromAction(PendingAction action) {
     return SessionSummary(
       id: action.sessionId,
@@ -231,7 +248,11 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
         bottom: false,
         child: Column(
           children: [
-            _TopBar(tab: tab, onRefresh: _refreshHosts),
+            _TopBar(
+              tab: tab,
+              onRefresh: _refreshHosts,
+              onStartSession: _startSessionFromHome,
+            ),
             _HomeSearchBar(
               controller: _searchController,
               hintText: 'Search ${tab.title.toLowerCase()}',
@@ -310,10 +331,15 @@ class _TabDef {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.tab, required this.onRefresh});
+  const _TopBar({
+    required this.tab,
+    required this.onRefresh,
+    required this.onStartSession,
+  });
 
   final _TabDef tab;
   final VoidCallback onRefresh;
+  final VoidCallback onStartSession;
 
   @override
   Widget build(BuildContext context) {
@@ -381,6 +407,12 @@ class _TopBar extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          const SizedBox(width: 8),
+          MeshIconButton(
+            icon: Icons.terminal_rounded,
+            tooltip: 'New session',
+            onTap: onStartSession,
           ),
           const SizedBox(width: 8),
           MeshIconButton(
