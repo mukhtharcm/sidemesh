@@ -223,6 +223,7 @@ export interface LiveEvent {
     | "activity_updated"
     | "action_opened"
     | "action_resolved"
+    | "skills_changed"
     | "error";
   sessionId: string;
   seq?: number;

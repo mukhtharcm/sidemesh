@@ -198,7 +198,7 @@ class _SessionScreenState extends State<SessionScreen>
     _scrollController.addListener(_onTranscriptScroll);
     _markCurrentSessionSeen();
     _loadSnapshot();
-    _loadSkills();
+    _loadSkills(forceReload: true);
     unawaited(_loadGitStatus(silent: true));
     _connectLive();
   }
@@ -655,6 +655,10 @@ class _SessionScreenState extends State<SessionScreen>
       final scoreCompare = leftScore.compareTo(rightScore);
       if (scoreCompare != 0) {
         return scoreCompare;
+      }
+      final scopeCompare = left.scopeRank.compareTo(right.scopeRank);
+      if (scopeCompare != 0) {
+        return scopeCompare;
       }
       return left.displayName.toLowerCase().compareTo(
         right.displayName.toLowerCase(),
@@ -1155,6 +1159,8 @@ class _SessionScreenState extends State<SessionScreen>
           _awaitingAssistantReply = _running && _liveAssistantText.isEmpty;
         });
         _refreshThinkingState();
+      case 'skills_changed':
+        unawaited(_loadSkills(forceReload: true));
       case 'hello':
       case 'error':
         break;
@@ -4393,12 +4399,22 @@ class _ComposerSkillSuggestionTray extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              skill.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.labelLarge
-                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    skill.displayName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelLarge
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                _SkillScopeBadge(skill: skill),
+                              ],
                             ),
                             const SizedBox(height: 2),
                             Text(
@@ -4437,6 +4453,38 @@ class _ComposerSkillSuggestionTray extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: child,
+    );
+  }
+}
+
+class _SkillScopeBadge extends StatelessWidget {
+  const _SkillScopeBadge({required this.skill});
+
+  final SkillSummary skill;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final isWorkspace = skill.scope == 'repo';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: isWorkspace ? colors.accentMuted : colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: isWorkspace
+              ? colors.accent.withValues(alpha: 0.35)
+              : colors.border,
+        ),
+      ),
+      child: Text(
+        skill.scopeLabel,
+        style: monoStyle(
+          color: isWorkspace ? colors.accent : colors.textTertiary,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 }
