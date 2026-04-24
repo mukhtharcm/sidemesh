@@ -56,20 +56,30 @@ class InspectorSurface {
 /// shell listens and renders the pane accordingly.
 class InspectorController extends ChangeNotifier {
   InspectorSurface? _current;
+  bool _lastCloseWasUserInitiated = false;
 
   InspectorSurface? get current => _current;
   bool get isOpen => _current != null;
 
+  /// Whether the last transition to a null [current] was triggered by a
+  /// user-initiated [close] / [toggle] call, as opposed to a shell-driven
+  /// [closeForOwner] (e.g. session switch). Used by persistence logic to
+  /// distinguish "user dismissed the inspector" from "the session that
+  /// owned it became inactive."
+  bool get lastCloseWasUserInitiated => _lastCloseWasUserInitiated;
+
   /// Opens [surface], replacing any currently-visible surface.
   void show(InspectorSurface surface) {
     _current = surface;
+    _lastCloseWasUserInitiated = false;
     notifyListeners();
   }
 
-  /// Closes the pane if anything is open.
+  /// Closes the pane if anything is open. User-initiated.
   void close() {
     if (_current == null) return;
     _current = null;
+    _lastCloseWasUserInitiated = true;
     notifyListeners();
   }
 
@@ -86,10 +96,12 @@ class InspectorController extends ChangeNotifier {
 
   /// Closes the pane if the currently-open surface belongs to [ownerKey].
   /// Useful when a session is closed and its inspector should go with it.
+  /// Shell-initiated — does not mark as user-closed.
   void closeForOwner(String ownerKey) {
-    if (_current?.ownerKey == ownerKey) {
-      close();
-    }
+    if (_current?.ownerKey != ownerKey) return;
+    _current = null;
+    _lastCloseWasUserInitiated = false;
+    notifyListeners();
   }
 }
 
