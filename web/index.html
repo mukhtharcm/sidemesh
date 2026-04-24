@@ -3,437 +3,54 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Sidemesh — codex, from wherever you happen to be</title>
-<meta name="description" content="A fleet-first mobile control plane for Codex. A small daemon per machine, a smaller app in your pocket. No pairing server, no cloud broker, no account." />
-<meta name="theme-color" content="#14172A" />
-<meta property="og:title" content="Sidemesh" />
-<meta property="og:description" content="Codex, from wherever you happen to be." />
-<meta property="og:image" content="/assets/app-icon.png" />
-<meta property="og:type" content="website" />
-<meta name="twitter:card" content="summary_large_image" />
+<title>sidemesh · coming soon</title>
+<meta name="description" content="Codex from your pocket. Pre-release." />
+<meta name="theme-color" content="#FAF7EF" />
 <link rel="icon" type="image/png" href="/assets/favicon.png" />
 <link rel="apple-touch-icon" href="/assets/favicon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
-  :root {
-    --bg: #14172A;
-    --bg-raised: #1B1F34;
-    --bg-sunken: #0F1220;
-    --ink: #E6DBC2;
-    --ink-dim: #B6AE9A;
-    --muted: #7A8091;
-    --rust: #E3844A;
-    --rust-soft: #F0A270;
-    --line: rgba(230, 219, 194, 0.10);
-    --line-strong: rgba(230, 219, 194, 0.18);
-  }
-
-  * { box-sizing: border-box; }
-
-  html, body {
-    margin: 0;
-    padding: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 15px;
-    line-height: 1.7;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-
-  /* Subtle noise-ish scanline feel — a faint horizontal striping that doesn't
-     distract but gives the background some life. Only visible on larger screens. */
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    background-image:
-      radial-gradient(circle at 15% 0%, rgba(227, 132, 74, 0.07), transparent 40%),
-      radial-gradient(circle at 85% 100%, rgba(100, 130, 200, 0.06), transparent 50%);
-    pointer-events: none;
-    z-index: 0;
-  }
-
-  a { color: var(--ink); text-decoration: none; }
-  a:hover { color: var(--rust-soft); }
-  a.arrow::after { content: " →"; color: var(--rust); }
-
-  ::selection { background: var(--rust); color: var(--bg); }
-
-  .col {
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 0 24px;
-    position: relative;
-    z-index: 1;
-  }
-
-  /* --- top bar --- */
-  header.top {
-    padding: 26px 0 0;
-    font-size: 14px;
-  }
-  header.top .row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 20px;
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-family: "Space Grotesk", sans-serif;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    font-size: 16px;
-    color: var(--ink);
-  }
-  .brand img {
-    width: 28px;
-    height: 28px;
-    border-radius: 7px;
-  }
-  header.top .nav-links {
-    display: flex;
-    gap: 22px;
-    color: var(--ink-dim);
-  }
-
-  /* --- hero --- */
-  .hero {
-    padding: 72px 0 56px;
-  }
-  .kicker {
-    color: var(--rust);
-    font-size: 13px;
-    letter-spacing: 0.02em;
-    margin: 0 0 20px;
-  }
-  .kicker::before { content: "▲ "; }
-
-  h1 {
-    font-family: "Space Grotesk", sans-serif;
-    font-weight: 700;
-    font-size: clamp(40px, 6.4vw, 60px);
-    line-height: 1.02;
-    letter-spacing: -0.03em;
-    margin: 0 0 28px;
-    color: var(--ink);
-  }
-  h1 em {
-    font-style: normal;
-    color: var(--rust);
-  }
-
-  .lede {
-    color: var(--ink-dim);
-    max-width: 620px;
-    margin: 0 0 28px;
-    font-size: 15px;
-  }
-  .lede strong { color: var(--ink); font-weight: 500; }
-
-  .cta-row {
-    display: flex;
-    gap: 24px;
-    flex-wrap: wrap;
-    font-size: 14px;
-  }
-  .cta-row a { color: var(--ink); }
-  .cta-row a.primary { color: var(--rust); font-weight: 500; }
-
-  /* --- terminal card --- */
-  .term {
-    margin: 48px 0 0;
-    background: var(--bg-sunken);
-    border: 1px solid var(--line-strong);
-    border-radius: 12px;
-    overflow: hidden;
-    font-size: 13.5px;
-    line-height: 1.6;
-    box-shadow: 0 20px 60px -30px rgba(0, 0, 0, 0.6);
-  }
-  .term .bar {
-    background: var(--bg-raised);
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--line);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--muted);
-    font-size: 12px;
-  }
-  .term .bar .dots { display: inline-flex; gap: 6px; }
-  .term .bar .dots span {
-    width: 10px; height: 10px; border-radius: 50%;
-    background: #3A3F52;
-  }
-  .term .bar .title { margin-left: 8px; }
-  .term .body {
-    padding: 18px 20px;
-    white-space: pre-wrap;
-    color: var(--ink-dim);
-  }
-  .term .body .p { color: var(--rust); }       /* prompt */
-  .term .body .k { color: var(--rust-soft); }   /* keyword/accent */
-  .term .body .c { color: var(--muted); }       /* comment */
-  .term .body .g { color: #8EC07C; }             /* "good" status green */
-  .term .body .w { color: #F0A270; }             /* warn */
-  .term .body .n { color: var(--ink); }          /* normal / emphasized */
-  .cursor {
-    display: inline-block;
-    width: 8px;
-    height: 14px;
-    background: var(--rust);
-    vertical-align: -2px;
-    animation: blink 1.1s steps(1) infinite;
-  }
-  @keyframes blink { 50% { opacity: 0; } }
-
-  /* --- sections --- */
-  section {
-    padding: 72px 0 16px;
-    border-top: 1px solid var(--line);
-  }
-  .sect-num {
-    color: var(--rust);
-    font-size: 12px;
-    margin: 0 0 10px;
-  }
-  h2 {
-    font-family: "Space Grotesk", sans-serif;
-    font-weight: 700;
-    font-size: clamp(26px, 3.4vw, 34px);
-    letter-spacing: -0.02em;
-    margin: 0 0 20px;
-    color: var(--ink);
-  }
-  section p {
-    color: var(--ink-dim);
-    margin: 0 0 16px;
-  }
-  section p strong { color: var(--ink); font-weight: 500; }
-
-  /* --- a day in the mesh: compact transcripts --- */
-  .moments {
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    margin: 24px 0 8px;
-  }
-  .moment {
-    border-left: 2px solid var(--rust);
-    padding: 2px 0 2px 18px;
-  }
-  .moment .when {
-    font-size: 13px;
-    color: var(--rust);
-    margin: 0 0 4px;
-  }
-  .moment .when b { color: var(--ink); font-weight: 500; }
-  .moment p { margin: 0; color: var(--ink-dim); }
-
-  /* --- ascii diagram --- */
-  pre.ascii {
-    background: var(--bg-sunken);
-    border: 1px solid var(--line-strong);
-    border-radius: 12px;
-    padding: 20px;
-    overflow-x: auto;
-    font-size: 12.5px;
-    line-height: 1.45;
-    color: var(--ink);
-    margin: 20px 0 20px;
-  }
-  pre.ascii .k { color: var(--rust); }
-
-  /* --- "does not" list --- */
-  ul.notlist {
-    list-style: none;
-    padding: 0;
-    margin: 20px 0 8px;
-  }
-  ul.notlist li {
-    color: var(--ink-dim);
-    padding: 6px 0 6px 24px;
-    position: relative;
-  }
-  ul.notlist li::before {
-    content: "×";
-    color: var(--rust);
-    position: absolute;
-    left: 0;
-    top: 5px;
-    font-weight: 700;
-  }
-
-  /* --- shipping shell --- */
-  pre.shell {
-    background: var(--bg-sunken);
-    border: 1px solid var(--line-strong);
-    border-radius: 12px;
-    padding: 20px;
-    margin: 20px 0;
-    font-size: 14px;
-    line-height: 1.75;
-    overflow-x: auto;
-  }
-  pre.shell .p { color: var(--rust); }
-  pre.shell .c { color: var(--muted); }
-  pre.shell .n { color: var(--ink); }
-
-  /* --- footer prompt --- */
-  footer {
-    padding: 72px 0 64px;
-    border-top: 1px solid var(--line);
-    margin-top: 56px;
-    font-size: 13px;
-    color: var(--muted);
-  }
-  footer .prompt {
-    color: var(--ink);
-    margin: 0 0 12px;
-  }
-  footer .prompt .p { color: var(--rust); }
-  footer .prompt .u { color: var(--rust-soft); }
-  footer .fine a { color: var(--ink-dim); }
-  footer .fine a:hover { color: var(--rust-soft); }
-
-  /* --- small screens --- */
-  @media (max-width: 560px) {
-    header.top .nav-links { gap: 14px; }
-    .term .body { padding: 14px; font-size: 12.5px; }
-    pre.ascii { font-size: 11px; }
-  }
+  :root { --bg:#FAF7EF; --ink:#1A1B22; --muted:#7C7A73; --rust:#B8542A; --rule:#D4CCBA; }
+  *{box-sizing:border-box;} html,body{margin:0;padding:0;}
+  body{background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;flex-direction:column;}
+  .wrap{max-width:640px;margin:0 auto;padding:72px 28px;flex:1;}
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:56px;}
+  .brand img{width:28px;height:28px;border-radius:6px;}
+  .brand span{font-family:'JetBrains Mono',monospace;font-size:14px;letter-spacing:0.06em;font-weight:600;}
+  h1{font-size:44px;line-height:1.08;letter-spacing:-0.02em;font-weight:700;margin:0 0 20px;}
+  h1 em{font-style:normal;color:var(--rust);}
+  .lede{font-size:17px;color:#3E4151;max-width:48ch;margin:0 0 36px;}
+  .mono{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
+  form{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 32px;max-width:480px;}
+  input[type=email]{flex:1;min-width:220px;background:transparent;border:1px solid var(--ink);color:var(--ink);padding:12px 14px;font-family:'JetBrains Mono',monospace;font-size:13px;border-radius:4px;}
+  button{border:0;background:var(--ink);color:var(--bg);padding:12px 22px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;border-radius:4px;cursor:pointer;}
+  button:hover{background:var(--rust);}
+  .platforms{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--muted);letter-spacing:0.04em;}
+  footer{border-top:1px solid var(--rule);padding:22px 28px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:var(--muted);}
 </style>
 </head>
 <body>
-
-<header class="top">
-  <div class="col row" style="display:flex;justify-content:space-between;align-items:center;">
+  <div class="wrap">
     <a class="brand" href="/">
       <img src="/assets/app-icon.png" alt="" />
       <span>sidemesh</span>
     </a>
-    <div class="nav-links">
-      <a href="#ship">ship list</a>
-      <a href="https://github.com/your-org/sidemesh" target="_blank" rel="noopener">github</a>
-    </div>
+
+    <p class="mono">pre-release</p>
+    <h1>Codex, from your pocket. <em>Almost.</em></h1>
+    <p class="lede">Sidemesh is a mobile control surface for Codex &mdash; a lightweight app in your hand, a small companion on every machine you code on. No cloud broker. No account. No middleman.</p>
+
+    <p class="mono">get notified</p>
+    <form onsubmit="event.preventDefault(); this.querySelector('button').textContent='queued ✓'; this.querySelector('input').disabled=true; this.querySelector('button').disabled=true;">
+      <input type="email" required placeholder="you@wherever.dev" />
+      <button type="submit">Notify me</button>
+    </form>
+
+    <p class="platforms">iOS · Android · macOS</p>
   </div>
-</header>
-
-<div class="col">
-
-  <!-- HERO -->
-  <div class="hero">
-    <p class="kicker">codex, from wherever you happen to be</p>
-    <h1>Your coding fleet,<br/><em>one tap away.</em></h1>
-    <p class="lede">
-      <strong>Sidemesh is a small daemon and a smaller app.</strong>
-      Run the daemon on any machine where Codex already runs &mdash; your MacBook,
-      a lab box, a rented VPS, that Mac mini you forgot in a closet &mdash; and the
-      app reaches each of them over your own network. No pairing server.
-      No cloud broker. No account to create.
-    </p>
-    <div class="cta-row">
-      <a class="primary arrow" href="#ship">get notified when it ships</a>
-      <a class="arrow" href="https://github.com/your-org/sidemesh" target="_blank" rel="noopener">read the source</a>
-    </div>
-
-    <!-- terminal hero -->
-    <div class="term" aria-hidden="true">
-      <div class="bar">
-        <span class="dots"><span></span><span></span><span></span></span>
-        <span class="title">mbp ~ sidemesh daemon</span>
-      </div>
-<div class="body"><span class="p">$</span> <span class="n">sidemesh daemon --label mbp --port 8899</span>
-<span class="k">▲</span> daemon listening on <span class="n">:8899</span>
-<span class="k">▲</span> bearer token <span class="c">(share with app):</span> <span class="n">sk-mesh-4c1a9b…</span>
-<span class="k">▲</span> codex app-server ready <span class="g">✓</span>
-
-<span class="c"># … phone connects, 90 seconds later</span>
-<span class="k">[mbp]</span> session started <span class="n">refactor-auth</span>
-<span class="k">[mbp]</span> → editing <span class="n">apps/mobile/lib/auth.dart</span>
-<span class="k">[mbp]</span> → editing <span class="n">apps/mobile/lib/session.dart</span>
-<span class="k">[mbp]</span> <span class="w">⚠</span>  wants to run: <span class="n">git push --force-with-lease</span>
-       <span class="c">↳ tap to approve on phone<span class="cursor"></span></span>
-</div>
-    </div>
-  </div>
-
-  <!-- SECTION: a day in the mesh -->
-  <section>
-    <p class="sect-num">(01) a day in the mesh</p>
-    <h2>Work doesn't stop because you stood up.</h2>
-    <p>Start a Codex session at your desk. Approve a destructive edit from the train. Paste a log into a fresh prompt while you're standing in line. The session stays where you left it; you just show up.</p>
-    <div class="moments">
-      <div class="moment">
-        <p class="when"><b>07:42</b> · desk</p>
-        <p>Kick off <code>/refactor auth module</code> on <code>mbp</code>. Close the laptop. Walk to the train.</p>
-      </div>
-      <div class="moment">
-        <p class="when"><b>08:14</b> · red line, standing room only</p>
-        <p><code>mbp</code> wants to <code>git push --force-with-lease</code>. One tap declines it. Type a one-line correction. Lock the phone.</p>
-      </div>
-      <div class="moment">
-        <p class="when"><b>09:05</b> · coffee shop</p>
-        <p>Switch to <code>nyc-vps</code>. Tail last night's deploy log. Start a new session to chase an error. Sip coffee.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- SECTION: wires -->
-  <section>
-    <p class="sect-num">(02) how it wires together</p>
-    <h2>A tiny daemon per machine. One app for all of them.</h2>
-    <p>Each machine runs a small Node daemon that owns one <code>codex app-server</code> process over stdio and exposes an HTTP + WebSocket API behind a bearer token. Run as many daemons as you like. The app talks to each one directly — <strong>nothing in the middle</strong>.</p>
-    <pre class="ascii" aria-label="architecture diagram">  ┌──────────────┐                          ┌──────────────┐                  ┌──────────────────┐
-  │     app      │  <span class="k">── bearer token ──▶</span>   │    daemon    │  <span class="k">── stdio ──▶</span>    │  codex           │
-  │  phone / mac │      HTTP + WS           │    (node)    │                  │  app-server      │
-  │              │  <span class="k">◀──────────────────</span>   │              │  <span class="k">◀──────────</span>       │  (your files)    │
-  └──────────────┘                          └──────────────┘                  └──────────────────┘</pre>
-    <p>Pairs nicely with <a href="https://tailscale.com" target="_blank" rel="noopener">Tailscale</a>, a Cloudflare Tunnel, plain <code>ssh -R</code>, or whatever you already use to reach your boxes.</p>
-  </section>
-
-  <!-- SECTION: does not -->
-  <section>
-    <p class="sect-num">(03) things sidemesh does not try to do</p>
-    <h2>A short honest list.</h2>
-    <p>Being small means being opinionated. Here's what lives outside the scope:</p>
-    <ul class="notlist">
-      <li>install or manage Codex for you &mdash; bring your own</li>
-      <li>sync files across machines &mdash; your workspace lives on the daemon's disk, and that's the feature</li>
-      <li>store anything in the cloud &mdash; there is no cloud</li>
-      <li>replace your editor &mdash; go use Zed, or vim, or whatever</li>
-      <li>add a pairing server or a third-party relay &mdash; you already own a network</li>
-    </ul>
-  </section>
-
-  <!-- SECTION: shipping -->
-  <section id="ship">
-    <p class="sect-num">(04) shipping soon</p>
-    <h2>First builds are landing.</h2>
-    <p>The app is being polished for iOS, Android, and macOS. The daemon runs today from <a href="https://github.com/your-org/sidemesh" target="_blank" rel="noopener">source</a>. Installers are next.</p>
-<pre class="shell"><span class="p">$</span> <span class="n">brew install sidemesh</span>        <span class="c"># coming soon</span>
-<span class="p">$</span> <span class="n">sidemesh ios</span>                 <span class="c"># coming soon</span>
-<span class="p">$</span> <span class="n">sidemesh android</span>             <span class="c"># coming soon</span>
-<span class="p">$</span> <span class="n">sidemesh macos</span>               <span class="c"># coming soon</span></pre>
-    <p>Star <a href="https://github.com/your-org/sidemesh" target="_blank" rel="noopener">the repo</a> to get pinged the moment those comments turn into real commands.</p>
-  </section>
-
-</div>
-
-<footer>
-  <div class="col">
-    <p class="prompt"><span class="u">your-org@sidemesh</span>:<span class="p">~</span>$ <span class="cursor" style="vertical-align:-1px"></span></p>
-    <p class="fine">© <span id="y"></span> sidemesh · built for hackers who ship from anywhere · <a href="https://github.com/your-org/sidemesh" target="_blank" rel="noopener">github</a></p>
-  </div>
-</footer>
-
-<script>document.getElementById('y').textContent=new Date().getFullYear();</script>
+  <footer>© <span id="y"></span> sidemesh</footer>
+  <script>document.getElementById('y').textContent=new Date().getFullYear();</script>
 </body>
 </html>
