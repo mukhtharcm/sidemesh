@@ -155,6 +155,11 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return;
     }
 
+    if (method === "skills/changed") {
+      broadcastSkillsChanged(socketsBySession);
+      return;
+    }
+
     const sessionId = extractSessionId(method, params);
     if (!sessionId) {
       return;
@@ -1524,6 +1529,14 @@ function broadcast(
   }
   for (const socket of sockets) {
     sendEvent(socket, event);
+  }
+}
+
+function broadcastSkillsChanged(socketsBySession: Map<string, Set<WebSocket>>): void {
+  for (const [sessionId, sockets] of socketsBySession) {
+    for (const socket of sockets) {
+      sendEvent(socket, { type: "skills_changed", sessionId });
+    }
   }
 }
 
