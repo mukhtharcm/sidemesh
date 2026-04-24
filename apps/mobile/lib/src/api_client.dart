@@ -37,6 +37,11 @@ class ApiClient {
     return SkillCatalog.fromJson(_decodeObject(response));
   }
 
+  Future<List<ModelCatalogEntry>> fetchModels(HostProfile host) async {
+    final response = await _get(host, '/api/models');
+    return _decodeList(response).map(ModelCatalogEntry.fromJson).toList();
+  }
+
   Future<List<SessionSummary>> fetchSessions(
     HostProfile host, {
     int? limit,
@@ -99,6 +104,8 @@ class ApiClient {
     required String prompt,
     List<SessionInputItem>? input,
     String? model,
+    String? reasoningEffort,
+    bool? fastMode,
     String? approvalPolicy,
     String? sandboxMode,
     String? webSearch,
@@ -110,6 +117,12 @@ class ApiClient {
     }
     if ((model ?? '').isNotEmpty) {
       body['model'] = model;
+    }
+    if ((reasoningEffort ?? '').isNotEmpty) {
+      body['reasoningEffort'] = reasoningEffort;
+    }
+    if (fastMode != null) {
+      body['fastMode'] = fastMode;
     }
     if ((approvalPolicy ?? '').isNotEmpty) {
       body['approvalPolicy'] = approvalPolicy;
@@ -134,6 +147,9 @@ class ApiClient {
     String text = '',
     List<SessionInputItem>? input,
     String? clientMessageId,
+    String? model,
+    String? reasoningEffort,
+    bool? fastMode,
     String? approvalPolicy,
     String? sandboxMode,
     bool? networkAccess,
@@ -145,6 +161,11 @@ class ApiClient {
       ...?clientMessageId == null
           ? null
           : <String, dynamic>{'clientMessageId': clientMessageId},
+      ...?(model ?? '').isEmpty ? null : <String, dynamic>{'model': model},
+      ...?(reasoningEffort ?? '').isEmpty
+          ? null
+          : <String, dynamic>{'reasoningEffort': reasoningEffort},
+      ...?fastMode == null ? null : <String, dynamic>{'fastMode': fastMode},
       ...?approvalPolicy == null
           ? null
           : <String, dynamic>{'approvalPolicy': approvalPolicy},
