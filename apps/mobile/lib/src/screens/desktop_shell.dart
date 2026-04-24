@@ -13,6 +13,7 @@ import '../theme/theme_controller.dart';
 import '../widgets/mesh_widgets.dart';
 import 'home_screen.dart';
 import 'host_detail_screen.dart';
+import 'inspector/inspector_controller.dart';
 import 'session_screen.dart';
 
 /// Two-pane macOS shell — sidebar (Recent / Inbox / Hosts) on the left,
@@ -38,6 +39,7 @@ class _DesktopShellState extends State<DesktopShell> {
   final ApiClient _api = ApiClient();
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode(debugLabel: 'sidebar-search');
+  final InspectorController _inspector = InspectorController();
 
   List<HostProfile> _hosts = const [];
   bool _loading = true;
@@ -86,6 +88,7 @@ class _DesktopShellState extends State<DesktopShell> {
     _searchDebounce?.cancel();
     _searchController.dispose();
     _searchFocus.dispose();
+    _inspector.dispose();
     super.dispose();
   }
 
@@ -264,6 +267,10 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 
   void _openSession(HostProfile host, SessionSummary session) {
+    final current = _active;
+    if (current != null) {
+      _inspector.closeForOwner('${current.host.id}|${current.session.id}');
+    }
     setState(() {
       _active = _ActiveSession(host: host, session: session);
       _activeHost = null;
@@ -271,6 +278,10 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 
   void _openHostDetail(HostProfile host) {
+    final current = _active;
+    if (current != null) {
+      _inspector.closeForOwner('${current.host.id}|${current.session.id}');
+    }
     setState(() {
       _activeHost = host;
       _active = null;
@@ -296,6 +307,104 @@ class _DesktopShellState extends State<DesktopShell> {
     setState(() => _refreshTick++);
   }
 
+  /// Figures out how wide each of the three columns should be given the
+  /// available [total] width. Sidebar and inspector give up space before
+  /// the detail pane does.
+  ({double sidebar, double detail, double inspector}) _computePaneWidths(
+    double total,
+  ) {
+    // Resizer is 6pt (see _SidebarResizer). When inspector is open,
+    // we render a 1pt divider to its left.
+    const double resizer = 6;
+    const double inspectorMin = 320;
+    const double inspectorDefault = 380;
+    const double detailMin = 560;
+    final inspectorOpen = _inspector.current != null;
+
+    double sidebar = _sidebarWidth.clamp(_minSidebarWidth, _maxSidebarWidth);
+    double inspector = inspectorOpen ? inspectorDefault : 0;
+    double inspectorDivider = inspectorOpen ? 1 : 0;
+
+    double detail = total - sidebar - resizer - inspectorDivider - inspector;
+
+    if (inspectorOpen && detail < detailMin) {
+      // Shrink the sidebar toward its min first; session titles stay
+      // readable as long as we don't go below that.
+      final sidebarSlack = sidebar - _minSidebarWidth;
+      if (sidebarSlack > 0) {
+        final needed = detailMin - detail;
+        final take = needed < sidebarSlack ? needed : sidebarSlack;
+        sidebar -= take;
+        detail += take;
+      }
+    }
+
+    if (inspectorOpen && detail < detailMin) {
+      // Then shrink the inspector toward its own min.
+      final inspectorSlack = inspector - inspectorMin;
+      if (inspectorSlack > 0) {
+        final needed = detailMin - detail;
+        final take = needed < inspectorSlack ? needed : inspectorSlack;
+        inspector -= take;
+        detail += take;
+      }
+    }
+
+    // If detail is still under min we let it float; the overlay
+    // fallback is a later-phase task.
+    return (sidebar: sidebar, detail: detail, inspector: inspector);
+  }
+
+  void _toggleInspectorDebug() {
+    final ownerKey = _active != null
+        ? '${_active!.host.id}|${_active!.session.id}'
+        : 'shell';
+    _inspector.toggle(
+      InspectorSurface(
+        kind: InspectorSurfaceKind.debug,
+        ownerKey: ownerKey,
+        title: 'Inspector (debug)',
+        icon: Icons.bug_report_outlined,
+        bodyBuilder: (context) {
+          final colors = context.colors;
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Inspector slot is working',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'This is a debug surface. Real surfaces (search, file '
+                  'browser, git, details) will land in later phases. '
+                  'Toggle with \u2318\u21e7I.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Owner: $ownerKey',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colors.textTertiary,
+                    fontFamily: 'JetBrainsMono',
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -309,6 +418,8 @@ class _DesktopShellState extends State<DesktopShell> {
               _FocusSearchIntent(),
           SingleActivator(LogicalKeyboardKey.keyW, meta: true):
               _CloseActiveSessionIntent(),
+          SingleActivator(LogicalKeyboardKey.keyI, meta: true, shift: true):
+              _ToggleInspectorDebugIntent(),
           SingleActivator(LogicalKeyboardKey.slash, meta: true):
               _ShowShortcutsIntent(),
           SingleActivator(LogicalKeyboardKey.slash, meta: true, shift: true):
@@ -360,67 +471,114 @@ class _DesktopShellState extends State<DesktopShell> {
                 return null;
               },
             ),
+            _ToggleInspectorDebugIntent:
+                CallbackAction<_ToggleInspectorDebugIntent>(
+                  onInvoke: (_) {
+                    _toggleInspectorDebug();
+                    return null;
+                  },
+                ),
           },
           child: Focus(
             autofocus: true,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                ListenableBuilder(
-                  listenable: ApprovalInboxStore.instance,
-                  builder: (context, _) => _Sidebar(
-                    titlebarInset: _titlebarInset,
-                    width: _sidebarWidth,
-                    hosts: _hosts,
-                    loading: _loading,
-                    api: _api,
-                    section: _section,
-                    refreshTick: _refreshTick,
-                    inboxCount: ApprovalInboxStore.instance.count,
-                    activeCount: _activeCount,
-                    selectedSessionId: _active?.session.id,
-                    selectedHostId: _activeHost?.id,
-                    searchController: _searchController,
-                    searchFocus: _searchFocus,
-                    query: _query,
-                    onClearSearch: () {
-                      _searchController.clear();
+            child: InspectorScope(
+              controller: _inspector,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return AnimatedBuilder(
+                    animation: _inspector,
+                    builder: (context, _) {
+                      final widths = _computePaneWidths(constraints.maxWidth);
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(
+                            width: widths.sidebar,
+                            child: ListenableBuilder(
+                              listenable: ApprovalInboxStore.instance,
+                              builder: (context, _) => _Sidebar(
+                                titlebarInset: _titlebarInset,
+                                width: widths.sidebar,
+                                hosts: _hosts,
+                                loading: _loading,
+                                api: _api,
+                                section: _section,
+                                refreshTick: _refreshTick,
+                                inboxCount:
+                                    ApprovalInboxStore.instance.count,
+                                activeCount: _activeCount,
+                                selectedSessionId: _active?.session.id,
+                                selectedHostId: _activeHost?.id,
+                                searchController: _searchController,
+                                searchFocus: _searchFocus,
+                                query: _query,
+                                onClearSearch: () {
+                                  _searchController.clear();
+                                },
+                                onSelectSection: (s) =>
+                                    setState(() => _section = s),
+                                onOpenSession: _openSession,
+                                onOpenSessionFromAction: (host, action) =>
+                                    _openSession(
+                                      host,
+                                      _sessionFromAction(action),
+                                    ),
+                                onOpenHostDetail: _openHostDetail,
+                                onAddHost: () => _showHostEditor(),
+                                onEditHost: (h) => _showHostEditor(initial: h),
+                                onRemoveHost: _removeHost,
+                                onActiveCountChanged: (n) {
+                                  if (!mounted) return;
+                                  setState(() => _activeCount = n);
+                                },
+                                onInboxCountChanged: (_) {},
+                                onShowShortcuts: _showShortcutsSheet,
+                              ),
+                            ),
+                          ),
+                          _SidebarResizer(
+                            color: colors.border,
+                            onDrag: _resizeSidebar,
+                            onDragEnd: _persistSidebarWidth,
+                          ),
+                          SizedBox(
+                            width: widths.detail,
+                            child: _DetailPane(
+                              titlebarInset: _titlebarInset,
+                              active: _active,
+                              activeHost: _activeHost,
+                              api: _api,
+                              onClose: () {
+                                final current = _active;
+                                if (current != null) {
+                                  _inspector.closeForOwner(
+                                    '${current.host.id}|${current.session.id}',
+                                  );
+                                }
+                                setState(() {
+                                  _active = null;
+                                  _activeHost = null;
+                                });
+                              },
+                              onOpenSession: _openSession,
+                            ),
+                          ),
+                          if (_inspector.current != null) ...[
+                            Container(width: 1, color: colors.border),
+                            SizedBox(
+                              width: widths.inspector,
+                              child: _InspectorPane(
+                                surface: _inspector.current!,
+                                onClose: _inspector.close,
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
                     },
-                    onSelectSection: (s) => setState(() => _section = s),
-                    onOpenSession: _openSession,
-                    onOpenSessionFromAction: (host, action) =>
-                        _openSession(host, _sessionFromAction(action)),
-                    onOpenHostDetail: _openHostDetail,
-                    onAddHost: () => _showHostEditor(),
-                    onEditHost: (h) => _showHostEditor(initial: h),
-                    onRemoveHost: _removeHost,
-                    onActiveCountChanged: (n) {
-                      if (!mounted) return;
-                      setState(() => _activeCount = n);
-                    },
-                    onInboxCountChanged: (_) {},
-                    onShowShortcuts: _showShortcutsSheet,
-                  ),
-                ),
-                _SidebarResizer(
-                  color: colors.border,
-                  onDrag: _resizeSidebar,
-                  onDragEnd: _persistSidebarWidth,
-                ),
-                Expanded(
-                  child: _DetailPane(
-                    titlebarInset: _titlebarInset,
-                    active: _active,
-                    activeHost: _activeHost,
-                    api: _api,
-                    onClose: () => setState(() {
-                      _active = null;
-                      _activeHost = null;
-                    }),
-                    onOpenSession: _openSession,
-                  ),
-                ),
-              ],
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -448,6 +606,10 @@ class _ShowShortcutsIntent extends Intent {
 class _SwitchSectionIntent extends Intent {
   const _SwitchSectionIntent(this.section);
   final _SidebarSection section;
+}
+
+class _ToggleInspectorDebugIntent extends Intent {
+  const _ToggleInspectorDebugIntent();
 }
 
 class _Sidebar extends StatelessWidget {
@@ -1279,6 +1441,73 @@ class _SidebarResizerState extends State<_SidebarResizer> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The desktop-shell's third pane ("inspector"). Draws the header
+/// chrome (title + optional surface actions + close button) and hands
+/// the body area over to the surface.
+class _InspectorPane extends StatelessWidget {
+  const _InspectorPane({required this.surface, required this.onClose});
+
+  final InspectorSurface surface;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final actions = surface.actionsBuilder?.call(context) ?? const <Widget>[];
+    return Container(
+      color: colors.canvas,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: colors.border, width: 1),
+              ),
+            ),
+            child: Row(
+              children: [
+                if (surface.icon != null) ...[
+                  Icon(surface.icon, size: 16, color: colors.textSecondary),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: Text(
+                    surface.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: colors.textPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                ...actions,
+                if (actions.isNotEmpty) const SizedBox(width: 4),
+                InkResponse(
+                  radius: 18,
+                  onTap: onClose,
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(
+                      Icons.close_rounded,
+                      size: 16,
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(child: surface.bodyBuilder(context)),
+        ],
       ),
     );
   }
