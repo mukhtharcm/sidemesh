@@ -1,17 +1,38 @@
-# mobile
+# Sidemesh Mobile
 
-A new Flutter project.
+Flutter client for connecting to Sidemesh hosts.
 
-## Getting Started
+## iOS Flavors
 
-This project is a starting point for a Flutter application.
+The iOS project has two shared schemes so development and production builds can
+be installed on the same iPhone.
 
-A few resources to get you started if this is your first Flutter project:
+| Flavor | Scheme | Display name | Bundle ID |
+| --- | --- | --- | --- |
+| Development | `dev` | `Sidemesh Dev` | `dev.sidemesh.mobile.dev` |
+| Production | `prod` | `Sidemesh` | `dev.sidemesh.mobile` |
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+Run on a connected iPhone:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter run --flavor dev -t lib/main.dart
+flutter run --flavor prod -t lib/main.dart
+```
+
+From the repository root:
+
+```bash
+npm run mobile:ios:dev
+npm run mobile:ios:prod
+```
+
+Build checks without installing:
+
+```bash
+flutter build ios --flavor dev --debug --no-codesign
+flutter build ios --flavor prod --release --no-codesign
+```
+
+The two flavors use different iOS bundle IDs, so iOS treats them as separate
+apps. Local hosts, tokens, favorites, pins, theme, and other preferences are
+stored separately by default.
