@@ -28,6 +28,7 @@ import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/macos_native_composer_field.dart';
 import '../widgets/diff_view.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/syntax_code_block.dart';
@@ -2585,26 +2586,35 @@ class _Composer extends StatelessWidget {
     final colors = context.colors;
     final isMacDesktop =
         submitOnEnter && defaultTargetPlatform == TargetPlatform.macOS;
-    final enableDesktopSubmitShortcut = submitOnEnter;
-    Widget field = TextField(
-      controller: controller,
-      focusNode: focusNode,
-      minLines: 1,
-      maxLines: 6,
-      onTapOutside: isMacDesktop ? null : (_) => onDismiss(),
-      style: Theme.of(context).textTheme.bodyMedium,
-      decoration: InputDecoration(
-        hintText: enableDesktopSubmitShortcut
-            ? 'Message this session — Enter to send, Shift+Enter for newline'
-            : 'Message this session',
-        hintStyle: TextStyle(color: colors.textTertiary),
-        border: InputBorder.none,
-        enabledBorder: InputBorder.none,
-        focusedBorder: InputBorder.none,
-        contentPadding: const EdgeInsets.symmetric(vertical: 14),
-      ),
-    );
-    if (enableDesktopSubmitShortcut) {
+    final hintText = submitOnEnter
+        ? 'Message this session — Enter to send, Shift+Enter for newline'
+        : 'Message this session';
+    Widget field;
+    if (isMacDesktop) {
+      field = MacosNativeComposerField(
+        controller: controller,
+        onSend: onSend,
+        hintText: hintText,
+      );
+    } else {
+      field = TextField(
+        controller: controller,
+        focusNode: focusNode,
+        minLines: 1,
+        maxLines: 6,
+        onTapOutside: (_) => onDismiss(),
+        style: Theme.of(context).textTheme.bodyMedium,
+        decoration: InputDecoration(
+          hintText: hintText,
+          hintStyle: TextStyle(color: colors.textTertiary),
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(vertical: 14),
+        ),
+      );
+    }
+    if (submitOnEnter && !isMacDesktop) {
       // Desktop affordance: bare Enter sends, Shift+Enter inserts a newline.
       // Wrapping the TextField with CallbackShortcuts at a higher priority
       // than its default newline handler.
