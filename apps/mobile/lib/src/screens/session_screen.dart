@@ -8009,45 +8009,76 @@ class _SearchPanelState extends State<_SearchPanel> {
             padding: const EdgeInsets.fromLTRB(14, 12, 10, 6),
             child: Row(
               children: [
-                Icon(Icons.search_rounded, size: 20, color: colors.accent),
-                const SizedBox(width: 10),
                 Expanded(
-                  child: TextField(
-                    controller: widget.controller,
-                    focusNode: widget.focusNode,
-                    autofocus: true,
-                    textInputAction: TextInputAction.search,
-                    decoration: InputDecoration.collapsed(
-                      hintText: 'Search transcript',
-                      hintStyle: TextStyle(color: colors.textTertiary),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
                     ),
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colors.textPrimary,
-                      height: 1.25,
+                    decoration: BoxDecoration(
+                      color: colors.surfaceMuted,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.search_rounded,
+                          size: 18,
+                          color: colors.textTertiary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: widget.controller,
+                            focusNode: widget.focusNode,
+                            autofocus: true,
+                            textInputAction: TextInputAction.search,
+                            cursorColor: colors.accent,
+                            decoration: InputDecoration(
+                              isCollapsed: true,
+                              border: InputBorder.none,
+                              hintText: 'Search transcript',
+                              hintStyle: TextStyle(
+                                color: colors.textTertiary,
+                                fontSize: 14,
+                              ),
+                            ),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: colors.textPrimary,
+                              fontSize: 14,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                        if (hasQuery) ...[
+                          const SizedBox(width: 6),
+                          InkResponse(
+                            radius: 16,
+                            onTap: () {
+                              widget.controller.clear();
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: Icon(
+                                Icons.close_rounded,
+                                size: 16,
+                                color: colors.textSecondary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
-                if (hasQuery)
+                if (!widget.inSheet) ...[
+                  const SizedBox(width: 4),
                   InkResponse(
-                    radius: 18,
-                    onTap: () {
-                      widget.controller.clear();
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(6),
-                      child: Icon(
-                        Icons.close_rounded,
-                        size: 18,
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                  ),
-                if (!widget.inSheet)
-                  InkResponse(
-                    radius: 18,
+                    radius: 20,
                     onTap: widget.onClose,
                     child: Padding(
-                      padding: const EdgeInsets.all(6),
+                      padding: const EdgeInsets.all(8),
                       child: Icon(
                         Icons.close_fullscreen_rounded,
                         size: 18,
@@ -8055,6 +8086,7 @@ class _SearchPanelState extends State<_SearchPanel> {
                       ),
                     ),
                   ),
+                ],
               ],
             ),
           ),
