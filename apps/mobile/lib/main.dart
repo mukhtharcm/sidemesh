@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
@@ -8,11 +9,14 @@ import 'package:macos_window_utils/macos_window_utils.dart';
 
 import 'src/screens/desktop_shell.dart';
 import 'src/screens/home_screen.dart';
+import 'src/local_notification_service.dart';
 import 'src/theme/app_theme.dart';
 import 'src/theme/theme_controller.dart';
 
 bool get _isMacOSDesktop =>
-    !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS && Platform.isMacOS;
+    !kIsWeb &&
+    defaultTargetPlatform == TargetPlatform.macOS &&
+    Platform.isMacOS;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,7 +32,11 @@ Future<void> main() async {
     await WindowManipulator.enableFullSizeContentView();
     await WindowManipulator.hideTitle();
   }
+  await LocalNotificationService.instance.initialize();
   final themeController = await ThemeController.load();
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(LocalNotificationService.instance.requestPermissions());
+  });
   runApp(SidemeshApp(themeController: themeController));
 }
 
@@ -48,7 +56,8 @@ class SidemeshApp extends StatelessWidget {
           final variant = themeController.variant;
           final darkPalette = variant.dark;
           final lightPalette = variant.light;
-          final isDark = mode == ThemeMode.dark ||
+          final isDark =
+              mode == ThemeMode.dark ||
               (mode == ThemeMode.system &&
                   MediaQuery.platformBrightnessOf(context) == Brightness.dark);
           final activePalette = isDark ? darkPalette : lightPalette;
