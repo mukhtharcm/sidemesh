@@ -394,6 +394,22 @@ class SkillSummary {
 
   String get mentionToken => '\$$name';
 
+  String get scopeLabel => switch (scope) {
+    'repo' => 'workspace',
+    'user' => 'user',
+    'system' => 'system',
+    'admin' => 'admin',
+    _ => scope.isEmpty ? 'skill' : scope,
+  };
+
+  int get scopeRank => switch (scope) {
+    'repo' => 0,
+    'user' => 1,
+    'system' => 2,
+    'admin' => 3,
+    _ => 4,
+  };
+
   factory SkillSummary.fromJson(Map<String, dynamic> json) => SkillSummary(
     name: _stringValue(json['name']),
     description: _stringValue(json['description']),
