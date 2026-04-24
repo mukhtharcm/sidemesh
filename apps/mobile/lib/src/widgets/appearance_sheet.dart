@@ -261,14 +261,16 @@ class _SwatchCard extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
           decoration: BoxDecoration(
+            color: frameColors.surface,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: selected ? frameColors.accent : frameColors.border,
               width: selected ? 2 : 1,
             ),
           ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(selected ? 12 : 13),
+            child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
@@ -378,6 +380,7 @@ class _SwatchCard extends StatelessWidget {
                 ),
               ),
             ],
+          ),
           ),
         ),
       ),
