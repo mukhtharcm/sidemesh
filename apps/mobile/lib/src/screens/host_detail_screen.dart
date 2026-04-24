@@ -139,15 +139,11 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   }
 
   Future<void> _startSession({String? prefilledCwd}) async {
-    final created = await showModalBottomSheet<SessionSummary>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => CreateSessionSheet(
-        host: widget.host,
-        api: widget.api,
-        initialCwd: prefilledCwd,
-      ),
+    final created = await showCreateSessionLauncher(
+      context,
+      host: widget.host,
+      api: widget.api,
+      initialCwd: prefilledCwd,
     );
     if (created != null && mounted) {
       widget.onOpenSession(created);
