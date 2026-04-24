@@ -66,7 +66,9 @@ class _SessionScreenState extends State<SessionScreen>
   static const _maxDecodedDraftImageBytes = 18 * 1024 * 1024;
 
   final _composerController = TextEditingController();
+  final _searchController = TextEditingController();
   final _composerFocusNode = FocusNode(debugLabel: 'session_composer');
+  final _searchFocusNode = FocusNode(debugLabel: 'session_search');
   final _scrollController = ScrollController();
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
   final SessionPinsStore _pinsStore = SessionPinsStore.instance;
@@ -104,6 +106,8 @@ class _SessionScreenState extends State<SessionScreen>
   bool _sending = false;
   bool _awaitingAssistantReply = false;
   bool _loadingSkills = false;
+  bool _searchOpen = false;
+  String _searchQuery = '';
   String? _skillsError;
   IOWebSocketChannel? _channel;
   StreamSubscription? _subscription;
@@ -162,6 +166,7 @@ class _SessionScreenState extends State<SessionScreen>
     _policyStore.ensureLoaded();
     _readStore.ensureLoaded();
     _composerController.addListener(_handleComposerChanged);
+    _searchController.addListener(_handleSearchChanged);
     _session = widget.session;
     _scrollController.addListener(_onTranscriptScroll);
     _markCurrentSessionSeen();
@@ -187,9 +192,12 @@ class _SessionScreenState extends State<SessionScreen>
     WidgetsBinding.instance.removeObserver(this);
     _reconnectTimer?.cancel();
     _composerController.removeListener(_handleComposerChanged);
+    _searchController.removeListener(_handleSearchChanged);
     _pinsStore.removeListener(_handlePinsChanged);
     _composerController.dispose();
+    _searchController.dispose();
     _composerFocusNode.dispose();
+    _searchFocusNode.dispose();
     _scrollController.removeListener(_onTranscriptScroll);
     _scrollController.dispose();
     _subscription?.cancel();
@@ -204,6 +212,40 @@ class _SessionScreenState extends State<SessionScreen>
   void _handlePinsChanged() {
     if (!mounted || _disposed) return;
     setState(() {});
+  }
+
+  void _handleSearchChanged() {
+    final query = _searchController.text;
+    if (query == _searchQuery) return;
+    setState(() => _searchQuery = query);
+  }
+
+  void _openSearch() {
+    if (!_searchOpen) {
+      setState(() => _searchOpen = true);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _disposed) return;
+      _searchFocusNode.requestFocus();
+    });
+  }
+
+  void _closeSearch() {
+    _searchFocusNode.unfocus();
+    if (_searchController.text.isNotEmpty) {
+      _searchController.clear();
+    }
+    if (_searchOpen || _searchQuery.isNotEmpty) {
+      setState(() {
+        _searchOpen = false;
+        _searchQuery = '';
+      });
+    }
+  }
+
+  void _clearSearchQuery() {
+    _searchController.clear();
+    _searchFocusNode.requestFocus();
   }
 
   void _onTranscriptScroll() {
@@ -945,6 +987,9 @@ class _SessionScreenState extends State<SessionScreen>
         _running = true;
         _awaitingAssistantReply = false;
         _liveAssistantNotifier.value = updatedLive;
+        if (_searchQuery.trim().isNotEmpty) {
+          setState(() {});
+        }
       }
       _thinkingNotifier.value = false;
     } else if (activities.isNotEmpty) {
@@ -1917,6 +1962,60 @@ class _SessionScreenState extends State<SessionScreen>
     return entries;
   }
 
+  List<_TimelineEntry> _filterTimelineEntriesForSearch(
+    List<_TimelineEntry> entries,
+    String query,
+  ) {
+    final needle = query.trim().toLowerCase();
+    if (needle.isEmpty) {
+      return entries;
+    }
+    return entries
+        .where((entry) => _timelineEntryMatchesSearch(entry, needle))
+        .toList(growable: false);
+  }
+
+  bool _timelineEntryMatchesSearch(_TimelineEntry entry, String needle) {
+    return switch (entry.kind) {
+      _TimelineEntryKind.message => _messageMatchesSearch(
+        entry.message!,
+        needle,
+      ),
+      _TimelineEntryKind.liveAssistant =>
+        _liveAssistantMessage == null
+            ? false
+            : _messageMatchesSearch(_liveAssistantMessage!.toMessage(), needle),
+      _TimelineEntryKind.activity => false,
+    };
+  }
+
+  bool _messageMatchesSearch(SessionMessage message, String needle) {
+    return _messageSearchHaystack(message).contains(needle);
+  }
+
+  String _messageSearchHaystack(SessionMessage message) {
+    return [
+      message.role,
+      message.phase ?? '',
+      message.text,
+      for (final attachment in message.attachments) ...[
+        attachment.type,
+        attachment.url ?? '',
+        attachment.path ?? '',
+      ],
+    ].join('\n').toLowerCase();
+  }
+
+  int _loadedSearchableMessageCount(List<_TimelineEntry> entries) {
+    return entries
+        .where(
+          (entry) =>
+              entry.kind == _TimelineEntryKind.message ||
+              entry.kind == _TimelineEntryKind.liveAssistant,
+        )
+        .length;
+  }
+
   bool _matchesPersistedMessage(
     SessionMessage persisted,
     SessionMessage optimistic,
@@ -1956,6 +2055,16 @@ class _SessionScreenState extends State<SessionScreen>
     final session = _session ?? widget.session;
     final colors = context.colors;
     final timelineEntries = _buildTimelineEntries();
+    final searchQuery = _searchQuery.trim();
+    final searchActive = searchQuery.isNotEmpty;
+    final visibleTimelineEntries = _filterTimelineEntriesForSearch(
+      timelineEntries,
+      searchQuery,
+    );
+    final searchMatchCount = searchActive ? visibleTimelineEntries.length : 0;
+    final loadedSearchableMessages = _loadedSearchableMessageCount(
+      timelineEntries,
+    );
     final pinnedMessages = _pinsStore.pinsFor(widget.host, session.id);
     final bodyContent = Column(
       children: [
@@ -2019,9 +2128,26 @@ class _SessionScreenState extends State<SessionScreen>
               onUnpin: _unpinMessage,
             ),
           ),
+        if (_searchOpen)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: _SessionSearchBar(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              matchCount: searchActive ? searchMatchCount : null,
+              loadedMessageCount: loadedSearchableMessages,
+              onClear: _clearSearchQuery,
+              onClose: _closeSearch,
+            ),
+          ),
         Expanded(
-          child: (_loading && timelineEntries.isEmpty)
+          child: (_loading && timelineEntries.isEmpty && !searchActive)
               ? const MeshLoader()
+              : (searchActive && visibleTimelineEntries.isEmpty)
+              ? _SessionSearchEmptyState(
+                  query: searchQuery,
+                  loadedMessageCount: loadedSearchableMessages,
+                )
               : Stack(
                   children: [
                     RefreshIndicator(
@@ -2036,10 +2162,11 @@ class _SessionScreenState extends State<SessionScreen>
                               ScrollViewKeyboardDismissBehavior.onDrag,
                           padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
                           physics: const AlwaysScrollableScrollPhysics(),
-                          itemCount: timelineEntries.length,
+                          itemCount: visibleTimelineEntries.length,
                           itemBuilder: (context, index) {
                             final entry =
-                                timelineEntries[timelineEntries.length -
+                                visibleTimelineEntries[visibleTimelineEntries
+                                        .length -
                                     index -
                                     1];
                             return KeyedSubtree(
@@ -2081,35 +2208,38 @@ class _SessionScreenState extends State<SessionScreen>
                         ),
                       ),
                     ),
-                    Positioned(
-                      right: 16,
-                      bottom: 12,
-                      child: ValueListenableBuilder<bool>(
-                        valueListenable: _showJumpToLatest,
-                        builder: (context, show, _) {
-                          return IgnorePointer(
-                            ignoring: !show,
-                            child: AnimatedOpacity(
-                              opacity: show ? 1 : 0,
-                              duration: const Duration(milliseconds: 160),
-                              curve: Curves.easeOut,
-                              child: _JumpToLatestPill(
-                                onTap: () {
-                                  if (!_scrollController.hasClients) {
-                                    return;
-                                  }
-                                  _scrollController.animateTo(
-                                    0,
-                                    duration: const Duration(milliseconds: 240),
-                                    curve: Curves.easeOut,
-                                  );
-                                },
+                    if (!searchActive)
+                      Positioned(
+                        right: 16,
+                        bottom: 12,
+                        child: ValueListenableBuilder<bool>(
+                          valueListenable: _showJumpToLatest,
+                          builder: (context, show, _) {
+                            return IgnorePointer(
+                              ignoring: !show,
+                              child: AnimatedOpacity(
+                                opacity: show ? 1 : 0,
+                                duration: const Duration(milliseconds: 160),
+                                curve: Curves.easeOut,
+                                child: _JumpToLatestPill(
+                                  onTap: () {
+                                    if (!_scrollController.hasClients) {
+                                      return;
+                                    }
+                                    _scrollController.animateTo(
+                                      0,
+                                      duration: const Duration(
+                                        milliseconds: 240,
+                                      ),
+                                      curve: Curves.easeOut,
+                                    );
+                                  },
+                                ),
                               ),
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
-                    ),
                   ],
                 ),
         ),
@@ -2160,6 +2290,17 @@ class _SessionScreenState extends State<SessionScreen>
                 label: Text('Stop', style: TextStyle(color: colors.danger)),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: MeshIconButton(
+              icon: _searchOpen
+                  ? Icons.search_off_rounded
+                  : Icons.search_rounded,
+              tooltip: _searchOpen ? 'Close search' : 'Search loaded messages',
+              color: _searchOpen ? colors.accent : colors.textSecondary,
+              onTap: _searchOpen ? _closeSearch : _openSearch,
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 10),
             child: ListenableBuilder(
@@ -2972,6 +3113,117 @@ String _gitDiffTitle(SessionGitDiff diff) {
     'remote' => 'Remote diff',
     _ => 'Working diff',
   };
+}
+
+class _SessionSearchBar extends StatelessWidget {
+  const _SessionSearchBar({
+    required this.controller,
+    required this.focusNode,
+    required this.matchCount,
+    required this.loadedMessageCount,
+    required this.onClear,
+    required this.onClose,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final int? matchCount;
+  final int loadedMessageCount;
+  final VoidCallback onClear;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final hasQuery = controller.text.trim().isNotEmpty;
+    final label = hasQuery
+        ? '${matchCount ?? 0} match${matchCount == 1 ? '' : 'es'}'
+        : '$loadedMessageCount loaded messages';
+    return MeshCard(
+      tone: MeshCardTone.elevated,
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      borderColor: colors.accent.withValues(alpha: 0.35),
+      child: Row(
+        children: [
+          Icon(Icons.search_rounded, size: 19, color: colors.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              minLines: 1,
+              maxLines: 1,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration.collapsed(
+                hintText: 'Search loaded messages',
+                hintStyle: TextStyle(color: colors.textTertiary),
+              ),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: colors.textPrimary,
+                height: 1.25,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          MeshPill(
+            label: label,
+            tone: hasQuery && (matchCount ?? 0) == 0
+                ? MeshPillTone.warning
+                : MeshPillTone.info,
+            bold: true,
+          ),
+          if (hasQuery) ...[
+            const SizedBox(width: 6),
+            InkWell(
+              onTap: onClear,
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.all(7),
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 18,
+                  color: colors.textSecondary,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(width: 2),
+          InkWell(
+            onTap: onClose,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.all(7),
+              child: Icon(
+                Icons.keyboard_arrow_up_rounded,
+                size: 20,
+                color: colors.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SessionSearchEmptyState extends StatelessWidget {
+  const _SessionSearchEmptyState({
+    required this.query,
+    required this.loadedMessageCount,
+  });
+
+  final String query;
+  final int loadedMessageCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshEmptyState(
+      icon: Icons.search_off_rounded,
+      title: 'No loaded messages match',
+      body:
+          'Searched $loadedMessageCount loaded messages for "$query". Load older history if the message is outside the current transcript window.',
+    );
+  }
 }
 
 class _PinnedMessagesStrip extends StatelessWidget {
