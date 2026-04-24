@@ -667,7 +667,7 @@ class _SessionScreenState extends State<SessionScreen>
 
     return candidates
         .where((item) => _skillSuggestionScore(item, query) < 100)
-        .take(6)
+        .take(80)
         .toList(growable: false);
   }
 
@@ -4309,7 +4309,7 @@ class _ComposerAttachmentChip extends StatelessWidget {
   }
 }
 
-class _ComposerSkillSuggestionTray extends StatelessWidget {
+class _ComposerSkillSuggestionTray extends StatefulWidget {
   const _ComposerSkillSuggestionTray({
     required this.query,
     required this.suggestions,
@@ -4325,10 +4325,25 @@ class _ComposerSkillSuggestionTray extends StatelessWidget {
   final ValueChanged<SkillSummary> onSelectSkill;
 
   @override
+  State<_ComposerSkillSuggestionTray> createState() =>
+      _ComposerSkillSuggestionTrayState();
+}
+
+class _ComposerSkillSuggestionTrayState
+    extends State<_ComposerSkillSuggestionTray> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     Widget child;
-    if (loading) {
+    if (widget.loading) {
       child = const Padding(
         padding: EdgeInsets.symmetric(vertical: 10),
         child: Center(
@@ -4339,10 +4354,10 @@ class _ComposerSkillSuggestionTray extends StatelessWidget {
           ),
         ),
       );
-    } else if (suggestions.isEmpty) {
-      final message = error == null || error!.trim().isEmpty
-          ? 'No skills match "\$$query".'
-          : 'Couldn\'t load skills: $error';
+    } else if (widget.suggestions.isEmpty) {
+      final message = widget.error == null || widget.error!.trim().isEmpty
+          ? 'No skills match "\$${widget.query}".'
+          : 'Couldn\'t load skills: ${widget.error}';
       child = Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
@@ -4365,84 +4380,25 @@ class _ComposerSkillSuggestionTray extends StatelessWidget {
         ),
       );
     } else {
-      child = Column(
-        mainAxisSize: MainAxisSize.min,
-        children: suggestions
-            .map(
-              (skill) => InkWell(
-                onTap: () => onSelectSkill(skill),
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: colors.surfaceMuted,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: colors.border),
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(
-                          Icons.auto_awesome_rounded,
-                          size: 15,
-                          color: colors.accent,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    skill.displayName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelLarge
-                                        ?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _SkillScopeBadge(skill: skill),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              skill.summaryDescription,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: colors.textSecondary),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        skill.mentionToken,
-                        style: monoStyle(
-                          color: colors.textTertiary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            )
-            .toList(growable: false),
+      final maxHeight = math.min(
+        340.0,
+        MediaQuery.sizeOf(context).height * 0.32,
+      );
+      child = ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: widget.suggestions.length > 4,
+          child: ListView.builder(
+            controller: _scrollController,
+            primary: false,
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            itemCount: widget.suggestions.length,
+            itemBuilder: (context, index) =>
+                _buildSkillRow(context, widget.suggestions[index]),
+          ),
+        ),
       );
     }
 
@@ -4454,6 +4410,78 @@ class _ComposerSkillSuggestionTray extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: child,
+    );
+  }
+
+  Widget _buildSkillRow(BuildContext context, SkillSummary skill) {
+    final colors = context.colors;
+    return InkWell(
+      onTap: () => widget.onSelectSkill(skill),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: colors.surfaceMuted,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: colors.border),
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.auto_awesome_rounded,
+                size: 15,
+                color: colors.accent,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          skill.displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _SkillScopeBadge(skill: skill),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    skill.summaryDescription,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              skill.mentionToken,
+              style: monoStyle(
+                color: colors.textTertiary,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
