@@ -25,6 +25,7 @@ import 'inspector/inspector_pinned.dart';
 import 'inspector/inspector_search.dart';
 import 'workspace_browser_dialog.dart';
 import '../session_favorites_store.dart';
+import '../session_message_seed_store.dart';
 import '../session_overrides_store.dart';
 import '../session_pins_store.dart';
 import '../session_policy_store.dart';
@@ -190,6 +191,10 @@ class _SessionScreenState extends State<SessionScreen>
     _composerController.addListener(_handleComposerChanged);
     _searchController.addListener(_handleSearchChanged);
     _session = widget.session;
+    _optimisticMessages = SessionMessageSeedStore.instance.take(
+      widget.host,
+      widget.session.id,
+    );
     _scrollController.addListener(_onTranscriptScroll);
     _markCurrentSessionSeen();
     _loadSnapshot();
