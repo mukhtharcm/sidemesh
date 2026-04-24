@@ -79,7 +79,7 @@ export interface SessionActivityChange {
 
 export interface SessionActivityBase {
   id: string;
-  type: "command" | "file_change" | "turn_diff";
+  type: "command" | "file_change" | "turn_diff" | "image_generation";
   turnId: string | null;
   createdAt: number;
   seq: number;
@@ -115,7 +115,17 @@ export interface TurnDiffActivity extends SessionActivityBase {
   diff: string | null;
 }
 
-export type SessionActivity = CommandActivity | FileChangeActivity | TurnDiffActivity;
+export interface ImageGenerationActivity extends SessionActivityBase {
+  type: "image_generation";
+  revisedPrompt: string | null;
+  savedPath: string | null;
+}
+
+export type SessionActivity =
+  | CommandActivity
+  | FileChangeActivity
+  | TurnDiffActivity
+  | ImageGenerationActivity;
 
 export interface PendingAction {
   id: string;

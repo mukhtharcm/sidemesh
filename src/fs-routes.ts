@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 import type { Express, Request, Response, NextFunction } from "express";
@@ -106,6 +107,29 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     }),
   );
 
+  app.get(
+    "/api/fs/blob",
+    asyncRoute(async (request, response) => {
+      const target = await resolveIncomingBlobPath(
+        request.query.path,
+        bridge,
+        listSessions,
+      );
+      const res = (await bridge.request("fs/readFile", { path: target })) as {
+        dataBase64: string;
+      };
+      const bytes = Buffer.from(res.dataBase64 || "", "base64");
+      response.setHeader("Content-Type", guessMime(target));
+      response.setHeader("Content-Length", String(bytes.byteLength));
+      response.setHeader("Cache-Control", "private, max-age=60");
+      response.setHeader(
+        "Content-Disposition",
+        `inline; filename="${path.basename(target).replaceAll('"', "")}"`,
+      );
+      response.send(bytes);
+    }),
+  );
+
   app.post(
     "/api/fs/write",
     asyncRoute(async (request, response) => {
@@ -203,6 +227,42 @@ async function resolveIncomingPath(
   }
   const roots = await collectWorkspaceRoots(bridge, listSessions);
   return resolveWorkspacePath(raw, roots, options);
+}
+
+async function resolveIncomingBlobPath(
+  raw: unknown,
+  bridge: CodexBridge,
+  listSessions: () => Promise<SessionSummary[]>,
+): Promise<string> {
+  try {
+    return await resolveIncomingPath(raw, bridge, listSessions);
+  } catch (error) {
+    if (typeof raw !== "string" || !path.isAbsolute(raw)) {
+      throw error;
+    }
+
+    const canonical = await realpath(raw).catch((realpathError) => {
+      throw new WorkspaceAccessError(
+        `cannot resolve path: ${realpathError instanceof Error ? realpathError.message : String(realpathError)}`,
+      );
+    });
+    const info = await stat(canonical).catch((statError) => {
+      throw new WorkspaceAccessError(
+        `cannot stat path: ${statError instanceof Error ? statError.message : String(statError)}`,
+      );
+    });
+    if (!info.isFile()) {
+      throw new WorkspaceAccessError("path is not a regular file", 400);
+    }
+    if (!guessMime(canonical).startsWith("image/")) {
+      throw new WorkspaceAccessError(
+        "blob route only supports image files",
+        403,
+      );
+    }
+
+    return canonical;
+  }
 }
 
 function asyncRoute(

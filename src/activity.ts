@@ -3,6 +3,7 @@ import path from "node:path";
 import type {
   CommandActivity,
   FileChangeActivity,
+  ImageGenerationActivity,
   SessionActivity,
   SessionCommandActionSummary,
   SessionActivityChange,
@@ -131,6 +132,19 @@ export function buildActivityFromThreadItem(
     };
   }
 
+  if (item.type === "imageGeneration") {
+    return {
+      id: item.id,
+      type: "image_generation",
+      turnId: context.turnId,
+      createdAt: context.createdAt,
+      seq: context.seq,
+      status: normalizeStatus(item.status),
+      revisedPrompt: asString(item.revisedPrompt),
+      savedPath: asString(item.savedPath),
+    };
+  }
+
   return null;
 }
 
@@ -172,6 +186,17 @@ export function mergeActivity(
       createdAt: existing.createdAt,
       seq: existing.seq,
       diff: incoming.diff ?? existingTurnDiff.diff,
+    };
+  }
+
+  if (incoming.type === "image_generation") {
+    const existingImage = existing as ImageGenerationActivity;
+    return {
+      ...incoming,
+      createdAt: existing.createdAt,
+      seq: existing.seq,
+      revisedPrompt: incoming.revisedPrompt ?? existingImage.revisedPrompt,
+      savedPath: incoming.savedPath ?? existingImage.savedPath,
     };
   }
 
@@ -383,6 +408,36 @@ export function buildFileChangeActivityFromRolloutEvent(
   };
 }
 
+export function buildImageGenerationActivityFromRolloutEvent(
+  payload: unknown,
+  createdAt: number,
+  seq: number,
+): ImageGenerationActivity | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const typed = payload as Record<string, unknown>;
+  const id =
+    asString(typed.call_id) ||
+    asString(typed.callId) ||
+    asString(typed.id);
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    type: "image_generation",
+    turnId: asString(typed.turn_id) || asString(typed.turnId),
+    createdAt,
+    seq,
+    status: normalizeStatus(typed.status),
+    revisedPrompt: asString(typed.revised_prompt) || asString(typed.revisedPrompt),
+    savedPath: asString(typed.saved_path) || asString(typed.savedPath),
+  };
+}
+
 export function buildFileChangeChanges(raw: unknown): SessionActivityChange[] {
   if (!Array.isArray(raw)) {
     return [];
@@ -471,7 +526,11 @@ function pickTurnTimestamp(
 }
 
 function isActivityThreadItem(item: ThreadItemRecord): boolean {
-  return item.type === "commandExecution" || item.type === "fileChange";
+  return (
+    item.type === "commandExecution" ||
+    item.type === "fileChange" ||
+    item.type === "imageGeneration"
+  );
 }
 
 function normalizeStatus(value: unknown): SessionActivity["status"] {
