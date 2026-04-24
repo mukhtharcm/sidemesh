@@ -1062,6 +1062,7 @@ class _ThemeToggleButton extends StatefulWidget {
 
 class _ThemeToggleButtonState extends State<_ThemeToggleButton> {
   bool _hover = false;
+  final LayerLink _link = LayerLink();
 
   @override
   Widget build(BuildContext context) {
@@ -1079,24 +1080,31 @@ class _ThemeToggleButtonState extends State<_ThemeToggleButton> {
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() => _hover = false),
         cursor: SystemMouseCursors.click,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () => showAppearanceSheet(context),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: _hover ? colors.surfaceMuted : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
+        child: CompositedTransformTarget(
+          link: _link,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => showAppearanceSheet(
+                context,
+                anchor: _link,
+                anchorSize: const Size(28, 28),
               ),
-              alignment: Alignment.center,
-              child: Icon(
-                icon,
-                size: 16,
-                color: _hover ? colors.textPrimary : colors.textSecondary,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: _hover ? colors.surfaceMuted : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  icon,
+                  size: 16,
+                  color: _hover ? colors.textPrimary : colors.textSecondary,
+                ),
               ),
             ),
           ),
