@@ -9,7 +9,11 @@
     "daemon:dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit",
     "mobile:get": "cd apps/mobile && flutter pub get",
-    "mobile:analyze": "cd apps/mobile && flutter analyze"
+    "mobile:analyze": "cd apps/mobile && flutter analyze",
+    "mobile:ios:dev": "cd apps/mobile && flutter run --flavor dev -t lib/main.dart",
+    "mobile:ios:prod": "cd apps/mobile && flutter run --flavor prod -t lib/main.dart",
+    "mobile:ios:build:dev": "cd apps/mobile && flutter build ios --flavor dev --debug",
+    "mobile:ios:build:prod": "cd apps/mobile && flutter build ipa --flavor prod --release"
   },
   "dependencies": {
     "cors": "^2.8.5",
