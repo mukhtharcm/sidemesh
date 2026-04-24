@@ -65,6 +65,7 @@ class _SessionScreenState extends State<SessionScreen>
   static const _maxDecodedDraftImageBytes = 18 * 1024 * 1024;
 
   final _composerController = TextEditingController();
+  final _composerFocusNode = FocusNode(debugLabel: 'session_composer');
   final _scrollController = ScrollController();
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
   final SessionPolicyStore _policyStore = SessionPolicyStore.instance;
@@ -108,6 +109,7 @@ class _SessionScreenState extends State<SessionScreen>
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   bool _disposed = false;
+  bool _restoreComposerFocusOnResume = false;
   int? _lastEventSeq;
   // Incremented whenever a fresh snapshot is requested so in-flight responses
   // from older requests can be discarded.
@@ -177,6 +179,7 @@ class _SessionScreenState extends State<SessionScreen>
     _reconnectTimer?.cancel();
     _composerController.removeListener(_handleComposerChanged);
     _composerController.dispose();
+    _composerFocusNode.dispose();
     _scrollController.removeListener(_onTranscriptScroll);
     _scrollController.dispose();
     _subscription?.cancel();
@@ -366,6 +369,25 @@ class _SessionScreenState extends State<SessionScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_isMacDesktop) {
+      switch (state) {
+        case AppLifecycleState.inactive:
+        case AppLifecycleState.hidden:
+        case AppLifecycleState.paused:
+          _restoreComposerFocusOnResume = _composerFocusNode.hasFocus;
+          break;
+        case AppLifecycleState.resumed:
+          final shouldRestoreFocus = _restoreComposerFocusOnResume;
+          _restoreComposerFocusOnResume = false;
+          if (shouldRestoreFocus) {
+            _queueComposerFocusRestore();
+          }
+          break;
+        case AppLifecycleState.detached:
+          _restoreComposerFocusOnResume = false;
+          break;
+      }
+    }
     if (state == AppLifecycleState.resumed && mounted && !_disposed) {
       // OS can pause or silently kill the socket while backgrounded; the
       // normal onDone / onError path often doesn't fire until a write
@@ -386,6 +408,21 @@ class _SessionScreenState extends State<SessionScreen>
       }());
       _connectLive();
     }
+  }
+
+  bool get _isMacDesktop =>
+      widget.topPadding != null &&
+      defaultTargetPlatform == TargetPlatform.macOS;
+
+  void _queueComposerFocusRestore() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future<void>.delayed(const Duration(milliseconds: 140), () {
+        if (!mounted || _disposed) {
+          return;
+        }
+        _composerFocusNode.requestFocus();
+      });
+    });
   }
 
   Future<void> _loadSnapshot({
@@ -1246,6 +1283,9 @@ class _SessionScreenState extends State<SessionScreen>
             wasRunning && _liveAssistantText.isEmpty && !stillHasPending;
       });
       _refreshThinkingState();
+      if (_isMacDesktop) {
+        _queueComposerFocusRestore();
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -1522,6 +1562,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _dismissKeyboard() {
+    _restoreComposerFocusOnResume = false;
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
@@ -1892,6 +1933,7 @@ class _SessionScreenState extends State<SessionScreen>
         _ComposerStatusStrip(thinking: _thinkingNotifier),
         _Composer(
           controller: _composerController,
+          focusNode: _composerFocusNode,
           attachments: _draftAttachments,
           skills: _draftSkillMentions,
           activeSkillQuery: _activeSkillQuery?.query,
@@ -2504,6 +2546,7 @@ class _HistoryTruncationCard extends StatelessWidget {
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
+    required this.focusNode,
     required this.attachments,
     required this.skills,
     required this.activeSkillQuery,
@@ -2521,6 +2564,7 @@ class _Composer extends StatelessWidget {
   });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final List<_ComposerImageAttachment> attachments;
   final List<_ComposerSkillMention> skills;
   final String? activeSkillQuery;
@@ -2541,9 +2585,10 @@ class _Composer extends StatelessWidget {
     final colors = context.colors;
     final isMacDesktop =
         submitOnEnter && defaultTargetPlatform == TargetPlatform.macOS;
-    final enableDesktopSubmitShortcut = submitOnEnter && !isMacDesktop;
+    final enableDesktopSubmitShortcut = submitOnEnter;
     Widget field = TextField(
       controller: controller,
+      focusNode: focusNode,
       minLines: 1,
       maxLines: 6,
       onTapOutside: isMacDesktop ? null : (_) => onDismiss(),
