@@ -12,6 +12,7 @@ import '../theme/app_colors.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/appearance_sheet.dart';
+import 'create_session_sheet.dart';
 import 'home_screen.dart';
 import 'host_detail_screen.dart';
 import 'inspector/inspector_controller.dart';
@@ -598,6 +599,7 @@ class _DesktopShellState extends State<DesktopShell> {
                               titlebarInset: _titlebarInset,
                               active: _active,
                               activeHost: _activeHost,
+                              hosts: _hosts,
                               api: _api,
                               onClose: () {
                                 final current = _active;
@@ -612,6 +614,7 @@ class _DesktopShellState extends State<DesktopShell> {
                                 });
                               },
                               onOpenSession: _openSession,
+                              onAddHost: () => _showHostEditor(),
                             ),
                           ),
                           if (_inspector.current != null) ...[
@@ -1109,17 +1112,21 @@ class _DetailPane extends StatefulWidget {
     required this.titlebarInset,
     required this.active,
     required this.activeHost,
+    required this.hosts,
     required this.api,
     required this.onClose,
     required this.onOpenSession,
+    required this.onAddHost,
   });
 
   final double titlebarInset;
   final _ActiveSession? active;
   final HostProfile? activeHost;
+  final List<HostProfile> hosts;
   final ApiClient api;
   final VoidCallback onClose;
   final void Function(HostProfile, SessionSummary) onOpenSession;
+  final VoidCallback onAddHost;
 
   @override
   State<_DetailPane> createState() => _DetailPaneState();
@@ -1127,6 +1134,22 @@ class _DetailPane extends StatefulWidget {
 
 class _DetailPaneState extends State<_DetailPane> {
   bool _hoverClose = false;
+
+  Future<void> _startSessionFromEmptyState() async {
+    if (widget.hosts.isEmpty) {
+      widget.onAddHost();
+      return;
+    }
+    final result = await showCreateSessionHostLauncher(
+      context,
+      hosts: widget.hosts,
+      api: widget.api,
+    );
+    if (!mounted || result == null) {
+      return;
+    }
+    widget.onOpenSession(result.host, result.session);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1177,26 +1200,54 @@ class _DetailPaneState extends State<_DetailPane> {
                     decoration: BoxDecoration(
                       color: colors.accentMuted,
                       borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: colors.accent.withValues(alpha: 0.35),
+                      ),
                     ),
                     alignment: Alignment.center,
                     child: Icon(
-                      Icons.forum_rounded,
+                      Icons.terminal_rounded,
                       color: colors.accent,
                       size: 26,
                     ),
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Pick a session',
+                    'Ready to launch',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Text(
-                    'Choose a host and session from the sidebar to get going.',
-                    style: TextStyle(color: colors.textSecondary),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 360),
+                    child: Text(
+                      widget.hosts.isEmpty
+                          ? 'Add a host first, then launch Codex from here.'
+                          : 'Open an existing chat or launch a fresh Codex session on any configured host.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: colors.textSecondary),
+                    ),
                   ),
+                  const SizedBox(height: 18),
+                  FilledButton.icon(
+                    onPressed: _startSessionFromEmptyState,
+                    icon: Icon(
+                      widget.hosts.isEmpty
+                          ? Icons.add_rounded
+                          : Icons.play_arrow_rounded,
+                    ),
+                    label: Text(
+                      widget.hosts.isEmpty ? 'Add host' : 'Start session',
+                    ),
+                  ),
+                  if (widget.hosts.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    MeshPill(
+                      label: '${widget.hosts.length} hosts available',
+                      icon: Icons.hub_rounded,
+                    ),
+                  ],
                 ],
               ),
             ),
