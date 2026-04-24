@@ -18,6 +18,7 @@ import 'file_browser_screen.dart';
 import 'file_viewer_pane.dart';
 import 'file_viewer_screen.dart';
 import 'inspector/inspector_controller.dart';
+import 'inspector/inspector_file_browser.dart';
 import 'inspector/inspector_search.dart';
 import 'workspace_browser_dialog.dart';
 import '../session_favorites_store.dart';
@@ -2449,7 +2450,17 @@ class _SessionScreenState extends State<SessionScreen>
                       break;
                     case 'browse':
                       final isDesktop = widget.topPadding != null;
-                      if (isDesktop) {
+                      final scope = InspectorScope.maybeOf(context);
+                      if (isDesktop && scope != null) {
+                        scope.show(
+                          buildInspectorWorkspaceBrowserSurface(
+                            ownerKey: _inspectorOwnerKey(),
+                            host: widget.host,
+                            api: widget.api,
+                            root: session.cwd,
+                          ),
+                        );
+                      } else if (isDesktop) {
                         showWorkspaceBrowserDialog(
                           context,
                           host: widget.host,
