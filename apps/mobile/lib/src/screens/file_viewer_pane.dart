@@ -10,6 +10,7 @@ import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/markdown_content.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/syntax_code_block.dart';
 
@@ -49,6 +50,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
   bool _loading = true;
   bool _editing = false;
   bool _saving = false;
+  bool _markdownPreview = false;
   late final TextEditingController _editController = TextEditingController();
   StreamSubscription<FsChangeEvent>? _liveSub;
 
@@ -69,6 +71,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.path != widget.path) {
       _editing = false;
+      _markdownPreview = false;
       _editController.clear();
       _load();
     }
@@ -83,8 +86,8 @@ class FileViewerPaneState extends State<FileViewerPane> {
     if (stream == null) return;
     _liveSub = stream.listen((event) {
       if (!mounted) return;
-      final matches = event.changedPaths.contains(widget.path) ||
-          event.path == widget.path;
+      final matches =
+          event.changedPaths.contains(widget.path) || event.path == widget.path;
       if (matches && !_editing) {
         _load(silent: true);
       }
@@ -188,6 +191,9 @@ class FileViewerPaneState extends State<FileViewerPane> {
     setState(() {
       _editing = !_editing;
       if (_editing) {
+        _markdownPreview = false;
+      }
+      if (_editing) {
         _editController.text = _file!.contents;
       }
     });
@@ -195,6 +201,14 @@ class FileViewerPaneState extends State<FileViewerPane> {
   }
 
   void refresh() => _load();
+
+  void toggleMarkdownPreview() {
+    if (!supportsMarkdownPreview) {
+      return;
+    }
+    setState(() => _markdownPreview = !_markdownPreview);
+    _bump();
+  }
 
   Future<void> copyContents() async {
     final file = _file;
@@ -208,6 +222,10 @@ class FileViewerPaneState extends State<FileViewerPane> {
   bool get saving => _saving;
   FsFile? get file => _file;
   VoidCallback? get saveAction => _editing ? _save : null;
+  bool get isMarkdownFile => languageForPath(widget.path) == 'markdown';
+  bool get supportsMarkdownPreview =>
+      !_editing && _file != null && isMarkdownFile;
+  bool get markdownPreview => _markdownPreview;
 
   @override
   Widget build(BuildContext context) {
@@ -278,12 +296,17 @@ class FileViewerPaneState extends State<FileViewerPane> {
               padding: const EdgeInsets.only(bottom: 10),
               child: MeshCard(
                 tone: MeshCardTone.surface,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 child: Row(
                   children: [
-                    Icon(Icons.warning_amber_rounded,
-                        size: 16, color: colors.warning),
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      size: 16,
+                      color: colors.warning,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -296,14 +319,28 @@ class FileViewerPaneState extends State<FileViewerPane> {
                 ),
               ),
             ),
-          SelectionArea(
-            child: SyntaxCodeBlock(
-              text: file.contents,
-              language: languageForPath(file.path),
-              showLanguageBadge: false,
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          if (supportsMarkdownPreview && _markdownPreview)
+            Container(
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colors.border),
+              ),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              child: MarkdownContent(
+                text: file.contents,
+                textColor: colors.textPrimary,
+              ),
+            )
+          else
+            SelectionArea(
+              child: SyntaxCodeBlock(
+                text: file.contents,
+                language: languageForPath(file.path),
+                showLanguageBadge: false,
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -313,10 +350,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
 /// Shared action row used both on the mobile viewer app bar and the desktop
 /// dialog header.
 class FileViewerActions extends StatelessWidget {
-  const FileViewerActions({
-    super.key,
-    required this.state,
-  });
+  const FileViewerActions({super.key, required this.state});
 
   final FileViewerPaneState? state;
 
@@ -326,6 +360,8 @@ class FileViewerActions extends StatelessWidget {
     final editing = s?.editing ?? false;
     final saving = s?.saving ?? false;
     final hasFile = s?.file != null;
+    final canPreviewMarkdown = s?.isMarkdownFile ?? false;
+    final markdownPreview = s?.markdownPreview ?? false;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -354,6 +390,17 @@ class FileViewerActions extends StatelessWidget {
           onPressed: hasFile ? () => s?.copyContents() : null,
           icon: const Icon(Icons.content_copy_rounded, size: 18),
         ),
+        if (canPreviewMarkdown)
+          IconButton(
+            tooltip: markdownPreview ? 'View source' : 'Preview markdown',
+            onPressed: hasFile && !editing
+                ? () => s?.toggleMarkdownPreview()
+                : null,
+            icon: Icon(
+              markdownPreview ? Icons.code_rounded : Icons.article_outlined,
+              size: 18,
+            ),
+          ),
         IconButton(
           tooltip: 'Refresh',
           onPressed: hasFile ? () => s?.refresh() : null,
@@ -365,7 +412,9 @@ class FileViewerActions extends StatelessWidget {
 }
 
 String baseName(String path) {
-  final trimmed = path.endsWith('/') ? path.substring(0, path.length - 1) : path;
+  final trimmed = path.endsWith('/')
+      ? path.substring(0, path.length - 1)
+      : path;
   final idx = trimmed.lastIndexOf('/');
   return idx >= 0 ? trimmed.substring(idx + 1) : trimmed;
 }

@@ -7,7 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:image/image.dart' as img;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/io.dart';
@@ -28,6 +27,7 @@ import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/markdown_content.dart';
 import '../widgets/diff_view.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/syntax_code_block.dart';
@@ -3804,60 +3804,10 @@ class _MarkdownMessageBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = context.colors;
-    final baseBody = theme.textTheme.bodyMedium?.copyWith(
-      color: textColor,
-      height: 1.5,
-    );
-    final markdownText = _autoLinkBareUrlsForMarkdown(text);
-
-    return GptMarkdown(
-      markdownText,
-      style: baseBody,
-      followLinkColor: false,
-      onLinkTap: (href, title) {
-        if (href.isEmpty) return;
-        _openLink(context, href);
-      },
-      linkBuilder: (context, linkText, url, style) {
-        return Text.rich(
-          TextSpan(
-            children: [linkText],
-            style: (style).copyWith(
-              color: colors.accent,
-              decoration: TextDecoration.underline,
-            ),
-          ),
-        );
-      },
-      codeBuilder: (context, name, code, closed) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: SyntaxCodeBlock(
-            text: code.trimRight(),
-            language: name.isEmpty ? null : name,
-          ),
-        );
-      },
-      highlightBuilder: (context, hlText, style) {
-        final isPath = onOpenFile != null && _looksLikeFilePath(hlText);
-        final displayStyle =
-            monoStyle(
-              color: isPath ? colors.accent : colors.accent,
-              fontSize: 12.5,
-            ).copyWith(
-              decoration: isPath ? TextDecoration.underline : null,
-              decorationColor: isPath ? colors.accent : null,
-            );
-        if (isPath) {
-          return GestureDetector(
-            onTap: () => onOpenFile!(hlText),
-            child: Text(hlText, style: displayStyle),
-          );
-        }
-        return Text(hlText, style: displayStyle);
-      },
+    return MarkdownContent(
+      text: text,
+      textColor: textColor,
+      onOpenFile: onOpenFile,
     );
   }
 }
@@ -3963,195 +3913,6 @@ Map<String, Object?> _compressDraftImagePayload(Map<String, Object?> payload) {
   };
 }
 
-Future<void> _openLink(BuildContext context, String href) async {
-  final uri = Uri.tryParse(href);
-  if (uri == null) return;
-  final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-  if (!ok && context.mounted) {
-    showAppSnackBar(context, 'Could not open link');
-  }
-}
-
-String _autoLinkBareUrlsForMarkdown(String text) {
-  if (text.isEmpty || !_urlRegExp.hasMatch(text)) {
-    return text;
-  }
-
-  final output = StringBuffer();
-  final fenceMatches = _fencedCodeRegExp.allMatches(text).toList();
-  var cursor = 0;
-
-  for (final match in fenceMatches) {
-    if (match.start > cursor) {
-      output.write(
-        _autoLinkBareUrlsOutsideInlineCode(text.substring(cursor, match.start)),
-      );
-    }
-    output.write(match.group(0)!);
-    cursor = match.end;
-  }
-
-  if (cursor < text.length) {
-    output.write(_autoLinkBareUrlsOutsideInlineCode(text.substring(cursor)));
-  }
-
-  return output.toString();
-}
-
-String _autoLinkBareUrlsOutsideInlineCode(String text) {
-  if (text.isEmpty || !_urlRegExp.hasMatch(text)) {
-    return text;
-  }
-
-  final output = StringBuffer();
-  final inlineCodeMatches = _inlineCodeRegExp.allMatches(text).toList();
-  var cursor = 0;
-
-  for (final match in inlineCodeMatches) {
-    if (match.start > cursor) {
-      output.write(
-        _wrapBareUrlsAsMarkdownLinks(text.substring(cursor, match.start)),
-      );
-    }
-    output.write(match.group(0)!);
-    cursor = match.end;
-  }
-
-  if (cursor < text.length) {
-    output.write(_wrapBareUrlsAsMarkdownLinks(text.substring(cursor)));
-  }
-
-  return output.toString();
-}
-
-String _wrapBareUrlsAsMarkdownLinks(String text) {
-  if (text.isEmpty || !_urlRegExp.hasMatch(text)) {
-    return text;
-  }
-
-  final output = StringBuffer();
-  var cursor = 0;
-  for (final match in _bareMarkdownUrlRegExp.allMatches(text)) {
-    final raw = match.group(0);
-    if (raw == null || raw.isEmpty) continue;
-    if (match.start > cursor) {
-      output.write(text.substring(cursor, match.start));
-    }
-
-    final trimmed = raw.replaceAll(RegExp(r'[),.!?;:\]]+$'), '');
-    if (trimmed.isEmpty) {
-      output.write(raw);
-      cursor = match.end;
-      continue;
-    }
-
-    final trailing = raw.substring(trimmed.length);
-    final href = trimmed.startsWith('www.') ? 'https://$trimmed' : trimmed;
-    output.write('[$trimmed]($href)');
-    output.write(trailing);
-    cursor = match.end;
-  }
-
-  if (cursor < text.length) {
-    output.write(text.substring(cursor));
-  }
-
-  return output.toString();
-}
-
-/// Returns true when [text] looks like a workspace file path rather than a
-/// plain identifier or URL. Requires a `/` separator AND either a known file
-/// extension or an explicit relative prefix (`./`, `../`).
-bool _looksLikeFilePath(String text) {
-  if (text.isEmpty) return false;
-  // Never linkify URLs — those go through onLinkTap.
-  if (text.startsWith('http://') || text.startsWith('https://')) return false;
-  // Must contain a slash (rules out single words like `foo`)
-  if (!text.contains('/')) return false;
-  // Explicit relative prefixes → always treat as path
-  if (text.startsWith('./') || text.startsWith('../')) return true;
-  // Absolute path → treat as path when it has an extension
-  if (text.startsWith('/')) {
-    return _hasKnownExtension(text);
-  }
-  // Relative path like `src/foo.ts` — require a known extension to avoid
-  // false positives on domain names or command args like `--out/dir`
-  return _hasKnownExtension(text);
-}
-
-bool _hasKnownExtension(String path) {
-  final dot = path.lastIndexOf('.');
-  if (dot < 0 || dot == path.length - 1) return false;
-  final ext = path.substring(dot + 1).toLowerCase();
-  const knownExts = {
-    'dart',
-    'ts',
-    'tsx',
-    'js',
-    'mjs',
-    'cjs',
-    'jsx',
-    'json',
-    'yaml',
-    'yml',
-    'toml',
-    'md',
-    'markdown',
-    'html',
-    'htm',
-    'xml',
-    'svg',
-    'css',
-    'scss',
-    'less',
-    'py',
-    'go',
-    'rs',
-    'rb',
-    'java',
-    'kt',
-    'swift',
-    'c',
-    'h',
-    'cpp',
-    'cc',
-    'cxx',
-    'cs',
-    'sh',
-    'bash',
-    'zsh',
-    'fish',
-    'txt',
-    'env',
-    'lock',
-    'gradle',
-    'properties',
-    'proto',
-    'graphql',
-    'sql',
-  };
-  return knownExts.contains(ext);
-}
-
-// Matches http(s)://… and www.… URLs. Conservative trailing punctuation trim
-// happens in _buildLinkSpans below.
-final RegExp _urlRegExp = RegExp(
-  r'(https?:\/\/[^\s<>]+|www\.[^\s<>]+)',
-  caseSensitive: false,
-);
-
-// gpt_markdown parses markdown links, but it does not auto-link bare URLs.
-// Restore the old GitHub-style behavior in prose while leaving code intact.
-final RegExp _bareMarkdownUrlRegExp = RegExp(
-  r'(?<!\]\()(?<!\[)(https?:\/\/[^\s<>]+|www\.[^\s<>]+)',
-  caseSensitive: false,
-);
-final RegExp _fencedCodeRegExp = RegExp(
-  r'(```[\s\S]*?```|~~~[\s\S]*?~~~)',
-  multiLine: true,
-);
-final RegExp _inlineCodeRegExp = RegExp(r'(``[^`\n]*``|`[^`\n]*`)');
-
 class _LinkifiedSelectableText extends StatefulWidget {
   const _LinkifiedSelectableText({
     required this.text,
@@ -4224,6 +3985,20 @@ class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
     return SelectableText.rich(TextSpan(style: widget.style, children: spans));
   }
 }
+
+Future<void> _openLink(BuildContext context, String href) async {
+  final uri = Uri.tryParse(href);
+  if (uri == null) return;
+  final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!ok && context.mounted) {
+    showAppSnackBar(context, 'Could not open link');
+  }
+}
+
+final RegExp _urlRegExp = RegExp(
+  r'(https?:\/\/[^\s<>]+|www\.[^\s<>]+)',
+  caseSensitive: false,
+);
 
 class _ActivityCard extends StatefulWidget {
   const _ActivityCard({
