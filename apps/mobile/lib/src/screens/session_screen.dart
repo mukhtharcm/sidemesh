@@ -1034,6 +1034,7 @@ class _SessionScreenState extends State<SessionScreen>
     // Track server seq; if we detect a gap relative to what the server tells
     // us it has emitted, trigger a snapshot re-fetch to re-sync.
     if (event.type == 'hello') {
+      unawaited(_loadSkills(forceReload: true));
       final nextSeq = event.nextSeq;
       final last = _lastEventSeq;
       if (nextSeq != null && last != null && nextSeq > last + 1) {
