@@ -64,8 +64,7 @@ class _DesktopShellState extends State<DesktopShell> {
   static const double _defaultInspectorWidth = 380;
   static const double _minInspectorWidth = 320;
   static const double _maxInspectorWidth = 640;
-  static const String _inspectorWidthPref =
-      'sidemesh.desktop.inspectorWidth';
+  static const String _inspectorWidthPref = 'sidemesh.desktop.inspectorWidth';
 
   double _inspectorWidth = _defaultInspectorWidth;
 
@@ -557,8 +556,7 @@ class _DesktopShellState extends State<DesktopShell> {
                                 api: _api,
                                 section: _section,
                                 refreshTick: _refreshTick,
-                                inboxCount:
-                                    ApprovalInboxStore.instance.count,
+                                inboxCount: ApprovalInboxStore.instance.count,
                                 activeCount: _activeCount,
                                 selectedSessionId: _active?.session.id,
                                 selectedHostId: _activeHost?.id,
@@ -1225,6 +1223,8 @@ class _DetailPaneState extends State<_DetailPane> {
               host: active.host,
               session: active.session,
               api: widget.api,
+              onOpenSession: (session) =>
+                  widget.onOpenSession(active.host, session),
               topPadding: widget.titlebarInset + 6,
             ),
           ),

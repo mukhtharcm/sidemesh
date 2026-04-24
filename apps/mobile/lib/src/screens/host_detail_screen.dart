@@ -11,6 +11,7 @@ import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/mesh_widgets.dart';
+import 'create_session_sheet.dart';
 
 class HostDetailScreen extends StatefulWidget {
   const HostDetailScreen({
@@ -49,10 +50,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
     _favorites.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
     _future = _load();
-    _refreshTimer = Timer.periodic(
-      _refreshInterval,
-      (_) => _silentRefresh(),
-    );
+    _refreshTimer = Timer.periodic(_refreshInterval, (_) => _silentRefresh());
   }
 
   @override
@@ -145,7 +143,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _CreateSessionSheet(
+      builder: (context) => CreateSessionSheet(
         host: widget.host,
         api: widget.api,
         initialCwd: prefilledCwd,
@@ -285,10 +283,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                           ),
                           onTap: () => widget.onOpenSession(session),
                           onToggleFavorite: () {
-                            _favorites.toggleFavorite(
-                              widget.host,
-                              session.id,
-                            );
+                            _favorites.toggleFavorite(widget.host, session.id);
                           },
                         ),
                       ),
@@ -332,11 +327,7 @@ class _EmbeddedHostHeader extends StatelessWidget {
               borderRadius: BorderRadius.circular(9),
             ),
             alignment: Alignment.center,
-            child: Icon(
-              Icons.dns_rounded,
-              size: 17,
-              color: colors.accent,
-            ),
+            child: Icon(Icons.dns_rounded, size: 17, color: colors.accent),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -357,10 +348,7 @@ class _EmbeddedHostHeader extends StatelessWidget {
                   host.baseUrl,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: monoStyle(
-                    color: colors.textTertiary,
-                    fontSize: 11,
-                  ),
+                  style: monoStyle(color: colors.textTertiary, fontSize: 11),
                 ),
               ],
             ),
@@ -597,13 +585,9 @@ class _SessionRow extends StatelessWidget {
                       session.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.titleSmall?.copyWith(
-                            fontWeight: unread
-                                ? FontWeight.w800
-                                : FontWeight.w700,
-                          ),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: unread ? FontWeight.w800 : FontWeight.w700,
+                      ),
                     ),
                   ),
                   if (unread) ...[
@@ -617,8 +601,10 @@ class _SessionRow extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                     iconSize: 20,
                     splashRadius: 18,
-                    constraints:
-                        const BoxConstraints(minWidth: 32, minHeight: 32),
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
                     icon: Icon(
                       favorite
                           ? Icons.star_rounded
@@ -626,8 +612,7 @@ class _SessionRow extends StatelessWidget {
                       color: favorite ? colors.warning : colors.textTertiary,
                     ),
                   ),
-                  Icon(Icons.chevron_right_rounded,
-                      color: colors.textTertiary),
+                  Icon(Icons.chevron_right_rounded, color: colors.textTertiary),
                 ],
               ),
               const SizedBox(height: 4),
@@ -659,362 +644,7 @@ class _UnreadDot extends StatelessWidget {
     return Container(
       width: 8,
       height: 8,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-      ),
-    );
-  }
-}
-
-class _CreateSessionSheet extends StatefulWidget {
-  const _CreateSessionSheet({
-    required this.host,
-    required this.api,
-    this.initialCwd,
-  });
-
-  final HostProfile host;
-  final ApiClient api;
-  final String? initialCwd;
-
-  @override
-  State<_CreateSessionSheet> createState() => _CreateSessionSheetState();
-}
-
-enum _SessionLaunchMode { inherit, readOnly, defaultPreset, fullAccess, custom }
-
-extension on _SessionLaunchMode {
-  String get label => switch (this) {
-    _SessionLaunchMode.inherit => 'Inherit',
-    _SessionLaunchMode.readOnly => 'Read Only',
-    _SessionLaunchMode.defaultPreset => 'Default',
-    _SessionLaunchMode.fullAccess => 'Full Access',
-    _SessionLaunchMode.custom => 'Custom',
-  };
-
-  String get description => switch (this) {
-    _SessionLaunchMode.inherit =>
-      'Matches plain Codex TUI startup and inherits this host\'s active config.',
-    _SessionLaunchMode.readOnly =>
-      'Codex can read files in the workspace. Approval is required to edit files or access the internet.',
-    _SessionLaunchMode.defaultPreset =>
-      'Codex can read and edit the workspace, and run commands. Approval is required to access the internet or edit other files.',
-    _SessionLaunchMode.fullAccess =>
-      'Codex can access the internet and edit files outside the workspace without asking.',
-    _SessionLaunchMode.custom =>
-      'Choose approval policy and sandbox mode explicitly.',
-  };
-}
-
-class _CreateSessionSheetState extends State<_CreateSessionSheet> {
-  late final TextEditingController _cwdController;
-  late final TextEditingController _promptController;
-  late final TextEditingController _modelController;
-  late final TextEditingController _profileController;
-  _SessionLaunchMode _launchMode = _SessionLaunchMode.defaultPreset;
-  String _customApprovalPolicy = 'on-request';
-  String _customSandboxMode = 'workspace-write';
-  bool _enableSearch = false;
-  bool _showAdvanced = false;
-  bool _submitting = false;
-  String? _error;
-
-  static const _approvalPolicies = [
-    ('untrusted', 'Untrusted'),
-    ('on-failure', 'On failure'),
-    ('on-request', 'On request'),
-    ('never', 'Never'),
-  ];
-
-  static const _sandboxModes = [
-    ('read-only', 'Read only'),
-    ('workspace-write', 'Workspace write'),
-    ('danger-full-access', 'Danger full access'),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _cwdController = TextEditingController(text: widget.initialCwd ?? '');
-    _promptController = TextEditingController();
-    _modelController = TextEditingController();
-    _profileController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _cwdController.dispose();
-    _promptController.dispose();
-    _modelController.dispose();
-    _profileController.dispose();
-    super.dispose();
-  }
-
-  String? _normalized(TextEditingController controller) {
-    final value = controller.text.trim();
-    return value.isEmpty ? null : value;
-  }
-
-  String? _selectedApprovalPolicy() {
-    return switch (_launchMode) {
-      _SessionLaunchMode.inherit => null,
-      _SessionLaunchMode.readOnly => 'on-request',
-      _SessionLaunchMode.defaultPreset => 'on-request',
-      _SessionLaunchMode.fullAccess => 'never',
-      _SessionLaunchMode.custom => _customApprovalPolicy,
-    };
-  }
-
-  String? _selectedSandboxMode() {
-    return switch (_launchMode) {
-      _SessionLaunchMode.inherit => null,
-      _SessionLaunchMode.readOnly => 'read-only',
-      _SessionLaunchMode.defaultPreset => 'workspace-write',
-      _SessionLaunchMode.fullAccess => 'danger-full-access',
-      _SessionLaunchMode.custom => _customSandboxMode,
-    };
-  }
-
-  Future<void> _submit() async {
-    final cwd = _cwdController.text.trim();
-    final prompt = _promptController.text.trim();
-    if (cwd.isEmpty || prompt.isEmpty) {
-      setState(() => _error = 'cwd and prompt are required');
-      return;
-    }
-    setState(() {
-      _error = null;
-      _submitting = true;
-    });
-    try {
-      final session = await widget.api.createSession(
-        widget.host,
-        cwd: cwd,
-        prompt: prompt,
-        model: _normalized(_modelController),
-        profile: _normalized(_profileController),
-        approvalPolicy: _selectedApprovalPolicy(),
-        sandboxMode: _selectedSandboxMode(),
-        webSearch: _enableSearch ? 'live' : null,
-      );
-      if (!mounted) {
-        return;
-      }
-      Navigator.of(context).pop(session);
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _error = error.toString();
-        _submitting = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final bottom = MediaQuery.of(context).viewInsets.bottom;
-    final helperStyle = Theme.of(
-      context,
-    ).textTheme.bodySmall?.copyWith(color: colors.textSecondary, height: 1.45);
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 16, 16, bottom + 16),
-      child: MeshCard(
-        tone: MeshCardTone.surface,
-        padding: const EdgeInsets.all(22),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: colors.accentMuted,
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      Icons.play_arrow_rounded,
-                      color: colors.accent,
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'New session',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              TextField(
-                controller: _cwdController,
-                decoration: const InputDecoration(
-                  labelText: 'Working directory',
-                  hintText: '/Users/you/src/project',
-                ),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _promptController,
-                minLines: 3,
-                maxLines: 6,
-                decoration: const InputDecoration(
-                  labelText: 'Prompt',
-                  hintText: 'Refactor this module so...',
-                ),
-              ),
-              const SizedBox(height: 14),
-              TextButton.icon(
-                onPressed: _submitting
-                    ? null
-                    : () => setState(() => _showAdvanced = !_showAdvanced),
-                icon: Icon(
-                  _showAdvanced
-                      ? Icons.expand_less_rounded
-                      : Icons.expand_more_rounded,
-                ),
-                label: Text(_showAdvanced ? 'Hide advanced' : 'Show advanced'),
-              ),
-              if (_showAdvanced) ...[
-                const SizedBox(height: 6),
-                DropdownButtonFormField<_SessionLaunchMode>(
-                  initialValue: _launchMode,
-                  decoration: const InputDecoration(labelText: 'Runtime mode'),
-                  items: _SessionLaunchMode.values
-                      .map(
-                        (mode) => DropdownMenuItem<_SessionLaunchMode>(
-                          value: mode,
-                          child: Text(mode.label),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: _submitting
-                      ? null
-                      : (value) {
-                          if (value == null) {
-                            return;
-                          }
-                          setState(() => _launchMode = value);
-                        },
-                ),
-                const SizedBox(height: 8),
-                Text(_launchMode.description, style: helperStyle),
-                const SizedBox(height: 8),
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  value: _enableSearch,
-                  onChanged: _submitting
-                      ? null
-                      : (value) => setState(() => _enableSearch = value),
-                  title: const Text('Enable live web search'),
-                  subtitle: Text(
-                    'Matches Codex TUI `--search` and sets `web_search="live"` for this thread.',
-                    style: helperStyle,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _modelController,
-                  decoration: const InputDecoration(
-                    labelText: 'Model override',
-                    hintText: 'gpt-5.4',
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _profileController,
-                  decoration: const InputDecoration(
-                    labelText: 'Profile override',
-                    hintText: 'guardian',
-                  ),
-                ),
-                if (_launchMode == _SessionLaunchMode.custom) ...[
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<String>(
-                    initialValue: _customApprovalPolicy,
-                    decoration: const InputDecoration(
-                      labelText: 'Approval policy',
-                    ),
-                    items: _approvalPolicies
-                        .map(
-                          (entry) => DropdownMenuItem<String>(
-                            value: entry.$1,
-                            child: Text(entry.$2),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: _submitting
-                        ? null
-                        : (value) {
-                            if (value == null) {
-                              return;
-                            }
-                            setState(() => _customApprovalPolicy = value);
-                          },
-                  ),
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<String>(
-                    initialValue: _customSandboxMode,
-                    decoration: const InputDecoration(
-                      labelText: 'Sandbox mode',
-                    ),
-                    items: _sandboxModes
-                        .map(
-                          (entry) => DropdownMenuItem<String>(
-                            value: entry.$1,
-                            child: Text(entry.$2),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: _submitting
-                        ? null
-                        : (value) {
-                            if (value == null) {
-                              return;
-                            }
-                            setState(() => _customSandboxMode = value);
-                          },
-                  ),
-                ],
-              ],
-              if (_error != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  _error!,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.danger),
-                ),
-              ],
-              const SizedBox(height: 18),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton.icon(
-                  onPressed: _submitting ? null : _submit,
-                  icon: _submitting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.send_rounded),
-                  label: const Text('Start session'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
 }

@@ -14,6 +14,7 @@ import 'package:web_socket_channel/io.dart';
 import '../api_client.dart';
 import '../fs_languages.dart';
 import '../models.dart';
+import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_pane.dart';
 import 'file_viewer_screen.dart';
@@ -44,12 +45,14 @@ class SessionScreen extends StatefulWidget {
     required this.host,
     required this.session,
     required this.api,
+    this.onOpenSession,
     this.topPadding,
   });
 
   final HostProfile host;
   final SessionSummary session;
   final ApiClient api;
+  final ValueChanged<SessionSummary>? onOpenSession;
   // Extra top padding for embedded desktop use (to avoid overlapping the
   // transparent macOS titlebar). When null, SafeArea handles insets.
   final double? topPadding;
@@ -1990,6 +1993,39 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
+  Future<void> _startSessionFromCurrent() async {
+    final session = _session ?? widget.session;
+    final created = await showModalBottomSheet<SessionSummary>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => CreateSessionSheet(
+        host: widget.host,
+        api: widget.api,
+        initialCwd: session.cwd,
+      ),
+    );
+    if (!mounted || created == null) return;
+
+    final openSession = widget.onOpenSession;
+    if (openSession != null) {
+      openSession(created);
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SessionScreen(
+          host: widget.host,
+          session: created,
+          api: widget.api,
+          onOpenSession: widget.onOpenSession,
+          topPadding: widget.topPadding,
+        ),
+      ),
+    );
+  }
+
   void _dismissKeyboard() {
     _restoreComposerFocusOnResume = false;
     FocusManager.instance.primaryFocus?.unfocus();
@@ -2345,10 +2381,7 @@ class _SessionScreenState extends State<SessionScreen>
           ListenableBuilder(
             listenable: _favorites,
             builder: (context, _) {
-              final favorite = _favorites.isFavorite(
-                widget.host,
-                session.id,
-              );
+              final favorite = _favorites.isFavorite(widget.host, session.id);
               return _SessionHeader(
                 host: widget.host,
                 session: session,
@@ -2412,7 +2445,8 @@ class _SessionScreenState extends State<SessionScreen>
                             final prev = chronoIndex > 0
                                 ? visibleTimelineEntries[chronoIndex - 1]
                                 : null;
-                            final showDay = prev == null ||
+                            final showDay =
+                                prev == null ||
                                 !_sameCalendarDay(
                                   prev.createdAt,
                                   entry.createdAt,
@@ -2467,36 +2501,34 @@ class _SessionScreenState extends State<SessionScreen>
                       ),
                     ),
                     Positioned(
-                        right: 16,
-                        bottom: 12,
-                        child: ValueListenableBuilder<bool>(
-                          valueListenable: _showJumpToLatest,
-                          builder: (context, show, _) {
-                            return IgnorePointer(
-                              ignoring: !show,
-                              child: AnimatedOpacity(
-                                opacity: show ? 1 : 0,
-                                duration: const Duration(milliseconds: 160),
-                                curve: Curves.easeOut,
-                                child: _JumpToLatestPill(
-                                  onTap: () {
-                                    if (!_scrollController.hasClients) {
-                                      return;
-                                    }
-                                    _scrollController.animateTo(
-                                      0,
-                                      duration: const Duration(
-                                        milliseconds: 240,
-                                      ),
-                                      curve: Curves.easeOut,
-                                    );
-                                  },
-                                ),
+                      right: 16,
+                      bottom: 12,
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: _showJumpToLatest,
+                        builder: (context, show, _) {
+                          return IgnorePointer(
+                            ignoring: !show,
+                            child: AnimatedOpacity(
+                              opacity: show ? 1 : 0,
+                              duration: const Duration(milliseconds: 160),
+                              curve: Curves.easeOut,
+                              child: _JumpToLatestPill(
+                                onTap: () {
+                                  if (!_scrollController.hasClients) {
+                                    return;
+                                  }
+                                  _scrollController.animateTo(
+                                    0,
+                                    duration: const Duration(milliseconds: 240),
+                                    curve: Curves.easeOut,
+                                  );
+                                },
                               ),
-                            );
-                          },
-                        ),
+                            ),
+                          );
+                        },
                       ),
+                    ),
                   ],
                 ),
         ),
@@ -2568,6 +2600,15 @@ class _SessionScreenState extends State<SessionScreen>
                 label: Text('Stop', style: TextStyle(color: colors.danger)),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: MeshIconButton(
+              icon: Icons.add_comment_outlined,
+              tooltip: 'New session',
+              color: colors.textSecondary,
+              onTap: _startSessionFromCurrent,
+            ),
+          ),
           if (_gitHeaderLabel(session, _gitStatus) != null &&
               (_gitStatus?.dirty ?? false))
             Padding(
@@ -2623,8 +2664,7 @@ class _SessionScreenState extends State<SessionScreen>
             listenable: _favorites,
             builder: (context, _) {
               final favorite = _favorites.isFavorite(widget.host, session.id);
-              final gitAvailable =
-                  _gitHeaderLabel(session, _gitStatus) != null;
+              final gitAvailable = _gitHeaderLabel(session, _gitStatus) != null;
               final gitDirty = _gitStatus?.dirty ?? false;
               // Hide the 'Git details' menu item when it's already a visible
               // icon (dirty state). Keep it hidden entirely if there is no
@@ -2632,10 +2672,7 @@ class _SessionScreenState extends State<SessionScreen>
               final showGitInMenu = gitAvailable && !gitDirty;
               return PopupMenuButton<String>(
                 tooltip: 'Session actions',
-                icon: Icon(
-                  Icons.more_vert_rounded,
-                  color: colors.textPrimary,
-                ),
+                icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
                 onSelected: (value) {
                   switch (value) {
                     case 'search':
@@ -3065,11 +3102,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 0, 8, 6),
           child: Row(
             children: [
-              Icon(
-                Icons.dns_rounded,
-                size: 12,
-                color: colors.textTertiary,
-              ),
+              Icon(Icons.dns_rounded, size: 12, color: colors.textTertiary),
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
@@ -3084,9 +3117,9 @@ class _SessionAppBarSubtitle extends StatelessWidget {
               ),
               Text(
                 '  ·  ',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colors.textTertiary,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(color: colors.textTertiary),
               ),
               Flexible(
                 child: Text(
@@ -4000,10 +4033,7 @@ class _Composer extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            _ComposerAttachButton(
-              enabled: !sending,
-              onPressed: onPickImages,
-            ),
+            _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
             const SizedBox(width: 8),
             Expanded(
               child: Container(
@@ -4179,9 +4209,7 @@ class _SendButton extends StatelessWidget {
                     )
                   : Icon(
                       Icons.arrow_upward_rounded,
-                      color: canSend
-                          ? colors.accentOn
-                          : colors.textTertiary,
+                      color: canSend ? colors.accentOn : colors.textTertiary,
                     ),
             ),
           ),
@@ -4819,17 +4847,16 @@ class _MessageBubble extends StatelessWidget {
                           children: [
                             Text(
                               _formatMessageTime(message.createdAt),
-                              style: Theme.of(
-                                context,
-                              ).textTheme.labelSmall?.copyWith(
-                                color: isUser
-                                    ? textColor.withValues(alpha: 0.62)
-                                    : colors.textTertiary,
-                                fontSize: 10.5,
-                                fontFeatures: const [
-                                  FontFeature.tabularFigures(),
-                                ],
-                              ),
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(
+                                    color: isUser
+                                        ? textColor.withValues(alpha: 0.62)
+                                        : colors.textTertiary,
+                                    fontSize: 10.5,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
                             ),
                             if (canPin)
                               _MessagePinButton(
@@ -8141,4 +8168,3 @@ class _DaySeparator extends StatelessWidget {
     );
   }
 }
-
