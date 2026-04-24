@@ -2164,12 +2164,19 @@ class _SessionScreenState extends State<SessionScreen>
                           physics: const AlwaysScrollableScrollPhysics(),
                           itemCount: visibleTimelineEntries.length,
                           itemBuilder: (context, index) {
-                            final entry =
-                                visibleTimelineEntries[visibleTimelineEntries
-                                        .length -
-                                    index -
-                                    1];
-                            return KeyedSubtree(
+                            final chronoIndex =
+                                visibleTimelineEntries.length - index - 1;
+                            final entry = visibleTimelineEntries[chronoIndex];
+                            final prev = chronoIndex > 0
+                                ? visibleTimelineEntries[chronoIndex - 1]
+                                : null;
+                            final showDay = !searchActive &&
+                                (prev == null ||
+                                    !_sameCalendarDay(
+                                      prev.createdAt,
+                                      entry.createdAt,
+                                    ));
+                            final child = KeyedSubtree(
                               key: ValueKey(entry.keyId),
                               child: switch (entry.kind) {
                                 _TimelineEntryKind.message => _MessageBubble(
@@ -2203,6 +2210,16 @@ class _SessionScreenState extends State<SessionScreen>
                                     onOpenFile: _openWorkspaceFile,
                                   ),
                               },
+                            );
+                            if (!showDay) return child;
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                _DaySeparator(
+                                  label: _formatDaySeparator(entry.createdAt),
+                                ),
+                                child,
+                              ],
                             );
                           },
                         ),
@@ -4575,16 +4592,30 @@ class _MessageBubble extends StatelessWidget {
                         ),
                         linkColor: colors.accent,
                       ),
-                  if (canPin || (!isUser && hasText))
+                  if (canPin || (!isUser && hasText) || hasText)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Align(
                         alignment: Alignment.centerRight,
                         child: Wrap(
-                          spacing: 6,
+                          spacing: 8,
                           runSpacing: 4,
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
+                            Text(
+                              _formatMessageTime(message.createdAt),
+                              style: Theme.of(
+                                context,
+                              ).textTheme.labelSmall?.copyWith(
+                                color: isUser
+                                    ? textColor.withValues(alpha: 0.62)
+                                    : colors.textTertiary,
+                                fontSize: 10.5,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
                             if (canPin)
                               _MessagePinButton(
                                 pinned: pinned,
@@ -7774,4 +7805,92 @@ bool _sameTurnConfig(SessionTurnConfig left, SessionTurnConfig right) {
   return left.model == right.model &&
       left.reasoningEffort == right.reasoningEffort &&
       left.fastMode == right.fastMode;
+}
+
+bool _sameCalendarDay(DateTime a, DateTime b) {
+  return a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+String _formatMessageTime(DateTime value) {
+  final now = DateTime.now();
+  final time =
+      '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+  if (_sameCalendarDay(value, now)) {
+    return time;
+  }
+  final diffDays = now.difference(value).inDays;
+  if (diffDays < 7 && diffDays >= 0) {
+    return '${_weekdayShort(value.weekday)} · $time';
+  }
+  if (value.year == now.year) {
+    return '${_monthShort(value.month)} ${value.day} · $time';
+  }
+  return '${_monthShort(value.month)} ${value.day} ${value.year}';
+}
+
+String _formatDaySeparator(DateTime value) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final day = DateTime(value.year, value.month, value.day);
+  final diff = today.difference(day).inDays;
+  if (diff == 0) return 'Today';
+  if (diff == 1) return 'Yesterday';
+  if (value.year == now.year) {
+    return '${_weekdayShort(value.weekday)}, ${_monthShort(value.month)} ${value.day}';
+  }
+  return '${_monthShort(value.month)} ${value.day}, ${value.year}';
+}
+
+String _weekdayShort(int weekday) {
+  const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  return names[(weekday - 1).clamp(0, 6)];
+}
+
+String _monthShort(int month) {
+  const names = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return names[(month - 1).clamp(0, 11)];
+}
+
+class _DaySeparator extends StatelessWidget {
+  const _DaySeparator({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Expanded(child: Divider(color: colors.border, height: 1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: colors.textTertiary,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ),
+          Expanded(child: Divider(color: colors.border, height: 1)),
+        ],
+      ),
+    );
+  }
 }
