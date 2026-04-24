@@ -46,6 +46,7 @@ class SessionScreen extends StatefulWidget {
     required this.session,
     required this.api,
     this.onOpenSession,
+    this.onArchived,
     this.topPadding,
   });
 
@@ -53,6 +54,7 @@ class SessionScreen extends StatefulWidget {
   final SessionSummary session;
   final ApiClient api;
   final ValueChanged<SessionSummary>? onOpenSession;
+  final VoidCallback? onArchived;
   // Extra top padding for embedded desktop use (to avoid overlapping the
   // transparent macOS titlebar). When null, SafeArea handles insets.
   final double? topPadding;
@@ -1746,7 +1748,12 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted) {
         return;
       }
-      Navigator.of(context).pop();
+      final onArchived = widget.onArchived;
+      if (onArchived != null) {
+        onArchived();
+      } else {
+        Navigator.of(context).pop();
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -2016,6 +2023,7 @@ class _SessionScreenState extends State<SessionScreen>
           session: created,
           api: widget.api,
           onOpenSession: widget.onOpenSession,
+          onArchived: widget.onArchived,
           topPadding: widget.topPadding,
         ),
       ),

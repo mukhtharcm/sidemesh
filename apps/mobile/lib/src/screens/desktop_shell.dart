@@ -340,6 +340,15 @@ class _DesktopShellState extends State<DesktopShell> {
     });
   }
 
+  void _handleActiveSessionArchived(HostProfile host, SessionSummary session) {
+    _inspector.closeForOwner('${host.id}|${session.id}');
+    setState(() {
+      _active = null;
+      _activeHost = host;
+    });
+    _bumpRefresh();
+  }
+
   SessionSummary _sessionFromAction(PendingAction action) {
     return SessionSummary(
       id: action.sessionId,
@@ -614,6 +623,7 @@ class _DesktopShellState extends State<DesktopShell> {
                                 });
                               },
                               onOpenSession: _openSession,
+                              onArchived: _handleActiveSessionArchived,
                               onAddHost: () => _showHostEditor(),
                             ),
                           ),
@@ -1116,6 +1126,7 @@ class _DetailPane extends StatefulWidget {
     required this.api,
     required this.onClose,
     required this.onOpenSession,
+    required this.onArchived,
     required this.onAddHost,
   });
 
@@ -1126,6 +1137,7 @@ class _DetailPane extends StatefulWidget {
   final ApiClient api;
   final VoidCallback onClose;
   final void Function(HostProfile, SessionSummary) onOpenSession;
+  final void Function(HostProfile, SessionSummary) onArchived;
   final VoidCallback onAddHost;
 
   @override
@@ -1276,6 +1288,7 @@ class _DetailPaneState extends State<_DetailPane> {
               api: widget.api,
               onOpenSession: (session) =>
                   widget.onOpenSession(active.host, session),
+              onArchived: () => widget.onArchived(active.host, active.session),
               topPadding: widget.titlebarInset + 6,
             ),
           ),
