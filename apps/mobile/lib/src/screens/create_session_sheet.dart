@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../session_message_seed_store.dart';
 import '../session_policy_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -471,6 +472,19 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         sandboxMode: _sandbox.wire,
         webSearch: _webSearch ? 'live' : null,
         profile: _trimmedOrNull(_profileController.text),
+      );
+      final submittedAt = DateTime.now();
+      SessionMessageSeedStore.instance.put(
+        widget.host,
+        session.id,
+        SessionMessage(
+          id: 'local-create-${submittedAt.microsecondsSinceEpoch}',
+          role: 'user',
+          text: prompt,
+          attachments: const <SessionMessageAttachment>[],
+          createdAt: submittedAt,
+          seq: 0,
+        ),
       );
       if (!mounted) return;
       Navigator.of(context).pop(session);
