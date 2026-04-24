@@ -20,6 +20,7 @@ import 'file_viewer_screen.dart';
 import 'workspace_browser_dialog.dart';
 import '../session_favorites_store.dart';
 import '../session_overrides_store.dart';
+import '../session_pins_store.dart';
 import '../session_policy_store.dart';
 import '../session_read_store.dart';
 import '../session_turn_config_store.dart';
@@ -68,6 +69,7 @@ class _SessionScreenState extends State<SessionScreen>
   final _composerFocusNode = FocusNode(debugLabel: 'session_composer');
   final _scrollController = ScrollController();
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
+  final SessionPinsStore _pinsStore = SessionPinsStore.instance;
   final SessionPolicyStore _policyStore = SessionPolicyStore.instance;
   final SessionReadStore _readStore = SessionReadStore.instance;
   final SessionTurnConfigStore _turnConfigStore =
@@ -155,6 +157,8 @@ class _SessionScreenState extends State<SessionScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _favorites.ensureLoaded();
+    _pinsStore.ensureLoaded();
+    _pinsStore.addListener(_handlePinsChanged);
     _policyStore.ensureLoaded();
     _readStore.ensureLoaded();
     _composerController.addListener(_handleComposerChanged);
@@ -183,6 +187,7 @@ class _SessionScreenState extends State<SessionScreen>
     WidgetsBinding.instance.removeObserver(this);
     _reconnectTimer?.cancel();
     _composerController.removeListener(_handleComposerChanged);
+    _pinsStore.removeListener(_handlePinsChanged);
     _composerController.dispose();
     _composerFocusNode.dispose();
     _scrollController.removeListener(_onTranscriptScroll);
@@ -194,6 +199,11 @@ class _SessionScreenState extends State<SessionScreen>
     _thinkingNotifier.dispose();
     _showJumpToLatest.dispose();
     super.dispose();
+  }
+
+  void _handlePinsChanged() {
+    if (!mounted || _disposed) return;
+    setState(() {});
   }
 
   void _onTranscriptScroll() {
@@ -1479,6 +1489,53 @@ class _SessionScreenState extends State<SessionScreen>
     await _favorites.toggleFavorite(widget.host, widget.session.id);
   }
 
+  Future<void> _toggleMessagePin(SessionMessage message) async {
+    if (!message.hasVisibleContent) {
+      return;
+    }
+    final pinned = await _pinsStore.togglePin(
+      widget.host,
+      widget.session.id,
+      message,
+    );
+    if (!mounted) return;
+    HapticFeedback.selectionClick();
+    showAppSnackBar(
+      context,
+      pinned ? 'Pinned message' : 'Unpinned message',
+      duration: const Duration(seconds: 2),
+    );
+  }
+
+  Future<void> _unpinMessage(PinnedSessionMessage pin) async {
+    await _pinsStore.unpin(widget.host, widget.session.id, pin.messageId);
+    if (!mounted) return;
+    HapticFeedback.selectionClick();
+    showAppSnackBar(
+      context,
+      'Unpinned message',
+      duration: const Duration(seconds: 2),
+    );
+  }
+
+  Future<void> _showPinnedMessage(PinnedSessionMessage pin) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.colors.surface,
+      showDragHandle: true,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => _PinnedMessageSheet(
+        pin: pin,
+        onUnpin: () {
+          Navigator.of(sheetContext).pop();
+          unawaited(_unpinMessage(pin));
+        },
+        onOpenFile: _openWorkspaceFile,
+      ),
+    );
+  }
+
   Future<void> _respondAction(String decision) async {
     final action = _pendingAction;
     if (action == null) {
@@ -1899,6 +1956,7 @@ class _SessionScreenState extends State<SessionScreen>
     final session = _session ?? widget.session;
     final colors = context.colors;
     final timelineEntries = _buildTimelineEntries();
+    final pinnedMessages = _pinsStore.pinsFor(widget.host, session.id);
     final bodyContent = Column(
       children: [
         ListenableBuilder(
@@ -1952,6 +2010,15 @@ class _SessionScreenState extends State<SessionScreen>
               onRespond: _respondAction,
             ),
           ),
+        if (pinnedMessages.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: _PinnedMessagesStrip(
+              pins: pinnedMessages,
+              onOpen: _showPinnedMessage,
+              onUnpin: _unpinMessage,
+            ),
+          ),
         Expanded(
           child: (_loading && timelineEntries.isEmpty)
               ? const MeshLoader()
@@ -1982,6 +2049,13 @@ class _SessionScreenState extends State<SessionScreen>
                                   host: widget.host,
                                   api: widget.api,
                                   message: entry.message!,
+                                  pinned: _pinsStore.isPinned(
+                                    widget.host,
+                                    session.id,
+                                    entry.message!.id,
+                                  ),
+                                  onTogglePin: () =>
+                                      _toggleMessagePin(entry.message!),
                                   onOpenFile: _openWorkspaceFile,
                                 ),
                                 _TimelineEntryKind.activity => _ActivityCard(
@@ -2899,6 +2973,279 @@ String _gitDiffTitle(SessionGitDiff diff) {
     _ => 'Working diff',
   };
 }
+
+class _PinnedMessagesStrip extends StatelessWidget {
+  const _PinnedMessagesStrip({
+    required this.pins,
+    required this.onOpen,
+    required this.onUnpin,
+  });
+
+  final List<PinnedSessionMessage> pins;
+  final ValueChanged<PinnedSessionMessage> onOpen;
+  final ValueChanged<PinnedSessionMessage> onUnpin;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        color: colors.surfaceElevated,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: colors.warning.withValues(alpha: 0.38)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.push_pin_rounded, size: 16, color: colors.warning),
+              const SizedBox(width: 7),
+              Text(
+                'Pinned',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: colors.textPrimary,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 8),
+              MeshPill(
+                label: '${pins.length}',
+                tone: MeshPillTone.warning,
+                bold: true,
+              ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          SizedBox(
+            height: 88,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: pins.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              itemBuilder: (context, index) {
+                final pin = pins[index];
+                return _PinnedMessageTile(
+                  pin: pin,
+                  onOpen: () => onOpen(pin),
+                  onUnpin: () => onUnpin(pin),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PinnedMessageTile extends StatelessWidget {
+  const _PinnedMessageTile({
+    required this.pin,
+    required this.onOpen,
+    required this.onUnpin,
+  });
+
+  final PinnedSessionMessage pin;
+  final VoidCallback onOpen;
+  final VoidCallback onUnpin;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return SizedBox(
+      width: 260,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onOpen,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        pin.roleLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colors.warning,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: onUnpin,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 15,
+                          color: colors.textTertiary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  pin.preview,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PinnedMessageSheet extends StatelessWidget {
+  const _PinnedMessageSheet({
+    required this.pin,
+    required this.onUnpin,
+    this.onOpenFile,
+  });
+
+  final PinnedSessionMessage pin;
+  final VoidCallback onUnpin;
+  final void Function(String path)? onOpenFile;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final textStyle = Theme.of(
+      context,
+    ).textTheme.bodyMedium?.copyWith(color: colors.textPrimary, height: 1.45);
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.82,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 8, 18, 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.push_pin_rounded, size: 20, color: colors.warning),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Pinned ${pin.roleLabel.toLowerCase()} message',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: colors.textPrimary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (pin.hasText)
+                  _MessageCopyButton(
+                    text: pin.text,
+                    tone: colors.textSecondary,
+                    accent: colors.accent,
+                  ),
+                const SizedBox(width: 6),
+                TextButton.icon(
+                  onPressed: onUnpin,
+                  icon: const Icon(Icons.push_pin_outlined, size: 17),
+                  label: const Text('Unpin'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                MeshPill(
+                  label: pin.roleLabel,
+                  icon: pin.role == 'assistant'
+                      ? Icons.smart_toy_outlined
+                      : Icons.person_outline_rounded,
+                ),
+                MeshPill(
+                  label: 'Pinned ${_formatPinnedTimestamp(pin.pinnedAt)}',
+                  icon: Icons.schedule_rounded,
+                ),
+                if (pin.attachmentCount > 0)
+                  MeshPill(
+                    label:
+                        '${pin.attachmentCount} attachment${pin.attachmentCount == 1 ? '' : 's'}',
+                    icon: Icons.attachment_rounded,
+                  ),
+                if (pin.textTruncated)
+                  const MeshPill(
+                    label: 'Stored preview truncated',
+                    icon: Icons.content_cut_rounded,
+                    tone: MeshPillTone.warning,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Expanded(
+              child: MeshCard(
+                tone: MeshCardTone.muted,
+                padding: const EdgeInsets.all(14),
+                child: SingleChildScrollView(
+                  child: pin.hasText
+                      ? (pin.role == 'assistant'
+                            ? _MarkdownMessageBody(
+                                text: pin.text,
+                                textColor: colors.textPrimary,
+                                onOpenFile: onOpenFile,
+                              )
+                            : _LinkifiedSelectableText(
+                                text: pin.text,
+                                style: textStyle,
+                                linkColor: colors.accent,
+                              ))
+                      : Text(
+                          pin.preview,
+                          style: textStyle?.copyWith(
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _formatPinnedTimestamp(DateTime value) {
+  if (value.millisecondsSinceEpoch <= 0) return 'earlier';
+  final now = DateTime.now();
+  final sameDay =
+      value.year == now.year &&
+      value.month == now.month &&
+      value.day == now.day;
+  final time = '${_twoDigits(value.hour)}:${_twoDigits(value.minute)}';
+  if (sameDay) return 'today $time';
+  return '${value.month}/${value.day} $time';
+}
+
+String _twoDigits(int value) => value.toString().padLeft(2, '0');
 
 class _PendingActionCard extends StatelessWidget {
   const _PendingActionCard({required this.action, required this.onRespond});
@@ -3826,6 +4173,8 @@ class _MessageBubble extends StatelessWidget {
     required this.api,
     required this.message,
     this.live = false,
+    this.pinned = false,
+    this.onTogglePin,
     this.onOpenFile,
   });
 
@@ -3833,6 +4182,8 @@ class _MessageBubble extends StatelessWidget {
   final ApiClient api;
   final SessionMessage message;
   final bool live;
+  final bool pinned;
+  final VoidCallback? onTogglePin;
   final void Function(String path)? onOpenFile;
 
   @override
@@ -3841,6 +4192,7 @@ class _MessageBubble extends StatelessWidget {
     final isUser = message.role == 'user';
     final isAssistant = message.role == 'assistant';
     final hasText = message.text.trim().isNotEmpty;
+    final canPin = onTogglePin != null && message.hasVisibleContent;
 
     final bubbleColor = switch (message.role) {
       'user' => colors.userBubble,
@@ -3920,15 +4272,32 @@ class _MessageBubble extends StatelessWidget {
                         ),
                         linkColor: colors.accent,
                       ),
-                  if (!isUser && hasText)
+                  if (canPin || (!isUser && hasText))
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Align(
                         alignment: Alignment.centerRight,
-                        child: _MessageCopyButton(
-                          text: message.text,
-                          tone: colors.textSecondary,
-                          accent: colors.accent,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (canPin)
+                              _MessagePinButton(
+                                pinned: pinned,
+                                tone: isUser
+                                    ? textColor.withValues(alpha: 0.72)
+                                    : colors.textSecondary,
+                                accent: colors.warning,
+                                onTap: onTogglePin!,
+                              ),
+                            if (!isUser && hasText)
+                              _MessageCopyButton(
+                                text: message.text,
+                                tone: colors.textSecondary,
+                                accent: colors.accent,
+                              ),
+                          ],
                         ),
                       ),
                     ),
@@ -4320,6 +4689,51 @@ class _MessageCopyButtonState extends State<_MessageCopyButton> {
             const SizedBox(width: 4),
             Text(
               _copied ? 'Copied' : 'Copy',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MessagePinButton extends StatelessWidget {
+  const _MessagePinButton({
+    required this.pinned,
+    required this.tone,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final bool pinned;
+  final Color tone;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = pinned ? accent : tone;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+              size: 13,
+              color: color,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              pinned ? 'Pinned' : 'Pin',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: color,
                 fontWeight: FontWeight.w700,
