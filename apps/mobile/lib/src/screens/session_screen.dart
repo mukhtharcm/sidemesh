@@ -20,6 +20,7 @@ import 'file_viewer_screen.dart';
 import 'inspector/inspector_controller.dart';
 import 'inspector/inspector_file_browser.dart';
 import 'inspector/inspector_persistence.dart';
+import 'inspector/inspector_pinned.dart';
 import 'inspector/inspector_search.dart';
 import 'workspace_browser_dialog.dart';
 import '../session_favorites_store.dart';
@@ -264,6 +265,17 @@ class _SessionScreenState extends State<SessionScreen>
           ),
         );
         break;
+      case InspectorSurfaceKind.pinned:
+        controller.show(
+          buildInspectorPinnedSurface(
+            ownerKey: ownerKey,
+            pinsBuilder: _currentPins,
+            onOpen: _showPinnedMessage,
+            onUnpin: _unpinMessage,
+            refresh: _pinsStore,
+          ),
+        );
+        break;
       case InspectorSurfaceKind.debug:
       case InspectorSurfaceKind.gitDetails:
       case InspectorSurfaceKind.sessionDetails:
@@ -396,6 +408,62 @@ class _SessionScreenState extends State<SessionScreen>
     return cur != null &&
         cur.kind == InspectorSurfaceKind.search &&
         cur.ownerKey == _inspectorOwnerKey();
+  }
+
+  bool _isPinnedInspectorOpen(InspectorController? scope) {
+    if (scope == null) return false;
+    final cur = scope.current;
+    return cur != null &&
+        cur.kind == InspectorSurfaceKind.pinned &&
+        cur.ownerKey == _inspectorOwnerKey();
+  }
+
+  List<PinnedSessionMessage> _currentPins() {
+    return _pinsStore.pinsFor(widget.host, (_session ?? widget.session).id);
+  }
+
+  void _openPinnedPanel() {
+    final width = MediaQuery.of(context).size.width;
+    final scope = InspectorScope.maybeOf(context);
+    if (width >= 900 && scope != null) {
+      scope.toggle(
+        buildInspectorPinnedSurface(
+          ownerKey: _inspectorOwnerKey(),
+          pinsBuilder: _currentPins,
+          onOpen: _showPinnedMessage,
+          onUnpin: _unpinMessage,
+          refresh: _pinsStore,
+        ),
+      );
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final size = MediaQuery.of(sheetContext).size;
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+          ),
+          child: SizedBox(
+            height: size.height * 0.75,
+            child: _PinnedListSheet(
+              pinsBuilder: _currentPins,
+              refresh: _pinsStore,
+              onOpen: (pin) {
+                Navigator.of(sheetContext).maybePop();
+                _showPinnedMessage(pin);
+              },
+              onUnpin: _unpinMessage,
+              onClose: () => Navigator.of(sheetContext).maybePop(),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _toggleSearchPanel() {
@@ -2321,10 +2389,12 @@ class _SessionScreenState extends State<SessionScreen>
         if (pinnedMessages.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _PinnedMessagesStrip(
-              pins: pinnedMessages,
-              onOpen: _showPinnedMessage,
-              onUnpin: _unpinMessage,
+            child: _PinnedChip(
+              count: pinnedMessages.length,
+              active: _isPinnedInspectorOpen(
+                InspectorScope.maybeOf(context),
+              ),
+              onTap: _openPinnedPanel,
             ),
           ),
         Expanded(
@@ -3348,145 +3418,139 @@ String _gitDiffTitle(SessionGitDiff diff) {
   };
 }
 
-class _PinnedMessagesStrip extends StatelessWidget {
-  const _PinnedMessagesStrip({
-    required this.pins,
-    required this.onOpen,
-    required this.onUnpin,
+class _PinnedChip extends StatelessWidget {
+  const _PinnedChip({
+    required this.count,
+    required this.active,
+    required this.onTap,
   });
 
-  final List<PinnedSessionMessage> pins;
-  final ValueChanged<PinnedSessionMessage> onOpen;
-  final ValueChanged<PinnedSessionMessage> onUnpin;
+  final int count;
+  final bool active;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      decoration: BoxDecoration(
-        color: colors.surfaceElevated,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: colors.warning.withValues(alpha: 0.38)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    final bg = active
+        ? colors.accent.withValues(alpha: 0.14)
+        : colors.surfaceElevated;
+    final border = active ? colors.accent : colors.border;
+    final iconColor = active ? colors.accent : colors.textSecondary;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.push_pin_rounded, size: 16, color: colors.warning),
-              const SizedBox(width: 7),
+              Icon(Icons.push_pin_rounded, size: 14, color: iconColor),
+              const SizedBox(width: 6),
               Text(
-                'Pinned',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                '$count pinned',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: colors.textPrimary,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.2,
                 ),
               ),
-              const SizedBox(width: 8),
-              MeshPill(
-                label: '${pins.length}',
-                tone: MeshPillTone.warning,
-                bold: true,
+              const SizedBox(width: 6),
+              Icon(
+                active
+                    ? Icons.expand_less_rounded
+                    : Icons.chevron_right_rounded,
+                size: 16,
+                color: colors.textTertiary,
               ),
             ],
           ),
-          const SizedBox(height: 9),
-          SizedBox(
-            height: 88,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: pins.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 10),
-              itemBuilder: (context, index) {
-                final pin = pins[index];
-                return _PinnedMessageTile(
-                  pin: pin,
-                  onOpen: () => onOpen(pin),
-                  onUnpin: () => onUnpin(pin),
-                );
-              },
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _PinnedMessageTile extends StatelessWidget {
-  const _PinnedMessageTile({
-    required this.pin,
+class _PinnedListSheet extends StatelessWidget {
+  const _PinnedListSheet({
+    required this.pinsBuilder,
+    required this.refresh,
     required this.onOpen,
     required this.onUnpin,
+    required this.onClose,
   });
 
-  final PinnedSessionMessage pin;
-  final VoidCallback onOpen;
-  final VoidCallback onUnpin;
+  final List<PinnedSessionMessage> Function() pinsBuilder;
+  final Listenable refresh;
+  final ValueChanged<PinnedSessionMessage> onOpen;
+  final ValueChanged<PinnedSessionMessage> onUnpin;
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return SizedBox(
-      width: 260,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onOpen,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-            decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: colors.border),
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      child: Container(
+        color: colors.surfaceElevated,
+        child: Column(
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: colors.border,
+                borderRadius: BorderRadius.circular(999),
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        pin.roleLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: colors.warning,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.4,
-                        ),
-                      ),
-                    ),
-                    InkWell(
-                      onTap: onUnpin,
-                      borderRadius: BorderRadius.circular(8),
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: Icon(
-                          Icons.close_rounded,
-                          size: 15,
-                          color: colors.textTertiary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  pin.preview,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.push_pin_rounded,
+                    size: 16,
                     color: colors.textSecondary,
-                    height: 1.25,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Text(
+                    'Pinned messages',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: colors.textPrimary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: onClose,
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                  ),
+                ],
+              ),
             ),
-          ),
+            Divider(height: 1, color: colors.border),
+            Expanded(
+              child: ListenableBuilder(
+                listenable: refresh,
+                builder: (context, _) => PinnedListPanel(
+                  pins: pinsBuilder(),
+                  onOpen: onOpen,
+                  onUnpin: onUnpin,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

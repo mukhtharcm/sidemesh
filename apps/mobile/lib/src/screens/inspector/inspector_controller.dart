@@ -7,7 +7,14 @@ import 'package:flutter/widgets.dart';
 /// can be exercised before any real surface is migrated. Real kinds
 /// (search, fileBrowser, gitDetails, sessionDetails, ...) are added as
 /// surfaces land.
-enum InspectorSurfaceKind { debug, search, fileBrowser, gitDetails, sessionDetails }
+enum InspectorSurfaceKind {
+  debug,
+  search,
+  fileBrowser,
+  pinned,
+  gitDetails,
+  sessionDetails,
+}
 
 /// A single surface that the inspector pane can host.
 ///
