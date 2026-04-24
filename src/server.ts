@@ -16,6 +16,7 @@ import type {
   SkillCatalogEntry,
   SkillErrorInfo,
   SkillSummary,
+  ModelSummary,
   SessionMessageAttachment,
   SessionMessage,
   SessionRuntimeSummary,
@@ -69,9 +70,12 @@ interface SessionHistorySummary {
 type ApprovalPolicyValue = "untrusted" | "on-failure" | "on-request" | "never";
 type SandboxModeValue = "read-only" | "workspace-write" | "danger-full-access";
 type WebSearchModeValue = "disabled" | "cached" | "live";
+type ReasoningEffortValue = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 interface CreateSessionOverrides {
   model: string | null;
+  reasoningEffort: ReasoningEffortValue | null;
+  fastMode: boolean | null;
   approvalPolicy: ApprovalPolicyValue | null;
   sandboxMode: SandboxModeValue | null;
   webSearch: WebSearchModeValue | null;
@@ -587,6 +591,10 @@ export async function startServer(config: NodeConfig): Promise<void> {
     response.json(result);
   }));
 
+  app.get("/api/models", asyncRoute(async (_request, response) => {
+    response.json(await listModels(bridge));
+  }));
+
   app.post("/api/sessions/create", asyncRoute(async (request, response) => {
     const cwd = asString(request.body?.cwd);
     const prompt = asString(request.body?.prompt);
@@ -606,6 +614,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
     if (overrides.model) {
       startedParams.model = overrides.model;
     }
+    if (overrides.fastMode !== null) {
+      startedParams.serviceTier = overrides.fastMode ? "fast" : null;
+    }
     if (overrides.approvalPolicy) {
       startedParams.approvalPolicy = overrides.approvalPolicy;
     }
@@ -619,6 +630,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
     const started = (await bridge.request("thread/start", startedParams)) as any;
     const thread = started.thread as ThreadRecord;
+    const startedRuntime = buildRuntimeFromThreadStart(started);
 
     let turnId: string | null = null;
     const resolvedInput = input.length > 0 ? input : buildLegacyTextInput(prompt);
@@ -634,7 +646,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
 
     response.status(201).json({
-      session: mapSession(thread),
+      session: mapSession(thread, startedRuntime),
       activeTurnId: turnId,
     });
   }));
@@ -689,6 +701,15 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const turnOverrides = parseTurnOverrides(request.body);
     if (turnOverrides.approvalPolicy) {
       turnStartParams.approvalPolicy = turnOverrides.approvalPolicy;
+    }
+    if (turnOverrides.model) {
+      turnStartParams.model = turnOverrides.model;
+    }
+    if (turnOverrides.reasoningEffort) {
+      turnStartParams.effort = turnOverrides.reasoningEffort;
+    }
+    if (turnOverrides.fastMode !== null) {
+      turnStartParams.serviceTier = turnOverrides.fastMode ? "fast" : null;
     }
     // NOTE: turn/start expects a tagged `sandboxPolicy` object (v2 protocol),
     // NOT the simple kebab string that thread/start accepts as `sandbox`.
@@ -1550,6 +1571,87 @@ function normalizeSkillCatalogEntry(raw: unknown, cwd: string): SkillCatalogEntr
   };
 }
 
+async function listModels(bridge: CodexBridge): Promise<ModelSummary[]> {
+  const models: ModelSummary[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+
+  for (;;) {
+    const payload = (await bridge.request("model/list", {
+      includeHidden: false,
+      cursor: cursor ?? undefined,
+    })) as { data?: unknown[]; nextCursor?: unknown };
+    const rawEntries = Array.isArray(payload.data) ? payload.data : [];
+
+    for (const entry of rawEntries) {
+      const model = normalizeModelSummary(entry);
+      if (!model || seen.has(model.model)) {
+        continue;
+      }
+      seen.add(model.model);
+      models.push(model);
+    }
+
+    const nextCursor = asString(payload.nextCursor);
+    if (!nextCursor) {
+      break;
+    }
+    cursor = nextCursor;
+  }
+
+  return models;
+}
+
+function normalizeModelSummary(raw: unknown): ModelSummary | null {
+  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  if (!typed) {
+    return null;
+  }
+
+  const model = asString(typed.model);
+  const id = asString(typed.id);
+  const displayName = asString(typed.displayName) || model;
+  const description = asString(typed.description);
+  const defaultReasoningEffort =
+    asString(typed.defaultReasoningEffort) || asString(typed.default_reasoning_effort);
+  if (!id || !model || !displayName || !description || !defaultReasoningEffort) {
+    return null;
+  }
+
+  const supportedReasoningEfforts = Array.isArray(typed.supportedReasoningEfforts)
+    ? typed.supportedReasoningEfforts
+        .map((entry) => {
+          const item =
+            entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
+          const reasoningEffort =
+            asString(item?.reasoningEffort) || asString(item?.reasoning_effort);
+          const summaryDescription = asString(item?.description);
+          if (!reasoningEffort || !summaryDescription) {
+            return null;
+          }
+          return { reasoningEffort, description: summaryDescription };
+        })
+        .filter((entry): entry is ModelSummary["supportedReasoningEfforts"][number] => entry !== null)
+    : [];
+
+  return {
+    id,
+    model,
+    displayName,
+    description,
+    defaultReasoningEffort,
+    supportedReasoningEfforts,
+    supportsPersonality: typed.supportsPersonality === true,
+    additionalSpeedTiers: Array.isArray(typed.additionalSpeedTiers)
+      ? typed.additionalSpeedTiers.map((entry) => asString(entry)).filter((entry): entry is string => Boolean(entry))
+      : [],
+    inputModalities: Array.isArray(typed.inputModalities)
+      ? typed.inputModalities.map((entry) => asString(entry)).filter((entry): entry is string => Boolean(entry))
+      : [],
+    isDefault: typed.isDefault === true,
+  };
+}
+
 function normalizeSkillSummary(raw: unknown): SkillSummary | null {
   const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
   if (!typed) {
@@ -1606,10 +1708,63 @@ function normalizeSkillErrorInfo(raw: unknown): SkillErrorInfo | null {
   return { path, message };
 }
 
+function buildRuntimeFromThreadStart(raw: unknown): SessionRuntimeSummary | null {
+  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  if (!typed) {
+    return null;
+  }
+
+  const runtime = {
+    model: asString(typed.model) ?? undefined,
+    serviceTier:
+      asString(typed.serviceTier) ??
+      asString(typed.service_tier) ??
+      undefined,
+    reasoningEffort:
+      asString(typed.reasoningEffort) ??
+      asString(typed.reasoning_effort) ??
+      undefined,
+    approvalPolicy:
+      asString(typed.approvalPolicy) ??
+      asString(typed.approval_policy) ??
+      undefined,
+    sandboxMode:
+      asString((typed.sandbox as Record<string, unknown> | undefined)?.type) ??
+      asString(
+        (typed.permissionProfile as Record<string, unknown> | undefined)
+          ?.sandboxMode,
+      ) ??
+      undefined,
+    networkAccess:
+      parseOptionalBool(
+        (typed.sandbox as Record<string, unknown> | undefined)?.networkAccess,
+      ) ??
+      parseOptionalBool(
+        (typed.sandbox as Record<string, unknown> | undefined)?.network_access,
+      ) ??
+      undefined,
+  } satisfies SessionRuntimeSummary;
+
+  if (
+    !runtime.model &&
+    !runtime.serviceTier &&
+    !runtime.reasoningEffort &&
+    !runtime.approvalPolicy &&
+    !runtime.sandboxMode &&
+    runtime.networkAccess === undefined
+  ) {
+    return null;
+  }
+
+  return runtime;
+}
+
 function parseCreateSessionOverrides(value: unknown): CreateSessionOverrides {
   const typed = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return {
     model: asString(typed.model),
+    reasoningEffort: parseReasoningEffort(typed.reasoningEffort),
+    fastMode: parseOptionalBool(typed.fastMode),
     approvalPolicy: parseApprovalPolicy(typed.approvalPolicy),
     sandboxMode: parseSandboxMode(typed.sandboxMode),
     webSearch: parseWebSearchMode(typed.webSearch),
@@ -1618,6 +1773,9 @@ function parseCreateSessionOverrides(value: unknown): CreateSessionOverrides {
 }
 
 interface TurnOverrides {
+  model: string | null;
+  reasoningEffort: ReasoningEffortValue | null;
+  fastMode: boolean | null;
   approvalPolicy: ApprovalPolicyValue | null;
   sandboxMode: SandboxModeValue | null;
   networkAccess: boolean | null;
@@ -1626,6 +1784,9 @@ interface TurnOverrides {
 function parseTurnOverrides(value: unknown): TurnOverrides {
   const typed = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return {
+    model: asString(typed.model),
+    reasoningEffort: parseReasoningEffort(typed.reasoningEffort),
+    fastMode: parseOptionalBool(typed.fastMode),
     approvalPolicy: parseApprovalPolicy(typed.approvalPolicy),
     sandboxMode: parseSandboxMode(typed.sandbox ?? typed.sandboxMode),
     networkAccess: parseOptionalBool(typed.networkAccess),
@@ -1724,6 +1885,21 @@ function parseWebSearchMode(value: unknown): WebSearchModeValue | null {
   }
 }
 
+function parseReasoningEffort(value: unknown): ReasoningEffortValue | null {
+  const effort = asString(value);
+  switch (effort) {
+    case "none":
+    case "minimal":
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+      return effort;
+    default:
+      return null;
+  }
+}
+
 function buildThreadConfigOverrides(
   overrides: CreateSessionOverrides,
 ): Record<string, unknown> | null {
@@ -1733,6 +1909,9 @@ function buildThreadConfigOverrides(
   }
   if (overrides.webSearch) {
     config.web_search = overrides.webSearch;
+  }
+  if (overrides.reasoningEffort) {
+    config.model_reasoning_effort = overrides.reasoningEffort;
   }
   return Object.keys(config).length > 0 ? config : null;
 }
