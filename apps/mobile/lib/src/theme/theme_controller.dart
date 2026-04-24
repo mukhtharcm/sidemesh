@@ -1,15 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Owns the active [ThemeMode] and persists it across launches.
+import 'app_palettes.dart';
+
+/// Owns the active [ThemeMode] and [ThemeVariant] and persists them across
+/// launches.
 class ThemeController extends ChangeNotifier {
-  ThemeController._(this._mode);
+  ThemeController._(this._mode, this._variant);
 
   static const _prefsKey = 'sidemesh_theme_mode_v1';
+  static const _variantPrefsKey = 'sidemesh_theme_variant_v1';
 
   ThemeMode _mode;
+  ThemeVariant _variant;
 
   ThemeMode get mode => _mode;
+  ThemeVariant get variant => _variant;
 
   bool isDark(BuildContext context) {
     if (_mode == ThemeMode.system) {
@@ -27,7 +33,8 @@ class ThemeController extends ChangeNotifier {
       'system' => ThemeMode.system,
       _ => ThemeMode.system,
     };
-    return ThemeController._(mode);
+    final variant = ThemeVariant.fromId(prefs.getString(_variantPrefsKey));
+    return ThemeController._(mode, variant);
   }
 
   Future<void> setMode(ThemeMode mode) async {
@@ -42,6 +49,14 @@ class ThemeController extends ChangeNotifier {
       ThemeMode.dark => 'dark',
       ThemeMode.system => 'system',
     });
+  }
+
+  Future<void> setVariant(ThemeVariant variant) async {
+    if (variant == _variant) return;
+    _variant = variant;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_variantPrefsKey, variant.id);
   }
 
   Future<void> toggle(BuildContext context) async {

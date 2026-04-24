@@ -45,9 +45,13 @@ class SidemeshApp extends StatelessWidget {
         animation: themeController,
         builder: (context, _) {
           final mode = themeController.mode;
+          final variant = themeController.variant;
+          final darkPalette = variant.dark;
+          final lightPalette = variant.light;
           final isDark = mode == ThemeMode.dark ||
               (mode == ThemeMode.system &&
                   MediaQuery.platformBrightnessOf(context) == Brightness.dark);
+          final activePalette = isDark ? darkPalette : lightPalette;
           final home = _isMacOSDesktop
               ? const DesktopShell()
               : const SidemeshHomeScreen();
@@ -55,19 +59,19 @@ class SidemeshApp extends StatelessWidget {
             value: isDark
                 ? SystemUiOverlayStyle.light.copyWith(
                     statusBarColor: Colors.transparent,
-                    systemNavigationBarColor: const Color(0xFF0B0F14),
+                    systemNavigationBarColor: activePalette.canvas,
                     systemNavigationBarIconBrightness: Brightness.light,
                   )
                 : SystemUiOverlayStyle.dark.copyWith(
                     statusBarColor: Colors.transparent,
-                    systemNavigationBarColor: const Color(0xFFF6EFE2),
+                    systemNavigationBarColor: activePalette.canvas,
                     systemNavigationBarIconBrightness: Brightness.dark,
                   ),
             child: MaterialApp(
               title: 'Sidemesh',
               debugShowCheckedModeBanner: false,
-              theme: buildLightTheme(),
-              darkTheme: buildDarkTheme(),
+              theme: buildLightTheme(lightPalette),
+              darkTheme: buildDarkTheme(darkPalette),
               themeMode: mode,
               home: home,
             ),
