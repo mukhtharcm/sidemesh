@@ -149,6 +149,9 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
     }
   }
 
+  List<SessionResource> get _mediaResources =>
+      _resources.where((item) => item.isImage).toList(growable: false);
+
   Future<void> _openUrl(String raw) async {
     final uri = Uri.tryParse(raw);
     if (uri == null) {
@@ -164,6 +167,27 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
   void _openFile(String path) {
     widget.onClose?.call();
     widget.onOpenFile?.call(path);
+  }
+
+  void _openImageGallery(SessionResource resource) {
+    final media = _mediaResources;
+    if (media.isEmpty) {
+      return;
+    }
+    final initialIndex = media.indexWhere((item) => item.id == resource.id);
+    if (initialIndex < 0) {
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _FullscreenImageGallery(
+          host: widget.host,
+          api: widget.api,
+          resources: media,
+          initialIndex: initialIndex,
+        ),
+      ),
+    );
   }
 
   Widget _buildToolbar(BuildContext context) {
@@ -277,6 +301,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
             host: widget.host,
             api: widget.api,
             resource: resources[index],
+            onTap: () => _openImageGallery(resources[index]),
           ),
         ),
       );
@@ -298,6 +323,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
                   host: widget.host,
                   api: widget.api,
                   resource: resource,
+                  onTap: () => _openImageGallery(resource),
                 ),
               );
             }
@@ -503,6 +529,78 @@ class _ResourceMediaCard extends StatelessWidget {
     required this.host,
     required this.api,
     required this.resource,
+    this.onTap,
+  });
+
+  final HostProfile host;
+  final ApiClient api;
+  final SessionResource resource;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MeshCard(
+      tone: MeshCardTone.surface,
+      padding: EdgeInsets.zero,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _ResourceImagePreview(
+                  host: host,
+                  api: api,
+                  resource: resource,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                decoration: BoxDecoration(
+                  color: colors.surface,
+                  border: Border(top: BorderSide(color: colors.border)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      resource.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _sourceLabel(resource),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(
+                        color: colors.textTertiary,
+                        fontSize: 10.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ResourceImagePreview extends StatelessWidget {
+  const _ResourceImagePreview({
+    required this.host,
+    required this.api,
+    required this.resource,
   });
 
   final HostProfile host;
@@ -511,58 +609,10 @@ class _ResourceMediaCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      padding: EdgeInsets.zero,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: (resource.path ?? '').isNotEmpty
-                  ? _LocalResourceImage(
-                      host: host,
-                      api: api,
-                      path: resource.path!,
-                    )
-                  : _RemoteResourceImage(url: resource.url ?? ''),
-            ),
-            Container(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-              decoration: BoxDecoration(
-                color: colors.surface,
-                border: Border(top: BorderSide(color: colors.border)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    resource.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _sourceLabel(resource),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: monoStyle(
-                      color: colors.textTertiary,
-                      fontSize: 10.5,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    if ((resource.path ?? '').isNotEmpty) {
+      return _LocalResourceImage(host: host, api: api, path: resource.path!);
+    }
+    return _RemoteResourceImage(url: resource.url ?? '');
   }
 }
 
@@ -702,25 +752,260 @@ class _MediaPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => _FullscreenImageViewer(imageProvider: provider),
-            ),
-          );
-        },
-        child: Image(
-          image: provider,
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-          errorBuilder: (context, error, stackTrace) => _MediaFallback(
-            title: 'Image',
-            detail: fallbackLabel,
-            colors: context.colors,
+    return Image(
+      image: provider,
+      fit: BoxFit.cover,
+      gaplessPlayback: true,
+      errorBuilder: (context, error, stackTrace) => _MediaFallback(
+        title: 'Image',
+        detail: fallbackLabel,
+        colors: context.colors,
+      ),
+    );
+  }
+}
+
+class _FullscreenImageGallery extends StatefulWidget {
+  const _FullscreenImageGallery({
+    required this.host,
+    required this.api,
+    required this.resources,
+    required this.initialIndex,
+  });
+
+  final HostProfile host;
+  final ApiClient api;
+  final List<SessionResource> resources;
+  final int initialIndex;
+
+  @override
+  State<_FullscreenImageGallery> createState() =>
+      _FullscreenImageGalleryState();
+}
+
+class _FullscreenImageGalleryState extends State<_FullscreenImageGallery> {
+  late final PageController _pageController;
+  late int _index;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final resource = widget.resources[_index];
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text(
+          '${_index + 1} / ${widget.resources.length}',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
           ),
+        ),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: PageView.builder(
+                controller: _pageController,
+                itemCount: widget.resources.length,
+                onPageChanged: (value) => setState(() => _index = value),
+                itemBuilder: (context, index) => _GalleryImagePage(
+                  host: widget.host,
+                  api: widget.api,
+                  resource: widget.resources[index],
+                ),
+              ),
+            ),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+              decoration: const BoxDecoration(
+                color: Color.fromRGBO(0, 0, 0, 0.72),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    resource.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _gallerySubtitle(resource),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.white70,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GalleryImagePage extends StatelessWidget {
+  const _GalleryImagePage({
+    required this.host,
+    required this.api,
+    required this.resource,
+  });
+
+  final HostProfile host;
+  final ApiClient api;
+  final SessionResource resource;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: (resource.path ?? '').isNotEmpty
+            ? _LocalGalleryImage(host: host, api: api, path: resource.path!)
+            : _RemoteGalleryImage(url: resource.url ?? ''),
+      ),
+    );
+  }
+}
+
+class _RemoteGalleryImage extends StatelessWidget {
+  const _RemoteGalleryImage({required this.url});
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _decodeImageDataUrl(url);
+    final ImageProvider<Object>? provider = bytes != null
+        ? MemoryImage(bytes)
+        : (url.startsWith('http://') || url.startsWith('https://')
+              ? NetworkImage(url)
+              : null);
+    if (provider == null) {
+      return _GalleryFallback(detail: url);
+    }
+    return InteractiveViewer(
+      minScale: 0.8,
+      maxScale: 4,
+      child: Image(image: provider, fit: BoxFit.contain),
+    );
+  }
+}
+
+class _LocalGalleryImage extends StatefulWidget {
+  const _LocalGalleryImage({
+    required this.host,
+    required this.api,
+    required this.path,
+  });
+
+  final HostProfile host;
+  final ApiClient api;
+  final String path;
+
+  @override
+  State<_LocalGalleryImage> createState() => _LocalGalleryImageState();
+}
+
+class _LocalGalleryImageState extends State<_LocalGalleryImage> {
+  File? _file;
+  Object? _error;
+  int _loadGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(covariant _LocalGalleryImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.host.id != widget.host.id ||
+        oldWidget.host.baseUrl != widget.host.baseUrl ||
+        oldWidget.host.token != widget.host.token ||
+        oldWidget.path != widget.path) {
+      unawaited(_load());
+    }
+  }
+
+  Future<void> _load() async {
+    final gen = ++_loadGeneration;
+    setState(() {
+      _file = null;
+      _error = null;
+    });
+    try {
+      final file = await ImageBlobCacheStore.instance.load(
+        host: widget.host,
+        path: widget.path,
+        api: widget.api,
+      );
+      if (!mounted || gen != _loadGeneration) return;
+      setState(() => _file = file);
+    } catch (error) {
+      if (!mounted || gen != _loadGeneration) return;
+      setState(() => _error = error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final file = _file;
+    if (file == null) {
+      return _GalleryFallback(
+        detail: _error == null ? 'Loading image...' : widget.path,
+      );
+    }
+    return InteractiveViewer(
+      minScale: 0.8,
+      maxScale: 4,
+      child: Image(image: FileImage(file), fit: BoxFit.contain),
+    );
+  }
+}
+
+class _GalleryFallback extends StatelessWidget {
+  const _GalleryFallback({required this.detail});
+
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Text(
+          detail,
+          textAlign: TextAlign.center,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
         ),
       ),
     );
@@ -771,32 +1056,6 @@ class _MediaFallback extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _FullscreenImageViewer extends StatelessWidget {
-  const _FullscreenImageViewer({required this.imageProvider});
-
-  final ImageProvider<Object> imageProvider;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-      ),
-      body: SafeArea(
-        child: InteractiveViewer(
-          minScale: 0.8,
-          maxScale: 4,
-          child: Center(
-            child: Image(image: imageProvider, fit: BoxFit.contain),
-          ),
-        ),
       ),
     );
   }
@@ -890,6 +1149,22 @@ String _sourceLabel(SessionResource resource) {
     default:
       return resource.source.toUpperCase();
   }
+}
+
+String _gallerySubtitle(SessionResource resource) {
+  final parts = <String>[
+    _sourceLabel(resource),
+    _formatTimestamp(resource.createdAt),
+  ];
+  final subtitle = resource.subtitle?.trim() ?? '';
+  if (subtitle.isNotEmpty) {
+    parts.add(subtitle);
+  } else if ((resource.path ?? '').isNotEmpty) {
+    parts.add(_basename(resource.path!));
+  } else if ((resource.url ?? '').isNotEmpty) {
+    parts.add(resource.url!);
+  }
+  return parts.join('  •  ');
 }
 
 String _relativeSessionPath(String path, String cwd) {
