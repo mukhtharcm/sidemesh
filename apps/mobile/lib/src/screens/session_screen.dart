@@ -33,6 +33,7 @@ import '../session_overrides_store.dart';
 import '../session_pins_store.dart';
 import '../session_policy_store.dart';
 import '../session_read_store.dart';
+import '../session_send_outbox_store.dart';
 import '../session_turn_config_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
@@ -90,6 +91,7 @@ class _SessionScreenState extends State<SessionScreen>
   final SessionPinsStore _pinsStore = SessionPinsStore.instance;
   final SessionPolicyStore _policyStore = SessionPolicyStore.instance;
   final SessionReadStore _readStore = SessionReadStore.instance;
+  final SessionSendOutboxStore _sendOutbox = SessionSendOutboxStore.instance;
   final SessionTurnConfigStore _turnConfigStore =
       SessionTurnConfigStore.instance;
   final StringBuffer _assistantDeltaBuffer = StringBuffer();
@@ -110,6 +112,7 @@ class _SessionScreenState extends State<SessionScreen>
       const <_ComposerImageAttachment>[];
   List<_ComposerSkillMention> _draftSkillMentions =
       const <_ComposerSkillMention>[];
+  List<PendingSessionSend> _pendingSends = const <PendingSessionSend>[];
   List<SkillSummary> _skills = const <SkillSummary>[];
   _ActiveComposerSkillQuery? _activeSkillQuery;
   SessionLogHistorySummary? _history;
@@ -133,9 +136,12 @@ class _SessionScreenState extends State<SessionScreen>
   StreamSubscription? _subscription;
   Timer? _liveFlushTimer;
   Timer? _sessionCachePersistTimer;
+  Timer? _pendingSendRetryTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   bool _disposed = false;
+  bool _retryingPendingSend = false;
+  final Set<String> _completedPendingSendIds = <String>{};
   bool _restoreComposerFocusOnResume = false;
   int? _lastEventSeq;
   // Incremented whenever a fresh snapshot is requested so in-flight responses
@@ -210,6 +216,7 @@ class _SessionScreenState extends State<SessionScreen>
     );
     _scrollController.addListener(_onTranscriptScroll);
     _markCurrentSessionSeen();
+    unawaited(_loadPendingSends());
     unawaited(_loadCachedSnapshot());
     _loadSnapshot();
     _loadSkills(forceReload: true);
@@ -345,6 +352,7 @@ class _SessionScreenState extends State<SessionScreen>
     WidgetsBinding.instance.removeObserver(this);
     _reconnectTimer?.cancel();
     _sessionCachePersistTimer?.cancel();
+    _pendingSendRetryTimer?.cancel();
     _composerController.removeListener(_handleComposerChanged);
     _searchController.removeListener(_handleSearchChanged);
     _pinsStore.removeListener(_handlePinsChanged);
@@ -749,6 +757,7 @@ class _SessionScreenState extends State<SessionScreen>
         }
       }());
       _connectLive();
+      _schedulePendingSendRetry();
     }
   }
 
@@ -833,6 +842,7 @@ class _SessionScreenState extends State<SessionScreen>
         }
       });
       HostStatusStore.instance.markOnline(widget.host.id);
+      unawaited(_dropResolvedPendingSends(log.messages));
       _refreshThinkingState();
       _syncSessionLiveActivity();
       _markCurrentSessionSeen();
@@ -1686,6 +1696,289 @@ class _SessionScreenState extends State<SessionScreen>
     return next.trim();
   }
 
+  Future<void> _loadPendingSends() async {
+    final pending = await _sendOutbox.loadForSession(
+      widget.host,
+      widget.session.id,
+    );
+    if (!mounted || _disposed) {
+      return;
+    }
+    setState(() {
+      _pendingSends = pending;
+      for (final send in pending) {
+        _upsertOptimisticMessage(send.message);
+      }
+    });
+    _schedulePendingSendRetry();
+  }
+
+  Future<bool> _queuePendingSend({
+    required String clientMessageId,
+    required String text,
+    required List<SessionInputItem> inputItems,
+    required SessionMessage message,
+    required String? model,
+    required String? reasoningEffort,
+    required bool? fastMode,
+    required String? approvalPolicy,
+    required String? sandboxMode,
+    required bool? networkAccess,
+    required Object error,
+  }) async {
+    final now = DateTime.now();
+    final pending = PendingSessionSend(
+      hostId: widget.host.id,
+      hostFingerprint: SessionSendOutboxStore.hostFingerprint(widget.host),
+      sessionId: widget.session.id,
+      clientMessageId: clientMessageId,
+      text: text,
+      inputItems: inputItems,
+      message: message,
+      createdAt: now,
+      updatedAt: now,
+      nextAttemptAt: now.add(_pendingSendBackoff(0)),
+      retryCount: 0,
+      model: model,
+      reasoningEffort: reasoningEffort,
+      fastMode: fastMode,
+      approvalPolicy: approvalPolicy,
+      sandboxMode: sandboxMode,
+      networkAccess: networkAccess,
+      lastError: friendlyError(error),
+    );
+    final saved = await _sendOutbox.upsert(pending);
+    if (!saved) {
+      return false;
+    }
+    if (!mounted || _disposed) {
+      return true;
+    }
+    setState(() => _upsertPendingSend(pending));
+    _schedulePendingSendRetry();
+    return true;
+  }
+
+  void _upsertPendingSend(PendingSessionSend pending) {
+    final existingIndex = _pendingSends.indexWhere(
+      (item) => item.key == pending.key,
+    );
+    if (existingIndex == -1) {
+      _pendingSends = [..._pendingSends, pending];
+      return;
+    }
+    final updated = [..._pendingSends];
+    updated[existingIndex] = pending;
+    _pendingSends = updated;
+  }
+
+  void _removePendingSend(PendingSessionSend pending) {
+    _pendingSends = _pendingSends
+        .where((item) => item.key != pending.key)
+        .toList(growable: false);
+  }
+
+  Duration _pendingSendBackoff(int retryCount) {
+    const steps = <Duration>[
+      Duration(seconds: 5),
+      Duration(seconds: 15),
+      Duration(seconds: 45),
+      Duration(minutes: 2),
+      Duration(minutes: 5),
+    ];
+    return steps[math.min(retryCount, steps.length - 1)];
+  }
+
+  void _schedulePendingSendRetry() {
+    _pendingSendRetryTimer?.cancel();
+    _pendingSendRetryTimer = null;
+    if (_pendingSends.isEmpty || _disposed) {
+      return;
+    }
+    final now = DateTime.now();
+    final retryable = _pendingSends
+        .where((send) => !send.blocked)
+        .toList(growable: false);
+    if (retryable.isEmpty) {
+      return;
+    }
+    final nextAttempt = retryable
+        .map((send) => send.nextAttemptAt)
+        .reduce((left, right) => left.isBefore(right) ? left : right);
+    final delay = nextAttempt.isAfter(now)
+        ? nextAttempt.difference(now)
+        : Duration.zero;
+    _pendingSendRetryTimer = Timer(
+      delay,
+      () => unawaited(_retryPendingSends()),
+    );
+  }
+
+  PendingSessionSend? _nextPendingSendForRetry({required bool manual}) {
+    final now = DateTime.now();
+    final candidates = _pendingSends
+        .where((send) {
+          if (manual) {
+            return true;
+          }
+          return !send.blocked && !send.nextAttemptAt.isAfter(now);
+        })
+        .toList(growable: false);
+    if (candidates.isEmpty) {
+      return null;
+    }
+    candidates.sort((left, right) {
+      final nextAttemptCompare = left.nextAttemptAt.compareTo(
+        right.nextAttemptAt,
+      );
+      if (nextAttemptCompare != 0) {
+        return nextAttemptCompare;
+      }
+      return left.createdAt.compareTo(right.createdAt);
+    });
+    return candidates.first;
+  }
+
+  Future<void> _retryPendingSends({bool manual = false}) async {
+    _pendingSendRetryTimer?.cancel();
+    _pendingSendRetryTimer = null;
+    if (_retryingPendingSend ||
+        _pendingSends.isEmpty ||
+        !mounted ||
+        _disposed) {
+      return;
+    }
+    final pending = _nextPendingSendForRetry(manual: manual);
+    if (pending == null) {
+      _schedulePendingSendRetry();
+      return;
+    }
+
+    _retryingPendingSend = true;
+    setState(() {});
+    try {
+      await widget.api.sendInput(
+        widget.host,
+        sessionId: pending.sessionId,
+        text: pending.text,
+        input: pending.inputItems,
+        clientMessageId: pending.clientMessageId,
+        model: pending.model,
+        reasoningEffort: pending.reasoningEffort,
+        fastMode: pending.fastMode,
+        approvalPolicy: pending.approvalPolicy,
+        sandboxMode: pending.sandboxMode,
+        networkAccess: pending.networkAccess,
+      );
+      HostStatusStore.instance.markOnline(widget.host.id);
+      await _sendOutbox.remove(pending);
+      if (!mounted || _disposed) {
+        return;
+      }
+      setState(() {
+        _completedPendingSendIds.add(pending.clientMessageId);
+        _removePendingSend(pending);
+      });
+      unawaited(
+        _loadSnapshot(
+          messageLimit: _messageLimit,
+          activityLimit: _activityLimit,
+          scrollToBottom: false,
+        ),
+      );
+      showAppSnackBar(
+        context,
+        'Pending message sent.',
+        duration: const Duration(seconds: 2),
+      );
+    } catch (error) {
+      if (!mounted || _disposed) {
+        return;
+      }
+      final message = friendlyError(error);
+      if (isRetryableSendError(error)) {
+        HostStatusStore.instance.markOffline(widget.host.id, error: message);
+        final retryCount = pending.retryCount + 1;
+        final updated = pending.copyWith(
+          updatedAt: DateTime.now(),
+          nextAttemptAt: DateTime.now().add(_pendingSendBackoff(retryCount)),
+          retryCount: retryCount,
+          lastError: message,
+          blocked: false,
+        );
+        final saved = await _sendOutbox.upsert(updated);
+        if (!mounted || _disposed) {
+          return;
+        }
+        if (saved) {
+          setState(() => _upsertPendingSend(updated));
+        } else {
+          await _sendOutbox.remove(pending);
+          if (!mounted || _disposed) {
+            return;
+          }
+          setState(() => _removePendingSend(pending));
+          showAppSnackBar(
+            context,
+            'Pending message is too large to keep retrying.',
+          );
+        }
+      } else {
+        final updated = pending.copyWith(
+          updatedAt: DateTime.now(),
+          retryCount: pending.retryCount + 1,
+          lastError: message,
+          blocked: true,
+        );
+        await _sendOutbox.upsert(updated);
+        if (!mounted || _disposed) {
+          return;
+        }
+        setState(() => _upsertPendingSend(updated));
+        showAppSnackBar(context, 'Pending message needs attention: $message');
+      }
+    } finally {
+      if (mounted && !_disposed) {
+        setState(() => _retryingPendingSend = false);
+        _schedulePendingSendRetry();
+      } else {
+        _retryingPendingSend = false;
+      }
+    }
+  }
+
+  Future<void> _dropResolvedPendingSends(
+    List<SessionMessage> persistedMessages,
+  ) async {
+    if (_pendingSends.isEmpty || persistedMessages.isEmpty) {
+      return;
+    }
+    final resolved = _pendingSends
+        .where((pending) {
+          return persistedMessages.any(
+            (persisted) => _matchesPersistedPendingSend(persisted, pending),
+          );
+        })
+        .toList(growable: false);
+    if (resolved.isEmpty) {
+      return;
+    }
+    for (final pending in resolved) {
+      await _sendOutbox.remove(pending);
+    }
+    if (!mounted || _disposed) {
+      return;
+    }
+    setState(() {
+      for (final pending in resolved) {
+        _completedPendingSendIds.add(pending.clientMessageId);
+        _removePendingSend(pending);
+      }
+      _optimisticMessages = _reconcileOptimisticMessages(_messages);
+    });
+    _schedulePendingSendRetry();
+  }
+
   Future<void> _sendInput() async {
     final text = _composerController.text.trim();
     final draftAttachments = List<_ComposerImageAttachment>.from(
@@ -1758,10 +2051,58 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted) {
         return;
       }
+      await _sendOutbox.removeFor(
+        hostId: widget.host.id,
+        hostFingerprint: SessionSendOutboxStore.hostFingerprint(widget.host),
+        sessionId: widget.session.id,
+        clientMessageId: optimisticMessage.id,
+      );
+      if (!mounted) {
+        return;
+      }
       _clearFailedSendRetry();
     } catch (error) {
       if (!mounted) {
         return;
+      }
+      final retryable = isRetryableSendError(error);
+      if (retryable) {
+        final queued = await _queuePendingSend(
+          clientMessageId: optimisticMessage.id,
+          text: text,
+          inputItems: inputItems,
+          message: optimisticMessage,
+          model: turnConfig.model,
+          reasoningEffort: turnConfig.reasoningEffort,
+          fastMode: turnConfig.fastMode,
+          approvalPolicy: policy.approval?.wire,
+          sandboxMode: policy.sandbox?.wire,
+          networkAccess: policy.networkAccess,
+          error: error,
+        );
+        if (!mounted) {
+          return;
+        }
+        if (queued) {
+          HostStatusStore.instance.markOffline(
+            widget.host.id,
+            error: friendlyError(error),
+          );
+          showAppSnackBar(
+            context,
+            'Message queued. Sidemesh will retry when the host is reachable.',
+          );
+          setState(() {
+            _running = wasRunning;
+            _awaitingAssistantReply =
+                wasRunning &&
+                _liveAssistantText.isEmpty &&
+                _pendingAction == null;
+          });
+          _refreshThinkingState();
+          _syncSessionLiveActivity();
+          return;
+        }
       }
       _rememberFailedSendRetry(optimisticMessage.id, retrySignature);
       _composerController.text = text;
@@ -2573,15 +2914,46 @@ class _SessionScreenState extends State<SessionScreen>
     SessionMessage persisted,
     SessionMessage optimistic,
   ) {
-    return persisted.role == optimistic.role &&
+    final sameBody =
+        persisted.role == optimistic.role &&
         persisted.text.trim() == optimistic.text.trim() &&
-        _sameMessageAttachments(
+        _sameMessageAttachments(persisted.attachments, optimistic.attachments);
+    if (!sameBody) {
+      return false;
+    }
+    if (persisted.id == optimistic.id ||
+        _completedPendingSendIds.contains(optimistic.id)) {
+      return true;
+    }
+    return (persisted.createdAt.difference(optimistic.createdAt).inSeconds)
+            .abs() <=
+        90;
+  }
+
+  bool _matchesPersistedPendingSend(
+    SessionMessage persisted,
+    PendingSessionSend pending,
+  ) {
+    if (persisted.role != 'user' ||
+        persisted.text.trim() != pending.message.text.trim() ||
+        !_sameMessageAttachments(
           persisted.attachments,
-          optimistic.attachments,
-        ) &&
-        (persisted.createdAt.difference(optimistic.createdAt).inSeconds)
-                .abs() <=
-            90;
+          pending.message.attachments,
+        )) {
+      return false;
+    }
+    // Rollout history does not preserve clientMessageId, so use the pending
+    // send timestamps as a narrow window for stale outbox cleanup. This avoids
+    // treating an intentional same-text message much later as the pending send.
+    final lowerBound = pending.createdAt.subtract(const Duration(seconds: 90));
+    final latestKnownAttempt = [
+      pending.createdAt,
+      pending.updatedAt,
+      pending.nextAttemptAt,
+    ].reduce((left, right) => left.isAfter(right) ? left : right);
+    final upperBound = latestKnownAttempt.add(const Duration(minutes: 10));
+    return !persisted.createdAt.isBefore(lowerBound) &&
+        !persisted.createdAt.isAfter(upperBound);
   }
 
   bool _sameMessageAttachments(
@@ -2778,6 +3150,12 @@ class _SessionScreenState extends State<SessionScreen>
                   ],
                 ),
         ),
+        if (_pendingSends.isNotEmpty)
+          _PendingSendStrip(
+            pending: _pendingSends,
+            retrying: _retryingPendingSend,
+            onRetryNow: () => unawaited(_retryPendingSends(manual: true)),
+          ),
         _ComposerStatusStrip(thinking: _thinkingNotifier),
         _Composer(
           controller: _composerController,
@@ -5092,6 +5470,107 @@ class _ComposerStatusStrip extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+class _PendingSendStrip extends StatelessWidget {
+  const _PendingSendStrip({
+    required this.pending,
+    required this.retrying,
+    required this.onRetryNow,
+  });
+
+  final List<PendingSessionSend> pending;
+  final bool retrying;
+  final VoidCallback onRetryNow;
+
+  @override
+  Widget build(BuildContext context) {
+    if (pending.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final colors = context.colors;
+    final count = pending.length;
+    final blockedCount = pending.where((send) => send.blocked).length;
+    final retryable = pending
+        .where((send) => !send.blocked)
+        .toList(growable: false);
+    final nextAttempt = (retryable.isEmpty ? pending : retryable)
+        .map((send) => send.nextAttemptAt)
+        .reduce((left, right) => left.isBefore(right) ? left : right);
+    final lastError = pending
+        .firstWhere(
+          (send) => send.lastError != null,
+          orElse: () => pending.first,
+        )
+        .lastError;
+    final title = blockedCount > 0
+        ? (blockedCount == 1
+              ? '1 message needs attention'
+              : '$blockedCount messages need attention')
+        : (count == 1
+              ? '1 message waiting to retry'
+              : '$count messages waiting to retry');
+    final detail = retrying
+        ? 'Retrying now...'
+        : '${blockedCount > 0 && retryable.isEmpty ? 'Retry manually' : _formatRetryDelay(nextAttempt)}${lastError == null ? '' : ' - $lastError'}';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: colors.border),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: [
+              Icon(Icons.cloud_sync_rounded, color: colors.accent, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      detail,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: retrying ? null : onRetryNow,
+                child: const Text('Retry now'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatRetryDelay(DateTime nextAttempt) {
+    final remaining = nextAttempt.difference(DateTime.now());
+    if (remaining <= Duration.zero) {
+      return 'Retrying soon';
+    }
+    if (remaining.inMinutes >= 1) {
+      return 'Next retry in ${remaining.inMinutes}m';
+    }
+    return 'Next retry in ${remaining.inSeconds}s';
   }
 }
 
