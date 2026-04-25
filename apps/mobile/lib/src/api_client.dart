@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -9,15 +10,32 @@ import 'fs_models.dart';
 class ApiClient {
   ApiClient({http.Client? client}) : _client = client ?? http.Client();
 
+  static const Duration _quickReadTimeout = Duration(seconds: 6);
+  static const Duration _standardReadTimeout = Duration(seconds: 12);
+  static const Duration _transcriptReadTimeout = Duration(seconds: 25);
+  static const Duration _diffReadTimeout = Duration(seconds: 25);
+  static const Duration _turnWriteTimeout = Duration(seconds: 45);
+  static const Duration _webSocketConnectTimeout = Duration(seconds: 8);
+  static const Duration _webSocketPingInterval = Duration(seconds: 20);
+
   final http.Client _client;
 
   Future<NodeInfo> fetchNode(HostProfile host) async {
-    final response = await _get(host, '/api/node');
+    final response = await _get(
+      host,
+      '/api/node',
+      timeout: _quickReadTimeout,
+      operation: 'reach ${host.label}',
+    );
     return NodeInfo.fromJson(_decodeObject(response));
   }
 
   Future<List<WorkspaceSummary>> fetchWorkspaces(HostProfile host) async {
-    final response = await _get(host, '/api/workspaces');
+    final response = await _get(
+      host,
+      '/api/workspaces',
+      operation: 'load workspaces',
+    );
     return _decodeList(response).map(WorkspaceSummary.fromJson).toList();
   }
 
@@ -33,12 +51,14 @@ class ApiClient {
         'cwd': cwd,
         if (forceReload) 'forceReload': 'true',
       },
+      timeout: _standardReadTimeout,
+      operation: 'load skills',
     );
     return SkillCatalog.fromJson(_decodeObject(response));
   }
 
   Future<List<ModelCatalogEntry>> fetchModels(HostProfile host) async {
-    final response = await _get(host, '/api/models');
+    final response = await _get(host, '/api/models', operation: 'load models');
     return _decodeList(response).map(ModelCatalogEntry.fromJson).toList();
   }
 
@@ -50,12 +70,18 @@ class ApiClient {
       host,
       '/api/sessions',
       queryParameters: limit == null ? null : {'limit': '$limit'},
+      operation: 'load recent sessions',
     );
     return _decodeList(response).map(SessionSummary.fromJson).toList();
   }
 
   Future<List<PendingAction>> fetchPendingActions(HostProfile host) async {
-    final response = await _get(host, '/api/actions');
+    final response = await _get(
+      host,
+      '/api/actions',
+      timeout: _quickReadTimeout,
+      operation: 'load approvals',
+    );
     return _decodeList(response).map(PendingAction.fromJson).toList();
   }
 
@@ -76,6 +102,8 @@ class ApiClient {
       host,
       '/api/sessions/$sessionId/log',
       queryParameters: queryParameters.isEmpty ? null : queryParameters,
+      timeout: _transcriptReadTimeout,
+      operation: 'load session transcript',
     );
     return SessionLog.fromJson(_decodeObject(response));
   }
@@ -89,12 +117,18 @@ class ApiClient {
       host,
       '/api/sessions/$sessionId/events',
       queryParameters: {'since': '$since'},
+      operation: 'catch up session events',
     );
     return SessionEventsDelta.fromJson(_decodeObject(response));
   }
 
   Future<SessionStatus> fetchStatus(HostProfile host, String sessionId) async {
-    final response = await _get(host, '/api/sessions/$sessionId/status');
+    final response = await _get(
+      host,
+      '/api/sessions/$sessionId/status',
+      timeout: _quickReadTimeout,
+      operation: 'load session status',
+    );
     return SessionStatus.fromJson(_decodeObject(response));
   }
 
@@ -102,7 +136,11 @@ class ApiClient {
     HostProfile host,
     String sessionId,
   ) async {
-    final response = await _get(host, '/api/sessions/$sessionId/git');
+    final response = await _get(
+      host,
+      '/api/sessions/$sessionId/git',
+      operation: 'load git status',
+    );
     return SessionGitStatus.fromJson(_decodeObject(response));
   }
 
@@ -115,6 +153,8 @@ class ApiClient {
       host,
       '/api/sessions/$sessionId/git/diff',
       queryParameters: {'kind': kind},
+      timeout: _diffReadTimeout,
+      operation: 'load git diff',
     );
     return SessionGitDiff.fromJson(_decodeObject(response));
   }
@@ -157,7 +197,12 @@ class ApiClient {
     if ((profile ?? '').isNotEmpty) {
       body['profile'] = profile;
     }
-    final response = await _post(host, '/api/sessions/create', body: body);
+    final response = await _post(
+      host,
+      '/api/sessions/create',
+      body: body,
+      operation: 'start session',
+    );
     final payload = _decodeObject(response);
     return SessionSummary.fromJson(payload['session'] as Map<String, dynamic>);
   }
@@ -197,11 +242,22 @@ class ApiClient {
           ? null
           : <String, dynamic>{'networkAccess': networkAccess},
     };
-    await _post(host, '/api/sessions/$sessionId/input', body: body);
+    await _post(
+      host,
+      '/api/sessions/$sessionId/input',
+      body: body,
+      timeout: _turnWriteTimeout,
+      operation: 'send message',
+    );
   }
 
   Future<void> stopSession(HostProfile host, String sessionId) async {
-    await _post(host, '/api/sessions/$sessionId/stop', body: const {});
+    await _post(
+      host,
+      '/api/sessions/$sessionId/stop',
+      body: const {},
+      operation: 'stop session',
+    );
   }
 
   Future<SessionSummary> renameSession(
@@ -213,17 +269,28 @@ class ApiClient {
       host,
       '/api/sessions/$sessionId/name',
       body: {'name': name},
+      operation: 'rename session',
     );
     final payload = _decodeObject(response);
     return SessionSummary.fromJson(payload['session'] as Map<String, dynamic>);
   }
 
   Future<void> archiveSession(HostProfile host, String sessionId) async {
-    await _post(host, '/api/sessions/$sessionId/archive', body: const {});
+    await _post(
+      host,
+      '/api/sessions/$sessionId/archive',
+      body: const {},
+      operation: 'archive session',
+    );
   }
 
   Future<void> unarchiveSession(HostProfile host, String sessionId) async {
-    await _post(host, '/api/sessions/$sessionId/unarchive', body: const {});
+    await _post(
+      host,
+      '/api/sessions/$sessionId/unarchive',
+      body: const {},
+      operation: 'unarchive session',
+    );
   }
 
   Future<void> respondToAction(
@@ -235,6 +302,7 @@ class ApiClient {
       host,
       '/api/actions/$actionId/respond',
       body: {'decision': decision},
+      operation: 'resolve approval',
     );
   }
 
@@ -250,6 +318,8 @@ class ApiClient {
     return IOWebSocketChannel.connect(
       wsUri,
       headers: {'Authorization': 'Bearer ${host.token}'},
+      connectTimeout: _webSocketConnectTimeout,
+      pingInterval: _webSocketPingInterval,
     );
   }
 
@@ -264,6 +334,8 @@ class ApiClient {
     return IOWebSocketChannel.connect(
       wsUri,
       headers: {'Authorization': 'Bearer ${host.token}'},
+      connectTimeout: _webSocketConnectTimeout,
+      pingInterval: _webSocketPingInterval,
     );
   }
 
@@ -280,7 +352,7 @@ class ApiClient {
   // -------------------------- Workspace filesystem --------------------------
 
   Future<List<String>> fetchFsRoots(HostProfile host) async {
-    final response = await _get(host, '/api/fs/roots');
+    final response = await _get(host, '/api/fs/roots', operation: 'load roots');
     final decoded = _decodeObject(response);
     return ((decoded['roots'] as List?) ?? const [])
         .map((e) => e.toString())
@@ -292,6 +364,7 @@ class ApiClient {
       host,
       '/api/fs/list',
       queryParameters: {'path': path},
+      operation: 'list directory',
     );
     return FsListing.fromJson(_decodeObject(response));
   }
@@ -301,6 +374,7 @@ class ApiClient {
       host,
       '/api/fs/metadata',
       queryParameters: {'path': path},
+      operation: 'load file metadata',
     );
     return FsMetadata.fromJson(_decodeObject(response));
   }
@@ -310,6 +384,8 @@ class ApiClient {
       host,
       '/api/fs/read',
       queryParameters: {'path': path},
+      timeout: _transcriptReadTimeout,
+      operation: 'read file',
     );
     return FsFile.fromJson(_decodeObject(response));
   }
@@ -323,6 +399,7 @@ class ApiClient {
       host,
       '/api/fs/write',
       body: {'path': path, 'contents': contents},
+      operation: 'write file',
     );
   }
 
@@ -335,6 +412,7 @@ class ApiClient {
       host,
       '/api/fs/createDir',
       body: {'path': path, 'recursive': recursive},
+      operation: 'create directory',
     );
   }
 
@@ -348,6 +426,7 @@ class ApiClient {
       host,
       '/api/fs/remove',
       body: {'path': path, 'recursive': recursive, 'force': force},
+      operation: 'remove file',
     );
   }
 
@@ -365,6 +444,7 @@ class ApiClient {
         'destinationPath': destinationPath,
         'recursive': recursive,
       },
+      operation: 'copy file',
     );
   }
 
@@ -378,6 +458,8 @@ class ApiClient {
     return IOWebSocketChannel.connect(
       wsUri,
       headers: {'Authorization': 'Bearer ${host.token}'},
+      connectTimeout: _webSocketConnectTimeout,
+      pingInterval: _webSocketPingInterval,
     );
   }
 
@@ -385,11 +467,18 @@ class ApiClient {
     HostProfile host,
     String path, {
     Map<String, String>? queryParameters,
+    Duration? timeout,
+    String? operation,
   }) {
     _ensureHostEnabled(host);
-    return _client.get(
-      _uri(host, path, queryParameters: queryParameters),
-      headers: _headers(host),
+    final resolvedTimeout = timeout ?? _standardReadTimeout;
+    return _withTimeout(
+      _client.get(
+        _uri(host, path, queryParameters: queryParameters),
+        headers: _headers(host),
+      ),
+      timeout: resolvedTimeout,
+      operation: operation ?? 'load data',
     );
   }
 
@@ -397,12 +486,33 @@ class ApiClient {
     HostProfile host,
     String path, {
     required Map<String, dynamic> body,
+    Duration? timeout,
+    String? operation,
   }) {
     _ensureHostEnabled(host);
-    return _client.post(
+    final request = _client.post(
       _uri(host, path),
       headers: _headers(host),
       body: jsonEncode(body),
+    );
+    if (timeout == null) {
+      return request;
+    }
+    return _withTimeout(
+      request,
+      timeout: timeout,
+      operation: operation ?? 'send request',
+    );
+  }
+
+  Future<T> _withTimeout<T>(
+    Future<T> request, {
+    required Duration timeout,
+    required String operation,
+  }) {
+    return request.timeout(
+      timeout,
+      onTimeout: () => throw ApiTimeoutException(operation, timeout),
     );
   }
 
@@ -465,9 +575,24 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $body';
 }
 
+class ApiTimeoutException implements Exception {
+  const ApiTimeoutException(this.operation, this.timeout);
+
+  final String operation;
+  final Duration timeout;
+
+  int get seconds => timeout.inSeconds;
+
+  @override
+  String toString() => 'ApiTimeoutException($operation, ${seconds}s)';
+}
+
 /// Turns low-level errors (ApiException, SocketException, TimeoutException)
 /// into short human-readable strings suitable for snackbars.
 String friendlyError(Object error) {
+  if (error is ApiTimeoutException) {
+    return 'Timed out trying to ${error.operation} after ${error.seconds}s.';
+  }
   if (error is ApiException) {
     final parsed = _tryExtractMessage(error.body);
     if (parsed != null && parsed.isNotEmpty) {
