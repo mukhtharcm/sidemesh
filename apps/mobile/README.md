@@ -51,6 +51,14 @@ inherit those build settings for every Flutter flavor and simulator/device
 build. The extension target does not reliably inherit Flutter's
 `FLUTTER_BUILD_NAME` / `FLUTTER_BUILD_NUMBER` values.
 
+The extension target also needs the same `DEVELOPMENT_TEAM` as the Runner
+target in `ios/Runner.xcodeproj/project.pbxproj`. If Runner signs but the
+extension does not, release/device builds fail with:
+
+```text
+Signing for "SidemeshLiveActivityExtension" requires a development team.
+```
+
 If this regresses, simulator install can fail after a successful Xcode build
 with:
 
