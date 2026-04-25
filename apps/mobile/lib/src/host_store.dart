@@ -14,18 +14,19 @@ import 'models.dart';
 /// existing v1 blob.
 class HostStore {
   HostStore({FlutterSecureStorage? secure})
-      : _secure = secure ??
-            const FlutterSecureStorage(
-              aOptions: AndroidOptions(encryptedSharedPreferences: true),
-              iOptions: IOSOptions(
-                accessibility: KeychainAccessibility.first_unlock,
-              ),
-              // The macOS Data Protection Keychain needs a team-signed
-              // `com.apple.application-identifier` entitlement, which ad-hoc
-              // signed dev builds don't carry; using the legacy file-based
-              // keychain works without any signing setup.
-              mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-            );
+    : _secure =
+          secure ??
+          const FlutterSecureStorage(
+            aOptions: AndroidOptions(encryptedSharedPreferences: true),
+            iOptions: IOSOptions(
+              accessibility: KeychainAccessibility.first_unlock,
+            ),
+            // The macOS Data Protection Keychain needs a team-signed
+            // `com.apple.application-identifier` entitlement, which ad-hoc
+            // signed dev builds don't carry; using the legacy file-based
+            // keychain works without any signing setup.
+            mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+          );
 
   static const _legacyHostsKey = 'sidemesh_hosts_v1';
   static const _hostsMetaKey = 'sidemesh_hosts_v2';
@@ -96,29 +97,38 @@ class HostStore {
       final id = entry['id'] as String?;
       final label = entry['label'] as String?;
       final baseUrl = entry['baseUrl'] as String?;
+      final enabled = entry['enabled'] != false;
       if (id == null || label == null || baseUrl == null) {
         continue;
       }
-      hosts.add(HostProfile(
-        id: id,
-        label: label,
-        baseUrl: baseUrl,
-        token: tokens[id] ?? '',
-      ));
+      hosts.add(
+        HostProfile(
+          id: id,
+          label: label,
+          baseUrl: baseUrl,
+          token: tokens[id] ?? '',
+          enabled: enabled,
+        ),
+      );
     }
-    hosts.sort((left, right) =>
-        left.label.toLowerCase().compareTo(right.label.toLowerCase()));
+    hosts.sort(
+      (left, right) =>
+          left.label.toLowerCase().compareTo(right.label.toLowerCase()),
+    );
     return hosts;
   }
 
   Future<void> saveHosts(List<HostProfile> hosts) async {
     final prefs = await SharedPreferences.getInstance();
     final metadata = hosts
-        .map((host) => {
-              'id': host.id,
-              'label': host.label,
-              'baseUrl': host.baseUrl,
-            })
+        .map(
+          (host) => {
+            'id': host.id,
+            'label': host.label,
+            'baseUrl': host.baseUrl,
+            'enabled': host.enabled,
+          },
+        )
         .toList();
     await prefs.setString(_hostsMetaKey, jsonEncode(metadata));
 
