@@ -22,6 +22,7 @@ import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_pane.dart';
 import 'file_viewer_screen.dart';
+import 'image_viewer_screen.dart';
 import 'inspector/inspector_controller.dart';
 import 'inspector/inspector_file_browser.dart';
 import 'inspector/inspector_persistence.dart';
@@ -5853,46 +5854,22 @@ class _MessageImageAttachmentTileState
     final colors = context.colors;
     final imageProvider = _imageProvider();
     final heroTag = _messageImageHeroTag(widget.url);
-    final imageChild = imageProvider == null
-        ? _AttachmentLoadError(colors: colors)
-        : Hero(
-            tag: heroTag,
-            child: Image(
-              image: imageProvider,
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-              errorBuilder: (context, error, stackTrace) =>
-                  _AttachmentLoadError(colors: colors),
-            ),
-          );
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colors.border),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(15),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: imageProvider == null
-                ? null
-                : () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => _FullscreenImageViewer(
-                          imageProvider: imageProvider,
-                          heroTag: heroTag,
-                        ),
-                      ),
-                    );
-                  },
-            child: AspectRatio(aspectRatio: 1.35, child: imageChild),
-          ),
-        ),
-      ),
+    return _ImageAttachmentCard(
+      imageProvider: imageProvider,
+      heroTag: heroTag,
+      fallback: _AttachmentLoadError(colors: colors),
+      onOpen: imageProvider == null
+          ? null
+          : () {
+              showImageViewer(
+                context,
+                source: ImageViewerSource(
+                  imageProvider: imageProvider,
+                  heroTag: heroTag,
+                  title: 'Image attachment',
+                ),
+              );
+            },
     );
   }
 
@@ -5976,7 +5953,60 @@ class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
     final file = _file;
     final imageProvider = file == null ? null : FileImage(file);
     final hasFailed = _error != null;
-    return Container(
+    return _ImageAttachmentCard(
+      imageProvider: imageProvider,
+      heroTag: heroTag,
+      fallback: _LocalImageFallback(
+        path: widget.path,
+        colors: colors,
+        loading: !hasFailed && imageProvider == null,
+      ),
+      onOpen: imageProvider == null
+          ? null
+          : () {
+              showImageViewer(
+                context,
+                source: ImageViewerSource(
+                  imageProvider: imageProvider,
+                  heroTag: heroTag,
+                  title: baseName(widget.path),
+                  subtitle: widget.path,
+                ),
+              );
+            },
+    );
+  }
+}
+
+class _ImageAttachmentCard extends StatelessWidget {
+  const _ImageAttachmentCard({
+    required this.imageProvider,
+    required this.heroTag,
+    required this.fallback,
+    required this.onOpen,
+  });
+
+  final ImageProvider<Object>? imageProvider;
+  final String heroTag;
+  final Widget fallback;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final imageChild = imageProvider == null
+        ? fallback
+        : Hero(
+            tag: heroTag,
+            child: Image(
+              image: imageProvider!,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              errorBuilder: (context, error, stackTrace) => fallback,
+            ),
+          );
+
+    return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
         borderRadius: BorderRadius.circular(16),
@@ -5987,40 +6017,8 @@ class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: imageProvider == null
-                ? null
-                : () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => _FullscreenImageViewer(
-                          imageProvider: imageProvider,
-                          heroTag: heroTag,
-                        ),
-                      ),
-                    );
-                  },
-            child: AspectRatio(
-              aspectRatio: 1.35,
-              child: imageProvider == null
-                  ? _LocalImageFallback(
-                      path: widget.path,
-                      colors: colors,
-                      loading: !hasFailed,
-                    )
-                  : Hero(
-                      tag: heroTag,
-                      child: Image(
-                        image: imageProvider,
-                        fit: BoxFit.cover,
-                        gaplessPlayback: true,
-                        errorBuilder: (context, error, stackTrace) =>
-                            _LocalImageFallback(
-                              path: widget.path,
-                              colors: colors,
-                            ),
-                      ),
-                    ),
-            ),
+            onTap: onOpen,
+            child: AspectRatio(aspectRatio: 1.35, child: imageChild),
           ),
         ),
       ),
@@ -6095,48 +6093,6 @@ class _AttachmentLoadError extends StatelessWidget {
         Icons.broken_image_outlined,
         color: colors.textTertiary,
         size: 28,
-      ),
-    );
-  }
-}
-
-class _FullscreenImageViewer extends StatelessWidget {
-  const _FullscreenImageViewer({
-    required this.imageProvider,
-    required this.heroTag,
-  });
-
-  final ImageProvider<Object> imageProvider;
-  final String heroTag;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        elevation: 0,
-      ),
-      body: SafeArea(
-        child: Center(
-          child: InteractiveViewer(
-            minScale: 1,
-            maxScale: 5,
-            child: Hero(
-              tag: heroTag,
-              child: Image(
-                image: imageProvider,
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) => const Icon(
-                  Icons.broken_image_outlined,
-                  color: Colors.white54,
-                  size: 36,
-                ),
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }
