@@ -4,6 +4,7 @@ export interface NodeConfig {
   token: string;
   tokenSource: "env" | "generated";
   codexBin: string;
+  stateDir: string;
 }
 
 export interface SessionSummary {
