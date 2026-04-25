@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:macos_window_utils/macos_window_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api_client.dart';
@@ -351,6 +352,7 @@ class _DesktopShellState extends State<DesktopShell> {
     _handlingNotificationIntent = true;
     try {
       if (!mounted) return;
+      unawaited(WindowManipulator.orderFrontRegardless());
       if (_section != _SidebarSection.inbox) {
         setState(() => _section = _SidebarSection.inbox);
       }
