@@ -15,9 +15,12 @@ class LocalNotificationService with WidgetsBindingObserver {
   static const _approvalChannelName = 'Approvals';
   static const _approvalChannelDescription =
       'Codex approval requests from Sidemesh hosts';
+  static const _approvalAccent = Color(0xFFD69E2E);
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
+  final ValueNotifier<NotificationRouteIntent?> routeIntent =
+      ValueNotifier<NotificationRouteIntent?>(null);
 
   bool _initialized = false;
   bool _observingLifecycle = false;
@@ -55,6 +58,12 @@ class LocalNotificationService with WidgetsBindingObserver {
         onDidReceiveNotificationResponse: _handleNotificationResponse,
       );
       _initialized = true;
+      final launchDetails = await _plugin.getNotificationAppLaunchDetails();
+      final launchResponse = launchDetails?.notificationResponse;
+      if (launchDetails?.didNotificationLaunchApp == true &&
+          launchResponse != null) {
+        _handleNotificationResponse(launchResponse);
+      }
     } catch (error) {
       debugPrint('Failed to initialize local notifications: $error');
     }
@@ -74,20 +83,14 @@ class LocalNotificationService with WidgetsBindingObserver {
         : await _checkPermissions();
     if (!hasPermission) return;
 
-    final sessionTitle = action.sessionTitle?.trim();
-    final approvalTitle = action.title.trim();
-    final bodyParts = [
-      host.label,
-      if (sessionTitle != null && sessionTitle.isNotEmpty) sessionTitle,
-      if (approvalTitle.isNotEmpty) approvalTitle,
-    ];
+    final copy = _approvalCopy(host: host, action: action);
 
     try {
       await _plugin.show(
         id: _notificationId(host.id, action.id),
-        title: 'Codex approval needed',
-        body: bodyParts.join(' · '),
-        notificationDetails: const NotificationDetails(
+        title: copy.title,
+        body: copy.body,
+        notificationDetails: NotificationDetails(
           android: AndroidNotificationDetails(
             _approvalChannelId,
             _approvalChannelName,
@@ -96,6 +99,17 @@ class LocalNotificationService with WidgetsBindingObserver {
             importance: Importance.high,
             priority: Priority.high,
             category: AndroidNotificationCategory.reminder,
+            color: _approvalAccent,
+            subText: copy.subtitle,
+            ticker: copy.title,
+            groupKey: _approvalChannelId,
+            visibility: NotificationVisibility.private,
+            when: action.requestedAt.millisecondsSinceEpoch,
+            styleInformation: BigTextStyleInformation(
+              copy.expandedBody,
+              contentTitle: copy.title,
+              summaryText: copy.subtitle,
+            ),
           ),
           iOS: DarwinNotificationDetails(
             presentAlert: true,
@@ -103,7 +117,9 @@ class LocalNotificationService with WidgetsBindingObserver {
             presentList: true,
             presentSound: true,
             presentBadge: true,
+            subtitle: copy.subtitle,
             threadIdentifier: _approvalChannelId,
+            interruptionLevel: InterruptionLevel.timeSensitive,
           ),
           macOS: DarwinNotificationDetails(
             presentAlert: true,
@@ -111,7 +127,9 @@ class LocalNotificationService with WidgetsBindingObserver {
             presentList: true,
             presentSound: true,
             presentBadge: true,
+            subtitle: copy.subtitle,
             threadIdentifier: _approvalChannelId,
+            interruptionLevel: InterruptionLevel.timeSensitive,
           ),
         ),
         payload: jsonEncode({
@@ -256,7 +274,18 @@ class LocalNotificationService with WidgetsBindingObserver {
   }
 
   void _handleNotificationResponse(NotificationResponse response) {
-    debugPrint('Sidemesh notification tapped: ${response.payload}');
+    final intent = NotificationRouteIntent.fromPayload(response.payload);
+    if (intent == null) {
+      debugPrint('Sidemesh notification tapped: ${response.payload}');
+      return;
+    }
+    routeIntent.value = intent;
+  }
+
+  void markRouteIntentHandled(NotificationRouteIntent intent) {
+    if (routeIntent.value == intent) {
+      routeIntent.value = null;
+    }
   }
 
   int _notificationId(String hostId, String actionId) {
@@ -266,4 +295,123 @@ class LocalNotificationService with WidgetsBindingObserver {
     }
     return hash;
   }
+
+  _ApprovalNotificationCopy _approvalCopy({
+    required HostProfile host,
+    required PendingAction action,
+  }) {
+    final hostLabel = _cleanLine(host.label);
+    final sessionTitle = _cleanLine(action.sessionTitle ?? '');
+    final kindLabel = _actionKindLabel(action.kind);
+    final title = 'Approval waiting on $hostLabel';
+    final subtitle = sessionTitle.isNotEmpty ? sessionTitle : kindLabel;
+    final actionTitle = _cleanLine(action.title);
+    final detail = _cleanText(action.detail);
+    final body = detail.isNotEmpty
+        ? _compact(detail, 180)
+        : actionTitle.isNotEmpty
+        ? actionTitle
+        : kindLabel;
+    final expandedLines = <String>[
+      if (actionTitle.isNotEmpty) actionTitle,
+      if (detail.isNotEmpty && detail != actionTitle) detail,
+      if ((action.cwd ?? '').trim().isNotEmpty) 'cwd: ${action.cwd!.trim()}',
+    ];
+    return _ApprovalNotificationCopy(
+      title: title,
+      subtitle: subtitle,
+      body: body,
+      expandedBody: expandedLines.isEmpty ? body : expandedLines.join('\n\n'),
+    );
+  }
+
+  String _actionKindLabel(String kind) {
+    return switch (kind) {
+      'command' => 'Command approval',
+      'file_change' => 'File change approval',
+      'permissions' => 'Permission request',
+      '' => 'Approval request',
+      _ => '${kind.replaceAll('_', ' ')} approval',
+    };
+  }
+
+  String _cleanLine(String value) {
+    return _compact(_cleanText(value).replaceAll('\n', ' '), 72);
+  }
+
+  String _cleanText(String value) {
+    return value.trim().replaceAll(RegExp(r'\n{3,}'), '\n\n');
+  }
+
+  String _compact(String value, int maxLength) {
+    final trimmed = value.trim();
+    if (trimmed.length <= maxLength) return trimmed;
+    return '${trimmed.substring(0, maxLength - 1).trimRight()}…';
+  }
+}
+
+class NotificationRouteIntent {
+  const NotificationRouteIntent.approval({
+    required this.hostId,
+    required this.sessionId,
+    required this.actionId,
+  }) : type = 'approval';
+
+  final String type;
+  final String hostId;
+  final String sessionId;
+  final String actionId;
+
+  static NotificationRouteIntent? fromPayload(String? payload) {
+    if (payload == null || payload.isEmpty) return null;
+    try {
+      final json = jsonDecode(payload);
+      if (json is! Map<String, dynamic>) return null;
+      if (json['type'] != 'approval') return null;
+      final hostId = json['hostId'] as String?;
+      final sessionId = json['sessionId'] as String?;
+      final actionId = json['actionId'] as String?;
+      if (hostId == null ||
+          hostId.isEmpty ||
+          sessionId == null ||
+          sessionId.isEmpty ||
+          actionId == null ||
+          actionId.isEmpty) {
+        return null;
+      }
+      return NotificationRouteIntent.approval(
+        hostId: hostId,
+        sessionId: sessionId,
+        actionId: actionId,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is NotificationRouteIntent &&
+        other.type == type &&
+        other.hostId == hostId &&
+        other.sessionId == sessionId &&
+        other.actionId == actionId;
+  }
+
+  @override
+  int get hashCode => Object.hash(type, hostId, sessionId, actionId);
+}
+
+class _ApprovalNotificationCopy {
+  const _ApprovalNotificationCopy({
+    required this.title,
+    required this.subtitle,
+    required this.body,
+    required this.expandedBody,
+  });
+
+  final String title;
+  final String subtitle;
+  final String body;
+  final String expandedBody;
 }

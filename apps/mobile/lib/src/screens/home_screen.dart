@@ -7,6 +7,7 @@ import '../api_client.dart';
 import '../approval_inbox_store.dart';
 import '../host_status_store.dart';
 import '../host_store.dart';
+import '../local_notification_service.dart';
 import '../models.dart';
 import '../session_favorites_store.dart';
 import '../session_overrides_store.dart';
@@ -65,11 +66,15 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   int _tabIndex = 0;
   int _activeCount = 0;
   String _query = '';
+  bool _handlingNotificationIntent = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    LocalNotificationService.instance.routeIntent.addListener(
+      _onNotificationRouteIntent,
+    );
     _refreshHosts();
     _searchController.addListener(() {
       final next = _searchController.text;
@@ -90,6 +95,9 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    LocalNotificationService.instance.routeIntent.removeListener(
+      _onNotificationRouteIntent,
+    );
     _searchDebounce?.cancel();
     _heartbeatTimer?.cancel();
     _searchController.dispose();
@@ -149,6 +157,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       _loading = false;
     });
     ApprovalInboxStore.instance.configure(hosts: hosts, api: _api);
+    unawaited(_handleNotificationRouteIntent());
   }
 
   Future<void> _showHostEditor({HostProfile? initialHost}) async {
@@ -222,6 +231,76 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       return;
     }
     await _openSession(result.host, result.session);
+  }
+
+  void _onNotificationRouteIntent() {
+    unawaited(_handleNotificationRouteIntent());
+  }
+
+  Future<void> _handleNotificationRouteIntent() async {
+    if (_handlingNotificationIntent || _loading) return;
+    final service = LocalNotificationService.instance;
+    final intent = service.routeIntent.value;
+    if (intent == null || intent.type != 'approval') return;
+    _handlingNotificationIntent = true;
+    try {
+      if (!mounted) return;
+      if (_tabIndex != 1) {
+        setState(() => _tabIndex = 1);
+      }
+      final host = _hostForIntent(intent);
+      if (host == null) {
+        service.markRouteIntentHandled(intent);
+        return;
+      }
+      await ApprovalInboxStore.instance.refresh();
+      if (!mounted) return;
+      final entry = _entryForIntent(intent);
+      service.markRouteIntentHandled(intent);
+      await _openSession(
+        host,
+        entry == null
+            ? _sessionFromNotificationIntent(intent)
+            : _sessionFromAction(entry.action),
+      );
+    } finally {
+      _handlingNotificationIntent = false;
+    }
+  }
+
+  HostProfile? _hostForIntent(NotificationRouteIntent intent) {
+    for (final host in _hosts) {
+      if (host.id == intent.hostId) return host;
+    }
+    return null;
+  }
+
+  PendingActionEntry? _entryForIntent(NotificationRouteIntent intent) {
+    for (final entry in ApprovalInboxStore.instance.entries) {
+      if (entry.host.id == intent.hostId &&
+          entry.action.id == intent.actionId) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  SessionSummary _sessionFromNotificationIntent(
+    NotificationRouteIntent intent,
+  ) {
+    final now = DateTime.now();
+    return SessionSummary(
+      id: intent.sessionId,
+      title: 'Session',
+      preview: 'Opened from approval notification',
+      cwd: '',
+      createdAt: now,
+      updatedAt: now,
+      source: 'appServer',
+      status: 'pendingApproval',
+      runtime: null,
+      gitInfo: null,
+    );
   }
 
   SessionSummary _sessionFromAction(PendingAction action) {
