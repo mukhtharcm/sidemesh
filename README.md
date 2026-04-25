@@ -82,6 +82,7 @@ flutter install --debug -d <device-id>
 - `GET /api/sessions`
 - `GET /api/actions`
 - `GET /api/sessions/:sessionId/log`
+- `GET /api/sessions/:sessionId/resources`
 - `GET /api/sessions/:sessionId/events?since=<seq>`
 - `GET /api/sessions/:sessionId/status`
 - `POST /api/sessions/create`
@@ -124,6 +125,7 @@ The app currently supports:
 - host detail and workspace summaries
 - pending approval inbox
 - live chat with reconnect/delta replay
+- per-session resources view for links, images, and local artifacts
 - per-session approval, sandbox, model, and network controls
 - command, file-change, terminal-input, and turn-diff activity cards
 - session rename, archive, unarchive, favorite, and unread state

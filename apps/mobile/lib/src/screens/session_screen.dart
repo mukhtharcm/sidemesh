@@ -27,6 +27,7 @@ import 'inspector/inspector_controller.dart';
 import 'inspector/inspector_file_browser.dart';
 import 'inspector/inspector_persistence.dart';
 import 'inspector/inspector_pinned.dart';
+import 'inspector/inspector_resources.dart';
 import 'inspector/inspector_search.dart';
 import 'workspace_browser_dialog.dart';
 import '../session_favorites_store.dart';
@@ -290,6 +291,17 @@ class _SessionScreenState extends State<SessionScreen>
           ),
         );
         break;
+      case InspectorSurfaceKind.resources:
+        controller.show(
+          buildInspectorResourcesSurface(
+            ownerKey: ownerKey,
+            host: widget.host,
+            session: _session ?? widget.session,
+            api: widget.api,
+            onOpenFile: _openWorkspaceFile,
+          ),
+        );
+        break;
       case InspectorSurfaceKind.fileBrowser:
         final session = _session ?? widget.session;
         controller.show(
@@ -463,6 +475,14 @@ class _SessionScreenState extends State<SessionScreen>
         cur.ownerKey == _inspectorOwnerKey();
   }
 
+  bool _isResourcesInspectorOpen(InspectorController? scope) {
+    if (scope == null) return false;
+    final cur = scope.current;
+    return cur != null &&
+        cur.kind == InspectorSurfaceKind.resources &&
+        cur.ownerKey == _inspectorOwnerKey();
+  }
+
   List<PinnedSessionMessage> _currentPins() {
     return _pinsStore.pinsFor(widget.host, (_session ?? widget.session).id);
   }
@@ -505,6 +525,50 @@ class _SessionScreenState extends State<SessionScreen>
               onUnpin: _unpinMessage,
               onClose: () => Navigator.of(sheetContext).maybePop(),
             ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _openResourcesPanel() {
+    final width = MediaQuery.of(context).size.width;
+    final scope = InspectorScope.maybeOf(context);
+    final session = _session ?? widget.session;
+    if (width >= 900 && scope != null) {
+      scope.toggle(
+        buildInspectorResourcesSurface(
+          ownerKey: _inspectorOwnerKey(),
+          host: widget.host,
+          session: session,
+          api: widget.api,
+          onOpenFile: _openWorkspaceFile,
+        ),
+      );
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final size = MediaQuery.of(sheetContext).size;
+        return SizedBox(
+          height: size.height * 0.82,
+          child: SessionResourcesPanel(
+            host: widget.host,
+            session: session,
+            api: widget.api,
+            showDragHandle: true,
+            onClose: () => Navigator.of(sheetContext).maybePop(),
+            onOpenFile: (path) {
+              Navigator.of(sheetContext).maybePop();
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted || _disposed) return;
+                _openWorkspaceFile(path);
+              });
+            },
           ),
         );
       },
@@ -3193,6 +3257,7 @@ class _SessionScreenState extends State<SessionScreen>
     final inspectorScope = InspectorScope.maybeOf(context);
     final searchOpenInInspector =
         inspectorScope != null && _isSearchInspectorOpen(inspectorScope);
+    final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -3269,6 +3334,22 @@ class _SessionScreenState extends State<SessionScreen>
               onTap: _toggleSearchPanel,
             ),
           ),
+          if (!isCompact)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: MeshIconButton(
+                icon: resourcesOpenInInspector
+                    ? Icons.perm_media_rounded
+                    : Icons.perm_media_outlined,
+                tooltip: resourcesOpenInInspector
+                    ? 'Close resources'
+                    : 'Open resources',
+                color: resourcesOpenInInspector
+                    ? colors.accent
+                    : colors.textSecondary,
+                onTap: _openResourcesPanel,
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.only(right: 10),
             child: ListenableBuilder(
@@ -3313,6 +3394,9 @@ class _SessionScreenState extends State<SessionScreen>
                   switch (value) {
                     case 'search':
                       _toggleSearchPanel();
+                      break;
+                    case 'resources':
+                      _openResourcesPanel();
                       break;
                     case 'favorite':
                       _toggleFavorite();
@@ -3363,6 +3447,16 @@ class _SessionScreenState extends State<SessionScreen>
                   }
                 },
                 itemBuilder: (context) => [
+                  const PopupMenuItem<String>(
+                    value: 'resources',
+                    child: Row(
+                      children: [
+                        Icon(Icons.perm_media_outlined, size: 18),
+                        SizedBox(width: 10),
+                        Text('Resources'),
+                      ],
+                    ),
+                  ),
                   PopupMenuItem<String>(
                     value: 'favorite',
                     child: Row(
