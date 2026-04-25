@@ -1023,6 +1023,7 @@ class _RecentPaneState extends State<RecentPane> {
                   _RecentProgressStrip(
                     remaining: _pendingHostIds.length,
                     total: widget.hosts.length,
+                    showingCached: sortedEntries.isNotEmpty,
                   ),
                 if (hasFailures)
                   _RecentErrorBanner(
@@ -1060,6 +1061,7 @@ class _RecentPaneState extends State<RecentPane> {
                   return _RecentProgressStrip(
                     remaining: _pendingHostIds.length,
                     total: widget.hosts.length,
+                    showingCached: sortedEntries.isNotEmpty,
                   );
                 }
                 offset += 1;
@@ -1472,6 +1474,7 @@ class _InboxPaneState extends State<InboxPane> {
               _RecentProgressStrip(
                 remaining: _store.pendingHostsRemaining,
                 total: _store.totalHosts,
+                showingCached: entries.isNotEmpty,
               ),
             if (hasFailures)
               _RecentErrorBanner(
@@ -1514,6 +1517,7 @@ class _InboxPaneState extends State<InboxPane> {
               return _RecentProgressStrip(
                 remaining: _store.pendingHostsRemaining,
                 total: _store.totalHosts,
+                showingCached: entries.isNotEmpty,
               );
             }
             offset += 1;
@@ -2456,10 +2460,15 @@ String _randomId() {
 }
 
 class _RecentProgressStrip extends StatelessWidget {
-  const _RecentProgressStrip({required this.remaining, required this.total});
+  const _RecentProgressStrip({
+    required this.remaining,
+    required this.total,
+    required this.showingCached,
+  });
 
   final int remaining;
   final int total;
+  final bool showingCached;
 
   @override
   Widget build(BuildContext context) {
@@ -2480,7 +2489,7 @@ class _RecentProgressStrip extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Loading hosts · $loaded of $total ready',
+              '${showingCached ? 'Refreshing cached sessions' : 'Loading hosts'} · $loaded of $total ready',
               style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
