@@ -7,11 +7,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api_client.dart';
 import '../approval_inbox_store.dart';
+import '../host_status_store.dart';
 import '../host_store.dart';
+import '../live_activity_service.dart';
 import '../local_notification_service.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/theme_controller.dart';
+import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/notification_permission_banner.dart';
 import '../widgets/appearance_sheet.dart';
@@ -58,6 +61,9 @@ class _DesktopShellState extends State<DesktopShell> {
   // Used to trigger refresh of sidebar panes after a host/session mutation.
   int _refreshTick = 0;
   bool _handlingNotificationIntent = false;
+
+  List<HostProfile> get _enabledHosts =>
+      _hosts.where((host) => host.enabled).toList(growable: false);
 
   // Reserve space under the macOS titlebar so traffic lights & drag area
   // stay clean. 28pt matches the standard NSWindow titlebar height.
@@ -118,7 +124,12 @@ class _DesktopShellState extends State<DesktopShell> {
       _hosts = hosts;
       _loading = false;
     });
-    ApprovalInboxStore.instance.configure(hosts: hosts, api: _api);
+    for (final host in hosts) {
+      if (!host.enabled) {
+        HostStatusStore.instance.clear(host.id);
+      }
+    }
+    ApprovalInboxStore.instance.configure(hosts: _enabledHosts, api: _api);
     unawaited(_handleNotificationRouteIntent());
   }
 
@@ -316,9 +327,11 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 
   Future<void> _removeHost(HostProfile host) async {
+    final active = _active;
     final updated = _hosts.where((h) => h.id != host.id).toList();
     await _store.saveHosts(updated);
-    if (_active?.host.id == host.id) {
+    if (active?.host.id == host.id) {
+      _inspector.closeForOwner('${active!.host.id}|${active.session.id}');
       setState(() => _active = null);
     }
     if (_activeHost?.id == host.id) {
@@ -328,7 +341,36 @@ class _DesktopShellState extends State<DesktopShell> {
     _bumpRefresh();
   }
 
+  Future<void> _toggleHostEnabled(HostProfile host) async {
+    final disabling = host.enabled;
+    final active = _active;
+    final updated = _hosts
+        .map(
+          (item) =>
+              item.id == host.id ? item.copyWith(enabled: !item.enabled) : item,
+        )
+        .toList();
+    await _store.saveHosts(updated);
+    if (disabling) {
+      HostStatusStore.instance.clear(host.id);
+      await LiveActivityService.instance.clearPrimarySessionForHost(host.id);
+    }
+    if (active?.host.id == host.id && disabling) {
+      _inspector.closeForOwner('${active!.host.id}|${active.session.id}');
+      setState(() => _active = null);
+    }
+    if (_activeHost?.id == host.id && disabling) {
+      setState(() => _activeHost = null);
+    }
+    await _loadHosts();
+    _bumpRefresh();
+  }
+
   void _openSession(HostProfile host, SessionSummary session) {
+    if (!host.enabled) {
+      showAppSnackBar(context, 'Enable ${host.label} before opening sessions.');
+      return;
+    }
     // We don't close the old session's inspector here — the newly mounted
     // SessionScreen decides: it will either replace the surface with its
     // own restored one (smooth swap) or close the orphan if it has no
@@ -378,7 +420,7 @@ class _DesktopShellState extends State<DesktopShell> {
 
   HostProfile? _hostForIntent(NotificationRouteIntent intent) {
     for (final host in _hosts) {
-      if (host.id == intent.hostId) return host;
+      if (host.id == intent.hostId && host.enabled) return host;
     }
     return null;
   }
@@ -394,6 +436,10 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 
   void _openHostDetail(HostProfile host) {
+    if (!host.enabled) {
+      showAppSnackBar(context, 'Enable ${host.label} before opening details.');
+      return;
+    }
     final current = _active;
     if (current != null) {
       _inspector.closeForOwner('${current.host.id}|${current.session.id}');
@@ -670,6 +716,7 @@ class _DesktopShellState extends State<DesktopShell> {
                                 onAddHost: () => _showHostEditor(),
                                 onEditHost: (h) => _showHostEditor(initial: h),
                                 onRemoveHost: _removeHost,
+                                onToggleHostEnabled: _toggleHostEnabled,
                                 onActiveCountChanged: (n) {
                                   if (!mounted) return;
                                   setState(() => _activeCount = n);
@@ -691,6 +738,7 @@ class _DesktopShellState extends State<DesktopShell> {
                               active: _active,
                               activeHost: _activeHost,
                               hosts: _hosts,
+                              enabledHosts: _enabledHosts,
                               api: _api,
                               onClose: () {
                                 final current = _active;
@@ -787,6 +835,7 @@ class _Sidebar extends StatelessWidget {
     required this.onAddHost,
     required this.onEditHost,
     required this.onRemoveHost,
+    required this.onToggleHostEnabled,
     required this.onActiveCountChanged,
     required this.onInboxCountChanged,
     required this.onShowShortcuts,
@@ -814,6 +863,7 @@ class _Sidebar extends StatelessWidget {
   final VoidCallback onAddHost;
   final ValueChanged<HostProfile> onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
+  final ValueChanged<HostProfile> onToggleHostEnabled;
   final ValueChanged<int> onActiveCountChanged;
   final ValueChanged<int> onInboxCountChanged;
   final VoidCallback onShowShortcuts;
@@ -915,6 +965,7 @@ class _Sidebar extends StatelessWidget {
                       onAddHost: onAddHost,
                       onActiveCountChanged: onActiveCountChanged,
                       onInboxCountChanged: onInboxCountChanged,
+                      onToggleHostEnabled: onToggleHostEnabled,
                     ),
             ),
           ],
@@ -1040,6 +1091,7 @@ class _SidebarPane extends StatelessWidget {
     required this.onEditHost,
     required this.onRemoveHost,
     required this.onAddHost,
+    required this.onToggleHostEnabled,
     required this.onActiveCountChanged,
     required this.onInboxCountChanged,
   });
@@ -1056,30 +1108,36 @@ class _SidebarPane extends StatelessWidget {
   final ValueChanged<HostProfile> onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
   final VoidCallback onAddHost;
+  final ValueChanged<HostProfile> onToggleHostEnabled;
   final ValueChanged<int> onActiveCountChanged;
   final ValueChanged<int> onInboxCountChanged;
 
   @override
   Widget build(BuildContext context) {
+    final enabledHosts = hosts
+        .where((host) => host.enabled)
+        .toList(growable: false);
     switch (section) {
       case _SidebarSection.recent:
         return RecentPane(
-          hosts: hosts,
+          hosts: enabledHosts,
           api: api,
           onOpenSession: onOpenSession,
           onActiveCountChanged: onActiveCountChanged,
           query: query,
           selectedSessionId: selectedSessionId,
           dense: true,
+          hasSavedHosts: hosts.isNotEmpty,
         );
       case _SidebarSection.inbox:
         return InboxPane(
-          hosts: hosts,
+          hosts: enabledHosts,
           api: api,
           onOpenSession: onOpenSessionFromAction,
           onInboxCountChanged: onInboxCountChanged,
           query: query,
           dense: true,
+          hasSavedHosts: hosts.isNotEmpty,
         );
       case _SidebarSection.hosts:
         return HostsPane(
@@ -1087,6 +1145,7 @@ class _SidebarPane extends StatelessWidget {
           onOpenHost: onOpenHostDetail,
           onEditHost: onEditHost,
           onRemoveHost: onRemoveHost,
+          onToggleEnabled: onToggleHostEnabled,
           onAddHost: onAddHost,
           query: query,
           dense: true,
@@ -1209,6 +1268,7 @@ class _DetailPane extends StatefulWidget {
     required this.active,
     required this.activeHost,
     required this.hosts,
+    required this.enabledHosts,
     required this.api,
     required this.onClose,
     required this.onOpenSession,
@@ -1220,6 +1280,7 @@ class _DetailPane extends StatefulWidget {
   final _ActiveSession? active;
   final HostProfile? activeHost;
   final List<HostProfile> hosts;
+  final List<HostProfile> enabledHosts;
   final ApiClient api;
   final VoidCallback onClose;
   final void Function(HostProfile, SessionSummary) onOpenSession;
@@ -1238,9 +1299,12 @@ class _DetailPaneState extends State<_DetailPane> {
       widget.onAddHost();
       return;
     }
+    if (widget.enabledHosts.isEmpty) {
+      return;
+    }
     final result = await showCreateSessionHostLauncher(
       context,
-      hosts: widget.hosts,
+      hosts: widget.enabledHosts,
       api: widget.api,
     );
     if (!mounted || result == null) {
@@ -1322,6 +1386,8 @@ class _DetailPaneState extends State<_DetailPane> {
                     child: Text(
                       widget.hosts.isEmpty
                           ? 'Add a host first, then launch Codex from here.'
+                          : widget.enabledHosts.isEmpty
+                          ? 'Enable a saved host from the Hosts sidebar before launching Codex.'
                           : 'Open an existing chat or launch a fresh Codex session on any configured host.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: colors.textSecondary),
@@ -1329,20 +1395,30 @@ class _DetailPaneState extends State<_DetailPane> {
                   ),
                   const SizedBox(height: 18),
                   FilledButton.icon(
-                    onPressed: _startSessionFromEmptyState,
+                    onPressed:
+                        widget.enabledHosts.isEmpty && widget.hosts.isNotEmpty
+                        ? null
+                        : _startSessionFromEmptyState,
                     icon: Icon(
                       widget.hosts.isEmpty
                           ? Icons.add_rounded
+                          : widget.enabledHosts.isEmpty
+                          ? Icons.pause_circle_outline_rounded
                           : Icons.play_arrow_rounded,
                     ),
                     label: Text(
-                      widget.hosts.isEmpty ? 'Add host' : 'Start session',
+                      widget.hosts.isEmpty
+                          ? 'Add host'
+                          : widget.enabledHosts.isEmpty
+                          ? 'No enabled hosts'
+                          : 'Start session',
                     ),
                   ),
                   if (widget.hosts.isNotEmpty) ...[
                     const SizedBox(height: 10),
                     MeshPill(
-                      label: '${widget.hosts.length} hosts available',
+                      label:
+                          '${widget.enabledHosts.length} of ${widget.hosts.length} hosts enabled',
                       icon: Icons.hub_rounded,
                     ),
                   ],
