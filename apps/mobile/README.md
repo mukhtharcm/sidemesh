@@ -37,23 +37,43 @@ The two flavors use different iOS bundle IDs, so iOS treats them as separate
 apps. Local hosts, tokens, favorites, pins, theme, and other preferences are
 stored separately by default.
 
+## Local iOS Signing
+
+The committed Xcode project does not store a personal Apple development team
+ID. Both the Runner target and the Live Activity extension read:
+
+```text
+DEVELOPMENT_TEAM = $(SIDEMESH_DEVELOPMENT_TEAM)
+```
+
+Create this ignored local file on machines that need to sign device builds:
+
+```bash
+cat > ios/Flutter/Signing.local.xcconfig <<'EOF'
+SIDEMESH_DEVELOPMENT_TEAM = YOURTEAMID
+EOF
+```
+
+This file is intentionally ignored by git. If it is missing, simulator builds
+and `--no-codesign` checks still work, but release/device builds that require
+signing will fail until the local team ID exists.
+
 ## Live Activity Extension Notes
 
-The Live Activity widget extension uses explicit version values in
-`ios/SidemeshLiveActivityExtension/Info.plist`:
+The Live Activity widget extension has its own
+`ios/Flutter/Extension.xcconfig`. It includes Flutter's generated build values
+and the ignored local signing config, then maps them into the extension target:
 
-- `CFBundleShortVersionString = 1.0.0`
-- `CFBundleVersion = 1`
+- `MARKETING_VERSION = $(FLUTTER_BUILD_NAME)`
+- `CURRENT_PROJECT_VERSION = $(FLUTTER_BUILD_NUMBER)`
+- `DEVELOPMENT_TEAM = $(SIDEMESH_DEVELOPMENT_TEAM)`
 
-Do not replace these with `$(MARKETING_VERSION)` or
-`$(CURRENT_PROJECT_VERSION)` unless the extension target is also proven to
-inherit those build settings for every Flutter flavor and simulator/device
-build. The extension target does not reliably inherit Flutter's
-`FLUTTER_BUILD_NAME` / `FLUTTER_BUILD_NUMBER` values.
+Do not remove this extension xcconfig. Without it, the extension target can
+miss Flutter's version settings even though the Runner target has them.
 
-The extension target also needs the same `DEVELOPMENT_TEAM` as the Runner
-target in `ios/Runner.xcodeproj/project.pbxproj`. If Runner signs but the
-extension does not, release/device builds fail with:
+The extension target also needs the same resolved `DEVELOPMENT_TEAM` as the
+Runner target. If Runner signs but the extension does not, release/device
+builds fail with:
 
 ```text
 Signing for "SidemeshLiveActivityExtension" requires a development team.
