@@ -63,12 +63,15 @@ class LocalNotificationService with WidgetsBindingObserver {
   Future<void> showPendingApproval({
     required HostProfile host,
     required PendingAction action,
+    bool allowPermissionPrompt = true,
   }) async {
     if (kIsWeb || !_isSupportedPlatform) return;
     await initialize();
     if (!_initialized || _isForeground) return;
 
-    final hasPermission = await _ensurePermissions();
+    final hasPermission = allowPermissionPrompt
+        ? await _ensurePermissions()
+        : await _checkPermissions();
     if (!hasPermission) return;
 
     final sessionTitle = action.sessionTitle?.trim();
@@ -190,6 +193,57 @@ class LocalNotificationService with WidgetsBindingObserver {
     }
     _notificationsAllowed = granted;
     return granted;
+  }
+
+  Future<bool> _checkPermissions() async {
+    if (_permissionsRequested) return _notificationsAllowed;
+    try {
+      final bool granted;
+      switch (defaultTargetPlatform) {
+        case TargetPlatform.android:
+          granted =
+              await _plugin
+                  .resolvePlatformSpecificImplementation<
+                    AndroidFlutterLocalNotificationsPlugin
+                  >()
+                  ?.areNotificationsEnabled() ??
+              false;
+          break;
+        case TargetPlatform.iOS:
+          granted =
+              await _plugin
+                  .resolvePlatformSpecificImplementation<
+                    IOSFlutterLocalNotificationsPlugin
+                  >()
+                  ?.checkPermissions()
+                  .then((value) => value?.isEnabled ?? false) ??
+              false;
+          break;
+        case TargetPlatform.macOS:
+          granted =
+              await _plugin
+                  .resolvePlatformSpecificImplementation<
+                    MacOSFlutterLocalNotificationsPlugin
+                  >()
+                  ?.checkPermissions()
+                  .then((value) => value?.isEnabled ?? false) ??
+              false;
+          break;
+        case TargetPlatform.fuchsia:
+        case TargetPlatform.linux:
+        case TargetPlatform.windows:
+          granted = false;
+          break;
+      }
+      _notificationsAllowed = granted;
+      if (granted) {
+        _permissionsRequested = true;
+      }
+      return granted;
+    } catch (error) {
+      debugPrint('Failed to check notification permissions: $error');
+      return false;
+    }
   }
 
   void _handleNotificationResponse(NotificationResponse response) {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'api_client.dart';
+import 'approval_action_seen_store.dart';
 import 'host_status_store.dart';
 import 'live_activity_service.dart';
 import 'local_notification_service.dart';
@@ -85,6 +86,7 @@ class ApprovalInboxStore extends ChangeNotifier {
       _pendingHostIds = <String>{};
       _failedHostLabels = const [];
       _hasLoadedOnce = true;
+      await ApprovalActionSeenStore.instance.replace(<String>{});
       unawaited(LiveActivityService.instance.endPendingApprovals());
       notifyListeners();
       return;
@@ -127,10 +129,21 @@ class ApprovalInboxStore extends ChangeNotifier {
     collected.sort(
       (a, b) => b.action.requestedAt.compareTo(a.action.requestedAt),
     );
+    final seenStore = ApprovalActionSeenStore.instance;
+    final seenSnapshot = await seenStore.load();
+    final seenKeys = _hasLoadedOnce
+        ? <String>{...seenSnapshot.keys, ..._seenActionKeys}
+        : seenSnapshot.keys;
+    final shouldNotify = _hasLoadedOnce || seenSnapshot.initialized;
     _syncLiveActivity(collected);
-    _notifyForNewActions(collected);
+    _notifyForNewActions(
+      collected,
+      seenKeys: seenKeys,
+      shouldNotify: shouldNotify,
+    );
     _entries = List.unmodifiable(collected);
     _seenActionKeys = collected.map(_actionKey).toSet();
+    await seenStore.replace(_seenActionKeys);
     _failedHostLabels = List.unmodifiable(failures);
     _hasLoadedOnce = true;
     notifyListeners();
@@ -164,10 +177,14 @@ class ApprovalInboxStore extends ChangeNotifier {
     );
   }
 
-  void _notifyForNewActions(List<PendingActionEntry> entries) {
-    if (!_hasLoadedOnce) return;
+  void _notifyForNewActions(
+    List<PendingActionEntry> entries, {
+    required Set<String> seenKeys,
+    required bool shouldNotify,
+  }) {
+    if (!shouldNotify) return;
     for (final entry in entries) {
-      if (_seenActionKeys.contains(_actionKey(entry))) continue;
+      if (seenKeys.contains(_actionKey(entry))) continue;
       unawaited(
         LocalNotificationService.instance.showPendingApproval(
           host: entry.host,
