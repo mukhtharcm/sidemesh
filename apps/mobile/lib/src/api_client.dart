@@ -239,6 +239,7 @@ class ApiClient {
   }
 
   IOWebSocketChannel openLive(HostProfile host, String sessionId) {
+    _ensureHostEnabled(host);
     final baseUri = Uri.parse(host.baseUrl);
     final wsUri = baseUri.replace(
       scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
@@ -253,6 +254,7 @@ class ApiClient {
   }
 
   IOWebSocketChannel openActionsLive(HostProfile host) {
+    _ensureHostEnabled(host);
     final baseUri = Uri.parse(host.baseUrl);
     final wsUri = baseUri.replace(
       scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
@@ -266,12 +268,14 @@ class ApiClient {
   }
 
   Uri fsBlobUri(HostProfile host, String path) {
+    _ensureHostEnabled(host);
     return _uri(host, '/api/fs/blob', queryParameters: {'path': path});
   }
 
-  Map<String, String> authHeaders(HostProfile host) => {
-    'Authorization': 'Bearer ${host.token}',
-  };
+  Map<String, String> authHeaders(HostProfile host) {
+    _ensureHostEnabled(host);
+    return {'Authorization': 'Bearer ${host.token}'};
+  }
 
   // -------------------------- Workspace filesystem --------------------------
 
@@ -365,6 +369,7 @@ class ApiClient {
   }
 
   IOWebSocketChannel openFsLive(HostProfile host) {
+    _ensureHostEnabled(host);
     final baseUri = Uri.parse(host.baseUrl);
     final wsUri = baseUri.replace(
       scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
@@ -381,6 +386,7 @@ class ApiClient {
     String path, {
     Map<String, String>? queryParameters,
   }) {
+    _ensureHostEnabled(host);
     return _client.get(
       _uri(host, path, queryParameters: queryParameters),
       headers: _headers(host),
@@ -392,6 +398,7 @@ class ApiClient {
     String path, {
     required Map<String, dynamic> body,
   }) {
+    _ensureHostEnabled(host);
     return _client.post(
       _uri(host, path),
       headers: _headers(host),
@@ -412,6 +419,12 @@ class ApiClient {
     'Authorization': 'Bearer ${host.token}',
     'Content-Type': 'application/json',
   };
+
+  void _ensureHostEnabled(HostProfile host) {
+    if (!host.enabled) {
+      throw StateError('Host "${host.label}" is disabled.');
+    }
+  }
 
   Map<String, dynamic> _decodeObject(http.Response response) {
     _throwIfBadStatus(response);
@@ -484,6 +497,9 @@ String friendlyError(Object error) {
   }
   if (text.contains('TimeoutException')) {
     return 'Request timed out.';
+  }
+  if (text.startsWith('Bad state: Host ') && text.contains(' is disabled.')) {
+    return text.replaceFirst('Bad state: ', '');
   }
   final trimmed = text.replaceFirst('Exception: ', '');
   return trimmed.length > 160 ? '${trimmed.substring(0, 157)}…' : trimmed;

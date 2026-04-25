@@ -78,10 +78,12 @@ class ApprovalBackgroundPoller {
       return;
     }
 
-    final hosts = await HostStore().loadHosts();
+    final hosts = (await HostStore().loadHosts())
+        .where((host) => host.enabled)
+        .toList(growable: false);
     if (hosts.isEmpty) {
       await ApprovalActionSeenStore.instance.replace(<String>{});
-      await LiveActivityService.instance.endPendingApprovals();
+      await LiveActivityService.instance.clearPrimarySessionContext();
       return;
     }
 
@@ -130,7 +132,10 @@ class ApprovalBackgroundPoller {
         break;
       }
     }
-    if (host == null) return;
+    if (host == null) {
+      await LiveActivityService.instance.clearPrimarySessionContext();
+      return;
+    }
 
     try {
       final status = await api
