@@ -26,6 +26,7 @@ import 'inspector/inspector_pinned.dart';
 import 'inspector/inspector_search.dart';
 import 'workspace_browser_dialog.dart';
 import '../session_favorites_store.dart';
+import '../session_cache_store.dart';
 import '../session_message_seed_store.dart';
 import '../session_overrides_store.dart';
 import '../session_pins_store.dart';
@@ -72,6 +73,8 @@ class _SessionScreenState extends State<SessionScreen>
   static const _messagePageSize = 120;
   static const _activityPageSize = 80;
   static const _liveUpdateFlushInterval = Duration(milliseconds: 48);
+  static const _sessionCacheWriteDebounce = Duration(milliseconds: 900);
+  static const _failedSendRetryWindow = Duration(minutes: 10);
   static const _maxDraftImageCount = 4;
   static const _maxDraftImageBytes = 5 * 1024 * 1024;
   static const _maxDraftPayloadBytes = 9 * 1024 * 1024;
@@ -120,9 +123,13 @@ class _SessionScreenState extends State<SessionScreen>
   bool _loadingSkills = false;
   String _searchQuery = '';
   String? _skillsError;
+  String? _failedSendRetryClientMessageId;
+  String? _failedSendRetrySignature;
+  DateTime? _failedSendRetryExpiresAt;
   IOWebSocketChannel? _channel;
   StreamSubscription? _subscription;
   Timer? _liveFlushTimer;
+  Timer? _sessionCachePersistTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   bool _disposed = false;
@@ -198,6 +205,7 @@ class _SessionScreenState extends State<SessionScreen>
     );
     _scrollController.addListener(_onTranscriptScroll);
     _markCurrentSessionSeen();
+    unawaited(_loadCachedSnapshot());
     _loadSnapshot();
     _loadSkills(forceReload: true);
     unawaited(_loadGitStatus(silent: true));
@@ -327,9 +335,11 @@ class _SessionScreenState extends State<SessionScreen>
     // anything that streamed in during the last turn counts as read on
     // the way out.
     _markCurrentSessionSeen();
+    _persistCurrentSessionLog();
     unawaited(_readStore.flush());
     WidgetsBinding.instance.removeObserver(this);
     _reconnectTimer?.cancel();
+    _sessionCachePersistTimer?.cancel();
     _composerController.removeListener(_handleComposerChanged);
     _searchController.removeListener(_handleSearchChanged);
     _pinsStore.removeListener(_handlePinsChanged);
@@ -823,6 +833,7 @@ class _SessionScreenState extends State<SessionScreen>
       if (scrollToBottom) {
         await _scrollToBottom();
       }
+      _persistCurrentSessionLog();
     } catch (error) {
       if (!mounted || requestId != _snapshotRequestId) {
         return;
@@ -836,6 +847,49 @@ class _SessionScreenState extends State<SessionScreen>
       );
     } finally {
       _snapshotInFlight = false;
+    }
+  }
+
+  Future<void> _loadCachedSnapshot() async {
+    try {
+      final cached = await SessionCacheStore.instance.loadSessionLog(
+        widget.host,
+        widget.session.id,
+      );
+      if (!mounted || cached == null || _messages.isNotEmpty) {
+        return;
+      }
+      final log = cached.log;
+      setState(() {
+        _session = log.session;
+        _messages = log.messages;
+        _optimisticMessages = _reconcileOptimisticMessages(log.messages);
+        _activities = _sortActivities(log.activities);
+        _history = log.history;
+        // Permission prompts are live state. Restoring them from disk can show
+        // stale approvals after the server already resolved or forgot them.
+        _pendingAction = null;
+        _running = log.session.isActive;
+        _loading = false;
+        _awaitingAssistantReply =
+            log.session.isActive &&
+            _liveAssistantText.isEmpty &&
+            _pendingAction == null;
+        var highestSeq = _lastEventSeq ?? 0;
+        for (final m in log.messages) {
+          if (m.seq > highestSeq) highestSeq = m.seq;
+        }
+        for (final a in log.activities) {
+          if (a.seq > highestSeq) highestSeq = a.seq;
+        }
+        if (highestSeq > 0) {
+          _lastEventSeq = highestSeq;
+        }
+      });
+      _refreshThinkingState();
+      _markCurrentSessionSeen();
+    } catch (_) {
+      // Cached transcripts are best-effort. A fresh snapshot is already queued.
     }
   }
 
@@ -902,10 +956,40 @@ class _SessionScreenState extends State<SessionScreen>
       _refreshThinkingState();
       _syncSessionLiveActivity();
       _markCurrentSessionSeen();
+      _persistCurrentSessionLog();
       return true;
     } catch (_) {
       return false;
     }
+  }
+
+  void _persistCurrentSessionLog() {
+    _sessionCachePersistTimer?.cancel();
+    _sessionCachePersistTimer = null;
+    final session = _session;
+    if (session == null) {
+      return;
+    }
+    unawaited(
+      SessionCacheStore.instance.saveSessionLog(
+        widget.host,
+        SessionLog(
+          session: session,
+          messages: _messages,
+          activities: _activities,
+          pendingAction: null,
+          history: _history,
+        ),
+      ),
+    );
+  }
+
+  void _schedulePersistCurrentSessionLog() {
+    _sessionCachePersistTimer?.cancel();
+    _sessionCachePersistTimer = Timer(_sessionCacheWriteDebounce, () {
+      _sessionCachePersistTimer = null;
+      _persistCurrentSessionLog();
+    });
   }
 
   Future<void> _loadOlderTranscript() async {
@@ -1163,6 +1247,7 @@ class _SessionScreenState extends State<SessionScreen>
         });
         _refreshThinkingState();
         _syncSessionLiveActivity();
+        _persistCurrentSessionLog();
       case 'action_resolved':
         setState(() {
           _pendingAction = null;
@@ -1170,6 +1255,7 @@ class _SessionScreenState extends State<SessionScreen>
         });
         _refreshThinkingState();
         _syncSessionLiveActivity();
+        _persistCurrentSessionLog();
       case 'skills_changed':
         unawaited(_loadSkills(forceReload: true));
       case 'hello':
@@ -1289,6 +1375,7 @@ class _SessionScreenState extends State<SessionScreen>
       });
     }
     _syncSessionLiveActivity();
+    _schedulePersistCurrentSessionLog();
     _scrollToBottomFast();
   }
 
@@ -1597,8 +1684,23 @@ class _SessionScreenState extends State<SessionScreen>
       draftAttachments,
       draftSkillMentions,
     );
+    final policy = _policyStore.policyFor(widget.host, widget.session.id);
+    final turnConfig = _turnConfigStore.configFor(
+      widget.host,
+      widget.session.id,
+    );
+    final retrySignature = _buildSendRetrySignature(
+      inputItems: inputItems,
+      model: turnConfig.model,
+      reasoningEffort: turnConfig.reasoningEffort,
+      fastMode: turnConfig.fastMode,
+      approvalPolicy: policy.approval?.wire,
+      sandboxMode: policy.sandbox?.wire,
+      networkAccess: policy.networkAccess,
+    );
+    final clientMessageId = _clientMessageIdForSend(retrySignature);
     final optimisticMessage = SessionMessage(
-      id: 'local-${DateTime.now().microsecondsSinceEpoch}',
+      id: clientMessageId,
       role: 'user',
       text: text,
       attachments: _buildDraftMessageAttachments(draftAttachments),
@@ -1620,11 +1722,6 @@ class _SessionScreenState extends State<SessionScreen>
     _syncSessionLiveActivity();
     _scrollToBottomFast(force: true);
     try {
-      final policy = _policyStore.policyFor(widget.host, widget.session.id);
-      final turnConfig = _turnConfigStore.configFor(
-        widget.host,
-        widget.session.id,
-      );
       await widget.api.sendInput(
         widget.host,
         sessionId: widget.session.id,
@@ -1641,10 +1738,12 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted) {
         return;
       }
+      _clearFailedSendRetry();
     } catch (error) {
       if (!mounted) {
         return;
       }
+      _rememberFailedSendRetry(optimisticMessage.id, retrySignature);
       _composerController.text = text;
       _composerController.selection = TextSelection.collapsed(
         offset: _composerController.text.length,
@@ -1679,6 +1778,50 @@ class _SessionScreenState extends State<SessionScreen>
         });
       }
     }
+  }
+
+  String _buildSendRetrySignature({
+    required List<SessionInputItem> inputItems,
+    required String? model,
+    required String? reasoningEffort,
+    required bool? fastMode,
+    required String? approvalPolicy,
+    required String? sandboxMode,
+    required bool? networkAccess,
+  }) {
+    return jsonEncode({
+      'input': inputItems.map((item) => item.toJson()).toList(),
+      'model': model,
+      'reasoningEffort': reasoningEffort,
+      'fastMode': fastMode,
+      'approvalPolicy': approvalPolicy,
+      'sandboxMode': sandboxMode,
+      'networkAccess': networkAccess,
+    });
+  }
+
+  String _clientMessageIdForSend(String retrySignature) {
+    final retryId = _failedSendRetryClientMessageId;
+    final retryExpiresAt = _failedSendRetryExpiresAt;
+    if (retryId != null &&
+        _failedSendRetrySignature == retrySignature &&
+        retryExpiresAt != null &&
+        DateTime.now().isBefore(retryExpiresAt)) {
+      return retryId;
+    }
+    return 'local-${DateTime.now().microsecondsSinceEpoch}';
+  }
+
+  void _rememberFailedSendRetry(String clientMessageId, String signature) {
+    _failedSendRetryClientMessageId = clientMessageId;
+    _failedSendRetrySignature = signature;
+    _failedSendRetryExpiresAt = DateTime.now().add(_failedSendRetryWindow);
+  }
+
+  void _clearFailedSendRetry() {
+    _failedSendRetryClientMessageId = null;
+    _failedSendRetrySignature = null;
+    _failedSendRetryExpiresAt = null;
   }
 
   Future<void> _stopSession() async {
