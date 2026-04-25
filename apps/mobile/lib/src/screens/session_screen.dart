@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
@@ -14,6 +15,7 @@ import 'package:web_socket_channel/io.dart';
 import '../api_client.dart';
 import '../fs_languages.dart';
 import '../host_status_store.dart';
+import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
 import '../models.dart';
 import 'create_session_sheet.dart';
@@ -5905,7 +5907,7 @@ class _MessageImageAttachmentTileState
   }
 }
 
-class _LocalImageAttachmentTile extends StatelessWidget {
+class _LocalImageAttachmentTile extends StatefulWidget {
   const _LocalImageAttachmentTile({
     required this.host,
     required this.api,
@@ -5917,13 +5919,63 @@ class _LocalImageAttachmentTile extends StatelessWidget {
   final String path;
 
   @override
+  State<_LocalImageAttachmentTile> createState() =>
+      _LocalImageAttachmentTileState();
+}
+
+class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
+  File? _file;
+  Object? _error;
+  int _loadGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LocalImageAttachmentTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.host.id != widget.host.id ||
+        oldWidget.host.baseUrl != widget.host.baseUrl ||
+        oldWidget.host.token != widget.host.token ||
+        oldWidget.path != widget.path) {
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final gen = ++_loadGeneration;
+    setState(() {
+      _file = null;
+      _error = null;
+    });
+    try {
+      final file = await ImageBlobCacheStore.instance.load(
+        host: widget.host,
+        path: widget.path,
+        api: widget.api,
+      );
+      if (!mounted || gen != _loadGeneration) {
+        return;
+      }
+      setState(() => _file = file);
+    } catch (error) {
+      if (!mounted || gen != _loadGeneration) {
+        return;
+      }
+      setState(() => _error = error);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final heroTag = _messageImageHeroTag('${host.id}:$path');
-    final imageProvider = NetworkImage(
-      api.fsBlobUri(host, path).toString(),
-      headers: api.authHeaders(host),
-    );
+    final heroTag = _messageImageHeroTag('${widget.host.id}:${widget.path}');
+    final file = _file;
+    final imageProvider = file == null ? null : FileImage(file);
+    final hasFailed = _error != null;
     return Container(
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
@@ -5935,28 +5987,39 @@ class _LocalImageAttachmentTile extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => _FullscreenImageViewer(
-                    imageProvider: imageProvider,
-                    heroTag: heroTag,
-                  ),
-                ),
-              );
-            },
+            onTap: imageProvider == null
+                ? null
+                : () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => _FullscreenImageViewer(
+                          imageProvider: imageProvider,
+                          heroTag: heroTag,
+                        ),
+                      ),
+                    );
+                  },
             child: AspectRatio(
               aspectRatio: 1.35,
-              child: Hero(
-                tag: heroTag,
-                child: Image(
-                  image: imageProvider,
-                  fit: BoxFit.cover,
-                  gaplessPlayback: true,
-                  errorBuilder: (context, error, stackTrace) =>
-                      _LocalImageFallback(path: path, colors: colors),
-                ),
-              ),
+              child: imageProvider == null
+                  ? _LocalImageFallback(
+                      path: widget.path,
+                      colors: colors,
+                      loading: !hasFailed,
+                    )
+                  : Hero(
+                      tag: heroTag,
+                      child: Image(
+                        image: imageProvider,
+                        fit: BoxFit.cover,
+                        gaplessPlayback: true,
+                        errorBuilder: (context, error, stackTrace) =>
+                            _LocalImageFallback(
+                              path: widget.path,
+                              colors: colors,
+                            ),
+                      ),
+                    ),
             ),
           ),
         ),
@@ -5966,10 +6029,15 @@ class _LocalImageAttachmentTile extends StatelessWidget {
 }
 
 class _LocalImageFallback extends StatelessWidget {
-  const _LocalImageFallback({required this.path, required this.colors});
+  const _LocalImageFallback({
+    required this.path,
+    required this.colors,
+    this.loading = false,
+  });
 
   final String path;
   final AppColors colors;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -5978,7 +6046,11 @@ class _LocalImageFallback extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       child: Row(
         children: [
-          Icon(Icons.image_outlined, color: colors.accent, size: 18),
+          Icon(
+            loading ? Icons.downloading_rounded : Icons.image_outlined,
+            color: colors.accent,
+            size: 18,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -5986,7 +6058,7 @@ class _LocalImageFallback extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  _basename(path),
+                  loading ? 'Loading image...' : _basename(path),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(
