@@ -19,6 +19,9 @@ npm run daemon
 ```
 
 If `SIDEMESH_TOKEN` is not set, the daemon generates one on startup and prints it.
+The daemon stores lightweight local state in `SIDEMESH_STATE_DIR`, defaulting to
+`~/.sidemesh`; this currently includes a bounded send-retry ledger for
+`clientMessageId` replay protection.
 
 Optional environment variables:
 
@@ -27,6 +30,7 @@ SIDEMESH_LABEL=MacBook
 SIDEMESH_PORT=8787
 SIDEMESH_TOKEN=your-shared-token
 SIDEMESH_CODEX_BIN=codex
+SIDEMESH_STATE_DIR=~/.sidemesh
 ```
 
 ## Dogfood flow
