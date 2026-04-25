@@ -1603,28 +1603,32 @@ class _SessionScreenState extends State<SessionScreen>
     return file.xFile.readAsBytes();
   }
 
-  Future<void> _pasteComposerImage() async {
+  Future<bool> _pasteComposerImage({bool showEmptyFeedback = true}) async {
     if (_sending) {
-      return;
+      return false;
     }
 
     try {
       final clipboard = SystemClipboard.instance;
       if (clipboard == null) {
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          'Clipboard image paste is not supported here.',
-        );
-        return;
+        if (!mounted) return false;
+        if (showEmptyFeedback) {
+          showAppSnackBar(
+            context,
+            'Clipboard image paste is not supported here.',
+          );
+        }
+        return false;
       }
       final clipboardImage = await _readClipboardImage(clipboard);
       if (!mounted) {
-        return;
+        return false;
       }
       if (clipboardImage == null) {
-        showAppSnackBar(context, 'Clipboard does not contain an image.');
-        return;
+        if (showEmptyFeedback) {
+          showAppSnackBar(context, 'Clipboard does not contain an image.');
+        }
+        return false;
       }
 
       final nextAttachments = List<_ComposerImageAttachment>.from(
@@ -1635,7 +1639,7 @@ class _SessionScreenState extends State<SessionScreen>
           context,
           'You can attach up to $_maxDraftImageCount images per message.',
         );
-        return;
+        return false;
       }
 
       final totalBytes = nextAttachments.fold<int>(
@@ -1650,22 +1654,24 @@ class _SessionScreenState extends State<SessionScreen>
         bytes: clipboardImage.bytes,
       );
       if (!result.added) {
-        return;
+        return false;
       }
       if (!mounted) {
-        return;
+        return false;
       }
       setState(() {
         _draftAttachments = nextAttachments;
       });
+      return true;
     } catch (error) {
       if (!mounted) {
-        return;
+        return false;
       }
       showAppSnackBar(
         context,
         'Failed to paste image: ${friendlyError(error)}',
       );
+      return false;
     }
   }
 
@@ -3417,7 +3423,8 @@ class _SessionScreenState extends State<SessionScreen>
           skillError: _skillsError,
           sending: _sending,
           onPickImages: _pickComposerImages,
-          onPasteImage: () => unawaited(_pasteComposerImage()),
+          onPasteImage: () => _pasteComposerImage(),
+          onNativePaste: () => _pasteComposerImage(showEmptyFeedback: false),
           onRemoveAttachment: _removeDraftAttachment,
           onSelectSkill: _insertSkillMention,
           onRemoveSkill: _removeDraftSkillMention,
@@ -4901,6 +4908,7 @@ class _Composer extends StatelessWidget {
     required this.sending,
     required this.onPickImages,
     required this.onPasteImage,
+    required this.onNativePaste,
     required this.onRemoveAttachment,
     required this.onSelectSkill,
     required this.onRemoveSkill,
@@ -4919,7 +4927,8 @@ class _Composer extends StatelessWidget {
   final String? skillError;
   final bool sending;
   final VoidCallback onPickImages;
-  final VoidCallback onPasteImage;
+  final Future<bool> Function() onPasteImage;
+  final Future<bool> Function() onNativePaste;
   final ValueChanged<String> onRemoveAttachment;
   final ValueChanged<SkillSummary> onSelectSkill;
   final ValueChanged<String> onRemoveSkill;
@@ -4951,22 +4960,18 @@ class _Composer extends StatelessWidget {
         contentPadding: const EdgeInsets.symmetric(vertical: 14),
       ),
     );
+    field = Actions(
+      actions: <Type, Action<Intent>>{
+        PasteTextIntent: _ComposerPasteTextAction(onPasteImage: onNativePaste),
+      },
+      child: field,
+    );
     if (enableDesktopSubmitShortcut) {
       // Desktop affordance: bare Enter sends, Shift+Enter inserts a newline.
       // Wrapping the TextField with CallbackShortcuts at a higher priority
       // than its default newline handler.
       field = CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
-          const SingleActivator(
-            LogicalKeyboardKey.keyV,
-            control: true,
-            shift: true,
-          ): onPasteImage,
-          const SingleActivator(
-            LogicalKeyboardKey.keyV,
-            meta: true,
-            shift: true,
-          ): onPasteImage,
           const SingleActivator(LogicalKeyboardKey.enter): () {
             if (!sending) onSend();
           },
@@ -5000,7 +5005,10 @@ class _Composer extends StatelessWidget {
           children: [
             _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
             const SizedBox(width: 8),
-            _ComposerPasteButton(enabled: !sending, onPressed: onPasteImage),
+            _ComposerPasteButton(
+              enabled: !sending,
+              onPressed: () => unawaited(onPasteImage()),
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Container(
@@ -5125,12 +5133,8 @@ class _ComposerPasteButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final isApplePlatform =
-        defaultTargetPlatform == TargetPlatform.macOS ||
-        defaultTargetPlatform == TargetPlatform.iOS;
-    final shortcutLabel = isApplePlatform ? 'Shift+Cmd+V' : 'Shift+Ctrl+V';
     return Tooltip(
-      message: 'Paste image from clipboard ($shortcutLabel)',
+      message: 'Paste image from clipboard',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
@@ -5154,6 +5158,32 @@ class _ComposerPasteButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _ComposerPasteTextAction extends Action<PasteTextIntent> {
+  _ComposerPasteTextAction({required this.onPasteImage});
+
+  final Future<bool> Function() onPasteImage;
+
+  @override
+  bool get isActionEnabled => callingAction?.isActionEnabled ?? true;
+
+  @override
+  bool consumesKey(PasteTextIntent intent) =>
+      callingAction?.consumesKey(intent) ?? true;
+
+  @override
+  Future<Object?> invoke(PasteTextIntent intent) async {
+    final pastedImage = await onPasteImage();
+    if (pastedImage) {
+      return null;
+    }
+    final fallback = callingAction?.invoke(intent);
+    if (fallback is Future<Object?>) {
+      return await fallback;
+    }
+    return fallback;
   }
 }
 
