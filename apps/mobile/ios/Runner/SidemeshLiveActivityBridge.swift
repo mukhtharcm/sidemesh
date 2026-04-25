@@ -131,8 +131,17 @@ final class SidemeshLiveActivityBridge {
       status: args["status"] as? String ?? "active",
       host: args["host"] as? String ?? "",
       count: args["count"] as? Int ?? 1,
+      badge: args["badge"] as? String ?? Self.defaultBadge(for: args),
       updatedAt: updatedAt
     )
+  }
+
+  private static func defaultBadge(for args: [String: Any]) -> String {
+    let count = args["count"] as? Int ?? 1
+    if count > 1 {
+      return "\(count)"
+    }
+    return "!"
   }
 
   @available(iOS 16.1, *)

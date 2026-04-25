@@ -6,13 +6,13 @@ import WidgetKit
 struct SidemeshLiveActivityBundle: WidgetBundle {
   var body: some Widget {
     if #available(iOSApplicationExtension 16.1, *) {
-      SidemeshApprovalLiveActivity()
+      SidemeshPrimaryLiveActivity()
     }
   }
 }
 
 @available(iOSApplicationExtension 16.1, *)
-struct SidemeshApprovalLiveActivity: Widget {
+struct SidemeshPrimaryLiveActivity: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: SidemeshLiveActivityAttributes.self) { context in
       SidemeshLockScreenView(state: context.state)
@@ -44,11 +44,11 @@ struct SidemeshApprovalLiveActivity: Widget {
         Image(systemName: "point.3.connected.trianglepath.dotted")
           .foregroundColor(SidemeshPalette.accent)
       } compactTrailing: {
-        Text(context.state.count > 1 ? "\(context.state.count)" : "!")
+        Text(context.state.badge)
           .font(.caption.bold())
           .foregroundColor(SidemeshPalette.accent)
       } minimal: {
-        Image(systemName: "exclamationmark.circle.fill")
+        Image(systemName: "point.3.connected.trianglepath.dotted")
           .foregroundColor(SidemeshPalette.accent)
       }
     }
@@ -61,7 +61,7 @@ private struct SidemeshLockScreenView: View {
 
   var body: some View {
     HStack(alignment: .center, spacing: 14) {
-      SidemeshCountBadge(count: state.count)
+      SidemeshBadge(text: state.badge)
 
       VStack(alignment: .leading, spacing: 6) {
         HStack(spacing: 8) {
@@ -104,7 +104,7 @@ private struct SidemeshIslandBadge: View {
 
   var body: some View {
     VStack(spacing: 5) {
-      SidemeshCountBadge(count: state.count)
+      SidemeshBadge(text: state.badge)
       Text(state.status.uppercased())
         .font(.caption2.bold())
         .foregroundColor(SidemeshPalette.accent)
@@ -114,8 +114,8 @@ private struct SidemeshIslandBadge: View {
 }
 
 @available(iOSApplicationExtension 16.1, *)
-private struct SidemeshCountBadge: View {
-  let count: Int
+private struct SidemeshBadge: View {
+  let text: String
 
   var body: some View {
     ZStack {
@@ -123,8 +123,8 @@ private struct SidemeshCountBadge: View {
         .fill(SidemeshPalette.accent.opacity(0.18))
       Circle()
         .stroke(SidemeshPalette.accent, lineWidth: 1.5)
-      Text(count > 1 ? "\(count)" : "!")
-        .font(.title3.bold())
+      Text(text)
+        .font(.system(size: text.count > 2 ? 12 : 17, weight: .bold))
         .foregroundColor(SidemeshPalette.accent)
     }
     .frame(width: 44, height: 44)
