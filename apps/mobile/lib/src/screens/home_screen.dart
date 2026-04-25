@@ -18,6 +18,7 @@ import '../theme/theme_controller.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/appearance_sheet.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/notification_permission_banner.dart';
 import 'create_session_sheet.dart';
 import 'host_detail_screen.dart';
 import 'session_screen.dart';
@@ -257,6 +258,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               controller: _searchController,
               hintText: 'Search ${tab.title.toLowerCase()}',
             ),
+            const NotificationPermissionBanner(),
             Expanded(
               child: _loading
                   ? const MeshLoader()
