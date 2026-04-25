@@ -825,7 +825,7 @@ class _SessionScreenState extends State<SessionScreen>
       if (scrollToBottom) {
         await _scrollToBottom();
       }
-      unawaited(SessionCacheStore.instance.saveSessionLog(widget.host, log));
+      _persistCurrentSessionLog();
     } catch (error) {
       if (!mounted || requestId != _snapshotRequestId) {
         return;
