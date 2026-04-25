@@ -652,6 +652,25 @@ class SessionInputItem {
   final String? name;
   final String? path;
 
+  factory SessionInputItem.fromJson(Map<String, dynamic> json) {
+    final type = _stringValue(json['type']);
+    switch (type) {
+      case 'text':
+        return SessionInputItem.text(_stringValue(json['text']));
+      case 'image':
+        return SessionInputItem.image(_stringValue(json['url']));
+      case 'localImage':
+        return SessionInputItem.localImage(_stringValue(json['path']));
+      case 'skill':
+        return SessionInputItem.skill(
+          _stringValue(json['name']),
+          _stringValue(json['path']),
+        );
+      default:
+        return SessionInputItem._(type: type);
+    }
+  }
+
   Map<String, dynamic> toJson() {
     switch (type) {
       case 'text':
