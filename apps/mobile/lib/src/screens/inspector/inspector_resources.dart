@@ -13,6 +13,7 @@ import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_snackbar.dart';
 import '../../widgets/mesh_widgets.dart';
+import '../image_viewer_screen.dart';
 import 'inspector_controller.dart';
 
 InspectorSurface buildInspectorResourcesSurface({
@@ -178,15 +179,49 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
     if (initialIndex < 0) {
       return;
     }
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _FullscreenImageGallery(
-          host: widget.host,
-          api: widget.api,
-          resources: media,
-          initialIndex: initialIndex,
-        ),
-      ),
+    showImageGalleryViewer(
+      context,
+      sources: media.map(_imageViewerSourceFor).toList(growable: false),
+      initialIndex: initialIndex,
+    );
+  }
+
+  ImageViewerSource _imageViewerSourceFor(SessionResource resource) {
+    final path = resource.path;
+    if ((path ?? '').isNotEmpty) {
+      return ImageViewerSource.loader(
+        heroTag: 'session-resource:${widget.host.id}:${resource.id}',
+        title: resource.title,
+        subtitle: _gallerySubtitle(resource),
+        imageProviderLoader: () async {
+          final file = await ImageBlobCacheStore.instance.load(
+            host: widget.host,
+            path: path!,
+            api: widget.api,
+          );
+          return FileImage(file);
+        },
+      );
+    }
+
+    final url = resource.url ?? '';
+    final provider = _imageProviderForUrl(url);
+    if (provider != null) {
+      return ImageViewerSource(
+        imageProvider: provider,
+        heroTag: 'session-resource:${widget.host.id}:${resource.id}',
+        title: resource.title,
+        subtitle: _gallerySubtitle(resource),
+      );
+    }
+
+    return ImageViewerSource.loader(
+      heroTag: 'session-resource:${widget.host.id}:${resource.id}',
+      title: resource.title,
+      subtitle: _gallerySubtitle(resource),
+      imageProviderLoader: () async {
+        throw StateError('Unsupported image source');
+      },
     );
   }
 
@@ -765,315 +800,6 @@ class _MediaPreview extends StatelessWidget {
   }
 }
 
-class _FullscreenImageGallery extends StatefulWidget {
-  const _FullscreenImageGallery({
-    required this.host,
-    required this.api,
-    required this.resources,
-    required this.initialIndex,
-  });
-
-  final HostProfile host;
-  final ApiClient api;
-  final List<SessionResource> resources;
-  final int initialIndex;
-
-  @override
-  State<_FullscreenImageGallery> createState() =>
-      _FullscreenImageGalleryState();
-}
-
-class _FullscreenImageGalleryState extends State<_FullscreenImageGallery> {
-  late final PageController _pageController;
-  late int _index;
-  bool _chromeVisible = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _index = widget.initialIndex;
-    _pageController = PageController(initialPage: widget.initialIndex);
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  void _toggleChrome() {
-    setState(() => _chromeVisible = !_chromeVisible);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final resource = widget.resources[_index];
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: SafeArea(
-              child: PageView.builder(
-                controller: _pageController,
-                itemCount: widget.resources.length,
-                onPageChanged: (value) => setState(() => _index = value),
-                itemBuilder: (context, index) => _GalleryImagePage(
-                  host: widget.host,
-                  api: widget.api,
-                  resource: widget.resources[index],
-                  onTap: _toggleChrome,
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            top: 0,
-            child: IgnorePointer(
-              ignoring: !_chromeVisible,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 180),
-                opacity: _chromeVisible ? 1 : 0,
-                child: SafeArea(
-                  bottom: false,
-                  child: Container(
-                    margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                    padding: const EdgeInsets.fromLTRB(8, 8, 14, 8),
-                    decoration: BoxDecoration(
-                      color: const Color.fromRGBO(0, 0, 0, 0.72),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          onPressed: () => Navigator.of(context).maybePop(),
-                          icon: const Icon(
-                            Icons.arrow_back_rounded,
-                            color: Colors.white,
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            '${_index + 1} / ${widget.resources.length}',
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: IgnorePointer(
-              ignoring: !_chromeVisible,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 180),
-                opacity: _chromeVisible ? 1 : 0,
-                child: SafeArea(
-                  top: false,
-                  child: Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-                    decoration: BoxDecoration(
-                      color: const Color.fromRGBO(0, 0, 0, 0.72),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          resource.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _gallerySubtitle(resource),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: Colors.white70, height: 1.35),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GalleryImagePage extends StatelessWidget {
-  const _GalleryImagePage({
-    required this.host,
-    required this.api,
-    required this.resource,
-    required this.onTap,
-  });
-
-  final HostProfile host;
-  final ApiClient api;
-  final SessionResource resource;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: (resource.path ?? '').isNotEmpty
-              ? _LocalGalleryImage(host: host, api: api, path: resource.path!)
-              : _RemoteGalleryImage(url: resource.url ?? ''),
-        ),
-      ),
-    );
-  }
-}
-
-class _RemoteGalleryImage extends StatelessWidget {
-  const _RemoteGalleryImage({required this.url});
-
-  final String url;
-
-  @override
-  Widget build(BuildContext context) {
-    final bytes = _decodeImageDataUrl(url);
-    final ImageProvider<Object>? provider = bytes != null
-        ? MemoryImage(bytes)
-        : (url.startsWith('http://') || url.startsWith('https://')
-              ? NetworkImage(url)
-              : null);
-    if (provider == null) {
-      return _GalleryFallback(detail: url);
-    }
-    return InteractiveViewer(
-      minScale: 0.8,
-      maxScale: 4,
-      child: Image(image: provider, fit: BoxFit.contain),
-    );
-  }
-}
-
-class _LocalGalleryImage extends StatefulWidget {
-  const _LocalGalleryImage({
-    required this.host,
-    required this.api,
-    required this.path,
-  });
-
-  final HostProfile host;
-  final ApiClient api;
-  final String path;
-
-  @override
-  State<_LocalGalleryImage> createState() => _LocalGalleryImageState();
-}
-
-class _LocalGalleryImageState extends State<_LocalGalleryImage> {
-  File? _file;
-  Object? _error;
-  int _loadGeneration = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_load());
-  }
-
-  @override
-  void didUpdateWidget(covariant _LocalGalleryImage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.host.id != widget.host.id ||
-        oldWidget.host.baseUrl != widget.host.baseUrl ||
-        oldWidget.host.token != widget.host.token ||
-        oldWidget.path != widget.path) {
-      unawaited(_load());
-    }
-  }
-
-  Future<void> _load() async {
-    final gen = ++_loadGeneration;
-    setState(() {
-      _file = null;
-      _error = null;
-    });
-    try {
-      final file = await ImageBlobCacheStore.instance.load(
-        host: widget.host,
-        path: widget.path,
-        api: widget.api,
-      );
-      if (!mounted || gen != _loadGeneration) return;
-      setState(() => _file = file);
-    } catch (error) {
-      if (!mounted || gen != _loadGeneration) return;
-      setState(() => _error = error);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final file = _file;
-    if (file == null) {
-      return _GalleryFallback(
-        detail: _error == null ? 'Loading image...' : widget.path,
-      );
-    }
-    return InteractiveViewer(
-      minScale: 0.8,
-      maxScale: 4,
-      child: Image(image: FileImage(file), fit: BoxFit.contain),
-    );
-  }
-}
-
-class _GalleryFallback extends StatelessWidget {
-  const _GalleryFallback({required this.detail});
-
-  final String detail;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Text(
-          detail,
-          textAlign: TextAlign.center,
-          style: Theme.of(
-            context,
-          ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
-        ),
-      ),
-    );
-  }
-}
-
 class _MediaFallback extends StatelessWidget {
   const _MediaFallback({
     required this.title,
@@ -1276,4 +1002,15 @@ Uint8List? _decodeImageDataUrl(String raw) {
   } catch (_) {
     return null;
   }
+}
+
+ImageProvider<Object>? _imageProviderForUrl(String raw) {
+  final bytes = _decodeImageDataUrl(raw);
+  if (bytes != null) {
+    return MemoryImage(bytes);
+  }
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    return NetworkImage(raw);
+  }
+  return null;
 }

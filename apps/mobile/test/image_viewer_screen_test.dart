@@ -26,7 +26,9 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      buildTestApp(ImageViewerScreen(source: buildSource())),
+      buildTestApp(
+        ImageViewerScreen(sources: <ImageViewerSource>[buildSource()]),
+      ),
     );
     await tester.pump(const Duration(milliseconds: 80));
 
