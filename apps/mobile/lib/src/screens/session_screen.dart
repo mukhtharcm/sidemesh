@@ -74,6 +74,7 @@ class _SessionScreenState extends State<SessionScreen>
   static const _activityPageSize = 80;
   static const _liveUpdateFlushInterval = Duration(milliseconds: 48);
   static const _sessionCacheWriteDebounce = Duration(milliseconds: 900);
+  static const _failedSendRetryWindow = Duration(minutes: 10);
   static const _maxDraftImageCount = 4;
   static const _maxDraftImageBytes = 5 * 1024 * 1024;
   static const _maxDraftPayloadBytes = 9 * 1024 * 1024;
@@ -122,6 +123,9 @@ class _SessionScreenState extends State<SessionScreen>
   bool _loadingSkills = false;
   String _searchQuery = '';
   String? _skillsError;
+  String? _failedSendRetryClientMessageId;
+  String? _failedSendRetrySignature;
+  DateTime? _failedSendRetryExpiresAt;
   IOWebSocketChannel? _channel;
   StreamSubscription? _subscription;
   Timer? _liveFlushTimer;
@@ -1679,8 +1683,23 @@ class _SessionScreenState extends State<SessionScreen>
       draftAttachments,
       draftSkillMentions,
     );
+    final policy = _policyStore.policyFor(widget.host, widget.session.id);
+    final turnConfig = _turnConfigStore.configFor(
+      widget.host,
+      widget.session.id,
+    );
+    final retrySignature = _buildSendRetrySignature(
+      inputItems: inputItems,
+      model: turnConfig.model,
+      reasoningEffort: turnConfig.reasoningEffort,
+      fastMode: turnConfig.fastMode,
+      approvalPolicy: policy.approval?.wire,
+      sandboxMode: policy.sandbox?.wire,
+      networkAccess: policy.networkAccess,
+    );
+    final clientMessageId = _clientMessageIdForSend(retrySignature);
     final optimisticMessage = SessionMessage(
-      id: 'local-${DateTime.now().microsecondsSinceEpoch}',
+      id: clientMessageId,
       role: 'user',
       text: text,
       attachments: _buildDraftMessageAttachments(draftAttachments),
@@ -1702,11 +1721,6 @@ class _SessionScreenState extends State<SessionScreen>
     _syncSessionLiveActivity();
     _scrollToBottomFast(force: true);
     try {
-      final policy = _policyStore.policyFor(widget.host, widget.session.id);
-      final turnConfig = _turnConfigStore.configFor(
-        widget.host,
-        widget.session.id,
-      );
       await widget.api.sendInput(
         widget.host,
         sessionId: widget.session.id,
@@ -1723,10 +1737,12 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted) {
         return;
       }
+      _clearFailedSendRetry(retrySignature);
     } catch (error) {
       if (!mounted) {
         return;
       }
+      _rememberFailedSendRetry(optimisticMessage.id, retrySignature);
       _composerController.text = text;
       _composerController.selection = TextSelection.collapsed(
         offset: _composerController.text.length,
@@ -1761,6 +1777,53 @@ class _SessionScreenState extends State<SessionScreen>
         });
       }
     }
+  }
+
+  String _buildSendRetrySignature({
+    required List<SessionInputItem> inputItems,
+    required String? model,
+    required String? reasoningEffort,
+    required bool? fastMode,
+    required String? approvalPolicy,
+    required String? sandboxMode,
+    required bool? networkAccess,
+  }) {
+    return jsonEncode({
+      'input': inputItems.map((item) => item.toJson()).toList(),
+      'model': model,
+      'reasoningEffort': reasoningEffort,
+      'fastMode': fastMode,
+      'approvalPolicy': approvalPolicy,
+      'sandboxMode': sandboxMode,
+      'networkAccess': networkAccess,
+    });
+  }
+
+  String _clientMessageIdForSend(String retrySignature) {
+    final retryId = _failedSendRetryClientMessageId;
+    final retryExpiresAt = _failedSendRetryExpiresAt;
+    if (retryId != null &&
+        _failedSendRetrySignature == retrySignature &&
+        retryExpiresAt != null &&
+        DateTime.now().isBefore(retryExpiresAt)) {
+      return retryId;
+    }
+    return 'local-${DateTime.now().microsecondsSinceEpoch}';
+  }
+
+  void _rememberFailedSendRetry(String clientMessageId, String signature) {
+    _failedSendRetryClientMessageId = clientMessageId;
+    _failedSendRetrySignature = signature;
+    _failedSendRetryExpiresAt = DateTime.now().add(_failedSendRetryWindow);
+  }
+
+  void _clearFailedSendRetry(String signature) {
+    if (_failedSendRetrySignature != signature) {
+      return;
+    }
+    _failedSendRetryClientMessageId = null;
+    _failedSendRetrySignature = null;
+    _failedSendRetryExpiresAt = null;
   }
 
   Future<void> _stopSession() async {
