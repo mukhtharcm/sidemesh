@@ -18,6 +18,7 @@ InspectorSurface buildInspectorWorkspaceBrowserSurface({
   required HostProfile host,
   required ApiClient api,
   required String root,
+  String? selectedPath,
 }) {
   return InspectorSurface(
     kind: InspectorSurfaceKind.fileBrowser,
@@ -28,6 +29,7 @@ InspectorSurface buildInspectorWorkspaceBrowserSurface({
       host: host,
       api: api,
       root: root,
+      initialSelectedPath: selectedPath,
     ),
   );
 }
@@ -41,22 +43,41 @@ class WorkspaceBrowserPane extends StatefulWidget {
     required this.host,
     required this.api,
     required this.root,
+    this.initialSelectedPath,
   });
 
   final HostProfile host;
   final ApiClient api;
   final String root;
+  final String? initialSelectedPath;
 
   @override
   State<WorkspaceBrowserPane> createState() => _WorkspaceBrowserPaneState();
 }
 
 class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
-  String? _selected;
+  late String? _selected = widget.initialSelectedPath;
   Stream<FsChangeEvent>? _liveStream;
   final ValueNotifier<int> _viewerObservable = ValueNotifier<int>(0);
   final GlobalKey<FileViewerPaneState> _viewerKey =
       GlobalKey<FileViewerPaneState>();
+  late bool _inViewerMode = widget.initialSelectedPath != null;
+
+  @override
+  void didUpdateWidget(covariant WorkspaceBrowserPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final initialChanged =
+        oldWidget.initialSelectedPath != widget.initialSelectedPath;
+    final rootChanged = oldWidget.root != widget.root;
+    if (!initialChanged && !rootChanged) {
+      return;
+    }
+    setState(() {
+      _selected = widget.initialSelectedPath;
+      _inViewerMode = widget.initialSelectedPath != null;
+      _liveStream = null;
+    });
+  }
 
   @override
   void dispose() {
@@ -78,8 +99,6 @@ class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
     // build via _inViewerMode flag.
     setState(() => _inViewerMode = false);
   }
-
-  bool _inViewerMode = false;
 
   @override
   Widget build(BuildContext context) {
