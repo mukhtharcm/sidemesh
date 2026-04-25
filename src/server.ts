@@ -49,6 +49,7 @@ import {
 
 const DEFAULT_SOURCES = ["cli", "vscode", "exec", "appServer"];
 const SESSION_LOG_CACHE_LIMIT = 24;
+const SESSION_INPUT_DEDUPE_LIMIT = 500;
 
 interface SessionRuntimeCacheEntry {
   threadUpdatedAt: number;
@@ -70,6 +71,19 @@ interface SessionHistorySummary {
   returnedMessages: number;
   totalActivities: number;
   returnedActivities: number;
+}
+
+interface SessionInputReceipt {
+  mode: "steer" | "turn";
+  turnId: string | null;
+  messageId: string;
+}
+
+interface SessionInputDedupeEntry {
+  signature: string;
+  createdAt: number;
+  promise?: Promise<SessionInputReceipt>;
+  receipt?: SessionInputReceipt;
 }
 
 type ApprovalPolicyValue = "untrusted" | "on-failure" | "on-request" | "never";
@@ -121,6 +135,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
   const logCache = new Map<string, SessionLogCacheEntry>();
   const sessionSeqCursor = new Map<string, number>();
+  const sessionInputDedupe = new Map<string, SessionInputDedupeEntry>();
   let codexVersion = "unknown";
 
   function allocSeq(sessionId: string): number {
@@ -133,6 +148,22 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const current = sessionSeqCursor.get(sessionId) ?? 0;
     if (minimum > current) {
       sessionSeqCursor.set(sessionId, minimum);
+    }
+  }
+
+  function sessionInputDedupeKey(sessionId: string, clientMessageId: string): string {
+    return `${sessionId}:${clientMessageId}`;
+  }
+
+  function pruneSessionInputDedupe(): void {
+    if (sessionInputDedupe.size <= SESSION_INPUT_DEDUPE_LIMIT) {
+      return;
+    }
+    const stale = [...sessionInputDedupe.entries()]
+      .sort((left, right) => left[1].createdAt - right[1].createdAt)
+      .slice(0, sessionInputDedupe.size - SESSION_INPUT_DEDUPE_LIMIT);
+    for (const [key] of stale) {
+      sessionInputDedupe.delete(key);
     }
   }
 
@@ -713,81 +744,136 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return;
     }
 
-    const submittedMessage = buildSubmittedUserMessage(
-      resolvedInput,
-      clientMessageId,
-      allocSeq(sessionId),
-    );
-    const state = await loadRunState(bridge, sessionId, activeTurns);
-    if (state.turnId) {
-      const steer = (await bridge.request("turn/steer", {
+    const turnOverrides = parseTurnOverrides(request.body);
+    const inputSignature = JSON.stringify({
+      input: resolvedInput,
+      overrides: turnOverrides,
+    });
+    const dedupeKey = clientMessageId
+      ? sessionInputDedupeKey(sessionId, clientMessageId)
+      : null;
+    if (dedupeKey) {
+      const existing = sessionInputDedupe.get(dedupeKey);
+      if (existing) {
+        if (existing.signature !== inputSignature) {
+          response.status(409).json({
+            error: "clientMessageId was already used with different input",
+          });
+          return;
+        }
+        const receipt = existing.receipt ?? (await existing.promise);
+        if (receipt) {
+          response.json({ ...receipt, replayed: true });
+          return;
+        }
+      }
+    }
+
+    const submit = async (): Promise<SessionInputReceipt> => {
+      const submittedMessage = buildSubmittedUserMessage(
+        resolvedInput,
+        clientMessageId,
+        allocSeq(sessionId),
+      );
+      const state = await loadRunState(bridge, sessionId, activeTurns);
+      if (state.turnId) {
+        const steer = (await bridge.request("turn/steer", {
+          threadId: sessionId,
+          input: resolvedInput,
+          expectedTurnId: state.turnId,
+        })) as any;
+        broadcastLive(sessionId, {
+          type: "user_message_submitted",
+          sessionId,
+          turnId: state.turnId,
+          messageItem: submittedMessage,
+        });
+        return {
+          mode: "steer",
+          turnId: asString(steer.turnId),
+          messageId: submittedMessage.id,
+        };
+      }
+
+      if (!(await isThreadLoaded(bridge, sessionId))) {
+        await bridge.request("thread/resume", {
+          threadId: sessionId,
+          persistExtendedHistory: true,
+        });
+      }
+      const turnStartParams: Record<string, unknown> = {
         threadId: sessionId,
         input: resolvedInput,
-        expectedTurnId: state.turnId,
-      })) as any;
+      };
+      if (turnOverrides.approvalPolicy) {
+        turnStartParams.approvalPolicy = turnOverrides.approvalPolicy;
+      }
+      if (turnOverrides.model) {
+        turnStartParams.model = turnOverrides.model;
+      }
+      if (turnOverrides.reasoningEffort) {
+        turnStartParams.effort = turnOverrides.reasoningEffort;
+      }
+      if (turnOverrides.fastMode !== null) {
+        turnStartParams.serviceTier = turnOverrides.fastMode ? "fast" : null;
+      }
+      // NOTE: turn/start expects a tagged `sandboxPolicy` object (v2 protocol),
+      // NOT the simple kebab string that thread/start accepts as `sandbox`.
+      // Sending `sandbox: "workspace-write"` here silently no-ops and leaves the
+      // session's existing sandbox in place.
+      if (turnOverrides.sandboxMode || turnOverrides.networkAccess !== null) {
+        turnStartParams.sandboxPolicy = buildSandboxPolicyV2(
+          turnOverrides.sandboxMode,
+          turnOverrides.networkAccess,
+        );
+      }
+      const turn = (await bridge.request("turn/start", turnStartParams)) as any;
+      const turnId = asString(turn.turn?.id);
+      if (turnId) {
+        activeTurns.set(sessionId, { turnId, startedAt: Date.now() });
+      }
       broadcastLive(sessionId, {
         type: "user_message_submitted",
         sessionId,
-        turnId: state.turnId,
+        turnId: turnId || undefined,
         messageItem: submittedMessage,
       });
-      response.json({
-        mode: "steer",
-        turnId: asString(steer.turnId),
+      return {
+        mode: "turn",
+        turnId,
         messageId: submittedMessage.id,
+      };
+    };
+
+    const promise = submit();
+    if (dedupeKey) {
+      sessionInputDedupe.set(dedupeKey, {
+        signature: inputSignature,
+        createdAt: Date.now(),
+        promise,
       });
-      return;
+      pruneSessionInputDedupe();
     }
 
-    if (!(await isThreadLoaded(bridge, sessionId))) {
-      await bridge.request("thread/resume", {
-        threadId: sessionId,
-        persistExtendedHistory: true,
-      });
+    try {
+      const receipt = await promise;
+      if (dedupeKey) {
+        sessionInputDedupe.set(dedupeKey, {
+          signature: inputSignature,
+          createdAt: Date.now(),
+          receipt,
+        });
+      }
+      response.json({ ...receipt, replayed: false });
+    } catch (error) {
+      if (dedupeKey) {
+        const current = sessionInputDedupe.get(dedupeKey);
+        if (current?.promise === promise) {
+          sessionInputDedupe.delete(dedupeKey);
+        }
+      }
+      throw error;
     }
-    const turnStartParams: Record<string, unknown> = {
-      threadId: sessionId,
-      input: resolvedInput,
-    };
-    const turnOverrides = parseTurnOverrides(request.body);
-    if (turnOverrides.approvalPolicy) {
-      turnStartParams.approvalPolicy = turnOverrides.approvalPolicy;
-    }
-    if (turnOverrides.model) {
-      turnStartParams.model = turnOverrides.model;
-    }
-    if (turnOverrides.reasoningEffort) {
-      turnStartParams.effort = turnOverrides.reasoningEffort;
-    }
-    if (turnOverrides.fastMode !== null) {
-      turnStartParams.serviceTier = turnOverrides.fastMode ? "fast" : null;
-    }
-    // NOTE: turn/start expects a tagged `sandboxPolicy` object (v2 protocol),
-    // NOT the simple kebab string that thread/start accepts as `sandbox`.
-    // Sending `sandbox: "workspace-write"` here silently no-ops and leaves the
-    // session's existing sandbox in place.
-    if (turnOverrides.sandboxMode || turnOverrides.networkAccess !== null) {
-      turnStartParams.sandboxPolicy = buildSandboxPolicyV2(
-        turnOverrides.sandboxMode,
-        turnOverrides.networkAccess,
-      );
-    }
-    const turn = (await bridge.request("turn/start", turnStartParams)) as any;
-    const turnId = asString(turn.turn?.id);
-    if (turnId) {
-      activeTurns.set(sessionId, { turnId, startedAt: Date.now() });
-    }
-    broadcastLive(sessionId, {
-      type: "user_message_submitted",
-      sessionId,
-      turnId: turnId || undefined,
-      messageItem: submittedMessage,
-    });
-    response.json({
-      mode: "turn",
-      turnId,
-      messageId: submittedMessage.id,
-    });
   }));
 
   app.post("/api/sessions/:sessionId/stop", asyncRoute(async (request, response) => {

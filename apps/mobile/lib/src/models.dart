@@ -90,6 +90,12 @@ class GitInfoSummary {
     branch: _stringOrNull(json['branch']),
     originUrl: _stringOrNull(json['originUrl']),
   );
+
+  Map<String, dynamic> toJson() => {
+    'sha': sha,
+    'branch': branch,
+    'originUrl': originUrl,
+  };
 }
 
 class SessionSummary {
@@ -139,6 +145,19 @@ class SessionSummary {
         ? GitInfoSummary.fromJson(json['gitInfo'] as Map<String, dynamic>)
         : null,
   );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'preview': preview,
+    'cwd': cwd,
+    'createdAt': createdAt.millisecondsSinceEpoch,
+    'updatedAt': updatedAt.millisecondsSinceEpoch,
+    'source': source,
+    'status': status,
+    'runtime': runtime?.toJson(),
+    'gitInfo': gitInfo?.toJson(),
+  };
 }
 
 class SessionRuntimeSummary {
@@ -178,6 +197,18 @@ class SessionRuntimeSummary {
             ? null
             : _dateValue(json['updatedAt']),
       );
+
+  Map<String, dynamic> toJson() => {
+    'model': model,
+    'serviceTier': serviceTier,
+    'reasoningEffort': reasoningEffort,
+    'approvalPolicy': approvalPolicy,
+    'sandboxMode': sandboxMode,
+    'networkAccess': networkAccess,
+    'summaryMode': summaryMode,
+    'personality': personality,
+    'updatedAt': updatedAt?.millisecondsSinceEpoch,
+  };
 }
 
 class SessionGitFileStatus {
@@ -564,6 +595,16 @@ class SessionMessage {
     seq: _intOrNull(json['seq']) ?? 0,
     phase: json['phase'] as String?,
   );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'role': role,
+    'text': text,
+    'attachments': attachments.map((item) => item.toJson()).toList(),
+    'createdAt': createdAt.millisecondsSinceEpoch,
+    'seq': seq,
+    'phase': phase,
+  };
 }
 
 class SessionMessageAttachment {
@@ -582,6 +623,8 @@ class SessionMessageAttachment {
         url: _stringOrNull(json['url']),
         path: _stringOrNull(json['path']),
       );
+
+  Map<String, dynamic> toJson() => {'type': type, 'url': url, 'path': path};
 }
 
 class SessionInputItem {
@@ -649,6 +692,13 @@ class SessionActivityChange {
         diff: _stringValue(json['diff']),
         movePath: _stringOrNull(json['movePath']),
       );
+
+  Map<String, dynamic> toJson() => {
+    'path': path,
+    'kind': kind,
+    'diff': diff,
+    'movePath': movePath,
+  };
 }
 
 class SessionCommandActionSummary {
@@ -662,6 +712,8 @@ class SessionCommandActionSummary {
         kind: _stringValue(json['kind']),
         label: _stringValue(json['label']),
       );
+
+  Map<String, dynamic> toJson() => {'kind': kind, 'label': label};
 }
 
 class SessionActivity {
@@ -764,6 +816,33 @@ class SessionActivity {
         revisedPrompt: _stringOrNull(json['revisedPrompt']),
         savedPath: _stringOrNull(json['savedPath']),
       );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'type': type,
+    'createdAt': createdAt.millisecondsSinceEpoch,
+    'seq': seq,
+    'status': status,
+    'turnId': turnId,
+    'command': command,
+    'cwd': cwd,
+    'output': output,
+    'exitCode': exitCode,
+    'durationMs': durationMs,
+    'source': source,
+    'processId': processId,
+    'commandActions': commandActions.map((item) => item.toJson()).toList(),
+    'terminalStatus': terminalStatus,
+    'terminalInput': terminalInput,
+    'changes': changes.map((item) => item.toJson()).toList(),
+    'diff': diff,
+    'query': query,
+    'queries': queries,
+    'targetUrl': targetUrl,
+    'pattern': pattern,
+    'revisedPrompt': revisedPrompt,
+    'savedPath': savedPath,
+  };
 }
 
 class PendingAction {
@@ -806,6 +885,20 @@ class PendingAction {
     sessionTitle: json['sessionTitle'] as String?,
     cwd: json['cwd'] as String?,
   );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'sessionId': sessionId,
+    'kind': kind,
+    'title': title,
+    'detail': detail,
+    'requestedAt': requestedAt.millisecondsSinceEpoch,
+    'canApprove': canApprove,
+    'canApproveForSession': canApproveForSession,
+    'canDecline': canDecline,
+    'sessionTitle': sessionTitle,
+    'cwd': cwd,
+  };
 }
 
 class SessionLog {
@@ -840,6 +933,14 @@ class SessionLog {
             json['history'] as Map<String, dynamic>,
           ),
   );
+
+  Map<String, dynamic> toJson() => {
+    'session': session.toJson(),
+    'messages': messages.map((item) => item.toJson()).toList(),
+    'activities': activities.map((item) => item.toJson()).toList(),
+    'pendingAction': pendingAction?.toJson(),
+    'history': history?.toJson(),
+  };
 }
 
 class SessionEventsDelta {
@@ -905,6 +1006,14 @@ class SessionLogHistorySummary {
         totalActivities: _intValue(json['totalActivities']),
         returnedActivities: _intValue(json['returnedActivities']),
       );
+
+  Map<String, dynamic> toJson() => {
+    'isTruncated': isTruncated,
+    'totalMessages': totalMessages,
+    'returnedMessages': returnedMessages,
+    'totalActivities': totalActivities,
+    'returnedActivities': returnedActivities,
+  };
 }
 
 class SessionStatus {
