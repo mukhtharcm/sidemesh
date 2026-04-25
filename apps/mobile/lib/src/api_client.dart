@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
@@ -342,6 +343,18 @@ class ApiClient {
   Uri fsBlobUri(HostProfile host, String path) {
     _ensureHostEnabled(host);
     return _uri(host, '/api/fs/blob', queryParameters: {'path': path});
+  }
+
+  Future<Uint8List> fetchFsBlob(HostProfile host, String path) async {
+    final response = await _get(
+      host,
+      '/api/fs/blob',
+      queryParameters: {'path': path},
+      timeout: _transcriptReadTimeout,
+      operation: 'load image',
+    );
+    _throwIfBadStatus(response);
+    return response.bodyBytes;
   }
 
   Map<String, String> authHeaders(HostProfile host) {
