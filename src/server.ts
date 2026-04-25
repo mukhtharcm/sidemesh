@@ -10,6 +10,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import type {
   ActiveTurnState,
+  ApprovalLiveEvent,
   GitInfoSummary,
   LiveEvent,
   SessionActivity,
@@ -113,6 +114,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const app = express();
   const server = createServer(app);
   const socketsBySession = new Map<string, Set<WebSocket>>();
+  const approvalSockets = new Set<WebSocket>();
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, PendingActionRecord>();
   const liveActivities = new Map<string, Map<string, SessionActivity>>();
@@ -143,6 +145,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
         ? { ...event, seq: allocSeq(sessionId) }
         : event;
     broadcast(socketsBySession, sessionId, stamped);
+  }
+
+  function broadcastApprovalLive(event: ApprovalLiveEvent): void {
+    for (const socket of approvalSockets) {
+      sendEvent(socket, event);
+    }
   }
 
   bridge.on("stderr", (line) => {
@@ -342,9 +350,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
         });
         clearActionsForSession(
           pendingActions,
-          socketsBySession,
           sessionId,
           broadcastLive,
+          broadcastApprovalLive,
         );
         activeTurns.delete(sessionId);
         liveActivities.delete(sessionId);
@@ -375,6 +383,10 @@ export async function startServer(config: NodeConfig): Promise<void> {
     broadcastLive(sessionId, {
       type: "action_opened",
       sessionId,
+      action,
+    });
+    broadcastApprovalLive({
+      type: "action_opened",
       action,
     });
   });
@@ -852,13 +864,21 @@ export async function startServer(config: NodeConfig): Promise<void> {
       sessionId: action.sessionId,
       actionId,
     });
+    broadcastApprovalLive({
+      type: "action_resolved",
+      actionId,
+    });
     response.json({ ok: true });
   }));
 
   const wsServer = new WebSocketServer({ noServer: true });
   server.on("upgrade", (request, socket, head) => {
     const [pathOnly, queryString] = (request.url || "").split("?");
-    if (pathOnly !== "/api/live" && pathOnly !== "/api/fs/live") {
+    if (
+      pathOnly !== "/api/live" &&
+      pathOnly !== "/api/fs/live" &&
+      pathOnly !== "/api/actions/live"
+    ) {
       socket.destroy();
       return;
     }
@@ -876,6 +896,27 @@ export async function startServer(config: NodeConfig): Promise<void> {
         attachFsLiveSocket(ws, fsWatchRegistry, {
           bridge,
           listSessions: () => listSessions(bridge, runtimeCache),
+        });
+      });
+      return;
+    }
+
+    if (pathOnly === "/api/actions/live") {
+      wsServer.handleUpgrade(request, socket, head, (ws) => {
+        approvalSockets.add(ws);
+        sendEvent(ws, { type: "hello" });
+        void listPendingActions(bridge, pendingActions)
+          .then((actions) => {
+            sendEvent(ws, { type: "snapshot", actions });
+          })
+          .catch((error: unknown) => {
+            sendEvent(ws, {
+              type: "error",
+              message: error instanceof Error ? error.message : "Failed to load pending actions",
+            });
+          });
+        ws.on("close", () => {
+          approvalSockets.delete(ws);
         });
       });
       return;
@@ -1497,9 +1538,9 @@ function buildActionResponse(action: PendingActionRecord, decision: string | nul
 
 function clearActionsForSession(
   pendingActions: Map<string, PendingActionRecord>,
-  _socketsBySession: Map<string, Set<WebSocket>>,
   sessionId: string,
   broadcastLive: (sessionId: string, event: LiveEvent) => void,
+  broadcastApprovalLive: (event: ApprovalLiveEvent) => void,
 ): void {
   const toDelete = [...pendingActions.values()].filter((action) => action.sessionId === sessionId);
   for (const action of toDelete) {
@@ -1507,6 +1548,10 @@ function clearActionsForSession(
     broadcastLive(sessionId, {
       type: "action_resolved",
       sessionId,
+      actionId: action.id,
+    });
+    broadcastApprovalLive({
+      type: "action_resolved",
       actionId: action.id,
     });
   }
@@ -1546,7 +1591,7 @@ function broadcastSkillsChanged(socketsBySession: Map<string, Set<WebSocket>>): 
   }
 }
 
-function sendEvent(socket: WebSocket, event: LiveEvent): void {
+function sendEvent(socket: WebSocket, event: unknown): void {
   if (socket.readyState === socket.OPEN) {
     socket.send(JSON.stringify(event));
   }

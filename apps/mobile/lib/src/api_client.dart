@@ -252,6 +252,19 @@ class ApiClient {
     );
   }
 
+  IOWebSocketChannel openActionsLive(HostProfile host) {
+    final baseUri = Uri.parse(host.baseUrl);
+    final wsUri = baseUri.replace(
+      scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
+      path: '/api/actions/live',
+    );
+
+    return IOWebSocketChannel.connect(
+      wsUri,
+      headers: {'Authorization': 'Bearer ${host.token}'},
+    );
+  }
+
   Uri fsBlobUri(HostProfile host, String path) {
     return _uri(host, '/api/fs/blob', queryParameters: {'path': path});
   }

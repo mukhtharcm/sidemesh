@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'api_client.dart';
 import 'approval_action_seen_store.dart';
@@ -19,27 +21,28 @@ class PendingActionEntry {
   final PendingAction action;
 }
 
-/// Process-wide store that polls every known host for pending approvals
-/// regardless of which tab the user is currently viewing. This lets the
-/// inbox badge, sidebar pill, and Inbox pane stay in sync without each
-/// surface having to own its own poller.
+/// Process-wide store that tracks pending approvals for every known host.
 ///
-/// Consumers attach via [configure] with the current host list + API
-/// client; the store kicks off an immediate load and keeps polling on a
-/// short interval (15s by default). Reachability is mirrored into
-/// [HostStatusStore] so the existing online/offline dots keep working.
+/// Foreground updates come from one lightweight WebSocket per host. Polling is
+/// still kept as a slower reconciliation path for reconnects, old servers, and
+/// mobile suspension.
 class ApprovalInboxStore extends ChangeNotifier {
   ApprovalInboxStore._();
   static final ApprovalInboxStore instance = ApprovalInboxStore._();
 
-  static const Duration _pollInterval = Duration(seconds: 15);
+  static const Duration _pollInterval = Duration(seconds: 90);
 
   ApiClient? _api;
   List<HostProfile> _hosts = const [];
   List<PendingActionEntry> _entries = const [];
+  final Map<String, PendingActionEntry> _entriesByKey = {};
+  final Map<String, _ApprovalHostLiveConnection> _liveConnections = {};
+  final Set<String> _liveSnapshotHostIds = <String>{};
   Set<String> _seenActionKeys = <String>{};
+  final Set<String> _notifiedActionKeys = <String>{};
   Set<String> _pendingHostIds = <String>{};
   List<String> _failedHostLabels = const [];
+  bool? _seenStoreInitializedBaseline;
   bool _hasLoadedOnce = false;
   int _loadGen = 0;
   Timer? _pollTimer;
@@ -52,16 +55,17 @@ class ApprovalInboxStore extends ChangeNotifier {
   int get totalHosts => _hosts.length;
   List<String> get failedHostLabels => _failedHostLabels;
 
-  /// Update the host list / api client. Safe to call repeatedly; only kicks
-  /// off a new load when the host set actually changes or we haven't loaded
-  /// yet. Always (re-)arms the poll timer.
+  /// Update the host list / api client. Safe to call repeatedly; starts or
+  /// stops per-host live sockets as needed and keeps the reconcile timer armed.
   void configure({required List<HostProfile> hosts, required ApiClient api}) {
     _api = api;
-    final newIds = hosts.map((h) => h.id).toSet();
-    final oldIds = _hosts.map((h) => h.id).toSet();
+    final newSignatures = hosts.map(_hostSignature).toSet();
+    final oldSignatures = _hosts.map(_hostSignature).toSet();
     final hostsChanged =
-        newIds.length != oldIds.length || !newIds.containsAll(oldIds);
+        newSignatures.length != oldSignatures.length ||
+        !newSignatures.containsAll(oldSignatures);
     _hosts = List.unmodifiable(hosts);
+    _syncLiveConnections(hosts: _hosts, api: api);
     _ensureTimer();
     if (hostsChanged || !_hasLoadedOnce) {
       unawaited(refresh());
@@ -82,7 +86,10 @@ class ApprovalInboxStore extends ChangeNotifier {
 
     if (hosts.isEmpty) {
       _entries = const [];
+      _entriesByKey.clear();
+      _liveSnapshotHostIds.clear();
       _seenActionKeys = <String>{};
+      _notifiedActionKeys.clear();
       _pendingHostIds = <String>{};
       _failedHostLabels = const [];
       _hasLoadedOnce = true;
@@ -101,12 +108,14 @@ class ApprovalInboxStore extends ChangeNotifier {
 
     final collected = <PendingActionEntry>[];
     final failures = <String>[];
+    final successfulHostIds = <String>{};
     await Future.wait(
       hosts.map((host) async {
         try {
           final actions = await api.fetchPendingActions(host);
           if (gen != _loadGen) return;
           HostStatusStore.instance.markOnline(host.id);
+          successfulHostIds.add(host.id);
           collected.addAll(
             actions.map((a) => PendingActionEntry(host: host, action: a)),
           );
@@ -126,37 +135,153 @@ class ApprovalInboxStore extends ChangeNotifier {
       }),
     );
     if (gen != _loadGen) return;
-    collected.sort(
-      (a, b) => b.action.requestedAt.compareTo(a.action.requestedAt),
-    );
-    final seenStore = ApprovalActionSeenStore.instance;
-    final seenSnapshot = await seenStore.load();
-    final seenKeys = _hasLoadedOnce
-        ? <String>{...seenSnapshot.keys, ..._seenActionKeys}
-        : seenSnapshot.keys;
-    final shouldNotify = _hasLoadedOnce || seenSnapshot.initialized;
-    _syncLiveActivity(collected);
-    _notifyForNewActions(
-      collected,
-      seenKeys: seenKeys,
-      shouldNotify: shouldNotify,
-    );
-    _entries = List.unmodifiable(collected);
-    _seenActionKeys = collected.map(_actionKey).toSet();
-    await seenStore.replace(_seenActionKeys);
+    _replaceSuccessfulHostEntries(successfulHostIds, collected);
+    await _notifyForNewActions(collected);
+    await _persistCurrentActionKeys();
     _failedHostLabels = List.unmodifiable(failures);
     _hasLoadedOnce = true;
-    notifyListeners();
+    _publishEntries();
   }
 
   /// Optimistically drop an entry from the local view (e.g. after the user
   /// approves/declines). The next poll will reconcile with the server.
   void removeEntry(String actionId) {
-    final next = _entries
-        .where((e) => e.action.id != actionId)
+    final keys = _entriesByKey.entries
+        .where((entry) => entry.value.action.id == actionId)
+        .map((entry) => entry.key)
         .toList(growable: false);
-    if (next.length == _entries.length) return;
-    _entries = List.unmodifiable(next);
+    if (keys.isEmpty) return;
+    for (final key in keys) {
+      _entriesByKey.remove(key);
+    }
+    unawaited(_persistCurrentActionKeys());
+    _publishEntries();
+  }
+
+  void _syncLiveConnections({
+    required List<HostProfile> hosts,
+    required ApiClient api,
+  }) {
+    final activeIds = hosts.map((host) => host.id).toSet();
+    for (final id in _liveConnections.keys.toList(growable: false)) {
+      if (activeIds.contains(id)) continue;
+      _liveConnections.remove(id)?.dispose();
+      _liveSnapshotHostIds.remove(id);
+      _removeEntriesForHost(id);
+    }
+
+    for (final host in hosts) {
+      final existing = _liveConnections[host.id];
+      if (existing != null && existing.matches(host)) {
+        continue;
+      }
+      existing?.dispose();
+      _liveSnapshotHostIds.remove(host.id);
+      final connection = _ApprovalHostLiveConnection(
+        host: host,
+        api: api,
+        onOnline: _handleLiveOnline,
+        onOffline: _handleLiveOffline,
+        onSnapshot: _handleLiveSnapshot,
+        onActionOpened: _handleLiveActionOpened,
+        onActionResolved: _handleLiveActionResolved,
+      );
+      _liveConnections[host.id] = connection;
+      connection.connect();
+    }
+  }
+
+  void _handleLiveOnline(HostProfile host) {
+    HostStatusStore.instance.markOnline(host.id);
+  }
+
+  void _handleLiveOffline(HostProfile host, Object? error) {
+    // Polling owns host reachability. Live approval sockets are an optional
+    // fast path, so old servers or transient socket drops should not make an
+    // otherwise healthy host look offline.
+  }
+
+  void _handleLiveSnapshot(HostProfile host, List<PendingAction> actions) {
+    final isInitialHostSnapshot = _liveSnapshotHostIds.add(host.id);
+    unawaited(
+      _applyHostSnapshot(
+        host,
+        actions,
+        allowCurrentSessionNotification: !isInitialHostSnapshot,
+      ),
+    );
+  }
+
+  void _handleLiveActionOpened(HostProfile host, PendingAction action) {
+    unawaited(_upsertLiveAction(host, action));
+  }
+
+  void _handleLiveActionResolved(HostProfile host, String actionId) {
+    final removed = _entriesByKey.remove(_actionKeyFor(host.id, actionId));
+    if (removed == null) return;
+    unawaited(_persistCurrentActionKeys());
+    _publishEntries();
+  }
+
+  Future<void> _applyHostSnapshot(
+    HostProfile host,
+    List<PendingAction> actions, {
+    required bool allowCurrentSessionNotification,
+  }) async {
+    final entries = actions
+        .map((action) => PendingActionEntry(host: host, action: action))
+        .toList(growable: false);
+    _replaceSuccessfulHostEntries({host.id}, entries);
+    await _notifyForNewActions(
+      entries,
+      allowCurrentSessionNotification: allowCurrentSessionNotification,
+    );
+    await _persistCurrentActionKeys();
+    _failedHostLabels = _failedHostLabels
+        .where((label) => label != host.label)
+        .toList(growable: false);
+    _hasLoadedOnce = true;
+    _publishEntries();
+  }
+
+  Future<void> _upsertLiveAction(HostProfile host, PendingAction action) async {
+    final entry = PendingActionEntry(host: host, action: action);
+    final key = _actionKey(entry);
+    final existed = _entriesByKey.containsKey(key);
+    _entriesByKey[key] = entry;
+    if (!existed) {
+      await _notifyForNewActions([entry]);
+    }
+    await _persistCurrentActionKeys();
+    _hasLoadedOnce = true;
+    _publishEntries();
+  }
+
+  void _replaceSuccessfulHostEntries(
+    Set<String> successfulHostIds,
+    List<PendingActionEntry> entries,
+  ) {
+    for (final hostId in successfulHostIds) {
+      _removeEntriesForHost(hostId);
+    }
+    for (final entry in entries) {
+      _entriesByKey[_actionKey(entry)] = entry;
+    }
+  }
+
+  void _removeEntriesForHost(String hostId) {
+    final prefix = '$hostId:';
+    for (final key in _entriesByKey.keys.toList(growable: false)) {
+      if (key.startsWith(prefix)) {
+        _entriesByKey.remove(key);
+      }
+    }
+  }
+
+  void _publishEntries() {
+    final sorted = _entriesByKey.values.toList(growable: false)
+      ..sort((a, b) => b.action.requestedAt.compareTo(a.action.requestedAt));
+    _entries = List.unmodifiable(sorted);
     _syncLiveActivity(_entries);
     notifyListeners();
   }
@@ -177,14 +302,27 @@ class ApprovalInboxStore extends ChangeNotifier {
     );
   }
 
-  void _notifyForNewActions(
+  Future<void> _notifyForNewActions(
     List<PendingActionEntry> entries, {
-    required Set<String> seenKeys,
-    required bool shouldNotify,
-  }) {
+    bool allowCurrentSessionNotification = true,
+  }) async {
+    if (entries.isEmpty) return;
+    final seenSnapshot = await ApprovalActionSeenStore.instance.load();
+    _seenStoreInitializedBaseline ??= seenSnapshot.initialized;
+    final shouldNotify =
+        (allowCurrentSessionNotification && _hasLoadedOnce) ||
+        _seenStoreInitializedBaseline!;
     if (!shouldNotify) return;
+    final seenKeys = <String>{
+      ...seenSnapshot.keys,
+      ..._seenActionKeys,
+      ..._notifiedActionKeys,
+    };
     for (final entry in entries) {
-      if (seenKeys.contains(_actionKey(entry))) continue;
+      final key = _actionKey(entry);
+      if (seenKeys.contains(key)) continue;
+      seenKeys.add(key);
+      _notifiedActionKeys.add(key);
       unawaited(
         LocalNotificationService.instance.showPendingApproval(
           host: entry.host,
@@ -194,7 +332,138 @@ class ApprovalInboxStore extends ChangeNotifier {
     }
   }
 
+  Future<void> _persistCurrentActionKeys() async {
+    _seenActionKeys = _entriesByKey.keys.toSet();
+    await ApprovalActionSeenStore.instance.replace(_seenActionKeys);
+  }
+
   String _actionKey(PendingActionEntry entry) {
-    return '${entry.host.id}:${entry.action.id}';
+    return _actionKeyFor(entry.host.id, entry.action.id);
+  }
+
+  String _actionKeyFor(String hostId, String actionId) {
+    return '$hostId:$actionId';
+  }
+
+  String _hostSignature(HostProfile host) {
+    return '${host.id}|${host.label}|${host.baseUrl}|${host.token}';
+  }
+}
+
+class _ApprovalHostLiveConnection {
+  _ApprovalHostLiveConnection({
+    required this.host,
+    required this.api,
+    required this.onOnline,
+    required this.onOffline,
+    required this.onSnapshot,
+    required this.onActionOpened,
+    required this.onActionResolved,
+  });
+
+  final HostProfile host;
+  final ApiClient api;
+  final void Function(HostProfile host) onOnline;
+  final void Function(HostProfile host, Object? error) onOffline;
+  final void Function(HostProfile host, List<PendingAction> actions) onSnapshot;
+  final void Function(HostProfile host, PendingAction action) onActionOpened;
+  final void Function(HostProfile host, String actionId) onActionResolved;
+
+  WebSocketChannel? _channel;
+  StreamSubscription<dynamic>? _subscription;
+  Timer? _reconnectTimer;
+  bool _disposed = false;
+  int _attempt = 0;
+
+  bool matches(HostProfile next) =>
+      host.id == next.id &&
+      host.baseUrl == next.baseUrl &&
+      host.token == next.token;
+
+  void connect() {
+    if (_disposed) return;
+    try {
+      _channel = api.openActionsLive(host);
+      _subscription = _channel!.stream.listen(
+        _handleMessage,
+        onError: (Object error) => _scheduleReconnect(error),
+        onDone: () => _scheduleReconnect(null),
+      );
+      _attempt = 0;
+    } catch (error) {
+      _scheduleReconnect(error);
+    }
+  }
+
+  void _handleMessage(dynamic raw) {
+    if (raw is! String) return;
+    try {
+      final decoded = (jsonDecode(raw) as Map).cast<String, dynamic>();
+      switch (decoded['type']?.toString()) {
+        case 'hello':
+          onOnline(host);
+        case 'snapshot':
+          onOnline(host);
+          final actions = (decoded['actions'] as List<dynamic>? ?? const [])
+              .whereType<Map<dynamic, dynamic>>()
+              .map(
+                (item) => PendingAction.fromJson(item.cast<String, dynamic>()),
+              )
+              .toList(growable: false);
+          onSnapshot(host, actions);
+        case 'action_opened':
+          onOnline(host);
+          final action = decoded['action'];
+          if (action is Map<dynamic, dynamic>) {
+            onActionOpened(
+              host,
+              PendingAction.fromJson(action.cast<String, dynamic>()),
+            );
+          }
+        case 'action_resolved':
+          onOnline(host);
+          final actionId = decoded['actionId']?.toString();
+          if (actionId != null && actionId.isNotEmpty) {
+            onActionResolved(host, actionId);
+          }
+        case 'error':
+          onOffline(host, decoded['message']?.toString());
+      }
+    } catch (error) {
+      debugPrint('Ignored malformed approval live event: $error');
+    }
+  }
+
+  void _scheduleReconnect(Object? error) {
+    if (_disposed) return;
+    _subscription?.cancel();
+    _subscription = null;
+    _channel = null;
+    onOffline(host, error);
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(_backoffDelay(), connect);
+  }
+
+  Duration _backoffDelay() {
+    const delays = <Duration>[
+      Duration(seconds: 1),
+      Duration(seconds: 2),
+      Duration(seconds: 5),
+      Duration(seconds: 10),
+      Duration(seconds: 30),
+    ];
+    final delay = delays[_attempt.clamp(0, delays.length - 1).toInt()];
+    _attempt++;
+    return delay;
+  }
+
+  void dispose() {
+    _disposed = true;
+    _reconnectTimer?.cancel();
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
+    final sink = _channel?.sink;
+    if (sink != null) {
+      unawaited(sink.close());
+    }
   }
 }
