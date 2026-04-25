@@ -73,6 +73,7 @@ class _SessionScreenState extends State<SessionScreen>
   static const _messagePageSize = 120;
   static const _activityPageSize = 80;
   static const _liveUpdateFlushInterval = Duration(milliseconds: 48);
+  static const _sessionCacheWriteDebounce = Duration(milliseconds: 900);
   static const _maxDraftImageCount = 4;
   static const _maxDraftImageBytes = 5 * 1024 * 1024;
   static const _maxDraftPayloadBytes = 9 * 1024 * 1024;
@@ -124,6 +125,7 @@ class _SessionScreenState extends State<SessionScreen>
   IOWebSocketChannel? _channel;
   StreamSubscription? _subscription;
   Timer? _liveFlushTimer;
+  Timer? _sessionCachePersistTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   bool _disposed = false;
@@ -329,9 +331,11 @@ class _SessionScreenState extends State<SessionScreen>
     // anything that streamed in during the last turn counts as read on
     // the way out.
     _markCurrentSessionSeen();
+    _persistCurrentSessionLog();
     unawaited(_readStore.flush());
     WidgetsBinding.instance.removeObserver(this);
     _reconnectTimer?.cancel();
+    _sessionCachePersistTimer?.cancel();
     _composerController.removeListener(_handleComposerChanged);
     _searchController.removeListener(_handleSearchChanged);
     _pinsStore.removeListener(_handlePinsChanged);
@@ -955,6 +959,8 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _persistCurrentSessionLog() {
+    _sessionCachePersistTimer?.cancel();
+    _sessionCachePersistTimer = null;
     final session = _session;
     if (session == null) {
       return;
@@ -971,6 +977,14 @@ class _SessionScreenState extends State<SessionScreen>
         ),
       ),
     );
+  }
+
+  void _schedulePersistCurrentSessionLog() {
+    _sessionCachePersistTimer?.cancel();
+    _sessionCachePersistTimer = Timer(_sessionCacheWriteDebounce, () {
+      _sessionCachePersistTimer = null;
+      _persistCurrentSessionLog();
+    });
   }
 
   Future<void> _loadOlderTranscript() async {
@@ -1228,6 +1242,7 @@ class _SessionScreenState extends State<SessionScreen>
         });
         _refreshThinkingState();
         _syncSessionLiveActivity();
+        _persistCurrentSessionLog();
       case 'action_resolved':
         setState(() {
           _pendingAction = null;
@@ -1235,13 +1250,13 @@ class _SessionScreenState extends State<SessionScreen>
         });
         _refreshThinkingState();
         _syncSessionLiveActivity();
+        _persistCurrentSessionLog();
       case 'skills_changed':
         unawaited(_loadSkills(forceReload: true));
       case 'hello':
       case 'error':
         break;
     }
-    _persistCurrentSessionLog();
   }
 
   bool _shouldShowThinking() {
@@ -1355,7 +1370,7 @@ class _SessionScreenState extends State<SessionScreen>
       });
     }
     _syncSessionLiveActivity();
-    _persistCurrentSessionLog();
+    _schedulePersistCurrentSessionLog();
     _scrollToBottomFast();
   }
 

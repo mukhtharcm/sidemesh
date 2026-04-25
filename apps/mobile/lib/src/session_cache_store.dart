@@ -95,10 +95,12 @@ class SessionCacheStore {
       'cachedAt': DateTime.now().millisecondsSinceEpoch,
       'log': log.toJson(),
     });
+    final key = _logKey(host, log.session.id);
     if (encoded.length > _maxSessionLogCacheChars) {
+      await prefs.remove(key);
       return;
     }
-    await prefs.setString(_logKey(host, log.session.id), encoded);
+    await prefs.setString(key, encoded);
   }
 
   String _recentKey(HostProfile host) => '$_recentPrefix:${host.id}';
