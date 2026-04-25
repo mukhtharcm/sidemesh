@@ -9,6 +9,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
+import 'package:super_clipboard/super_clipboard.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/io.dart';
 
@@ -84,6 +85,15 @@ class _SessionScreenState extends State<SessionScreen>
   static const _maxDraftImageBytes = 5 * 1024 * 1024;
   static const _maxDraftPayloadBytes = 9 * 1024 * 1024;
   static const _maxDecodedDraftImageBytes = 18 * 1024 * 1024;
+  static const List<FileFormat> _clipboardImageFormats = <FileFormat>[
+    Formats.png,
+    Formats.jpeg,
+    Formats.webp,
+    Formats.gif,
+    Formats.bmp,
+    Formats.heic,
+    Formats.heif,
+  ];
 
   final _composerController = TextEditingController();
   final _searchController = TextEditingController();
@@ -1565,41 +1575,17 @@ class _SessionScreenState extends State<SessionScreen>
         continue;
       }
 
-      final prepared = await _prepareDraftImageAttachment(
+      final result = await _appendDraftImageAttachment(
+        nextAttachments: nextAttachments,
+        totalBytes: totalBytes,
         name: file.name.isEmpty ? 'image' : file.name,
         mimeType: mimeType,
         bytes: bytes,
       );
-      if (!mounted) {
-        return;
-      }
-      if (prepared.bytes.length > _maxDraftImageBytes) {
-        showAppSnackBar(
-          context,
-          '${prepared.name} is still larger than 5 MB after compression.',
-        );
-        continue;
-      }
-      if (totalBytes + prepared.bytes.length > _maxDraftPayloadBytes) {
-        showAppSnackBar(
-          context,
-          'Attached images are too large for one message. Remove one or pick a smaller file.',
-        );
+      totalBytes = result.totalBytes;
+      if (result.shouldStop) {
         break;
       }
-
-      final dataUrl =
-          'data:${prepared.mimeType};base64,${base64Encode(prepared.bytes)}';
-      nextAttachments.add(
-        _ComposerImageAttachment(
-          id: 'draft-${DateTime.now().microsecondsSinceEpoch}-${nextAttachments.length}',
-          name: prepared.name,
-          mimeType: prepared.mimeType,
-          bytes: prepared.bytes,
-          dataUrl: dataUrl,
-        ),
-      );
-      totalBytes += prepared.bytes.length;
     }
 
     if (!mounted) {
@@ -1615,6 +1601,125 @@ class _SessionScreenState extends State<SessionScreen>
       return file.bytes;
     }
     return file.xFile.readAsBytes();
+  }
+
+  Future<void> _pasteComposerImage() async {
+    if (_sending) {
+      return;
+    }
+
+    try {
+      final clipboard = SystemClipboard.instance;
+      if (clipboard == null) {
+        if (!mounted) return;
+        showAppSnackBar(
+          context,
+          'Clipboard image paste is not supported here.',
+        );
+        return;
+      }
+      final clipboardImage = await _readClipboardImage(clipboard);
+      if (!mounted) {
+        return;
+      }
+      if (clipboardImage == null) {
+        showAppSnackBar(context, 'Clipboard does not contain an image.');
+        return;
+      }
+
+      final nextAttachments = List<_ComposerImageAttachment>.from(
+        _draftAttachments,
+      );
+      if (nextAttachments.length >= _maxDraftImageCount) {
+        showAppSnackBar(
+          context,
+          'You can attach up to $_maxDraftImageCount images per message.',
+        );
+        return;
+      }
+
+      final totalBytes = nextAttachments.fold<int>(
+        0,
+        (sum, item) => sum + item.byteLength,
+      );
+      final result = await _appendDraftImageAttachment(
+        nextAttachments: nextAttachments,
+        totalBytes: totalBytes,
+        name: clipboardImage.name,
+        mimeType: clipboardImage.mimeType,
+        bytes: clipboardImage.bytes,
+      );
+      if (!result.added) {
+        return;
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _draftAttachments = nextAttachments;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      showAppSnackBar(
+        context,
+        'Failed to paste image: ${friendlyError(error)}',
+      );
+    }
+  }
+
+  Future<_ClipboardImageData?> _readClipboardImage(
+    SystemClipboard clipboard,
+  ) async {
+    final reader = await clipboard.read();
+    for (final format in _clipboardImageFormats) {
+      if (!reader.canProvide(format)) {
+        continue;
+      }
+      final image = await _readClipboardImageForFormat(reader, format);
+      if (image != null) {
+        return image;
+      }
+    }
+    return null;
+  }
+
+  Future<_ClipboardImageData?> _readClipboardImageForFormat(
+    ClipboardReader reader,
+    FileFormat format,
+  ) {
+    final completer = Completer<_ClipboardImageData?>();
+    final progress = reader.getFile(
+      format,
+      (file) async {
+        final bytes = await file.readAll();
+        if (completer.isCompleted) {
+          return;
+        }
+        completer.complete(
+          _ClipboardImageData(
+            name:
+                file.fileName ??
+                'pasted-image${_imageExtensionForMimeType(_mimeTypeForClipboardFormat(format))}',
+            mimeType: _mimeTypeForClipboardFormat(format),
+            bytes: bytes,
+          ),
+        );
+      },
+      onError: (error) {
+        if (!completer.isCompleted) {
+          completer.completeError(error);
+        }
+      },
+    );
+    if (progress == null) {
+      return Future<_ClipboardImageData?>.value(null);
+    }
+    return completer.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => null,
+    );
   }
 
   Future<_PreparedDraftImage> _prepareDraftImageAttachment({
@@ -1633,6 +1738,69 @@ class _SessionScreenState extends State<SessionScreen>
       mimeType: payload['mimeType'] as String,
       bytes: payload['bytes'] as Uint8List,
     );
+  }
+
+  Future<_DraftImageAppendResult> _appendDraftImageAttachment({
+    required List<_ComposerImageAttachment> nextAttachments,
+    required int totalBytes,
+    required String name,
+    required String mimeType,
+    required Uint8List bytes,
+  }) async {
+    if (bytes.isEmpty) {
+      if (mounted) {
+        showAppSnackBar(
+          context,
+          'Could not read ${name.isEmpty ? 'that image' : name}.',
+        );
+      }
+      return _DraftImageAppendResult.skipped(totalBytes);
+    }
+    if (bytes.length > _maxDecodedDraftImageBytes) {
+      if (mounted) {
+        showAppSnackBar(
+          context,
+          '${name.isEmpty ? 'That image' : name} is too large to process on-device.',
+        );
+      }
+      return _DraftImageAppendResult.skipped(totalBytes);
+    }
+
+    final prepared = await _prepareDraftImageAttachment(
+      name: name,
+      mimeType: mimeType,
+      bytes: bytes,
+    );
+    if (!mounted) {
+      return _DraftImageAppendResult.skipped(totalBytes);
+    }
+    if (prepared.bytes.length > _maxDraftImageBytes) {
+      showAppSnackBar(
+        context,
+        '${prepared.name} is still larger than 5 MB after compression.',
+      );
+      return _DraftImageAppendResult.skipped(totalBytes);
+    }
+    if (totalBytes + prepared.bytes.length > _maxDraftPayloadBytes) {
+      showAppSnackBar(
+        context,
+        'Attached images are too large for one message. Remove one or pick a smaller file.',
+      );
+      return _DraftImageAppendResult.stop(totalBytes);
+    }
+
+    final dataUrl =
+        'data:${prepared.mimeType};base64,${base64Encode(prepared.bytes)}';
+    nextAttachments.add(
+      _ComposerImageAttachment(
+        id: 'draft-${DateTime.now().microsecondsSinceEpoch}-${nextAttachments.length}',
+        name: prepared.name,
+        mimeType: prepared.mimeType,
+        bytes: prepared.bytes,
+        dataUrl: dataUrl,
+      ),
+    );
+    return _DraftImageAppendResult.added(totalBytes + prepared.bytes.length);
   }
 
   void _removeDraftAttachment(String attachmentId) {
@@ -1667,6 +1835,38 @@ class _SessionScreenState extends State<SessionScreen>
       return 'image/heif';
     }
     return null;
+  }
+
+  String _mimeTypeForClipboardFormat(FileFormat format) {
+    if (identical(format, Formats.png)) return 'image/png';
+    if (identical(format, Formats.jpeg)) return 'image/jpeg';
+    if (identical(format, Formats.webp)) return 'image/webp';
+    if (identical(format, Formats.gif)) return 'image/gif';
+    if (identical(format, Formats.bmp)) return 'image/bmp';
+    if (identical(format, Formats.heic)) return 'image/heic';
+    if (identical(format, Formats.heif)) return 'image/heif';
+    return 'image/png';
+  }
+
+  String _imageExtensionForMimeType(String mimeType) {
+    switch (mimeType) {
+      case 'image/jpeg':
+        return '.jpg';
+      case 'image/png':
+        return '.png';
+      case 'image/webp':
+        return '.webp';
+      case 'image/gif':
+        return '.gif';
+      case 'image/bmp':
+        return '.bmp';
+      case 'image/heic':
+        return '.heic';
+      case 'image/heif':
+        return '.heif';
+      default:
+        return '.png';
+    }
   }
 
   List<SessionInputItem> _buildComposerInputItems(
@@ -3217,6 +3417,7 @@ class _SessionScreenState extends State<SessionScreen>
           skillError: _skillsError,
           sending: _sending,
           onPickImages: _pickComposerImages,
+          onPasteImage: () => unawaited(_pasteComposerImage()),
           onRemoveAttachment: _removeDraftAttachment,
           onSelectSkill: _insertSkillMention,
           onRemoveSkill: _removeDraftSkillMention,
@@ -4699,6 +4900,7 @@ class _Composer extends StatelessWidget {
     required this.skillError,
     required this.sending,
     required this.onPickImages,
+    required this.onPasteImage,
     required this.onRemoveAttachment,
     required this.onSelectSkill,
     required this.onRemoveSkill,
@@ -4717,6 +4919,7 @@ class _Composer extends StatelessWidget {
   final String? skillError;
   final bool sending;
   final VoidCallback onPickImages;
+  final VoidCallback onPasteImage;
   final ValueChanged<String> onRemoveAttachment;
   final ValueChanged<SkillSummary> onSelectSkill;
   final ValueChanged<String> onRemoveSkill;
@@ -4754,6 +4957,16 @@ class _Composer extends StatelessWidget {
       // than its default newline handler.
       field = CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(
+            LogicalKeyboardKey.keyV,
+            control: true,
+            shift: true,
+          ): onPasteImage,
+          const SingleActivator(
+            LogicalKeyboardKey.keyV,
+            meta: true,
+            shift: true,
+          ): onPasteImage,
           const SingleActivator(LogicalKeyboardKey.enter): () {
             if (!sending) onSend();
           },
@@ -4786,6 +4999,8 @@ class _Composer extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
+            const SizedBox(width: 8),
+            _ComposerPasteButton(enabled: !sending, onPressed: onPasteImage),
             const SizedBox(width: 8),
             Expanded(
               child: Container(
@@ -4893,6 +5108,47 @@ class _ComposerAttachButton extends StatelessWidget {
               Icons.add_photo_alternate_outlined,
               color: enabled ? colors.accent : colors.textTertiary,
               size: 22,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerPasteButton extends StatelessWidget {
+  const _ComposerPasteButton({required this.enabled, required this.onPressed});
+
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final isApplePlatform =
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+    final shortcutLabel = isApplePlatform ? 'Shift+Cmd+V' : 'Shift+Ctrl+V';
+    return Tooltip(
+      message: 'Paste image from clipboard ($shortcutLabel)',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: enabled ? onPressed : null,
+          child: Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: colors.surfaceMuted,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: colors.border),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.content_paste_rounded,
+              color: enabled ? colors.accent : colors.textTertiary,
+              size: 21,
             ),
           ),
         ),
@@ -5365,6 +5621,39 @@ class _ActiveComposerSkillQuery {
 
 class _PreparedDraftImage {
   const _PreparedDraftImage({
+    required this.name,
+    required this.mimeType,
+    required this.bytes,
+  });
+
+  final String name;
+  final String mimeType;
+  final Uint8List bytes;
+}
+
+class _DraftImageAppendResult {
+  const _DraftImageAppendResult._({
+    required this.totalBytes,
+    required this.added,
+    required this.shouldStop,
+  });
+
+  const _DraftImageAppendResult.added(int totalBytes)
+    : this._(totalBytes: totalBytes, added: true, shouldStop: false);
+
+  const _DraftImageAppendResult.skipped(int totalBytes)
+    : this._(totalBytes: totalBytes, added: false, shouldStop: false);
+
+  const _DraftImageAppendResult.stop(int totalBytes)
+    : this._(totalBytes: totalBytes, added: false, shouldStop: true);
+
+  final int totalBytes;
+  final bool added;
+  final bool shouldStop;
+}
+
+class _ClipboardImageData {
+  const _ClipboardImageData({
     required this.name,
     required this.mimeType,
     required this.bytes,
