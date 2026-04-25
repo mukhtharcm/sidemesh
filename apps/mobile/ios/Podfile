@@ -46,4 +46,25 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
   end
+
+  rust_archive_flag = '-force_load ${PODS_CONFIGURATION_BUILD_DIR}/super_native_extensions/libsuper_native_extensions.a'
+  Dir.glob(File.join(__dir__, 'Pods', 'Target Support Files', 'Pods-Runner', 'Pods-Runner*.xcconfig')).each do |path|
+    contents = File.read(path)
+    next if contents.include?(rust_archive_flag)
+
+    updated = contents.gsub(
+      /^OTHER_LDFLAGS = (.+)$/,
+      "OTHER_LDFLAGS = \\1 #{rust_archive_flag}",
+    )
+    File.write(path, updated)
+  end
+
+  installer.aggregate_targets.each do |aggregate_target|
+    aggregate_target.xcconfigs.each_value do |xcconfig|
+      other_ldflags = xcconfig.attributes['OTHER_LDFLAGS'] || '$(inherited)'
+      unless other_ldflags.include?(rust_archive_flag)
+        xcconfig.attributes['OTHER_LDFLAGS'] = "#{other_ldflags} #{rust_archive_flag}"
+      end
+    end
+  end
 end
