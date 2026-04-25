@@ -13,6 +13,7 @@ import 'package:web_socket_channel/io.dart';
 
 import '../api_client.dart';
 import '../fs_languages.dart';
+import '../live_activity_service.dart';
 import '../models.dart';
 import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
@@ -812,6 +813,7 @@ class _SessionScreenState extends State<SessionScreen>
         }
       });
       _refreshThinkingState();
+      _syncSessionLiveActivity();
       _markCurrentSessionSeen();
       // Replay live events that landed during the fetch so action_opened /
       // activity_updated aren't silently dropped.
@@ -898,6 +900,7 @@ class _SessionScreenState extends State<SessionScreen>
         }
       });
       _refreshThinkingState();
+      _syncSessionLiveActivity();
       _markCurrentSessionSeen();
       return true;
     } catch (_) {
@@ -1073,6 +1076,7 @@ class _SessionScreenState extends State<SessionScreen>
           _awaitingAssistantReply = true;
         });
         _refreshThinkingState();
+        _syncSessionLiveActivity();
         _scrollToBottomFast();
       case 'turn_started':
         setState(() {
@@ -1081,6 +1085,7 @@ class _SessionScreenState extends State<SessionScreen>
               _liveAssistantText.isEmpty && _pendingAction == null;
         });
         _refreshThinkingState();
+        _syncSessionLiveActivity();
       case 'assistant_delta':
         final delta = event.delta;
         if (delta == null || delta.isEmpty) {
@@ -1104,6 +1109,7 @@ class _SessionScreenState extends State<SessionScreen>
               phase == 'commentary' && _running && _pendingAction == null;
         });
         _refreshThinkingState();
+        _syncSessionLiveActivity();
         _scrollToBottomFast();
       case 'turn_completed':
         _flushPendingLiveUpdates();
@@ -1126,6 +1132,7 @@ class _SessionScreenState extends State<SessionScreen>
           _clearLiveAssistantMessage();
         });
         _thinkingNotifier.value = false;
+        _syncSessionLiveActivity();
         // Background reconcile; do not block UI. Delayed enough for Codex to
         // finish flushing the rollout .jsonl file — otherwise the snapshot
         // reads a partial file and the new assistant message appears to
@@ -1154,12 +1161,14 @@ class _SessionScreenState extends State<SessionScreen>
           _awaitingAssistantReply = false;
         });
         _refreshThinkingState();
+        _syncSessionLiveActivity();
       case 'action_resolved':
         setState(() {
           _pendingAction = null;
           _awaitingAssistantReply = _running && _liveAssistantText.isEmpty;
         });
         _refreshThinkingState();
+        _syncSessionLiveActivity();
       case 'skills_changed':
         unawaited(_loadSkills(forceReload: true));
       case 'hello':
@@ -1177,6 +1186,46 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _refreshThinkingState() {
     _thinkingNotifier.value = _shouldShowThinking();
+  }
+
+  void _syncSessionLiveActivity({SessionActivity? latestActivity}) {
+    final session = _session ?? widget.session;
+    final pendingAction = _pendingAction;
+    if (!_running && pendingAction == null) {
+      unawaited(
+        LiveActivityService.instance.endPrimarySession(
+          host: widget.host,
+          sessionId: session.id,
+        ),
+      );
+      return;
+    }
+    unawaited(
+      LiveActivityService.instance.syncPrimarySession(
+        host: widget.host,
+        session: session,
+        isRunning: _running,
+        isThinking: _shouldShowThinking(),
+        isResponding: _liveAssistantText.isNotEmpty,
+        pendingAction: pendingAction,
+        latestActivity: latestActivity ?? _latestLiveActivity(),
+      ),
+    );
+  }
+
+  SessionActivity? _latestLiveActivity() {
+    if (_activities.isEmpty) return null;
+    const terminal = {'completed', 'failed', 'declined'};
+    final running = _activities
+        .where((activity) => !terminal.contains(activity.status))
+        .toList(growable: false);
+    final candidates = running.isNotEmpty ? running : _activities;
+    return candidates.reduce((left, right) {
+      if (left.seq != right.seq) {
+        return left.seq > right.seq ? left : right;
+      }
+      return left.createdAt.isAfter(right.createdAt) ? left : right;
+    });
   }
 
   void _scheduleLiveFlush() {
@@ -1238,6 +1287,7 @@ class _SessionScreenState extends State<SessionScreen>
         }
       });
     }
+    _syncSessionLiveActivity();
     _scrollToBottomFast();
   }
 
@@ -1566,6 +1616,7 @@ class _SessionScreenState extends State<SessionScreen>
       _upsertOptimisticMessage(optimisticMessage);
     });
     _refreshThinkingState();
+    _syncSessionLiveActivity();
     _scrollToBottomFast(force: true);
     try {
       final policy = _policyStore.policyFor(widget.host, widget.session.id);
@@ -1616,6 +1667,7 @@ class _SessionScreenState extends State<SessionScreen>
             wasRunning && _liveAssistantText.isEmpty && !stillHasPending;
       });
       _refreshThinkingState();
+      _syncSessionLiveActivity();
       if (_isMacDesktop) {
         _queueComposerFocusRestore();
       }
@@ -1666,6 +1718,7 @@ class _SessionScreenState extends State<SessionScreen>
         _clearLiveAssistantMessage();
       });
       _refreshThinkingState();
+      _syncSessionLiveActivity();
       showAppSnackBar(
         context,
         'Session stopped.',
@@ -1723,6 +1776,7 @@ class _SessionScreenState extends State<SessionScreen>
         return;
       }
       setState(() => _session = updated);
+      _syncSessionLiveActivity();
       SessionOverridesStore.instance.apply(widget.host.id, updated);
     } catch (error) {
       if (!mounted) {
@@ -1760,6 +1814,12 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted) {
         return;
       }
+      unawaited(
+        LiveActivityService.instance.endPrimarySession(
+          host: widget.host,
+          sessionId: widget.session.id,
+        ),
+      );
       final onArchived = widget.onArchived;
       if (onArchived != null) {
         onArchived();
@@ -1843,6 +1903,7 @@ class _SessionScreenState extends State<SessionScreen>
       setState(() {
         _pendingAction = null;
       });
+      _syncSessionLiveActivity();
       final label = switch (decision) {
         'approved' => 'Approved this step',
         'approvedForSession' => 'Approved for the rest of the session',
