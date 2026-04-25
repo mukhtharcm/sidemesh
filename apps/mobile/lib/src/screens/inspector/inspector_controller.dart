@@ -10,6 +10,7 @@ import 'package:flutter/widgets.dart';
 enum InspectorSurfaceKind {
   debug,
   search,
+  resources,
   fileBrowser,
   pinned,
   gitDetails,
@@ -127,8 +128,7 @@ class InspectorScope extends InheritedNotifier<InspectorController> {
   }) : super(notifier: controller);
 
   static InspectorController? maybeOf(BuildContext context) {
-    final scope = context
-        .dependOnInheritedWidgetOfExactType<InspectorScope>();
+    final scope = context.dependOnInheritedWidgetOfExactType<InspectorScope>();
     return scope?.notifier;
   }
 

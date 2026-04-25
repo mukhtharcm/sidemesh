@@ -110,6 +110,19 @@ class ApiClient {
     return SessionLog.fromJson(_decodeObject(response));
   }
 
+  Future<SessionResourcesResponse> fetchResources(
+    HostProfile host,
+    String sessionId,
+  ) async {
+    final response = await _get(
+      host,
+      '/api/sessions/$sessionId/resources',
+      timeout: _transcriptReadTimeout,
+      operation: 'load session resources',
+    );
+    return SessionResourcesResponse.fromJson(_decodeObject(response));
+  }
+
   Future<SessionEventsDelta> fetchEvents(
     HostProfile host,
     String sessionId, {
