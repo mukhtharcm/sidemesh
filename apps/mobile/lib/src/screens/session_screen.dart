@@ -13,6 +13,7 @@ import 'package:web_socket_channel/io.dart';
 
 import '../api_client.dart';
 import '../fs_languages.dart';
+import '../host_status_store.dart';
 import '../live_activity_service.dart';
 import '../models.dart';
 import 'create_session_sheet.dart';
@@ -121,6 +122,8 @@ class _SessionScreenState extends State<SessionScreen>
   bool _sending = false;
   bool _awaitingAssistantReply = false;
   bool _loadingSkills = false;
+  bool _showingCachedSnapshot = false;
+  bool _snapshotRefreshing = false;
   String _searchQuery = '';
   String? _skillsError;
   String? _failedSendRetryClientMessageId;
@@ -142,7 +145,7 @@ class _SessionScreenState extends State<SessionScreen>
   // replay them after the snapshot's setState runs — prevents a stale
   // snapshot from clobbering an already-delivered action_opened / activity.
   final List<LiveEvent> _pendingLiveEvents = <LiveEvent>[];
-  bool _snapshotInFlight = false;
+  int? _snapshotInFlightRequestId;
   int _skillsRequestId = 0;
 
   // Memoized timeline entries so rebuilds that don't change list inputs skip
@@ -169,6 +172,8 @@ class _SessionScreenState extends State<SessionScreen>
   bool _gitStatusLoading = false;
   String? _gitStatusError;
   int _gitStatusRequestId = 0;
+
+  bool get _snapshotInFlight => _snapshotInFlightRequestId != null;
 
   // Inspector (desktop pane-3) lifecycle tracking. Resolved in
   // [didChangeDependencies] so we can addListener/removeListener around
@@ -770,7 +775,10 @@ class _SessionScreenState extends State<SessionScreen>
     final resolvedMessageLimit = messageLimit ?? _messageLimit;
     final resolvedActivityLimit = activityLimit ?? _activityLimit;
     final requestId = ++_snapshotRequestId;
-    _snapshotInFlight = true;
+    _snapshotInFlightRequestId = requestId;
+    if (_showingCachedSnapshot && mounted) {
+      setState(() => _snapshotRefreshing = true);
+    }
     try {
       final log = await widget.api.fetchLog(
         widget.host,
@@ -796,6 +804,8 @@ class _SessionScreenState extends State<SessionScreen>
         _messageLimit = resolvedMessageLimit;
         _activityLimit = resolvedActivityLimit;
         _historyBannerDismissed = false;
+        _showingCachedSnapshot = false;
+        _snapshotRefreshing = false;
         // Prefer a live-delivered pendingAction over a stale snapshot "none".
         // The server only exposes the most-recent action, so if live says one
         // is open we trust it until action_resolved arrives.
@@ -822,6 +832,7 @@ class _SessionScreenState extends State<SessionScreen>
           _lastEventSeq = highestSeq;
         }
       });
+      HostStatusStore.instance.markOnline(widget.host.id);
       _refreshThinkingState();
       _syncSessionLiveActivity();
       _markCurrentSessionSeen();
@@ -840,13 +851,20 @@ class _SessionScreenState extends State<SessionScreen>
       }
       setState(() {
         _loading = false;
+        _snapshotRefreshing = false;
       });
+      HostStatusStore.instance.markOffline(
+        widget.host.id,
+        error: friendlyError(error),
+      );
       showAppSnackBar(
         context,
         "Failed to load session: ${friendlyError(error)}",
       );
     } finally {
-      _snapshotInFlight = false;
+      if (_snapshotInFlightRequestId == requestId) {
+        _snapshotInFlightRequestId = null;
+      }
     }
   }
 
@@ -871,6 +889,8 @@ class _SessionScreenState extends State<SessionScreen>
         _pendingAction = null;
         _running = log.session.isActive;
         _loading = false;
+        _showingCachedSnapshot = true;
+        _snapshotRefreshing = _snapshotInFlight;
         _awaitingAssistantReply =
             log.session.isActive &&
             _liveAssistantText.isEmpty &&
@@ -2625,6 +2645,11 @@ class _SessionScreenState extends State<SessionScreen>
               onRespond: _respondAction,
             ),
           ),
+        if (_showingCachedSnapshot)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: _CachedTranscriptStrip(refreshing: _snapshotRefreshing),
+          ),
         Expanded(
           child: (_loading && timelineEntries.isEmpty)
               ? const MeshLoader()
@@ -3037,6 +3062,55 @@ class _SessionScreenState extends State<SessionScreen>
     return Padding(
       padding: EdgeInsets.only(top: widget.topPadding!),
       child: scaffold,
+    );
+  }
+}
+
+class _CachedTranscriptStrip extends StatelessWidget {
+  const _CachedTranscriptStrip({required this.refreshing});
+
+  final bool refreshing;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: colors.warning.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.warning.withValues(alpha: 0.26)),
+      ),
+      child: Row(
+        children: [
+          if (refreshing)
+            SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.4,
+                color: colors.warning,
+              ),
+            )
+          else
+            Icon(Icons.history_rounded, size: 14, color: colors.warning),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              refreshing
+                  ? 'Cached transcript · refreshing host'
+                  : 'Cached transcript · host not fresh yet',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: monoStyle(
+                color: colors.textSecondary,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -51,29 +51,32 @@ class HostStatusStore extends ChangeNotifier {
     if (current.reachability == HostReachability.probing) return;
     _byHostId[hostId] = current.copyWith(
       reachability: HostReachability.probing,
+      lastChangedAt: DateTime.now(),
     );
     notifyListeners();
   }
 
   void markOnline(String hostId) {
-    final previous = statusFor(hostId).reachability;
+    final current = statusFor(hostId);
     _byHostId[hostId] = HostStatus(
       reachability: HostReachability.online,
       lastChangedAt: DateTime.now(),
     );
-    if (previous != HostReachability.online) {
+    if (current.reachability != HostReachability.online ||
+        current.lastError != null) {
       notifyListeners();
     }
   }
 
   void markOffline(String hostId, {String? error}) {
-    final previous = statusFor(hostId).reachability;
+    final current = statusFor(hostId);
     _byHostId[hostId] = HostStatus(
       reachability: HostReachability.offline,
       lastChangedAt: DateTime.now(),
       lastError: error,
     );
-    if (previous != HostReachability.offline) {
+    if (current.reachability != HostReachability.offline ||
+        current.lastError != error) {
       notifyListeners();
     }
   }
