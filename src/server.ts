@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { hostname, platform } from "node:os";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access, stat } from "node:fs/promises";
 import nodePath from "node:path";
 
@@ -46,10 +46,18 @@ import {
   attachFsLiveSocket,
   registerFsRoutes,
 } from "./fs-routes.js";
+import {
+  SessionInputDedupeStore,
+  type StoredSessionInputDedupeEntry,
+} from "./session-input-dedupe-store.js";
 
 const DEFAULT_SOURCES = ["cli", "vscode", "exec", "appServer"];
 const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
+const SESSION_INPUT_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
+const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
+const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
 interface SessionRuntimeCacheEntry {
   threadUpdatedAt: number;
@@ -80,7 +88,7 @@ interface SessionInputReceipt {
 }
 
 interface SessionInputDedupeEntry {
-  signature: string;
+  signatureHash: string;
   createdAt: number;
   promise?: Promise<SessionInputReceipt>;
   receipt?: SessionInputReceipt;
@@ -136,6 +144,20 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const logCache = new Map<string, SessionLogCacheEntry>();
   const sessionSeqCursor = new Map<string, number>();
   const sessionInputDedupe = new Map<string, SessionInputDedupeEntry>();
+  const sessionInputDedupeStore = await SessionInputDedupeStore.open(
+    nodePath.join(config.stateDir, SESSION_INPUT_DEDUPE_FILE),
+    {
+      ttlMs: SESSION_INPUT_DEDUPE_TTL_MS,
+      limit: SESSION_INPUT_DEDUPE_LIMIT,
+    },
+  );
+  for (const entry of sessionInputDedupeStore.entries()) {
+    sessionInputDedupe.set(entry.key, {
+      signatureHash: entry.signatureHash,
+      createdAt: entry.createdAt,
+      receipt: entry.receipt,
+    });
+  }
   let codexVersion = "unknown";
 
   function allocSeq(sessionId: string): number {
@@ -155,11 +177,18 @@ export async function startServer(config: NodeConfig): Promise<void> {
     return `${sessionId}:${clientMessageId}`;
   }
 
-  function pruneSessionInputDedupe(): void {
+  function pruneSessionInputDedupe(now = Date.now()): void {
+    for (const [key, entry] of sessionInputDedupe) {
+      if (!entry.promise && now - entry.createdAt > SESSION_INPUT_DEDUPE_TTL_MS) {
+        sessionInputDedupe.delete(key);
+      }
+    }
+
     if (sessionInputDedupe.size <= SESSION_INPUT_DEDUPE_LIMIT) {
       return;
     }
     const stale = [...sessionInputDedupe.entries()]
+      .filter(([, entry]) => !entry.promise)
       .sort((left, right) => left[1].createdAt - right[1].createdAt)
       .slice(0, sessionInputDedupe.size - SESSION_INPUT_DEDUPE_LIMIT);
     for (const [key] of stale) {
@@ -738,6 +767,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const text = asString(request.body?.text);
     const input = parseInputItems(request.body?.input);
     const clientMessageId = asString(request.body?.clientMessageId);
+    if (clientMessageId && !isValidClientMessageId(clientMessageId)) {
+      response.status(400).json({
+        error: "clientMessageId must be 1-128 URL-safe characters",
+      });
+      return;
+    }
     const resolvedInput = input.length > 0 ? input : buildLegacyTextInput(text);
     if (resolvedInput.length === 0) {
       response.status(400).json({ error: "input is required" });
@@ -745,17 +780,18 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
 
     const turnOverrides = parseTurnOverrides(request.body);
-    const inputSignature = JSON.stringify({
-      input: resolvedInput,
-      overrides: turnOverrides,
-    });
+    const inputSignatureHash = hashSessionInputSignature(
+      resolvedInput,
+      turnOverrides,
+    );
     const dedupeKey = clientMessageId
       ? sessionInputDedupeKey(sessionId, clientMessageId)
       : null;
     if (dedupeKey) {
+      pruneSessionInputDedupe();
       const existing = sessionInputDedupe.get(dedupeKey);
       if (existing) {
-        if (existing.signature !== inputSignature) {
+        if (existing.signatureHash !== inputSignatureHash) {
           response.status(409).json({
             error: "clientMessageId was already used with different input",
           });
@@ -848,7 +884,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const promise = submit();
     if (dedupeKey) {
       sessionInputDedupe.set(dedupeKey, {
-        signature: inputSignature,
+        signatureHash: inputSignatureHash,
         createdAt: Date.now(),
         promise,
       });
@@ -858,11 +894,21 @@ export async function startServer(config: NodeConfig): Promise<void> {
     try {
       const receipt = await promise;
       if (dedupeKey) {
+        const createdAt =
+          sessionInputDedupe.get(dedupeKey)?.createdAt ?? Date.now();
         sessionInputDedupe.set(dedupeKey, {
-          signature: inputSignature,
-          createdAt: Date.now(),
+          signatureHash: inputSignatureHash,
+          createdAt,
           receipt,
         });
+        await persistSessionInputDedupeReceipt(
+          sessionInputDedupeStore,
+          dedupeKey,
+          inputSignatureHash,
+          createdAt,
+          receipt,
+        );
+        pruneSessionInputDedupe();
       }
       response.json({ ...receipt, replayed: false });
     } catch (error) {
@@ -1380,6 +1426,40 @@ function sanitizeTitle(raw: string): string {
     return "Untitled session";
   }
   return compact.length > 90 ? `${compact.slice(0, 87)}...` : compact;
+}
+
+function hashSessionInputSignature(
+  input: SessionInputItem[],
+  overrides: TurnOverrides,
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({ input, overrides }))
+    .digest("hex");
+}
+
+function isValidClientMessageId(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= CLIENT_MESSAGE_ID_MAX_LENGTH &&
+    CLIENT_MESSAGE_ID_PATTERN.test(value)
+  );
+}
+
+async function persistSessionInputDedupeReceipt(
+  store: SessionInputDedupeStore,
+  key: string,
+  signatureHash: string,
+  createdAt: number,
+  receipt: SessionInputReceipt,
+): Promise<void> {
+  const entry: StoredSessionInputDedupeEntry = {
+    key,
+    signatureHash,
+    createdAt,
+    updatedAt: Date.now(),
+    receipt,
+  };
+  await store.put(entry);
 }
 
 function asInteger(value: unknown): number | null {
