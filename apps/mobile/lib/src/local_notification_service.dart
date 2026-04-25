@@ -133,12 +133,21 @@ class LocalNotificationService with WidgetsBindingObserver {
     return _ensurePermissions();
   }
 
+  Future<bool> checkPermissions() async {
+    if (kIsWeb || !_isSupportedPlatform) return false;
+    await initialize();
+    if (!_initialized) return false;
+    return _checkPermissions(force: true);
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _lifecycleState = state;
   }
 
   bool get _isForeground => _lifecycleState == AppLifecycleState.resumed;
+
+  bool get isSupported => !kIsWeb && _isSupportedPlatform;
 
   bool get _isSupportedPlatform {
     return defaultTargetPlatform == TargetPlatform.android ||
@@ -195,8 +204,8 @@ class LocalNotificationService with WidgetsBindingObserver {
     return granted;
   }
 
-  Future<bool> _checkPermissions() async {
-    if (_permissionsRequested) return _notificationsAllowed;
+  Future<bool> _checkPermissions({bool force = false}) async {
+    if (!force && _permissionsRequested) return _notificationsAllowed;
     try {
       final bool granted;
       switch (defaultTargetPlatform) {

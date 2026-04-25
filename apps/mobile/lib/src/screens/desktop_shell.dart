@@ -11,6 +11,7 @@ import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/notification_permission_banner.dart';
 import '../widgets/appearance_sheet.dart';
 import 'create_session_sheet.dart';
 import 'home_screen.dart';
@@ -809,6 +810,10 @@ class _Sidebar extends StatelessWidget {
                 focusNode: searchFocus,
                 onClear: onClearSearch,
               ),
+            ),
+            const NotificationPermissionBanner(
+              margin: EdgeInsets.fromLTRB(10, 0, 10, 8),
+              compact: true,
             ),
             Expanded(
               child: loading

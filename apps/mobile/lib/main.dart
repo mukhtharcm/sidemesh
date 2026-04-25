@@ -36,9 +36,6 @@ Future<void> main() async {
   await LocalNotificationService.instance.initialize();
   await BackgroundSyncService.instance.initialize();
   final themeController = await ThemeController.load();
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    unawaited(LocalNotificationService.instance.requestPermissions());
-  });
   runApp(SidemeshApp(themeController: themeController));
 }
 
