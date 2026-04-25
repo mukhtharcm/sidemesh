@@ -1,5 +1,6 @@
-import { hostname } from "node:os";
+import { hostname, homedir } from "node:os";
 import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 
 import type { NodeConfig } from "./types.js";
 
@@ -11,6 +12,8 @@ export function loadConfig(): NodeConfig {
     token: token || randomBytes(24).toString("hex"),
     tokenSource: token ? "env" : "generated",
     codexBin: process.env.SIDEMESH_CODEX_BIN?.trim() || "codex",
+    stateDir:
+      process.env.SIDEMESH_STATE_DIR?.trim() || join(homedir(), ".sidemesh"),
   };
 }
 
