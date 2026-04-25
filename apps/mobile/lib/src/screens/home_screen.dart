@@ -7,6 +7,7 @@ import '../api_client.dart';
 import '../approval_inbox_store.dart';
 import '../host_status_store.dart';
 import '../host_store.dart';
+import '../live_activity_service.dart';
 import '../local_notification_service.dart';
 import '../models.dart';
 import '../session_favorites_store.dart';
@@ -68,6 +69,9 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   String _query = '';
   bool _handlingNotificationIntent = false;
 
+  List<HostProfile> get _enabledHosts =>
+      _hosts.where((host) => host.enabled).toList(growable: false);
+
   @override
   void initState() {
     super.initState();
@@ -99,7 +103,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       _onNotificationRouteIntent,
     );
     _searchDebounce?.cancel();
-    _heartbeatTimer?.cancel();
+    _stopHeartbeat();
     _searchController.dispose();
     super.dispose();
   }
@@ -113,12 +117,15 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       unawaited(_runHeartbeat());
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      _heartbeatTimer?.cancel();
-      _heartbeatTimer = null;
+      _stopHeartbeat();
     }
   }
 
   void _startHeartbeat() {
+    if (_enabledHosts.isEmpty) {
+      _stopHeartbeat();
+      return;
+    }
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(
       _heartbeatInterval,
@@ -126,13 +133,19 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     );
   }
 
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+  }
+
   Future<void> _runHeartbeat() async {
-    if (_heartbeatInFlight || _hosts.isEmpty) return;
+    final hosts = _enabledHosts;
+    if (_heartbeatInFlight || hosts.isEmpty) return;
     _heartbeatInFlight = true;
     try {
       final store = HostStatusStore.instance;
       await Future.wait(
-        _hosts.map((host) async {
+        hosts.map((host) async {
           try {
             await _api.fetchNode(host);
             store.markOnline(host.id);
@@ -156,7 +169,13 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       _hosts = hosts;
       _loading = false;
     });
-    ApprovalInboxStore.instance.configure(hosts: hosts, api: _api);
+    for (final host in hosts) {
+      if (!host.enabled) {
+        HostStatusStore.instance.clear(host.id);
+      }
+    }
+    ApprovalInboxStore.instance.configure(hosts: _enabledHosts, api: _api);
+    _startHeartbeat();
     unawaited(_handleNotificationRouteIntent());
   }
 
@@ -184,7 +203,27 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     await _refreshHosts();
   }
 
+  Future<void> _toggleHostEnabled(HostProfile host) async {
+    final disabling = host.enabled;
+    final updated = _hosts
+        .map(
+          (item) =>
+              item.id == host.id ? item.copyWith(enabled: !item.enabled) : item,
+        )
+        .toList();
+    await _store.saveHosts(updated);
+    if (disabling) {
+      HostStatusStore.instance.clear(host.id);
+      await LiveActivityService.instance.clearPrimarySessionForHost(host.id);
+    }
+    await _refreshHosts();
+  }
+
   Future<void> _openSession(HostProfile host, SessionSummary session) async {
+    if (!host.enabled) {
+      showAppSnackBar(context, 'Enable ${host.label} before opening sessions.');
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => SessionScreen(
@@ -202,6 +241,10 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   }
 
   Future<void> _openHost(HostProfile host) async {
+    if (!host.enabled) {
+      showAppSnackBar(context, 'Enable ${host.label} before opening details.');
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => HostDetailScreen(
@@ -222,9 +265,14 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       await _showHostEditor();
       return;
     }
+    final enabledHosts = _enabledHosts;
+    if (enabledHosts.isEmpty) {
+      showAppSnackBar(context, 'Enable a host before starting a session.');
+      return;
+    }
     final result = await showCreateSessionHostLauncher(
       context,
-      hosts: _hosts,
+      hosts: enabledHosts,
       api: _api,
     );
     if (!mounted || result == null) {
@@ -270,7 +318,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
 
   HostProfile? _hostForIntent(NotificationRouteIntent intent) {
     for (final host in _hosts) {
-      if (host.id == intent.hostId) return host;
+      if (host.id == intent.hostId && host.enabled) return host;
     }
     return null;
   }
@@ -322,6 +370,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   Widget build(BuildContext context) {
     final colors = context.colors;
     final tab = _tabs[_tabIndex];
+    final enabledHosts = _enabledHosts;
     return Scaffold(
       backgroundColor: colors.canvas,
       body: SafeArea(
@@ -345,9 +394,10 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                       index: _tabIndex,
                       children: [
                         RecentPane(
-                          hosts: _hosts,
+                          hosts: enabledHosts,
                           api: _api,
                           query: _query,
+                          hasSavedHosts: _hosts.isNotEmpty,
                           onOpenSession: _openSession,
                           onActiveCountChanged: (count) {
                             if (!mounted) return;
@@ -355,9 +405,10 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                           },
                         ),
                         InboxPane(
-                          hosts: _hosts,
+                          hosts: enabledHosts,
                           api: _api,
                           query: _query,
+                          hasSavedHosts: _hosts.isNotEmpty,
                           onOpenSession: (host, action) =>
                               _openSession(host, _sessionFromAction(action)),
                           onInboxCountChanged: (_) {},
@@ -369,6 +420,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                           onEditHost: (host) =>
                               _showHostEditor(initialHost: host),
                           onRemoveHost: _removeHost,
+                          onToggleEnabled: _toggleHostEnabled,
                           onAddHost: () => _showHostEditor(),
                         ),
                       ],
@@ -662,6 +714,7 @@ class RecentPane extends StatefulWidget {
     this.selectedSessionId,
     this.padding,
     this.dense = false,
+    this.hasSavedHosts = false,
   });
 
   final List<HostProfile> hosts;
@@ -672,18 +725,29 @@ class RecentPane extends StatefulWidget {
   final String? selectedSessionId;
   final EdgeInsets? padding;
   final bool dense;
+  final bool hasSavedHosts;
 
   @override
   State<RecentPane> createState() => _RecentPaneState();
 }
 
-bool _sameHostIds(List<HostProfile> a, List<HostProfile> b) {
+bool _sameHostList(List<HostProfile> a, List<HostProfile> b) {
   if (identical(a, b)) return true;
   if (a.length != b.length) return false;
   for (var i = 0; i < a.length; i++) {
-    if (a[i].id != b[i].id) return false;
+    if (_hostListSignature(a[i]) != _hostListSignature(b[i])) return false;
   }
   return true;
+}
+
+String _hostListSignature(HostProfile host) {
+  return [
+    host.id,
+    host.label,
+    host.baseUrl,
+    host.token,
+    host.enabled ? '1' : '0',
+  ].join('\u001f');
 }
 
 class _RecentPaneState extends State<RecentPane> {
@@ -705,7 +769,7 @@ class _RecentPaneState extends State<RecentPane> {
     _favorites.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
     _kickoffLoad();
-    _refreshTimer = Timer.periodic(_refreshInterval, (_) => _silentRefresh());
+    _syncRefreshTimer();
   }
 
   @override
@@ -717,9 +781,19 @@ class _RecentPaneState extends State<RecentPane> {
   @override
   void didUpdateWidget(covariant RecentPane oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!_sameHostIds(oldWidget.hosts, widget.hosts)) {
+    if (!_sameHostList(oldWidget.hosts, widget.hosts)) {
       _kickoffLoad();
+      _syncRefreshTimer();
     }
+  }
+
+  void _syncRefreshTimer() {
+    if (widget.hosts.isEmpty) {
+      _refreshTimer?.cancel();
+      _refreshTimer = null;
+      return;
+    }
+    _refreshTimer ??= Timer.periodic(_refreshInterval, (_) => _silentRefresh());
   }
 
   void _kickoffLoad() {
@@ -745,6 +819,7 @@ class _RecentPaneState extends State<RecentPane> {
 
   Future<void> _silentRefresh() async {
     if (!mounted || widget.hosts.isEmpty) return;
+    final gen = _loadGen;
     // Fetch per host without tearing down the current list. Merge fresh
     // entries by (host, session) so the unread store sees new updatedAt
     // values even when the user hasn't pulled-to-refresh.
@@ -759,7 +834,7 @@ class _RecentPaneState extends State<RecentPane> {
       }),
       eagerError: false,
     );
-    if (!mounted) return;
+    if (!mounted || gen != _loadGen) return;
     final merged = <RemoteSessionEntry>[];
     final handled = <String>{};
     for (var i = 0; i < hosts.length; i++) {
@@ -859,11 +934,14 @@ class _RecentPaneState extends State<RecentPane> {
   @override
   Widget build(BuildContext context) {
     if (widget.hosts.isEmpty) {
-      return const MeshEmptyState(
-        icon: Icons.schedule_rounded,
-        title: 'No sessions yet',
-        body:
-            'Add a host first — your most recent Codex sessions will land here.',
+      return MeshEmptyState(
+        icon: widget.hasSavedHosts
+            ? Icons.pause_circle_outline_rounded
+            : Icons.schedule_rounded,
+        title: widget.hasSavedHosts ? 'No enabled hosts' : 'No sessions yet',
+        body: widget.hasSavedHosts
+            ? 'Enable a saved host from Hosts to load recent sessions.'
+            : 'Add a host first — your most recent Codex sessions will land here.',
       );
     }
 
@@ -1230,6 +1308,7 @@ class InboxPane extends StatefulWidget {
     required this.onInboxCountChanged,
     this.query = '',
     this.dense = false,
+    this.hasSavedHosts = false,
   });
 
   final List<HostProfile> hosts;
@@ -1238,6 +1317,7 @@ class InboxPane extends StatefulWidget {
   final ValueChanged<int> onInboxCountChanged;
   final String query;
   final bool dense;
+  final bool hasSavedHosts;
 
   @override
   State<InboxPane> createState() => _InboxPaneState();
@@ -1257,7 +1337,7 @@ class _InboxPaneState extends State<InboxPane> {
   @override
   void didUpdateWidget(covariant InboxPane oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!_sameHostIds(oldWidget.hosts, widget.hosts)) {
+    if (!_sameHostList(oldWidget.hosts, widget.hosts)) {
       _store.configure(hosts: widget.hosts, api: widget.api);
     }
   }
@@ -1313,11 +1393,14 @@ class _InboxPaneState extends State<InboxPane> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     if (widget.hosts.isEmpty) {
-      return const MeshEmptyState(
-        icon: Icons.all_inbox_rounded,
-        title: 'Inbox is empty',
-        body:
-            'Add a host first. Pending approvals from every machine will show up here.',
+      return MeshEmptyState(
+        icon: widget.hasSavedHosts
+            ? Icons.notifications_paused_rounded
+            : Icons.all_inbox_rounded,
+        title: widget.hasSavedHosts ? 'No enabled hosts' : 'Inbox is empty',
+        body: widget.hasSavedHosts
+            ? 'Enable a saved host from Hosts to receive pending approvals.'
+            : 'Add a host first. Pending approvals from every machine will show up here.',
       );
     }
 
@@ -1761,6 +1844,7 @@ class HostsPane extends StatelessWidget {
     required this.onOpenHost,
     required this.onEditHost,
     required this.onRemoveHost,
+    required this.onToggleEnabled,
     required this.onAddHost,
     this.query = '',
     this.dense = false,
@@ -1771,6 +1855,7 @@ class HostsPane extends StatelessWidget {
   final ValueChanged<HostProfile> onOpenHost;
   final ValueChanged<HostProfile> onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
+  final ValueChanged<HostProfile> onToggleEnabled;
   final VoidCallback onAddHost;
   final String query;
   final bool dense;
@@ -1835,6 +1920,7 @@ class HostsPane extends StatelessWidget {
           onTap: () => onOpenHost(host),
           onEdit: () => onEditHost(host),
           onRemove: () => onRemoveHost(host),
+          onToggleEnabled: () => onToggleEnabled(host),
         );
       },
     );
@@ -1847,6 +1933,7 @@ class _HostRowCard extends StatelessWidget {
     required this.onTap,
     required this.onEdit,
     required this.onRemove,
+    required this.onToggleEnabled,
     this.dense = false,
     this.selected = false,
   });
@@ -1855,6 +1942,7 @@ class _HostRowCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onRemove;
+  final VoidCallback onToggleEnabled;
   final bool dense;
   final bool selected;
 
@@ -1864,12 +1952,14 @@ class _HostRowCard extends StatelessWidget {
     return ListenableBuilder(
       listenable: HostStatusStore.instance,
       builder: (context, _) {
-        final status = HostStatusStore.instance.statusFor(host.id);
+        final status = host.enabled
+            ? HostStatusStore.instance.statusFor(host.id)
+            : HostStatus.unknown;
         if (dense) {
           return Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: onTap,
+              onTap: host.enabled ? onTap : null,
               borderRadius: BorderRadius.circular(10),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 120),
@@ -1905,7 +1995,10 @@ class _HostRowCard extends StatelessWidget {
                         Positioned(
                           right: -2,
                           bottom: -2,
-                          child: _HostStatusDot(status: status),
+                          child: _HostStatusDot(
+                            status: status,
+                            enabled: host.enabled,
+                          ),
                         ),
                       ],
                     ),
@@ -1923,12 +2016,14 @@ class _HostRowCard extends StatelessWidget {
                                 ?.copyWith(
                                   fontWeight: FontWeight.w600,
                                   height: 1.25,
-                                  color: selected ? colors.accent : null,
+                                  color: host.enabled
+                                      ? (selected ? colors.accent : null)
+                                      : colors.textTertiary,
                                 ),
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            host.baseUrl,
+                            host.enabled ? host.baseUrl : 'Disabled',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: monoStyle(
@@ -1937,6 +2032,22 @@ class _HostRowCard extends StatelessWidget {
                             ),
                           ),
                         ],
+                      ),
+                    ),
+                    InkWell(
+                      onTap: onToggleEnabled,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Icon(
+                          host.enabled
+                              ? Icons.pause_circle_outline_rounded
+                              : Icons.play_circle_outline_rounded,
+                          size: 14,
+                          color: host.enabled
+                              ? colors.textTertiary
+                              : colors.accent,
+                        ),
                       ),
                     ),
                     InkWell(
@@ -1970,7 +2081,7 @@ class _HostRowCard extends StatelessWidget {
           );
         }
         return MeshCard(
-          onTap: onTap,
+          onTap: host.enabled ? onTap : null,
           padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
           child: Row(
             children: [
@@ -1997,7 +2108,10 @@ class _HostRowCard extends StatelessWidget {
                   Positioned(
                     right: -2,
                     bottom: -2,
-                    child: _HostStatusDot(status: status),
+                    child: _HostStatusDot(
+                      status: status,
+                      enabled: host.enabled,
+                    ),
                   ),
                 ],
               ),
@@ -2010,11 +2124,14 @@ class _HostRowCard extends StatelessWidget {
                       host.label,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
+                        color: host.enabled ? null : colors.textTertiary,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      host.baseUrl,
+                      host.enabled
+                          ? host.baseUrl
+                          : 'Disabled · ${host.baseUrl}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: monoStyle(
@@ -2022,7 +2139,8 @@ class _HostRowCard extends StatelessWidget {
                         fontSize: 11.5,
                       ),
                     ),
-                    if (status.reachability != HostReachability.unknown) ...[
+                    if (!host.enabled ||
+                        status.reachability != HostReachability.unknown) ...[
                       const SizedBox(height: 4),
                       Text(
                         _statusLine(status),
@@ -2034,6 +2152,17 @@ class _HostRowCard extends StatelessWidget {
                       ),
                     ],
                   ],
+                ),
+              ),
+              IconButton(
+                tooltip: host.enabled ? 'Disable host' : 'Enable host',
+                onPressed: onToggleEnabled,
+                icon: Icon(
+                  host.enabled
+                      ? Icons.pause_circle_outline_rounded
+                      : Icons.play_circle_outline_rounded,
+                  size: 20,
+                  color: host.enabled ? colors.textSecondary : colors.accent,
                 ),
               ),
               IconButton(
@@ -2062,6 +2191,7 @@ class _HostRowCard extends StatelessWidget {
   }
 
   String _statusLine(HostStatus status) {
+    if (!host.enabled) return 'Disabled';
     switch (status.reachability) {
       case HostReachability.online:
         return 'Online';
@@ -2076,6 +2206,7 @@ class _HostRowCard extends StatelessWidget {
   }
 
   Color _statusColor(AppColors colors, HostStatus status) {
+    if (!host.enabled) return colors.textTertiary;
     switch (status.reachability) {
       case HostReachability.online:
         return colors.success;
@@ -2090,27 +2221,32 @@ class _HostRowCard extends StatelessWidget {
 }
 
 class _HostStatusDot extends StatelessWidget {
-  const _HostStatusDot({required this.status});
+  const _HostStatusDot({required this.status, required this.enabled});
 
   final HostStatus status;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final Color fill;
-    switch (status.reachability) {
-      case HostReachability.online:
-        fill = colors.success;
-        break;
-      case HostReachability.offline:
-        fill = colors.danger;
-        break;
-      case HostReachability.probing:
-        fill = colors.warning;
-        break;
-      case HostReachability.unknown:
-        fill = colors.textTertiary;
-        break;
+    if (!enabled) {
+      fill = colors.textTertiary;
+    } else {
+      switch (status.reachability) {
+        case HostReachability.online:
+          fill = colors.success;
+          break;
+        case HostReachability.offline:
+          fill = colors.danger;
+          break;
+        case HostReachability.probing:
+          fill = colors.warning;
+          break;
+        case HostReachability.unknown:
+          fill = colors.textTertiary;
+          break;
+      }
     }
     return Container(
       width: 12,
@@ -2137,6 +2273,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
   late final TextEditingController _labelController;
   late final TextEditingController _baseUrlController;
   late final TextEditingController _tokenController;
+  late bool _enabled;
 
   @override
   void initState() {
@@ -2150,6 +2287,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
     _tokenController = TextEditingController(
       text: widget.initialHost?.token ?? '',
     );
+    _enabled = widget.initialHost?.enabled ?? true;
   }
 
   @override
@@ -2220,6 +2358,18 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
               controller: _tokenController,
               decoration: const InputDecoration(labelText: 'Shared token'),
             ),
+            const SizedBox(height: 14),
+            SwitchListTile(
+              value: _enabled,
+              onChanged: (value) => setState(() => _enabled = value),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Enabled'),
+              subtitle: Text(
+                _enabled
+                    ? 'Include this host in sessions, inbox, and background sync.'
+                    : 'Keep this host saved, but skip automatic app traffic.',
+              ),
+            ),
             const SizedBox(height: 18),
             Align(
               alignment: Alignment.centerRight,
@@ -2237,6 +2387,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                       label: label,
                       baseUrl: baseUrl,
                       token: token,
+                      enabled: _enabled,
                     ),
                   );
                 },

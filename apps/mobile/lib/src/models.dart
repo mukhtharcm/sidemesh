@@ -4,18 +4,37 @@ class HostProfile {
     required this.label,
     required this.baseUrl,
     required this.token,
+    this.enabled = true,
   });
 
   final String id;
   final String label;
   final String baseUrl;
   final String token;
+  final bool enabled;
+
+  HostProfile copyWith({
+    String? id,
+    String? label,
+    String? baseUrl,
+    String? token,
+    bool? enabled,
+  }) {
+    return HostProfile(
+      id: id ?? this.id,
+      label: label ?? this.label,
+      baseUrl: baseUrl ?? this.baseUrl,
+      token: token ?? this.token,
+      enabled: enabled ?? this.enabled,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'label': label,
     'baseUrl': baseUrl,
     'token': token,
+    'enabled': enabled,
   };
 
   factory HostProfile.fromJson(Map<String, dynamic> json) => HostProfile(
@@ -23,6 +42,7 @@ class HostProfile {
     label: json['label'] as String,
     baseUrl: json['baseUrl'] as String,
     token: json['token'] as String,
+    enabled: json['enabled'] != false,
   );
 }
 

@@ -955,7 +955,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _connectLive() {
-    if (_disposed) return;
+    if (_disposed || !widget.host.enabled) return;
     _subscription?.cancel();
     _channel?.sink.close();
     _subscription = null;
@@ -976,6 +976,7 @@ class _SessionScreenState extends State<SessionScreen>
       _reconnectAttempts = 0;
     } catch (_) {
       _channel = null;
+      if (!widget.host.enabled) return;
       _scheduleReconnect();
     }
   }
@@ -994,7 +995,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _scheduleReconnect() {
-    if (_disposed || !mounted) return;
+    if (_disposed || !mounted || !widget.host.enabled) return;
     _reconnectTimer?.cancel();
     _reconnectAttempts = (_reconnectAttempts + 1).clamp(1, 6);
     // 0.5s, 1s, 2s, 4s, 8s, 15s
@@ -1007,7 +1008,7 @@ class _SessionScreenState extends State<SessionScreen>
       _ => 15000,
     };
     _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
-      if (!mounted || _disposed) return;
+      if (!mounted || _disposed || !widget.host.enabled) return;
       // Re-sync on every reconnect: the session may have advanced while we
       // were disconnected, and we have no replay mechanism.
       unawaited(
