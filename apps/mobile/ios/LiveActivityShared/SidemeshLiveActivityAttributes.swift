@@ -10,6 +10,7 @@ struct SidemeshLiveActivityAttributes: ActivityAttributes {
     var status: String
     var host: String
     var count: Int
+    var badge: String
     var updatedAt: Date
   }
 
