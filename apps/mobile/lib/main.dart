@@ -9,6 +9,7 @@ import 'package:macos_window_utils/macos_window_utils.dart';
 
 import 'src/screens/desktop_shell.dart';
 import 'src/screens/home_screen.dart';
+import 'src/background_sync_service.dart';
 import 'src/local_notification_service.dart';
 import 'src/theme/app_theme.dart';
 import 'src/theme/theme_controller.dart';
@@ -33,6 +34,7 @@ Future<void> main() async {
     await WindowManipulator.hideTitle();
   }
   await LocalNotificationService.instance.initialize();
+  await BackgroundSyncService.instance.initialize();
   final themeController = await ThemeController.load();
   WidgetsBinding.instance.addPostFrameCallback((_) {
     unawaited(LocalNotificationService.instance.requestPermissions());

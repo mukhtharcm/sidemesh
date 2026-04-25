@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
 
@@ -11,10 +12,28 @@ class LiveActivityService {
   static const _channel = MethodChannel('dev.sidemesh/live_activity');
   // Keep the original ID so existing approval activities are updated in place.
   static const _primaryActivityId = 'sidemesh.pendingApprovals';
+  static const _primaryOwnerKey = 'sidemesh_live_activity_primary_owner_v1';
+  static const _primaryOwnerUpdatedAtKey =
+      'sidemesh_live_activity_primary_owner_updated_at_v1';
+  static const _primaryOwnerHostIdKey =
+      'sidemesh_live_activity_primary_owner_host_id_v1';
+  static const _primaryOwnerSessionIdKey =
+      'sidemesh_live_activity_primary_owner_session_id_v1';
+  static const _primaryOwnerTitleKey =
+      'sidemesh_live_activity_primary_owner_title_v1';
+  static const _primaryOwnerPreviewKey =
+      'sidemesh_live_activity_primary_owner_preview_v1';
+  static const _primaryOwnerCwdKey =
+      'sidemesh_live_activity_primary_owner_cwd_v1';
+  static const _primaryOwnerModelKey =
+      'sidemesh_live_activity_primary_owner_model_v1';
+  static const _primaryOwnerTtl = Duration(hours: 1);
+  static const _ownerRefreshInterval = Duration(minutes: 5);
 
   bool? _supported;
   String? _activeSessionKey;
   String? _lastPrimarySignature;
+  DateTime? _lastOwnerPersistedAt;
   bool _sentEmptyPrimaryEnd = false;
 
   Future<void> syncPrimarySession({
@@ -46,7 +65,15 @@ class LiveActivityService {
     );
     final didSync = await _syncPrimaryActivity(payload);
     if (didSync) {
+      final shouldPersist =
+          _activeSessionKey != sessionKey ||
+          _lastOwnerPersistedAt == null ||
+          DateTime.now().difference(_lastOwnerPersistedAt!) >
+              _ownerRefreshInterval;
       _activeSessionKey = sessionKey;
+      if (shouldPersist) {
+        await _persistPrimaryOwner(sessionKey, host: host, session: session);
+      }
     }
   }
 
@@ -56,8 +83,12 @@ class LiveActivityService {
   }) async {
     if (!_isEligiblePlatform) return;
     final sessionKey = _sessionKey(host, sessionId);
-    if (_activeSessionKey != sessionKey) return;
+    if (_activeSessionKey != null && _activeSessionKey != sessionKey) return;
+    if (_activeSessionKey == null && !await _primaryOwnerMatches(sessionKey)) {
+      return;
+    }
     _activeSessionKey = null;
+    await _clearPrimaryOwner();
     await _endPrimaryActivity();
   }
 
@@ -68,7 +99,7 @@ class LiveActivityService {
     required String sessionTitle,
   }) async {
     if (!_isEligiblePlatform) return;
-    if (_activeSessionKey != null) return;
+    if (_activeSessionKey != null || await _hasRecentPrimaryOwner()) return;
     if (count <= 0) {
       await endPendingApprovals();
       return;
@@ -93,8 +124,49 @@ class LiveActivityService {
   }
 
   Future<void> endPendingApprovals() async {
-    if (!_isEligiblePlatform || _activeSessionKey != null) return;
+    if (!_isEligiblePlatform ||
+        _activeSessionKey != null ||
+        await _hasRecentPrimaryOwner()) {
+      return;
+    }
     await _endPrimaryActivity();
+  }
+
+  Future<PrimaryLiveActivitySession?> loadPrimarySessionContext() async {
+    if (!_isEligiblePlatform) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final owner = prefs.getString(_primaryOwnerKey);
+      final updatedAtMillis = prefs.getInt(_primaryOwnerUpdatedAtKey);
+      final hostId = prefs.getString(_primaryOwnerHostIdKey);
+      final sessionId = prefs.getString(_primaryOwnerSessionIdKey);
+      if (owner == null ||
+          owner.isEmpty ||
+          updatedAtMillis == null ||
+          hostId == null ||
+          hostId.isEmpty ||
+          sessionId == null ||
+          sessionId.isEmpty) {
+        return null;
+      }
+      final updatedAt = DateTime.fromMillisecondsSinceEpoch(updatedAtMillis);
+      if (DateTime.now().difference(updatedAt) > _primaryOwnerTtl) {
+        await _clearPrimaryOwner();
+        return null;
+      }
+      return PrimaryLiveActivitySession(
+        hostId: hostId,
+        sessionId: sessionId,
+        title: prefs.getString(_primaryOwnerTitleKey) ?? '',
+        preview: prefs.getString(_primaryOwnerPreviewKey) ?? '',
+        cwd: prefs.getString(_primaryOwnerCwdKey) ?? '',
+        model: prefs.getString(_primaryOwnerModelKey),
+        updatedAt: updatedAt,
+      );
+    } catch (error) {
+      debugPrint('Failed to load Live Activity session context: $error');
+      return null;
+    }
   }
 
   Future<bool> _syncPrimaryActivity(Map<String, Object> payload) async {
@@ -155,6 +227,86 @@ class LiveActivityService {
       _supported = false;
     }
     return _supported ?? false;
+  }
+
+  Future<void> _persistPrimaryOwner(
+    String sessionKey, {
+    required HostProfile host,
+    required SessionSummary session,
+  }) async {
+    try {
+      final now = DateTime.now();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_primaryOwnerKey, sessionKey);
+      await prefs.setInt(_primaryOwnerUpdatedAtKey, now.millisecondsSinceEpoch);
+      await prefs.setString(_primaryOwnerHostIdKey, host.id);
+      await prefs.setString(_primaryOwnerSessionIdKey, session.id);
+      await prefs.setString(_primaryOwnerTitleKey, session.title);
+      await prefs.setString(_primaryOwnerPreviewKey, session.preview);
+      await prefs.setString(_primaryOwnerCwdKey, session.cwd);
+      final model = session.runtime?.model?.trim();
+      if (model == null || model.isEmpty) {
+        await prefs.remove(_primaryOwnerModelKey);
+      } else {
+        await prefs.setString(_primaryOwnerModelKey, model);
+      }
+      _lastOwnerPersistedAt = now;
+    } catch (error) {
+      debugPrint('Failed to persist Live Activity owner: $error');
+    }
+  }
+
+  Future<void> _clearPrimaryOwner() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_primaryOwnerKey);
+      await prefs.remove(_primaryOwnerUpdatedAtKey);
+      await prefs.remove(_primaryOwnerHostIdKey);
+      await prefs.remove(_primaryOwnerSessionIdKey);
+      await prefs.remove(_primaryOwnerTitleKey);
+      await prefs.remove(_primaryOwnerPreviewKey);
+      await prefs.remove(_primaryOwnerCwdKey);
+      await prefs.remove(_primaryOwnerModelKey);
+      _lastOwnerPersistedAt = null;
+    } catch (error) {
+      debugPrint('Failed to clear Live Activity owner: $error');
+    }
+  }
+
+  Future<bool> _hasRecentPrimaryOwner() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final owner = prefs.getString(_primaryOwnerKey);
+      if (owner == null || owner.isEmpty) return false;
+      final updatedAtMillis = prefs.getInt(_primaryOwnerUpdatedAtKey);
+      if (updatedAtMillis == null) return false;
+      final updatedAt = DateTime.fromMillisecondsSinceEpoch(updatedAtMillis);
+      if (DateTime.now().difference(updatedAt) <= _primaryOwnerTtl) {
+        return true;
+      }
+      await _clearPrimaryOwner();
+    } catch (error) {
+      debugPrint('Failed to read Live Activity owner: $error');
+    }
+    return false;
+  }
+
+  Future<bool> _primaryOwnerMatches(String sessionKey) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final owner = prefs.getString(_primaryOwnerKey);
+      if (owner != sessionKey) return false;
+      final updatedAtMillis = prefs.getInt(_primaryOwnerUpdatedAtKey);
+      if (updatedAtMillis == null) return false;
+      final updatedAt = DateTime.fromMillisecondsSinceEpoch(updatedAtMillis);
+      if (DateTime.now().difference(updatedAt) <= _primaryOwnerTtl) {
+        return true;
+      }
+      await _clearPrimaryOwner();
+    } catch (error) {
+      debugPrint('Failed to match Live Activity owner: $error');
+    }
+    return false;
   }
 
   Map<String, Object> _sessionPayload({
@@ -374,4 +526,43 @@ class _LiveActivitySummary {
   final String detail;
   final String status;
   final String badge;
+}
+
+class PrimaryLiveActivitySession {
+  const PrimaryLiveActivitySession({
+    required this.hostId,
+    required this.sessionId,
+    required this.title,
+    required this.preview,
+    required this.cwd,
+    required this.model,
+    required this.updatedAt,
+  });
+
+  final String hostId;
+  final String sessionId;
+  final String title;
+  final String preview;
+  final String cwd;
+  final String? model;
+  final DateTime updatedAt;
+
+  SessionSummary toSessionSummary({required bool isRunning}) {
+    final now = DateTime.now();
+    final modelValue = model?.trim();
+    return SessionSummary(
+      id: sessionId,
+      title: title,
+      preview: preview,
+      cwd: cwd,
+      createdAt: updatedAt,
+      updatedAt: now,
+      source: '',
+      status: isRunning ? 'running' : 'completed',
+      runtime: modelValue == null || modelValue.isEmpty
+          ? null
+          : SessionRuntimeSummary(model: modelValue),
+      gitInfo: null,
+    );
+  }
 }
