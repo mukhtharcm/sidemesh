@@ -11,6 +11,7 @@ import 'src/screens/desktop_shell.dart';
 import 'src/screens/home_screen.dart';
 import 'src/background_sync_service.dart';
 import 'src/local_notification_service.dart';
+import 'src/session_send_outbox_worker.dart';
 import 'src/theme/app_theme.dart';
 import 'src/theme/theme_controller.dart';
 
@@ -35,6 +36,7 @@ Future<void> main() async {
   }
   await LocalNotificationService.instance.initialize();
   await BackgroundSyncService.instance.initialize();
+  SessionSendOutboxWorker.instance.start();
   final themeController = await ThemeController.load();
   runApp(SidemeshApp(themeController: themeController));
 }
