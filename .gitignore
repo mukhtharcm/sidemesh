@@ -9,3 +9,4 @@ apps/mobile/.packages
 apps/mobile/build/
 apps/mobile/ios/Pods/
 apps/mobile/ios/.symlinks/
+apps/mobile/ios/Flutter/Signing.local.xcconfig

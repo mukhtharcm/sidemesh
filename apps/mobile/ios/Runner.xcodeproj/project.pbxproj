@@ -89,6 +89,7 @@
 		7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Release.xcconfig; path = Flutter/Release.xcconfig; sourceTree = "<group>"; };
 		825EF7CCC3FB96D71B25615E /* Pods-RunnerTests.debug-dev.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.debug-dev.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.debug-dev.xcconfig"; sourceTree = "<group>"; };
+		8F1E3C4D5A6B7C8D9E0F1234 /* Extension.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Extension.xcconfig; path = Flutter/Extension.xcconfig; sourceTree = "<group>"; };
 		895D310B1225484F73D103C2 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		96DCFD2087DC96C6ED758302 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Debug.xcconfig; path = Flutter/Debug.xcconfig; sourceTree = "<group>"; };
@@ -194,6 +195,7 @@
 				3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */,
 				9740EEB21CF90195004384FC /* Debug.xcconfig */,
 				7AFA3C8E1D35360C0083082E /* Release.xcconfig */,
+				8F1E3C4D5A6B7C8D9E0F1234 /* Extension.xcconfig */,
 				9740EEB31CF90195004384FC /* Generated.xcconfig */,
 			);
 			name = Flutter;
@@ -886,6 +888,7 @@
 		};
 		3D14518C608B5FE370832228 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8F1E3C4D5A6B7C8D9E0F1234 /* Extension.xcconfig */;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -979,6 +982,7 @@
 		};
 		687BDBAF3A1EB673F45BCCED /* Release-prod */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8F1E3C4D5A6B7C8D9E0F1234 /* Extension.xcconfig */;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -1133,6 +1137,7 @@
 		};
 		723BCD3291908C23A6E5082C /* Profile */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8F1E3C4D5A6B7C8D9E0F1234 /* Extension.xcconfig */;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -1341,6 +1346,7 @@
 		};
 		A1F5843F2CC8ECD996D782BE /* Profile-dev */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8F1E3C4D5A6B7C8D9E0F1234 /* Extension.xcconfig */;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -1485,6 +1491,7 @@
 		};
 		CC7D752F288F31A4C16D3DF6 /* Debug-dev */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8F1E3C4D5A6B7C8D9E0F1234 /* Extension.xcconfig */;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -1539,6 +1546,7 @@
 		};
 		EFF7CB2160D1C62BC9D59580 /* Profile-prod */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8F1E3C4D5A6B7C8D9E0F1234 /* Extension.xcconfig */;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -1587,6 +1595,7 @@
 		};
 		FA726E0B78C7D37C7E375115 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8F1E3C4D5A6B7C8D9E0F1234 /* Extension.xcconfig */;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -1619,6 +1628,7 @@
 		};
 		FB511616EC3498A15189DD14 /* Debug-prod */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8F1E3C4D5A6B7C8D9E0F1234 /* Extension.xcconfig */;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -1650,6 +1660,7 @@
 		};
 		FB7B66BCA6A9FA5B2D834785 /* Release-dev */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8F1E3C4D5A6B7C8D9E0F1234 /* Extension.xcconfig */;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
