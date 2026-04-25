@@ -1000,6 +1000,7 @@ class _RecentPaneState extends State<RecentPane> {
       ]),
       builder: (context, _) {
         final sortedEntries = _sortEntries(_entries);
+        final hasCachedEntries = _entries.isNotEmpty;
         final isRefreshing = _pendingHostIds.isNotEmpty;
         final hasFailures = _failedHostLabels.isNotEmpty;
         final noResults = sortedEntries.isEmpty;
@@ -1023,7 +1024,7 @@ class _RecentPaneState extends State<RecentPane> {
                   _RecentProgressStrip(
                     remaining: _pendingHostIds.length,
                     total: widget.hosts.length,
-                    showingCached: sortedEntries.isNotEmpty,
+                    showingCached: hasCachedEntries,
                   ),
                 if (hasFailures)
                   _RecentErrorBanner(
@@ -1061,7 +1062,7 @@ class _RecentPaneState extends State<RecentPane> {
                   return _RecentProgressStrip(
                     remaining: _pendingHostIds.length,
                     total: widget.hosts.length,
-                    showingCached: sortedEntries.isNotEmpty,
+                    showingCached: hasCachedEntries,
                   );
                 }
                 offset += 1;
@@ -1462,6 +1463,7 @@ class _InboxPaneState extends State<InboxPane> {
 
     final isRefreshing = _store.isLoading;
     final hasFailures = _store.failedHostLabels.isNotEmpty;
+    final hasCachedEntries = allEntries.isNotEmpty;
 
     if (entries.isEmpty) {
       return RefreshIndicator(
@@ -1474,7 +1476,7 @@ class _InboxPaneState extends State<InboxPane> {
               _RecentProgressStrip(
                 remaining: _store.pendingHostsRemaining,
                 total: _store.totalHosts,
-                showingCached: entries.isNotEmpty,
+                showingCached: hasCachedEntries,
               ),
             if (hasFailures)
               _RecentErrorBanner(
@@ -1517,7 +1519,7 @@ class _InboxPaneState extends State<InboxPane> {
               return _RecentProgressStrip(
                 remaining: _store.pendingHostsRemaining,
                 total: _store.totalHosts,
-                showingCached: entries.isNotEmpty,
+                showingCached: hasCachedEntries,
               );
             }
             offset += 1;

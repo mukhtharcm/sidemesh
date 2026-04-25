@@ -14,7 +14,6 @@ class ApiClient {
   static const Duration _standardReadTimeout = Duration(seconds: 12);
   static const Duration _transcriptReadTimeout = Duration(seconds: 25);
   static const Duration _diffReadTimeout = Duration(seconds: 25);
-  static const Duration _writeTimeout = Duration(seconds: 30);
   static const Duration _turnWriteTimeout = Duration(seconds: 45);
   static const Duration _webSocketConnectTimeout = Duration(seconds: 8);
   static const Duration _webSocketPingInterval = Duration(seconds: 20);
@@ -202,7 +201,6 @@ class ApiClient {
       host,
       '/api/sessions/create',
       body: body,
-      timeout: _turnWriteTimeout,
       operation: 'start session',
     );
     final payload = _decodeObject(response);
@@ -492,14 +490,17 @@ class ApiClient {
     String? operation,
   }) {
     _ensureHostEnabled(host);
-    final resolvedTimeout = timeout ?? _writeTimeout;
+    final request = _client.post(
+      _uri(host, path),
+      headers: _headers(host),
+      body: jsonEncode(body),
+    );
+    if (timeout == null) {
+      return request;
+    }
     return _withTimeout(
-      _client.post(
-        _uri(host, path),
-        headers: _headers(host),
-        body: jsonEncode(body),
-      ),
-      timeout: resolvedTimeout,
+      request,
+      timeout: timeout,
       operation: operation ?? 'send request',
     );
   }

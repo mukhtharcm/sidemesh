@@ -145,7 +145,7 @@ class _SessionScreenState extends State<SessionScreen>
   // replay them after the snapshot's setState runs — prevents a stale
   // snapshot from clobbering an already-delivered action_opened / activity.
   final List<LiveEvent> _pendingLiveEvents = <LiveEvent>[];
-  bool _snapshotInFlight = false;
+  int? _snapshotInFlightRequestId;
   int _skillsRequestId = 0;
 
   // Memoized timeline entries so rebuilds that don't change list inputs skip
@@ -172,6 +172,8 @@ class _SessionScreenState extends State<SessionScreen>
   bool _gitStatusLoading = false;
   String? _gitStatusError;
   int _gitStatusRequestId = 0;
+
+  bool get _snapshotInFlight => _snapshotInFlightRequestId != null;
 
   // Inspector (desktop pane-3) lifecycle tracking. Resolved in
   // [didChangeDependencies] so we can addListener/removeListener around
@@ -773,7 +775,7 @@ class _SessionScreenState extends State<SessionScreen>
     final resolvedMessageLimit = messageLimit ?? _messageLimit;
     final resolvedActivityLimit = activityLimit ?? _activityLimit;
     final requestId = ++_snapshotRequestId;
-    _snapshotInFlight = true;
+    _snapshotInFlightRequestId = requestId;
     if (_showingCachedSnapshot && mounted) {
       setState(() => _snapshotRefreshing = true);
     }
@@ -860,7 +862,9 @@ class _SessionScreenState extends State<SessionScreen>
         "Failed to load session: ${friendlyError(error)}",
       );
     } finally {
-      _snapshotInFlight = false;
+      if (_snapshotInFlightRequestId == requestId) {
+        _snapshotInFlightRequestId = null;
+      }
     }
   }
 
