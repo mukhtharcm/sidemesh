@@ -62,10 +62,13 @@ Future<CreateSessionLaunchResult?> showCreateSessionHostLauncher(
   required ApiClient api,
   String? initialCwd,
 }) async {
-  if (hosts.isEmpty) return null;
-  final host = hosts.length == 1
-      ? hosts.first
-      : await showCreateSessionHostPicker(context, hosts: hosts);
+  final enabledHosts = hosts
+      .where((host) => host.enabled)
+      .toList(growable: false);
+  if (enabledHosts.isEmpty) return null;
+  final host = enabledHosts.length == 1
+      ? enabledHosts.first
+      : await showCreateSessionHostPicker(context, hosts: enabledHosts);
   if (!context.mounted || host == null) return null;
   final session = await showCreateSessionLauncher(
     context,

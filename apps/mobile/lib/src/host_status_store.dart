@@ -77,4 +77,11 @@ class HostStatusStore extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  void clear(String hostId) {
+    final removed = _byHostId.remove(hostId);
+    if (removed != null) {
+      notifyListeners();
+    }
+  }
 }
