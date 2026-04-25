@@ -33,6 +33,7 @@ dependencies:
 
   cupertino_icons: ^1.0.8
   http: ^1.5.0
+  path_provider: ^2.1.5
   shared_preferences: ^2.5.3
   web_socket_channel: ^3.0.3
   gpt_markdown: ^1.1.6
