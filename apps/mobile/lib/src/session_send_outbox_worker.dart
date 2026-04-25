@@ -1,0 +1,237 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+
+import 'api_client.dart';
+import 'host_store.dart';
+import 'models.dart';
+import 'session_send_outbox_store.dart';
+
+/// Foreground-only retry worker for queued session sends.
+///
+/// This is intentionally not an OS background worker. It only runs while the
+/// app process is alive/resumed, giving us better retry behavior when users
+/// navigate away from a chat without adding background execution complexity.
+class SessionSendOutboxWorker with WidgetsBindingObserver {
+  SessionSendOutboxWorker._();
+
+  static final SessionSendOutboxWorker instance = SessionSendOutboxWorker._();
+
+  static const _idleInterval = Duration(seconds: 30);
+  static const _maxSendsPerPass = 3;
+
+  final SessionSendOutboxStore _outbox = SessionSendOutboxStore.instance;
+  final ApiClient _api = ApiClient();
+  final HostStore _hostStore = HostStore();
+
+  Timer? _timer;
+  bool _started = false;
+  bool _running = false;
+  AppLifecycleState? _lifecycleState;
+
+  void start() {
+    if (_started || kIsWeb) {
+      return;
+    }
+    _started = true;
+    _lifecycleState =
+        WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
+    _schedule(const Duration(seconds: 2));
+  }
+
+  void stop() {
+    if (!_started) {
+      return;
+    }
+    _started = false;
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleState = state;
+    if (state == AppLifecycleState.resumed) {
+      _schedule(Duration.zero);
+      return;
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _timer?.cancel();
+      _timer = null;
+    }
+  }
+
+  void poke() {
+    if (!_started) {
+      return;
+    }
+    _schedule(Duration.zero);
+  }
+
+  void _schedule(Duration delay) {
+    if (!_started || _lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    _timer?.cancel();
+    _timer = Timer(delay, () => unawaited(runOnce()));
+  }
+
+  Future<void> runOnce() async {
+    if (_running || !_started || _lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    _running = true;
+    try {
+      final pending = await _duePendingSends();
+      if (pending.isEmpty) {
+        _schedule(_idleInterval);
+        return;
+      }
+
+      final hosts = await _enabledHostsByKey();
+      for (final send in pending.take(_maxSendsPerPass)) {
+        if (!_isForeground) {
+          break;
+        }
+        final host = hosts[_hostKey(send.hostId, send.hostFingerprint)];
+        if (host == null) {
+          await _deferRetry(send, 'Host is disabled or unavailable.');
+          continue;
+        }
+        await _attemptSend(host, send);
+      }
+      await _scheduleNextPass();
+    } catch (error) {
+      debugPrint('Foreground send outbox retry failed: $error');
+      _schedule(_idleInterval);
+    } finally {
+      _running = false;
+    }
+  }
+
+  Future<List<PendingSessionSend>> _duePendingSends() async {
+    final now = DateTime.now();
+    final all = await _outbox.loadAll();
+    final due = all
+        .where((send) => !send.blocked && !send.nextAttemptAt.isAfter(now))
+        .toList(growable: false);
+    due.sort(_comparePending);
+    return due;
+  }
+
+  Future<void> _scheduleNextPass() async {
+    final all = await _outbox.loadAll();
+    final retryable = all
+        .where((send) => !send.blocked)
+        .toList(growable: false);
+    if (retryable.isEmpty) {
+      _schedule(_idleInterval);
+      return;
+    }
+    retryable.sort(_comparePending);
+    final next = retryable.first.nextAttemptAt;
+    final now = DateTime.now();
+    _schedule(next.isAfter(now) ? next.difference(now) : Duration.zero);
+  }
+
+  Future<Map<String, HostProfile>> _enabledHostsByKey() async {
+    final hosts = await _hostStore.loadHosts();
+    return <String, HostProfile>{
+      for (final host in hosts)
+        if (host.enabled)
+          _hostKey(host.id, SessionSendOutboxStore.hostFingerprint(host)): host,
+    };
+  }
+
+  Future<void> _attemptSend(HostProfile host, PendingSessionSend send) async {
+    if (!_isForeground) {
+      return;
+    }
+    try {
+      await _api.sendInput(
+        host,
+        sessionId: send.sessionId,
+        text: send.text,
+        input: send.inputItems,
+        clientMessageId: send.clientMessageId,
+        model: send.model,
+        reasoningEffort: send.reasoningEffort,
+        fastMode: send.fastMode,
+        approvalPolicy: send.approvalPolicy,
+        sandboxMode: send.sandboxMode,
+        networkAccess: send.networkAccess,
+      );
+      await _outbox.remove(send);
+    } catch (error) {
+      final message = friendlyError(error);
+      if (!isRetryableSendError(error)) {
+        await _markBlocked(send, message);
+        return;
+      }
+      final retryCount = send.retryCount + 1;
+      await _deferRetry(send, message, retryCount: retryCount);
+    }
+  }
+
+  Future<void> _deferRetry(
+    PendingSessionSend send,
+    String message, {
+    int? retryCount,
+  }) async {
+    final resolvedRetryCount = retryCount ?? send.retryCount + 1;
+    await _outbox.upsert(
+      send.copyWith(
+        updatedAt: DateTime.now(),
+        nextAttemptAt: DateTime.now().add(_backoff(resolvedRetryCount)),
+        retryCount: resolvedRetryCount,
+        lastError: message,
+        blocked: false,
+      ),
+    );
+  }
+
+  Future<void> _markBlocked(PendingSessionSend send, String message) async {
+    await _outbox.upsert(
+      send.copyWith(
+        updatedAt: DateTime.now(),
+        retryCount: send.retryCount + 1,
+        lastError: message,
+        blocked: true,
+      ),
+    );
+  }
+
+  Duration _backoff(int retryCount) {
+    const steps = <Duration>[
+      Duration(seconds: 5),
+      Duration(seconds: 15),
+      Duration(seconds: 45),
+      Duration(minutes: 2),
+      Duration(minutes: 5),
+    ];
+    final index = retryCount.clamp(0, steps.length - 1).toInt();
+    return steps[index];
+  }
+
+  int _comparePending(PendingSessionSend left, PendingSessionSend right) {
+    final nextAttemptCompare = left.nextAttemptAt.compareTo(
+      right.nextAttemptAt,
+    );
+    if (nextAttemptCompare != 0) {
+      return nextAttemptCompare;
+    }
+    return left.createdAt.compareTo(right.createdAt);
+  }
+
+  String _hostKey(String hostId, String hostFingerprint) {
+    return '$hostId:$hostFingerprint';
+  }
+
+  bool get _isForeground =>
+      _started && _lifecycleState == AppLifecycleState.resumed;
+}
