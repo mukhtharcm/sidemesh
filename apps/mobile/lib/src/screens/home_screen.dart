@@ -191,15 +191,24 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       return;
     }
     final exists = _hosts.any((item) => item.id == result.id);
+    final previousHost = exists
+        ? _hosts.firstWhere((item) => item.id == result.id)
+        : null;
     final updated = exists
         ? _hosts.map((item) => item.id == result.id ? result : item).toList()
         : [..._hosts, result];
+    if (previousHost != null &&
+        (previousHost.baseUrl != result.baseUrl ||
+            previousHost.token != result.token)) {
+      await SessionCacheStore.instance.clearHost(previousHost);
+    }
     await _store.saveHosts(updated);
     await _refreshHosts();
   }
 
   Future<void> _removeHost(HostProfile host) async {
     final updated = _hosts.where((item) => item.id != host.id).toList();
+    await SessionCacheStore.instance.clearHost(host);
     await _store.saveHosts(updated);
     await _refreshHosts();
   }
