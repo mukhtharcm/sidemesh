@@ -23,7 +23,9 @@ import type {
   ModelSummary,
   SessionMessageAttachment,
   SessionMessage,
+  SessionResourcesResponse,
   SessionRuntimeSummary,
+  SessionResource,
   SessionSummary,
   ThreadRecord,
   TurnRecord,
@@ -41,6 +43,7 @@ import {
 import { CodexBridge } from "./codex-client.js";
 import { buildGitDiff, readGitDiff, readGitStatus, sanitizeGitUrl } from "./git.js";
 import { loadRolloutLog, loadSessionRuntime } from "./history.js";
+import { buildSessionResources } from "./resources.js";
 import {
   FsWatchRegistry,
   attachFsLiveSocket,
@@ -617,6 +620,11 @@ export async function startServer(config: NodeConfig): Promise<void> {
       pendingAction: findPendingActionForSession(pendingActions, sessionId),
       session: mapSession(session, log.runtime),
     });
+  }));
+
+  app.get("/api/sessions/:sessionId/resources", asyncRoute(async (request, response) => {
+    const sessionId = pathParam(request.params.sessionId);
+    response.json(await readSessionResources(bridge, sessionId, liveActivities));
   }));
 
   app.get("/api/sessions/:sessionId/status", asyncRoute(async (request, response) => {
@@ -1583,6 +1591,29 @@ function buildSessionHistorySummary(
     returnedMessages,
     totalActivities,
     returnedActivities,
+  };
+}
+
+async function readSessionResources(
+  bridge: CodexBridge,
+  sessionId: string,
+  liveActivities: Map<string, Map<string, SessionActivity>>,
+): Promise<SessionResourcesResponse> {
+  const session = await readSession(bridge, sessionId, false);
+  const log = await loadRolloutLog(
+    sessionId,
+    session.path,
+    bridge.codexHome,
+  );
+  const activities = mergeSessionActivities(
+    log.activities,
+    liveActivities.get(sessionId)?.values() || [],
+  );
+  const resources: SessionResource[] = buildSessionResources(log.messages, activities);
+  return {
+    sessionId,
+    updatedAt: session.updatedAt,
+    resources,
   };
 }
 

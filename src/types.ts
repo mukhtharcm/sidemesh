@@ -133,6 +133,30 @@ export interface SessionMessageAttachment {
   path?: string;
 }
 
+export interface SessionResource {
+  id: string;
+  kind: "image" | "link" | "file";
+  source:
+    | "message_attachment"
+    | "message_link"
+    | "message_file"
+    | "web_search"
+    | "image_generation";
+  createdAt: number;
+  title: string;
+  subtitle: string | null;
+  url: string | null;
+  path: string | null;
+  messageId: string | null;
+  activityId: string | null;
+}
+
+export interface SessionResourcesResponse {
+  sessionId: string;
+  updatedAt: number;
+  resources: SessionResource[];
+}
+
 export interface SessionActivityChange {
   path: string;
   kind: "add" | "delete" | "update";
