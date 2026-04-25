@@ -786,6 +786,7 @@ class _FullscreenImageGallery extends StatefulWidget {
 class _FullscreenImageGalleryState extends State<_FullscreenImageGallery> {
   late final PageController _pageController;
   late int _index;
+  bool _chromeVisible = true;
 
   @override
   void initState() {
@@ -800,26 +801,19 @@ class _FullscreenImageGalleryState extends State<_FullscreenImageGallery> {
     super.dispose();
   }
 
+  void _toggleChrome() {
+    setState(() => _chromeVisible = !_chromeVisible);
+  }
+
   @override
   Widget build(BuildContext context) {
     final resource = widget.resources[_index];
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(
-          '${_index + 1} / ${widget.resources.length}',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: SafeArea(
               child: PageView.builder(
                 controller: _pageController,
                 itemCount: widget.resources.length,
@@ -828,42 +822,104 @@ class _FullscreenImageGalleryState extends State<_FullscreenImageGallery> {
                   host: widget.host,
                   api: widget.api,
                   resource: widget.resources[index],
+                  onTap: _toggleChrome,
                 ),
               ),
             ),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-              decoration: const BoxDecoration(
-                color: Color.fromRGBO(0, 0, 0, 0.72),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    resource.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: IgnorePointer(
+              ignoring: !_chromeVisible,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 180),
+                opacity: _chromeVisible ? 1 : 0,
+                child: SafeArea(
+                  bottom: false,
+                  child: Container(
+                    margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                    padding: const EdgeInsets.fromLTRB(8, 8, 14, 8),
+                    decoration: BoxDecoration(
+                      color: const Color.fromRGBO(0, 0, 0, 0.72),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => Navigator.of(context).maybePop(),
+                          icon: const Icon(
+                            Icons.arrow_back_rounded,
+                            color: Colors.white,
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            '${_index + 1} / ${widget.resources.length}',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _gallerySubtitle(resource),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.white70,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
-          ],
-        ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: IgnorePointer(
+              ignoring: !_chromeVisible,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 180),
+                opacity: _chromeVisible ? 1 : 0,
+                child: SafeArea(
+                  top: false,
+                  child: Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+                    decoration: BoxDecoration(
+                      color: const Color.fromRGBO(0, 0, 0, 0.72),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          resource.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _gallerySubtitle(resource),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: Colors.white70, height: 1.35),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -874,20 +930,26 @@ class _GalleryImagePage extends StatelessWidget {
     required this.host,
     required this.api,
     required this.resource,
+    required this.onTap,
   });
 
   final HostProfile host;
   final ApiClient api;
   final SessionResource resource;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: (resource.path ?? '').isNotEmpty
-            ? _LocalGalleryImage(host: host, api: api, path: resource.path!)
-            : _RemoteGalleryImage(url: resource.url ?? ''),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: (resource.path ?? '').isNotEmpty
+              ? _LocalGalleryImage(host: host, api: api, path: resource.path!)
+              : _RemoteGalleryImage(url: resource.url ?? ''),
+        ),
       ),
     );
   }
