@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
@@ -628,6 +629,21 @@ String friendlyError(Object error) {
   }
   final trimmed = text.replaceFirst('Exception: ', '');
   return trimmed.length > 160 ? '${trimmed.substring(0, 157)}…' : trimmed;
+}
+
+bool isRetryableSendError(Object error) {
+  if (error is ApiTimeoutException ||
+      error is TimeoutException ||
+      error is SocketException ||
+      error is http.ClientException) {
+    return true;
+  }
+  if (error is ApiException) {
+    return error.statusCode == 408 ||
+        error.statusCode == 429 ||
+        error.statusCode >= 500;
+  }
+  return false;
 }
 
 String? _tryExtractMessage(String body) {
