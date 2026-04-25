@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api_client.dart';
 import '../approval_inbox_store.dart';
 import '../host_store.dart';
+import '../local_notification_service.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/theme_controller.dart';
@@ -55,6 +56,7 @@ class _DesktopShellState extends State<DesktopShell> {
   Timer? _searchDebounce;
   // Used to trigger refresh of sidebar panes after a host/session mutation.
   int _refreshTick = 0;
+  bool _handlingNotificationIntent = false;
 
   // Reserve space under the macOS titlebar so traffic lights & drag area
   // stay clean. 28pt matches the standard NSWindow titlebar height.
@@ -73,6 +75,9 @@ class _DesktopShellState extends State<DesktopShell> {
   @override
   void initState() {
     super.initState();
+    LocalNotificationService.instance.routeIntent.addListener(
+      _onNotificationRouteIntent,
+    );
     _loadHosts();
     _loadSidebarWidth();
     _loadInspectorWidth();
@@ -95,6 +100,9 @@ class _DesktopShellState extends State<DesktopShell> {
 
   @override
   void dispose() {
+    LocalNotificationService.instance.routeIntent.removeListener(
+      _onNotificationRouteIntent,
+    );
     _searchDebounce?.cancel();
     _searchController.dispose();
     _searchFocus.dispose();
@@ -110,6 +118,7 @@ class _DesktopShellState extends State<DesktopShell> {
       _loading = false;
     });
     ApprovalInboxStore.instance.configure(hosts: hosts, api: _api);
+    unawaited(_handleNotificationRouteIntent());
   }
 
   Future<void> _loadSidebarWidth() async {
@@ -330,6 +339,58 @@ class _DesktopShellState extends State<DesktopShell> {
     });
   }
 
+  void _onNotificationRouteIntent() {
+    unawaited(_handleNotificationRouteIntent());
+  }
+
+  Future<void> _handleNotificationRouteIntent() async {
+    if (_handlingNotificationIntent || _loading) return;
+    final service = LocalNotificationService.instance;
+    final intent = service.routeIntent.value;
+    if (intent == null || intent.type != 'approval') return;
+    _handlingNotificationIntent = true;
+    try {
+      if (!mounted) return;
+      if (_section != _SidebarSection.inbox) {
+        setState(() => _section = _SidebarSection.inbox);
+      }
+      final host = _hostForIntent(intent);
+      if (host == null) {
+        service.markRouteIntentHandled(intent);
+        return;
+      }
+      await ApprovalInboxStore.instance.refresh();
+      if (!mounted) return;
+      final entry = _entryForIntent(intent);
+      service.markRouteIntentHandled(intent);
+      _openSession(
+        host,
+        entry == null
+            ? _sessionFromNotificationIntent(intent)
+            : _sessionFromAction(entry.action),
+      );
+    } finally {
+      _handlingNotificationIntent = false;
+    }
+  }
+
+  HostProfile? _hostForIntent(NotificationRouteIntent intent) {
+    for (final host in _hosts) {
+      if (host.id == intent.hostId) return host;
+    }
+    return null;
+  }
+
+  PendingActionEntry? _entryForIntent(NotificationRouteIntent intent) {
+    for (final entry in ApprovalInboxStore.instance.entries) {
+      if (entry.host.id == intent.hostId &&
+          entry.action.id == intent.actionId) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
   void _openHostDetail(HostProfile host) {
     final current = _active;
     if (current != null) {
@@ -358,6 +419,24 @@ class _DesktopShellState extends State<DesktopShell> {
       cwd: action.cwd ?? '',
       createdAt: action.requestedAt,
       updatedAt: action.requestedAt,
+      source: 'appServer',
+      status: 'pendingApproval',
+      runtime: null,
+      gitInfo: null,
+    );
+  }
+
+  SessionSummary _sessionFromNotificationIntent(
+    NotificationRouteIntent intent,
+  ) {
+    final now = DateTime.now();
+    return SessionSummary(
+      id: intent.sessionId,
+      title: 'Session',
+      preview: 'Opened from approval notification',
+      cwd: '',
+      createdAt: now,
+      updatedAt: now,
       source: 'appServer',
       status: 'pendingApproval',
       runtime: null,
