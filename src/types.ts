@@ -239,6 +239,14 @@ export interface LiveEvent {
   activity?: SessionActivity;
 }
 
+export interface ApprovalLiveEvent {
+  type: "hello" | "snapshot" | "action_opened" | "action_resolved" | "error";
+  actions?: PendingAction[];
+  action?: PendingAction;
+  actionId?: string;
+  message?: string;
+}
+
 export interface JsonRpcMessage {
   id?: number | string;
   method?: string;
