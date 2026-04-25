@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'api_client.dart';
 import 'host_status_store.dart';
+import 'live_activity_service.dart';
 import 'local_notification_service.dart';
 import 'models.dart';
 
@@ -84,6 +85,7 @@ class ApprovalInboxStore extends ChangeNotifier {
       _pendingHostIds = <String>{};
       _failedHostLabels = const [];
       _hasLoadedOnce = true;
+      unawaited(LiveActivityService.instance.endPendingApprovals());
       notifyListeners();
       return;
     }
@@ -125,6 +127,7 @@ class ApprovalInboxStore extends ChangeNotifier {
     collected.sort(
       (a, b) => b.action.requestedAt.compareTo(a.action.requestedAt),
     );
+    _syncLiveActivity(collected);
     _notifyForNewActions(collected);
     _entries = List.unmodifiable(collected);
     _seenActionKeys = collected.map(_actionKey).toSet();
@@ -141,7 +144,24 @@ class ApprovalInboxStore extends ChangeNotifier {
         .toList(growable: false);
     if (next.length == _entries.length) return;
     _entries = List.unmodifiable(next);
+    _syncLiveActivity(_entries);
     notifyListeners();
+  }
+
+  void _syncLiveActivity(List<PendingActionEntry> entries) {
+    if (entries.isEmpty) {
+      unawaited(LiveActivityService.instance.endPendingApprovals());
+      return;
+    }
+    final newest = entries.first;
+    unawaited(
+      LiveActivityService.instance.syncPendingApprovals(
+        count: entries.length,
+        hostLabel: newest.host.label,
+        title: newest.action.title,
+        sessionTitle: newest.action.sessionTitle ?? '',
+      ),
+    );
   }
 
   void _notifyForNewActions(List<PendingActionEntry> entries) {
