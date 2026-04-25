@@ -13,14 +13,12 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/io.dart';
 
 import '../api_client.dart';
-import '../fs_languages.dart';
 import '../host_status_store.dart';
 import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
 import '../models.dart';
 import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
-import 'file_viewer_pane.dart';
 import 'file_viewer_screen.dart';
 import 'image_viewer_screen.dart';
 import 'inspector/inspector_controller.dart';
@@ -2690,42 +2688,17 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _openWorkspaceFile(String path) {
-    final isDesktop = widget.topPadding != null;
-    if (isDesktop) {
-      showDialog<void>(
-        context: context,
-        barrierColor: Colors.black.withValues(alpha: 0.4),
-        builder: (dialogContext) {
-          final colors = context.colors;
-          final mediaSize = MediaQuery.of(dialogContext).size;
-          final maxWidth = (mediaSize.width * 0.8)
-              .clamp(640.0, 1100.0)
-              .toDouble();
-          final maxHeight = (mediaSize.height * 0.85)
-              .clamp(480.0, 860.0)
-              .toDouble();
-          return Dialog(
-            backgroundColor: colors.surface,
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 40,
-              vertical: 40,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: maxWidth,
-                maxHeight: maxHeight,
-              ),
-              child: _InlineFileViewer(
-                host: widget.host,
-                api: widget.api,
-                path: path,
-              ),
-            ),
-          );
-        },
+    final scope = InspectorScope.maybeOf(context);
+    if (widget.topPadding != null && scope != null) {
+      final session = _session ?? widget.session;
+      scope.show(
+        buildInspectorWorkspaceBrowserSurface(
+          ownerKey: _inspectorOwnerKey(),
+          host: widget.host,
+          api: widget.api,
+          root: session.cwd,
+          selectedPath: path,
+        ),
       );
       return;
     }
@@ -6063,7 +6036,7 @@ class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
                 source: ImageViewerSource(
                   imageProvider: imageProvider,
                   heroTag: heroTag,
-                  title: baseName(widget.path),
+                  title: _basename(widget.path),
                   subtitle: widget.path,
                 ),
               );
@@ -7209,110 +7182,6 @@ class _ActivityCardState extends State<_ActivityCard> {
       label: label,
       expandedLabel: 'Hide diffs',
       onToggle: () => setState(() => _diffExpanded = true),
-    );
-  }
-}
-
-class _InlineFileViewer extends StatefulWidget {
-  const _InlineFileViewer({
-    required this.host,
-    required this.api,
-    required this.path,
-  });
-
-  final HostProfile host;
-  final ApiClient api;
-  final String path;
-
-  @override
-  State<_InlineFileViewer> createState() => _InlineFileViewerState();
-}
-
-class _InlineFileViewerState extends State<_InlineFileViewer> {
-  final GlobalKey<FileViewerPaneState> _paneKey =
-      GlobalKey<FileViewerPaneState>();
-  final ValueNotifier<int> _observable = ValueNotifier<int>(0);
-
-  @override
-  void dispose() {
-    _observable.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final languageId = languageForPath(widget.path);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
-          child: Row(
-            children: [
-              Icon(Icons.description_outlined, size: 18, color: colors.accent),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      baseName(widget.path),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        if (languageId != null) ...[
-                          MeshPill(label: languageId, mono: true),
-                          const SizedBox(width: 6),
-                        ],
-                        Flexible(
-                          child: Text(
-                            widget.path,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: monoStyle(
-                              color: colors.textTertiary,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              ListenableBuilder(
-                listenable: _observable,
-                builder: (context, _) =>
-                    FileViewerActions(state: _paneKey.currentState),
-              ),
-              IconButton(
-                tooltip: 'Close',
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close_rounded, size: 20),
-              ),
-            ],
-          ),
-        ),
-        Divider(height: 1, color: colors.border),
-        Expanded(
-          child: FileViewerPane(
-            key: _paneKey,
-            host: widget.host,
-            api: widget.api,
-            path: widget.path,
-            observable: _observable,
-            dense: true,
-          ),
-        ),
-      ],
     );
   }
 }
