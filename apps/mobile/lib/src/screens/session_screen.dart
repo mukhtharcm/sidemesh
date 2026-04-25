@@ -26,6 +26,7 @@ import 'inspector/inspector_pinned.dart';
 import 'inspector/inspector_search.dart';
 import 'workspace_browser_dialog.dart';
 import '../session_favorites_store.dart';
+import '../session_cache_store.dart';
 import '../session_message_seed_store.dart';
 import '../session_overrides_store.dart';
 import '../session_pins_store.dart';
@@ -198,6 +199,7 @@ class _SessionScreenState extends State<SessionScreen>
     );
     _scrollController.addListener(_onTranscriptScroll);
     _markCurrentSessionSeen();
+    unawaited(_loadCachedSnapshot());
     _loadSnapshot();
     _loadSkills(forceReload: true);
     unawaited(_loadGitStatus(silent: true));
@@ -823,6 +825,7 @@ class _SessionScreenState extends State<SessionScreen>
       if (scrollToBottom) {
         await _scrollToBottom();
       }
+      unawaited(SessionCacheStore.instance.saveSessionLog(widget.host, log));
     } catch (error) {
       if (!mounted || requestId != _snapshotRequestId) {
         return;
@@ -836,6 +839,48 @@ class _SessionScreenState extends State<SessionScreen>
       );
     } finally {
       _snapshotInFlight = false;
+    }
+  }
+
+  Future<void> _loadCachedSnapshot() async {
+    try {
+      final cached = await SessionCacheStore.instance.loadSessionLog(
+        widget.host,
+        widget.session.id,
+      );
+      if (!mounted || cached == null || _messages.isNotEmpty) {
+        return;
+      }
+      final log = cached.log;
+      setState(() {
+        _session = log.session;
+        _messages = log.messages;
+        _optimisticMessages = _reconcileOptimisticMessages(log.messages);
+        _activities = _sortActivities(log.activities);
+        _history = log.history;
+        _pendingAction = log.pendingAction;
+        _running = log.session.isActive;
+        _loading = false;
+        _awaitingAssistantReply =
+            log.session.isActive &&
+            _liveAssistantText.isEmpty &&
+            _pendingAction == null;
+        var highestSeq = _lastEventSeq ?? 0;
+        for (final m in log.messages) {
+          if (m.seq > highestSeq) highestSeq = m.seq;
+        }
+        for (final a in log.activities) {
+          if (a.seq > highestSeq) highestSeq = a.seq;
+        }
+        if (highestSeq > 0) {
+          _lastEventSeq = highestSeq;
+        }
+      });
+      _refreshThinkingState();
+      _syncSessionLiveActivity();
+      _markCurrentSessionSeen();
+    } catch (_) {
+      // Cached transcripts are best-effort. A fresh snapshot is already queued.
     }
   }
 
@@ -902,10 +947,30 @@ class _SessionScreenState extends State<SessionScreen>
       _refreshThinkingState();
       _syncSessionLiveActivity();
       _markCurrentSessionSeen();
+      _persistCurrentSessionLog();
       return true;
     } catch (_) {
       return false;
     }
+  }
+
+  void _persistCurrentSessionLog() {
+    final session = _session;
+    if (session == null) {
+      return;
+    }
+    unawaited(
+      SessionCacheStore.instance.saveSessionLog(
+        widget.host,
+        SessionLog(
+          session: session,
+          messages: _messages,
+          activities: _activities,
+          pendingAction: _pendingAction,
+          history: _history,
+        ),
+      ),
+    );
   }
 
   Future<void> _loadOlderTranscript() async {
@@ -1176,6 +1241,7 @@ class _SessionScreenState extends State<SessionScreen>
       case 'error':
         break;
     }
+    _persistCurrentSessionLog();
   }
 
   bool _shouldShowThinking() {
@@ -1289,6 +1355,7 @@ class _SessionScreenState extends State<SessionScreen>
       });
     }
     _syncSessionLiveActivity();
+    _persistCurrentSessionLog();
     _scrollToBottomFast();
   }
 

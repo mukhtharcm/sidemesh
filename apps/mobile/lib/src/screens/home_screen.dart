@@ -11,6 +11,7 @@ import '../live_activity_service.dart';
 import '../local_notification_service.dart';
 import '../models.dart';
 import '../session_favorites_store.dart';
+import '../session_cache_store.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';
 import '../session_runtime.dart';
@@ -827,7 +828,11 @@ class _RecentPaneState extends State<RecentPane> {
     final fetches = await Future.wait(
       hosts.map<Future<List<SessionSummary>?>>((host) async {
         try {
-          return await widget.api.fetchSessions(host, limit: 40);
+          final sessions = await widget.api.fetchSessions(host, limit: 40);
+          unawaited(
+            SessionCacheStore.instance.saveRecentSessions(host, sessions),
+          );
+          return sessions;
         } catch (_) {
           return null;
         }
@@ -866,15 +871,38 @@ class _RecentPaneState extends State<RecentPane> {
 
   Future<void> _loadHost(HostProfile host, int gen) async {
     try {
+      final cached = await SessionCacheStore.instance.loadRecentSessions(host);
+      if (mounted && gen == _loadGen && cached.isNotEmpty) {
+        final cachedEntries = cached
+            .take(20)
+            .map((session) => RemoteSessionEntry(host: host, session: session))
+            .toList(growable: false);
+        setState(() {
+          _entries = [
+            ..._entries.where((entry) => entry.host.id != host.id),
+            ...cachedEntries,
+          ];
+        });
+        _emitActiveCount();
+      }
+    } catch (_) {
+      // Cache is an optimization only; network remains the source of truth.
+    }
+
+    try {
       final sessions = await widget.api.fetchSessions(host, limit: 40);
       if (!mounted || gen != _loadGen) return;
+      unawaited(SessionCacheStore.instance.saveRecentSessions(host, sessions));
       _statuses.markOnline(host.id);
       final newEntries = sessions
           .take(20)
           .map((session) => RemoteSessionEntry(host: host, session: session))
           .toList();
       setState(() {
-        _entries = [..._entries, ...newEntries];
+        _entries = [
+          ..._entries.where((entry) => entry.host.id != host.id),
+          ...newEntries,
+        ];
         _pendingHostIds = {..._pendingHostIds}..remove(host.id);
       });
       _emitActiveCount();
