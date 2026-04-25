@@ -866,7 +866,9 @@ class _SessionScreenState extends State<SessionScreen>
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
         _activities = _sortActivities(log.activities);
         _history = log.history;
-        _pendingAction = log.pendingAction;
+        // Permission prompts are live state. Restoring them from disk can show
+        // stale approvals after the server already resolved or forgot them.
+        _pendingAction = null;
         _running = log.session.isActive;
         _loading = false;
         _awaitingAssistantReply =
@@ -885,7 +887,6 @@ class _SessionScreenState extends State<SessionScreen>
         }
       });
       _refreshThinkingState();
-      _syncSessionLiveActivity();
       _markCurrentSessionSeen();
     } catch (_) {
       // Cached transcripts are best-effort. A fresh snapshot is already queued.
@@ -976,7 +977,7 @@ class _SessionScreenState extends State<SessionScreen>
           session: session,
           messages: _messages,
           activities: _activities,
-          pendingAction: _pendingAction,
+          pendingAction: null,
           history: _history,
         ),
       ),
@@ -1737,7 +1738,7 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted) {
         return;
       }
-      _clearFailedSendRetry(retrySignature);
+      _clearFailedSendRetry();
     } catch (error) {
       if (!mounted) {
         return;
@@ -1817,10 +1818,7 @@ class _SessionScreenState extends State<SessionScreen>
     _failedSendRetryExpiresAt = DateTime.now().add(_failedSendRetryWindow);
   }
 
-  void _clearFailedSendRetry(String signature) {
-    if (_failedSendRetrySignature != signature) {
-      return;
-    }
+  void _clearFailedSendRetry() {
     _failedSendRetryClientMessageId = null;
     _failedSendRetrySignature = null;
     _failedSendRetryExpiresAt = null;
