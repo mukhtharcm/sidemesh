@@ -36,3 +36,33 @@ flutter build ios --flavor prod --release --no-codesign
 The two flavors use different iOS bundle IDs, so iOS treats them as separate
 apps. Local hosts, tokens, favorites, pins, theme, and other preferences are
 stored separately by default.
+
+## Live Activity Extension Notes
+
+The Live Activity widget extension uses explicit version values in
+`ios/SidemeshLiveActivityExtension/Info.plist`:
+
+- `CFBundleShortVersionString = 1.0.0`
+- `CFBundleVersion = 1`
+
+Do not replace these with `$(MARKETING_VERSION)` or
+`$(CURRENT_PROJECT_VERSION)` unless the extension target is also proven to
+inherit those build settings for every Flutter flavor and simulator/device
+build. The extension target does not reliably inherit Flutter's
+`FLUTTER_BUILD_NAME` / `FLUTTER_BUILD_NUMBER` values.
+
+If this regresses, simulator install can fail after a successful Xcode build
+with:
+
+```text
+Invalid placeholder attributes.
+Failed to create app extension placeholder
+bundleVersion must be set in placeholder attributes for an app extension placeholder
+```
+
+The build may still succeed; verify with a simulator install:
+
+```bash
+flutter build ios --simulator --flavor dev --debug
+xcrun simctl install <simulator-id> build/ios/iphonesimulator/Runner.app
+```
