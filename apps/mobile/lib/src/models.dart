@@ -627,6 +627,87 @@ class SessionMessageAttachment {
   Map<String, dynamic> toJson() => {'type': type, 'url': url, 'path': path};
 }
 
+class SessionResource {
+  const SessionResource({
+    required this.id,
+    required this.kind,
+    required this.source,
+    required this.createdAt,
+    required this.title,
+    required this.subtitle,
+    required this.url,
+    required this.path,
+    required this.messageId,
+    required this.activityId,
+  });
+
+  final String id;
+  final String kind;
+  final String source;
+  final DateTime createdAt;
+  final String title;
+  final String? subtitle;
+  final String? url;
+  final String? path;
+  final String? messageId;
+  final String? activityId;
+
+  bool get isImage => kind == 'image';
+  bool get isLink => kind == 'link' && (url?.isNotEmpty ?? false);
+  bool get isFile => kind == 'file';
+  bool get hasPath => path?.isNotEmpty ?? false;
+
+  factory SessionResource.fromJson(Map<String, dynamic> json) =>
+      SessionResource(
+        id: _stringValue(json['id']),
+        kind: _stringValue(json['kind']),
+        source: _stringValue(json['source']),
+        createdAt: _dateValue(json['createdAt']),
+        title: _stringValue(json['title']),
+        subtitle: _stringOrNull(json['subtitle']),
+        url: _stringOrNull(json['url']),
+        path: _stringOrNull(json['path']),
+        messageId: _stringOrNull(json['messageId']),
+        activityId: _stringOrNull(json['activityId']),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'kind': kind,
+    'source': source,
+    'createdAt': createdAt.millisecondsSinceEpoch,
+    'title': title,
+    'subtitle': subtitle,
+    'url': url,
+    'path': path,
+    'messageId': messageId,
+    'activityId': activityId,
+  };
+}
+
+class SessionResourcesResponse {
+  const SessionResourcesResponse({
+    required this.sessionId,
+    required this.updatedAt,
+    required this.resources,
+  });
+
+  final String sessionId;
+  final DateTime updatedAt;
+  final List<SessionResource> resources;
+
+  factory SessionResourcesResponse.fromJson(Map<String, dynamic> json) =>
+      SessionResourcesResponse(
+        sessionId: _stringValue(json['sessionId']),
+        updatedAt: _dateValue(json['updatedAt']),
+        resources: (json['resources'] as List<dynamic>? ?? [])
+            .map(
+              (item) => SessionResource.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(),
+      );
+}
+
 class SessionInputItem {
   const SessionInputItem._({
     required this.type,
