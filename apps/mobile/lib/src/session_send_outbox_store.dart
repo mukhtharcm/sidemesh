@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
@@ -135,7 +136,7 @@ class PendingSessionSend {
   };
 }
 
-class SessionSendOutboxStore {
+class SessionSendOutboxStore extends ChangeNotifier {
   SessionSendOutboxStore._();
 
   static final SessionSendOutboxStore instance = SessionSendOutboxStore._();
@@ -172,6 +173,19 @@ class SessionSendOutboxStore {
     });
   }
 
+  Future<List<PendingSessionSend>> loadAll() {
+    return _runExclusive(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final entries = await _loadAll(prefs);
+      final pruned = _prune(entries, DateTime.now());
+      if (pruned.length != entries.length) {
+        await _saveAll(prefs, pruned);
+        notifyListeners();
+      }
+      return pruned;
+    });
+  }
+
   Future<bool> upsert(PendingSessionSend entry) async {
     final encodedEntry = jsonEncode(entry.toJson());
     if (utf8.encode(encodedEntry).length > _maxEntryChars) {
@@ -190,7 +204,9 @@ class SessionSendOutboxStore {
       while (entries.length > _maxEntries) {
         entries.removeLast();
       }
-      return _saveAllWithinBudget(prefs, entries, entry.key);
+      final saved = await _saveAllWithinBudget(prefs, entries, entry.key);
+      notifyListeners();
+      return saved;
     });
   }
 
@@ -216,6 +232,7 @@ class SessionSendOutboxStore {
         prefs,
       )).where((item) => item.key != key).toList(growable: false);
       await _saveAll(prefs, entries);
+      notifyListeners();
     });
   }
 
