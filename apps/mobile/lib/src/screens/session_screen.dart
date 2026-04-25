@@ -34,6 +34,7 @@ import '../session_pins_store.dart';
 import '../session_policy_store.dart';
 import '../session_read_store.dart';
 import '../session_send_outbox_store.dart';
+import '../session_send_outbox_worker.dart';
 import '../session_turn_config_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
@@ -205,6 +206,7 @@ class _SessionScreenState extends State<SessionScreen>
     _favorites.ensureLoaded();
     _pinsStore.ensureLoaded();
     _pinsStore.addListener(_handlePinsChanged);
+    _sendOutbox.addListener(_handleSendOutboxChanged);
     _policyStore.ensureLoaded();
     _readStore.ensureLoaded();
     _composerController.addListener(_handleComposerChanged);
@@ -356,6 +358,7 @@ class _SessionScreenState extends State<SessionScreen>
     _composerController.removeListener(_handleComposerChanged);
     _searchController.removeListener(_handleSearchChanged);
     _pinsStore.removeListener(_handlePinsChanged);
+    _sendOutbox.removeListener(_handleSendOutboxChanged);
     _composerController.dispose();
     _searchController.dispose();
     _composerFocusNode.dispose();
@@ -375,6 +378,11 @@ class _SessionScreenState extends State<SessionScreen>
   void _handlePinsChanged() {
     if (!mounted || _disposed) return;
     setState(() {});
+  }
+
+  void _handleSendOutboxChanged() {
+    if (!mounted || _disposed) return;
+    unawaited(_loadPendingSends());
   }
 
   void _handleSearchChanged() {
@@ -1756,6 +1764,7 @@ class _SessionScreenState extends State<SessionScreen>
     }
     setState(() => _upsertPendingSend(pending));
     _schedulePendingSendRetry();
+    SessionSendOutboxWorker.instance.poke();
     return true;
   }
 
