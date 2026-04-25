@@ -92,6 +92,32 @@ class LiveActivityService {
     await _endPrimaryActivity();
   }
 
+  Future<void> clearPrimarySessionContext() async {
+    if (!_isEligiblePlatform) return;
+    _activeSessionKey = null;
+    await _clearPrimaryOwner();
+    await _endPrimaryActivity();
+  }
+
+  Future<void> clearPrimarySessionForHost(String hostId) async {
+    if (!_isEligiblePlatform) return;
+    if (_activeSessionKey?.startsWith('$hostId:') == true) {
+      _activeSessionKey = null;
+      await _clearPrimaryOwner();
+      await _endPrimaryActivity();
+      return;
+    }
+    if (_activeSessionKey != null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString(_primaryOwnerHostIdKey) != hostId) return;
+      await _clearPrimaryOwner();
+      await _endPrimaryActivity();
+    } catch (error) {
+      debugPrint('Failed to clear Live Activity host context: $error');
+    }
+  }
+
   Future<void> syncPendingApprovals({
     required int count,
     required String hostLabel,

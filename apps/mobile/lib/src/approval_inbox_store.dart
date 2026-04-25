@@ -66,7 +66,11 @@ class ApprovalInboxStore extends ChangeNotifier {
         !newSignatures.containsAll(oldSignatures);
     _hosts = List.unmodifiable(hosts);
     _syncLiveConnections(hosts: _hosts, api: api);
-    _ensureTimer();
+    if (_hosts.isEmpty) {
+      _stopTimer();
+    } else {
+      _ensureTimer();
+    }
     if (hostsChanged || !_hasLoadedOnce) {
       unawaited(refresh());
     }
@@ -76,6 +80,11 @@ class ApprovalInboxStore extends ChangeNotifier {
     _pollTimer ??= Timer.periodic(_pollInterval, (_) {
       unawaited(refresh());
     });
+  }
+
+  void _stopTimer() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
   }
 
   Future<void> refresh() async {
@@ -381,7 +390,7 @@ class _ApprovalHostLiveConnection {
       host.token == next.token;
 
   void connect() {
-    if (_disposed) return;
+    if (_disposed || !host.enabled) return;
     try {
       _channel = api.openActionsLive(host);
       _subscription = _channel!.stream.listen(
@@ -391,6 +400,7 @@ class _ApprovalHostLiveConnection {
       );
       _attempt = 0;
     } catch (error) {
+      if (!host.enabled) return;
       _scheduleReconnect(error);
     }
   }
@@ -435,7 +445,7 @@ class _ApprovalHostLiveConnection {
   }
 
   void _scheduleReconnect(Object? error) {
-    if (_disposed) return;
+    if (_disposed || !host.enabled) return;
     _subscription?.cancel();
     _subscription = null;
     _channel = null;

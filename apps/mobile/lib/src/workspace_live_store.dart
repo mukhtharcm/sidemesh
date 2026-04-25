@@ -67,10 +67,11 @@ class _LiveSession {
   Stream<FsChangeEvent> get stream => _controller.stream;
 
   void _connect() {
-    if (_disposed) return;
+    if (_disposed || !host.enabled) return;
     try {
       _channel = api.openFsLive(host);
     } catch (_) {
+      if (!host.enabled) return;
       _scheduleReconnect();
       return;
     }
@@ -88,7 +89,7 @@ class _LiveSession {
   }
 
   void _scheduleReconnect() {
-    if (_disposed) return;
+    if (_disposed || !host.enabled) return;
     _channel = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(const Duration(seconds: 3), _connect);
@@ -108,12 +109,15 @@ class _LiveSession {
       } else if (type == 'error') {
         final id = decoded['id']?.toString();
         if (id != null) {
-          _pendingSubs.remove(id)?.completeError(
+          _pendingSubs
+              .remove(id)
+              ?.completeError(
                 StateError(decoded['message']?.toString() ?? 'subscribe error'),
               );
         }
       } else if (type == 'fs_changed') {
-        final changed = (decoded['changedPaths'] as List?)
+        final changed =
+            (decoded['changedPaths'] as List?)
                 ?.map((e) => e.toString())
                 .toList() ??
             const <String>[];
@@ -137,14 +141,11 @@ class _LiveSession {
     final id = 'sub-${_nextId++}';
     final completer = Completer<String>();
     _pendingSubs[id] = completer;
-    channel.sink.add(jsonEncode({
-      'type': 'subscribe',
-      'id': id,
-      'path': path,
-    }));
+    channel.sink.add(jsonEncode({'type': 'subscribe', 'id': id, 'path': path}));
     try {
-      final watchId =
-          await completer.future.timeout(const Duration(seconds: 10));
+      final watchId = await completer.future.timeout(
+        const Duration(seconds: 10),
+      );
       _pathToWatchId[path] = watchId;
     } catch (_) {
       _pendingSubs.remove(id);
@@ -156,10 +157,7 @@ class _LiveSession {
     final watchId = _pathToWatchId.remove(path);
     final channel = _channel;
     if (watchId == null || channel == null) return;
-    channel.sink.add(jsonEncode({
-      'type': 'unsubscribe',
-      'watchId': watchId,
-    }));
+    channel.sink.add(jsonEncode({'type': 'unsubscribe', 'watchId': watchId}));
   }
 
   Map<String, dynamic> _decode(String raw) =>
