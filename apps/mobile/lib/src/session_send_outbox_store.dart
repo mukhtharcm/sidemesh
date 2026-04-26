@@ -52,6 +52,7 @@ class PendingSessionSend {
   String get key => '$hostId:$hostFingerprint:$sessionId:$clientMessageId';
 
   PendingSessionSend copyWith({
+    String? hostFingerprint,
     DateTime? updatedAt,
     DateTime? nextAttemptAt,
     int? retryCount,
@@ -61,7 +62,7 @@ class PendingSessionSend {
   }) {
     return PendingSessionSend(
       hostId: hostId,
-      hostFingerprint: hostFingerprint,
+      hostFingerprint: hostFingerprint ?? this.hostFingerprint,
       sessionId: sessionId,
       clientMessageId: clientMessageId,
       text: text,
