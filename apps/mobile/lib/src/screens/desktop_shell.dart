@@ -1184,6 +1184,7 @@ class _SidebarPane extends StatelessWidget {
           selectedSessionId: selectedSessionId,
           dense: true,
           hasSavedHosts: hosts.isNotEmpty,
+          screenAwakeSourceKey: 'desktop-recent-sessions',
         );
       case _SidebarSection.inbox:
         return InboxPane(

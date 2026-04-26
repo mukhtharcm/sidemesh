@@ -8,6 +8,7 @@ import '../create_session_defaults_store.dart';
 import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
 import '../local_notification_service.dart';
+import '../screen_awake_settings_store.dart';
 import '../session_cache_store.dart';
 import '../session_policy_store.dart';
 import '../session_send_outbox_store.dart';
@@ -87,6 +88,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final CreateSessionDefaultsStore _defaultsStore =
       CreateSessionDefaultsStore.instance;
+  final ScreenAwakeSettingsStore _screenAwakeStore =
+      ScreenAwakeSettingsStore.instance;
 
   bool _notificationsLoading = true;
   bool _notificationsRequesting = false;
@@ -99,6 +102,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     unawaited(_defaultsStore.ensureLoaded());
+    unawaited(_screenAwakeStore.ensureLoaded());
     unawaited(_refreshNotificationStatus());
   }
 
@@ -244,6 +248,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onClose: widget.onClose,
       themeController: themeController,
       defaultsStore: _defaultsStore,
+      screenAwakeStore: _screenAwakeStore,
       notificationsLoading: _notificationsLoading,
       notificationsRequesting: _notificationsRequesting,
       notificationsSupported: _notificationsSupported,
@@ -464,6 +469,7 @@ class _SettingsContent extends StatelessWidget {
     required this.onClose,
     required this.themeController,
     required this.defaultsStore,
+    required this.screenAwakeStore,
     required this.notificationsLoading,
     required this.notificationsRequesting,
     required this.notificationsSupported,
@@ -485,6 +491,7 @@ class _SettingsContent extends StatelessWidget {
   final VoidCallback? onClose;
   final ThemeController themeController;
   final CreateSessionDefaultsStore defaultsStore;
+  final ScreenAwakeSettingsStore screenAwakeStore;
   final bool notificationsLoading;
   final bool notificationsRequesting;
   final bool notificationsSupported;
@@ -512,7 +519,12 @@ class _SettingsContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final list = ListView(
-      padding: EdgeInsets.fromLTRB(embedded ? 24 : 16, 16, embedded ? 24 : 16, 28),
+      padding: EdgeInsets.fromLTRB(
+        embedded ? 24 : 16,
+        16,
+        embedded ? 24 : 16,
+        28,
+      ),
       children: [
         _SectionHeader(
           icon: Icons.tune_rounded,
@@ -534,6 +546,32 @@ class _SettingsContent extends StatelessWidget {
               child: const Text('Customize'),
             ),
           ),
+        ),
+        const SizedBox(height: 12),
+        ListenableBuilder(
+          listenable: screenAwakeStore,
+          builder: (context, _) {
+            final enabled = screenAwakeStore.keepScreenAwakeWhileAgentRuns;
+            return _SettingsCard(
+              icon: Icons.light_mode_outlined,
+              title: 'Display',
+              subtitle: enabled
+                  ? 'Screen stays awake while an agent is working.'
+                  : 'Screen can sleep normally.',
+              body:
+                  'When enabled, Sidemesh keeps this device awake only while it can see an active agent session. The wake lock is released when the run ends, the app leaves the foreground, or this setting is turned off.',
+              footer: _ToggleTile(
+                icon: Icons.screen_lock_portrait_outlined,
+                title: 'Keep screen awake while agent runs',
+                subtitle:
+                    'Useful for monitoring long turns without repeatedly unlocking the device. This may use more battery.',
+                value: enabled,
+                onChanged: (value) => unawaited(
+                  screenAwakeStore.setKeepScreenAwakeWhileAgentRuns(value),
+                ),
+              ),
+            );
+          },
         ),
         const SizedBox(height: 12),
         _SettingsCard(
@@ -616,7 +654,8 @@ class _SettingsContent extends StatelessWidget {
             return _SettingsCard(
               icon: Icons.rocket_launch_outlined,
               title: 'New session defaults',
-              subtitle: '${defaults.approval.label} · ${defaults.sandbox.label}',
+              subtitle:
+                  '${defaults.approval.label} · ${defaults.sandbox.label}',
               body:
                   'These defaults seed the create-session flow before any host-specific model or profile selection.',
               footer: Wrap(
@@ -819,7 +858,7 @@ class _SettingsContent extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Global app controls for appearance, defaults, storage, and notifications.',
+                      'Global app controls for appearance, display, defaults, storage, and notifications.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.textSecondary,
                       ),

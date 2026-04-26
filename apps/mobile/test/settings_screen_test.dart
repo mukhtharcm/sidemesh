@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/create_session_defaults_store.dart';
+import 'package:sidemesh_mobile/src/screen_awake_settings_store.dart';
 import 'package:sidemesh_mobile/src/screens/settings_screen.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
@@ -12,6 +13,7 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     CreateSessionDefaultsStore.instance.resetForTest();
+    ScreenAwakeSettingsStore.instance.resetForTest();
   });
 
   testWidgets('renders core settings sections', (tester) async {
@@ -45,6 +47,8 @@ void main() {
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('App preferences'), findsOneWidget);
       expect(find.text('Appearance'), findsOneWidget);
+      expect(find.text('Display'), findsOneWidget);
+      expect(find.text('Keep screen awake while agent runs'), findsOneWidget);
       expect(find.text('Notifications'), findsOneWidget);
       expect(find.text('New session defaults'), findsOneWidget);
       expect(find.text('Storage & recovery'), findsOneWidget);
