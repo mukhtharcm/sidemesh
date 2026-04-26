@@ -18,6 +18,7 @@ import '../host_status_store.dart';
 import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
 import '../models.dart';
+import '../pending_send_recovery.dart';
 import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_screen.dart';
@@ -257,7 +258,10 @@ class _SessionScreenState extends State<SessionScreen>
     if (seed == null) {
       return;
     }
+    _applyComposerSeed(seed);
+  }
 
+  void _applyComposerSeed(SessionComposerSeed seed) {
     final draftAttachments = <_ComposerImageAttachment>[];
     final draftMentions = <_ComposerSkillMention>[];
     var attachmentIndex = 0;
@@ -2146,6 +2150,41 @@ class _SessionScreenState extends State<SessionScreen>
         .toList(growable: false);
   }
 
+  void _removeOptimisticPendingMessage(PendingSessionSend pending) {
+    _optimisticMessages = _optimisticMessages
+        .where((message) => message.id != pending.clientMessageId)
+        .toList(growable: false);
+  }
+
+  Future<void> _movePendingSendToComposer(PendingSessionSend pending) async {
+    await _sendOutbox.remove(pending);
+    if (!mounted || _disposed) {
+      return;
+    }
+    setState(() {
+      _removePendingSend(pending);
+      _removeOptimisticPendingMessage(pending);
+    });
+    _schedulePendingSendRetry();
+    _applyComposerSeed(
+      SessionComposerSeed(text: pending.text, inputItems: pending.inputItems),
+    );
+    showAppSnackBar(context, 'Queued message moved back into the composer.');
+  }
+
+  Future<void> _discardPendingSend(PendingSessionSend pending) async {
+    await _sendOutbox.remove(pending);
+    if (!mounted || _disposed) {
+      return;
+    }
+    setState(() {
+      _removePendingSend(pending);
+      _removeOptimisticPendingMessage(pending);
+    });
+    _schedulePendingSendRetry();
+    showAppSnackBar(context, 'Queued message discarded.');
+  }
+
   Duration _pendingSendBackoff(int retryCount) {
     const steps = <Duration>[
       Duration(seconds: 5),
@@ -3496,9 +3535,13 @@ class _SessionScreenState extends State<SessionScreen>
         ),
         if (_pendingSends.isNotEmpty)
           _PendingSendStrip(
+            host: widget.host,
             pending: _pendingSends,
             retrying: _retryingPendingSend,
             onRetryNow: () => unawaited(_retryPendingSends(manual: true)),
+            onEditCopy: (pending) =>
+                unawaited(_movePendingSendToComposer(pending)),
+            onDiscard: (pending) => unawaited(_discardPendingSend(pending)),
           ),
         _ComposerStatusStrip(thinking: _thinkingNotifier),
         _Composer(
@@ -5936,14 +5979,20 @@ class _ComposerStatusStrip extends StatelessWidget {
 
 class _PendingSendStrip extends StatelessWidget {
   const _PendingSendStrip({
+    required this.host,
     required this.pending,
     required this.retrying,
     required this.onRetryNow,
+    required this.onEditCopy,
+    required this.onDiscard,
   });
 
+  final HostProfile host;
   final List<PendingSessionSend> pending;
   final bool retrying;
   final VoidCallback onRetryNow;
+  final ValueChanged<PendingSessionSend> onEditCopy;
+  final ValueChanged<PendingSessionSend> onDiscard;
 
   @override
   Widget build(BuildContext context) {
@@ -5951,20 +6000,30 @@ class _PendingSendStrip extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final colors = context.colors;
-    final count = pending.length;
-    final blockedCount = pending.where((send) => send.blocked).length;
-    final retryable = pending
-        .where((send) => !send.blocked)
-        .toList(growable: false);
-    final nextAttempt = (retryable.isEmpty ? pending : retryable)
-        .map((send) => send.nextAttemptAt)
-        .reduce((left, right) => left.isBefore(right) ? left : right);
-    final lastError = pending
-        .firstWhere(
-          (send) => send.lastError != null,
-          orElse: () => pending.first,
+    final analyses = pending
+        .map(
+          (send) => analyzePendingSend(
+            send,
+            hosts: [host],
+            retrying: retrying && send.key == pending.first.key,
+          ),
         )
-        .lastError;
+        .toList(growable: false);
+    final count = analyses.length;
+    final blockedCount = analyses
+        .where((analysis) => analysis.needsAttention)
+        .length;
+    final primary = analyses.firstWhere(
+      (analysis) => analysis.needsAttention,
+      orElse: () => analyses.first,
+    );
+    final retryable = analyses
+        .where((analysis) => analysis.canRetryNow)
+        .toList(growable: false);
+    final nextAttempt = (retryable.isEmpty ? analyses : retryable)
+        .map((analysis) => analysis.send.nextAttemptAt)
+        .reduce((left, right) => left.isBefore(right) ? left : right);
+    final lastError = primary.send.lastError;
     final title = blockedCount > 0
         ? (blockedCount == 1
               ? '1 message needs attention'
@@ -5974,7 +6033,9 @@ class _PendingSendStrip extends StatelessWidget {
               : '$count messages waiting to retry');
     final detail = retrying
         ? 'Retrying now...'
-        : '${blockedCount > 0 && retryable.isEmpty ? 'Retry manually' : _formatRetryDelay(nextAttempt)}${lastError == null ? '' : ' - $lastError'}';
+        : blockedCount > 0
+        ? pendingSendRecoveryMessage(primary)
+        : '${_formatRetryDelay(nextAttempt)}${lastError == null ? '' : ' - $lastError'}';
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       child: DecoratedBox(
@@ -5985,36 +6046,68 @@ class _PendingSendStrip extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.cloud_sync_rounded, color: colors.accent, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: FontWeight.w800,
-                      ),
+              Row(
+                children: [
+                  Icon(
+                    Icons.cloud_sync_rounded,
+                    color: colors.accent,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(
+                                color: colors.textPrimary,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          detail,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colors.textSecondary),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      detail,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
+                  ),
+                  const SizedBox(width: 8),
+                  MeshPill(
+                    label: pendingSendStateLabel(primary.state),
+                    tone: _pendingSendStateTone(primary.state),
+                    mono: true,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  TextButton(
+                    onPressed: retrying ? null : onRetryNow,
+                    child: const Text('Retry now'),
+                  ),
+                  if (count == 1) ...[
+                    TextButton(
+                      onPressed: () => onEditCopy(primary.send),
+                      child: const Text('Edit copy'),
+                    ),
+                    TextButton(
+                      onPressed: () => onDiscard(primary.send),
+                      child: const Text('Discard'),
                     ),
                   ],
-                ),
-              ),
-              TextButton(
-                onPressed: retrying ? null : onRetryNow,
-                child: const Text('Retry now'),
+                ],
               ),
             ],
           ),
@@ -6033,6 +6126,14 @@ class _PendingSendStrip extends StatelessWidget {
     }
     return 'Next retry in ${remaining.inSeconds}s';
   }
+}
+
+MeshPillTone _pendingSendStateTone(PendingSendDisplayState state) {
+  return switch (state) {
+    PendingSendDisplayState.queued => MeshPillTone.info,
+    PendingSendDisplayState.retrying => MeshPillTone.accent,
+    PendingSendDisplayState.blocked => MeshPillTone.warning,
+  };
 }
 
 class _MessageBubble extends StatelessWidget {
