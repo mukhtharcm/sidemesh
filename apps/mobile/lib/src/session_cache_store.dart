@@ -119,6 +119,16 @@ class SessionCacheStore {
     await clearHostId(host.id);
   }
 
+  Future<void> clearAll() async {
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in prefs.getKeys().toList(growable: false)) {
+      if (key.startsWith('$_recentPrefix:') || key.startsWith('$_logPrefix:')) {
+        await prefs.remove(key);
+      }
+    }
+    await prefs.remove(_logIndexKey);
+  }
+
   Future<void> clearHostId(String hostId) async {
     final prefs = await SharedPreferences.getInstance();
     final recentPrefix = '$_recentPrefix:$hostId';

@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_palettes.dart';
+import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'mesh_widgets.dart';
 
-/// Opens the Appearance sheet — a single surface holding brightness +
-/// theme-variant controls. Used by both the mobile top-bar button and the
-/// desktop sidebar footer.
+/// Opens the Appearance sheet — a single surface holding brightness,
+/// palette, and typography controls. Used by both the mobile top-bar button
+/// and the desktop sidebar footer.
 Future<void> showAppearanceSheet(BuildContext context) {
   return showModalBottomSheet<void>(
     context: context,
@@ -66,9 +67,7 @@ class _AppearanceSheet extends StatelessWidget {
                           const SizedBox(width: 8),
                           Text(
                             'Appearance',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
+                            style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                           const Spacer(),
@@ -90,6 +89,10 @@ class _AppearanceSheet extends StatelessWidget {
                         controller: controller,
                         crossAxisCount: crossAxisCount,
                       ),
+                      const SizedBox(height: 22),
+                      _SectionLabel(text: 'Typography'),
+                      const SizedBox(height: 10),
+                      _TypographyCard(controller: controller),
                       const SizedBox(height: 8),
                     ],
                   ),
@@ -103,15 +106,15 @@ class _AppearanceSheet extends StatelessWidget {
   }
 
   Widget _grabHandle(AppColors colors) => Center(
-        child: Container(
-          width: 40,
-          height: 4,
-          decoration: BoxDecoration(
-            color: colors.border,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-      );
+    child: Container(
+      width: 40,
+      height: 4,
+      decoration: BoxDecoration(
+        color: colors.border,
+        borderRadius: BorderRadius.circular(2),
+      ),
+    ),
+  );
 }
 
 class _SectionLabel extends StatelessWidget {
@@ -124,10 +127,10 @@ class _SectionLabel extends StatelessWidget {
     return Text(
       text.toUpperCase(),
       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: colors.textTertiary,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.1,
-          ),
+        color: colors.textTertiary,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.1,
+      ),
     );
   }
 }
@@ -169,13 +172,10 @@ class _BrightnessSegmented extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     label,
-                    style:
-                        Theme.of(context).textTheme.labelMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: selected
-                                  ? colors.accent
-                                  : colors.textSecondary,
-                            ),
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: selected ? colors.accent : colors.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -204,10 +204,7 @@ class _BrightnessSegmented extends StatelessWidget {
 }
 
 class _SwatchGrid extends StatelessWidget {
-  const _SwatchGrid({
-    required this.controller,
-    required this.crossAxisCount,
-  });
+  const _SwatchGrid({required this.controller, required this.crossAxisCount});
 
   final ThemeController controller;
   final int crossAxisCount;
@@ -271,116 +268,116 @@ class _SwatchCard extends StatelessWidget {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(selected ? 12 : 13),
             child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: Stack(
-                  children: [
-                    // Canvas background
-                    Container(color: palette.canvas),
-                    // Mini bubble / surface strip mimicking an assistant bubble
-                    Positioned(
-                      left: 10,
-                      right: 10,
-                      top: 10,
-                      bottom: 10,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: palette.surface,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: palette.border),
-                        ),
-                        padding: const EdgeInsets.all(8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                _dot(palette.accent),
-                                const SizedBox(width: 4),
-                                _dot(palette.info),
-                                const SizedBox(width: 4),
-                                _dot(palette.success),
-                              ],
-                            ),
-                            Container(
-                              width: 34,
-                              height: 5,
-                              decoration: BoxDecoration(
-                                color: palette.textPrimary.withValues(
-                                  alpha: 0.7,
-                                ),
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                            ),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: Container(
-                                height: 14,
-                                width: 40,
-                                decoration: BoxDecoration(
-                                  color: palette.userBubble,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (selected)
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: Stack(
+                    children: [
+                      // Canvas background
+                      Container(color: palette.canvas),
+                      // Mini bubble / surface strip mimicking an assistant bubble
                       Positioned(
-                        right: 6,
-                        top: 6,
+                        left: 10,
+                        right: 10,
+                        top: 10,
+                        bottom: 10,
                         child: Container(
-                          padding: const EdgeInsets.all(3),
                           decoration: BoxDecoration(
-                            color: frameColors.accent,
-                            shape: BoxShape.circle,
+                            color: palette.surface,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: palette.border),
                           ),
-                          child: Icon(
-                            Icons.check_rounded,
-                            size: 12,
-                            color: frameColors.accentOn,
+                          padding: const EdgeInsets.all(8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  _dot(palette.accent),
+                                  const SizedBox(width: 4),
+                                  _dot(palette.info),
+                                  const SizedBox(width: 4),
+                                  _dot(palette.success),
+                                ],
+                              ),
+                              Container(
+                                width: 34,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  color: palette.textPrimary.withValues(
+                                    alpha: 0.7,
+                                  ),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                              ),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: Container(
+                                  height: 14,
+                                  width: 40,
+                                  decoration: BoxDecoration(
+                                    color: palette.userBubble,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                color: frameColors.surface,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      variant.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: selected
-                                ? frameColors.accent
-                                : frameColors.textPrimary,
+                      if (selected)
+                        Positioned(
+                          right: 6,
+                          top: 6,
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: frameColors.accent,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.check_rounded,
+                              size: 12,
+                              color: frameColors.accentOn,
+                            ),
                           ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      variant.tagline,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: frameColors.textTertiary,
-                            fontSize: 11,
-                          ),
-                    ),
-                  ],
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                  color: frameColors.surface,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        variant.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: selected
+                              ? frameColors.accent
+                              : frameColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        variant.tagline,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: frameColors.textTertiary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -388,8 +385,321 @@ class _SwatchCard extends StatelessWidget {
   }
 
   Widget _dot(Color color) => Container(
-        width: 6,
-        height: 6,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      );
+    width: 6,
+    height: 6,
+    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+  );
+}
+
+class _TypographyCard extends StatelessWidget {
+  const _TypographyCard({required this.controller});
+
+  final ThemeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final typography = controller.typography;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Typography',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Tune the interface voice and reading density without changing session content.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+          ),
+          const SizedBox(height: 14),
+          _TypographyPreview(controller: controller),
+          const SizedBox(height: 14),
+          _PreferenceLabel(text: 'Interface font'),
+          const SizedBox(height: 8),
+          for (final family in InterfaceFontFamily.values)
+            Padding(
+              padding: EdgeInsets.only(
+                bottom: family == InterfaceFontFamily.values.last ? 0 : 8,
+              ),
+              child: _ChoiceCard(
+                selected: typography.interfaceFont == family,
+                title: family.label,
+                subtitle: family.description,
+                onTap: () => controller.setInterfaceFont(family),
+              ),
+            ),
+          const SizedBox(height: 16),
+          _PreferenceLabel(text: 'Interface size'),
+          const SizedBox(height: 8),
+          _SegmentedChoiceRow<TextSizePreset>(
+            groupValue: typography.interfaceScale,
+            options: TextSizePreset.values,
+            labelFor: (preset) => preset.label,
+            onSelected: controller.setInterfaceScale,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            typography.interfaceScale.description,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => controller.resetTypography(),
+              child: const Text('Reset typography'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TypographyPreview extends StatelessWidget {
+  const _TypographyPreview({required this.controller});
+
+  final ThemeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final typography = controller.typography;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Recent sessions stay readable at a glance.',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Approval prompts, transcripts, and host controls all pick up these preferences immediately.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            '~/workspace/sidemesh/apps/mobile',
+            style: monoStyle(color: colors.accent, fontSize: 11.5),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              MeshPill(
+                label: typography.interfaceFont.label,
+                icon: Icons.font_download_outlined,
+              ),
+              MeshPill(
+                label: 'UI ${typography.interfaceScale.label.toLowerCase()}',
+                icon: Icons.format_size_rounded,
+                tone: MeshPillTone.neutral,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PreferenceLabel extends StatelessWidget {
+  const _PreferenceLabel({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: Theme.of(
+        context,
+      ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    );
+  }
+}
+
+class _ChoiceCard extends StatelessWidget {
+  const _ChoiceCard({
+    required this.selected,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: selected ? colors.accentMuted : colors.surfaceMuted,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected ? colors.accent : colors.border,
+              width: selected ? 1.4 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: selected ? colors.accent : colors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_off_rounded,
+                size: 18,
+                color: selected ? colors.accent : colors.textTertiary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SegmentedChoiceRow<T> extends StatelessWidget {
+  const _SegmentedChoiceRow({
+    required this.groupValue,
+    required this.options,
+    required this.labelFor,
+    required this.onSelected,
+  });
+
+  final T groupValue;
+  final List<T> options;
+  final String Function(T) labelFor;
+  final Future<void> Function(T) onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < options.length; i++) ...[
+            if (i > 0) const SizedBox(width: 4),
+            Expanded(
+              child: _SegmentedChoiceButton<T>(
+                value: options[i],
+                groupValue: groupValue,
+                label: labelFor(options[i]),
+                onSelected: onSelected,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SegmentedChoiceButton<T> extends StatelessWidget {
+  const _SegmentedChoiceButton({
+    required this.value,
+    required this.groupValue,
+    required this.label,
+    required this.onSelected,
+  });
+
+  final T value;
+  final T groupValue;
+  final String label;
+  final Future<void> Function(T) onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final selected = value == groupValue;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => onSelected(value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? colors.accentMuted : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? colors.accent : Colors.transparent,
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: selected ? colors.accent : colors.textSecondary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

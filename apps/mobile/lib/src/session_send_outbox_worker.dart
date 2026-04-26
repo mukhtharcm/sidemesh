@@ -162,57 +162,58 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
     if (!_isForeground) {
       return;
     }
-    try {
-      await _api.sendInput(
-        host,
-        sessionId: send.sessionId,
-        text: send.text,
-        input: send.inputItems,
-        clientMessageId: send.clientMessageId,
-        model: send.model,
-        reasoningEffort: send.reasoningEffort,
-        fastMode: send.fastMode,
-        approvalPolicy: send.approvalPolicy,
-        sandboxMode: send.sandboxMode,
-        networkAccess: send.networkAccess,
-      );
-      await _outbox.remove(send);
-    } catch (error) {
-      final message = friendlyError(error);
-      if (!isRetryableSendError(error)) {
-        await _markBlocked(send, message);
-        return;
-      }
-      final retryCount = send.retryCount + 1;
-      await _deferRetry(send, message, retryCount: retryCount);
-    }
-  }
-
-  Future<void> _deferRetry(
-    PendingSessionSend send,
-    String message, {
-    int? retryCount,
-  }) async {
-    final resolvedRetryCount = retryCount ?? send.retryCount + 1;
-    await _outbox.upsert(
-      send.copyWith(
-        updatedAt: DateTime.now(),
-        nextAttemptAt: DateTime.now().add(_backoff(resolvedRetryCount)),
-        retryCount: resolvedRetryCount,
-        lastError: message,
-        blocked: false,
-      ),
+    await _outbox.attemptIfPresent(
+      entry: send,
+      attempt: () {
+        return _api.sendInput(
+          host,
+          sessionId: send.sessionId,
+          text: send.text,
+          input: send.inputItems,
+          clientMessageId: send.clientMessageId,
+          model: send.model,
+          reasoningEffort: send.reasoningEffort,
+          fastMode: send.fastMode,
+          approvalPolicy: send.approvalPolicy,
+          sandboxMode: send.sandboxMode,
+          networkAccess: send.networkAccess,
+        );
+      },
+      recover: (error) {
+        final message = friendlyError(error);
+        if (!isRetryableSendError(error)) {
+          return _blockedSend(send, message);
+        }
+        return _deferredSend(send, message, retryCount: send.retryCount + 1);
+      },
     );
   }
 
   Future<void> _markBlocked(PendingSessionSend send, String message) async {
-    await _outbox.upsert(
-      send.copyWith(
-        updatedAt: DateTime.now(),
-        retryCount: send.retryCount + 1,
-        lastError: message,
-        blocked: true,
-      ),
+    await _outbox.replaceIfPresent(send, _blockedSend(send, message));
+  }
+
+  PendingSessionSend _deferredSend(
+    PendingSessionSend send,
+    String message, {
+    required int retryCount,
+  }) {
+    final now = DateTime.now();
+    return send.copyWith(
+      updatedAt: now,
+      nextAttemptAt: now.add(_backoff(retryCount)),
+      retryCount: retryCount,
+      lastError: message,
+      blocked: false,
+    );
+  }
+
+  PendingSessionSend _blockedSend(PendingSessionSend send, String message) {
+    return send.copyWith(
+      updatedAt: DateTime.now(),
+      retryCount: send.retryCount + 1,
+      lastError: message,
+      blocked: true,
     );
   }
 

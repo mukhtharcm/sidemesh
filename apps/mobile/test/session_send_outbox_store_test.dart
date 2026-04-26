@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/models.dart';
@@ -63,6 +65,50 @@ void main() {
     );
 
     expect(await store.loadForSession(host, 'session-1'), hasLength(5));
+  });
+
+  test('clearAll removes entries checked by stale workers', () async {
+    final store = SessionSendOutboxStore.instance;
+    final pending = _pendingSend(host, sessionId: 'session-1');
+
+    expect(await store.upsert(pending), isTrue);
+    expect(await store.contains(pending), isTrue);
+
+    await store.clearAll();
+
+    expect(await store.contains(pending), isFalse);
+    expect(await store.loadAll(), isEmpty);
+  });
+
+  test('clearAll waits for an in-flight attempt before clearing', () async {
+    final store = SessionSendOutboxStore.instance;
+    final pending = _pendingSend(host, sessionId: 'session-1');
+    final started = Completer<void>();
+    final release = Completer<void>();
+
+    expect(await store.upsert(pending), isTrue);
+
+    final attempt = store.attemptIfPresent(
+      entry: pending,
+      attempt: () async {
+        started.complete();
+        await release.future;
+      },
+      recover: (error) => pending.copyWith(lastError: '$error'),
+    );
+    await started.future;
+
+    var clearCompleted = false;
+    final clear = store.clearAll().then((_) => clearCompleted = true);
+    await Future<void>.delayed(Duration.zero);
+    expect(clearCompleted, isFalse);
+
+    release.complete();
+    await attempt;
+    await clear;
+
+    expect(clearCompleted, isTrue);
+    expect(await store.loadAll(), isEmpty);
   });
 }
 

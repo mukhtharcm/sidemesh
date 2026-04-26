@@ -66,6 +66,18 @@ class ImageBlobCacheStore {
     });
   }
 
+  Future<void> clearAll() async {
+    final prefs = await SharedPreferences.getInstance();
+    final dir = await _cacheDir();
+    await _runIndexMutation(() async {
+      final index = await _loadIndex(prefs);
+      for (final entry in index) {
+        await _deleteFileIfExists(_fileFor(dir, entry.key));
+      }
+      await prefs.remove(_indexKey);
+    });
+  }
+
   Future<File?> _loadCachedFile(String key) async {
     final prefs = await SharedPreferences.getInstance();
     final dir = await _cacheDir();

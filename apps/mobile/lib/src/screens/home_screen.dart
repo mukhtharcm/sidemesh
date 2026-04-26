@@ -19,13 +19,12 @@ import '../session_runtime.dart';
 import '../session_send_outbox_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
-import '../theme/theme_controller.dart';
 import '../widgets/app_snackbar.dart';
-import '../widgets/appearance_sheet.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/notification_permission_banner.dart';
 import 'create_session_sheet.dart';
 import 'host_detail_screen.dart';
+import 'settings_screen.dart';
 import 'session_screen.dart';
 
 class SidemeshHomeScreen extends StatefulWidget {
@@ -299,6 +298,10 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     await _openSession(result.host, result.session);
   }
 
+  void _openSettings() {
+    unawaited(openSettingsScreen(context));
+  }
+
   void _onNotificationRouteIntent() {
     unawaited(_handleNotificationRouteIntent());
   }
@@ -399,6 +402,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               tab: tab,
               onRefresh: _refreshHosts,
               onStartSession: _startSessionFromHome,
+              onOpenSettings: _openSettings,
             ),
             _HomeSearchBar(
               controller: _searchController,
@@ -496,16 +500,17 @@ class _TopBar extends StatelessWidget {
     required this.tab,
     required this.onRefresh,
     required this.onStartSession,
+    required this.onOpenSettings,
   });
 
   final _TabDef tab;
   final VoidCallback onRefresh;
   final VoidCallback onStartSession;
+  final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final controller = ThemeScope.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 16, 8),
       child: Row(
@@ -577,13 +582,9 @@ class _TopBar extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           MeshIconButton(
-            icon: switch (controller.mode) {
-              ThemeMode.dark => Icons.dark_mode_rounded,
-              ThemeMode.light => Icons.light_mode_rounded,
-              ThemeMode.system => Icons.brightness_auto_rounded,
-            },
-            tooltip: 'Appearance',
-            onTap: () => showAppearanceSheet(context),
+            icon: Icons.tune_rounded,
+            tooltip: 'Settings',
+            onTap: onOpenSettings,
           ),
           const SizedBox(width: 8),
           MeshIconButton(

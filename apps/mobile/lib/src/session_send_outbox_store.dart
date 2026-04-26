@@ -237,6 +237,66 @@ class SessionSendOutboxStore extends ChangeNotifier {
     });
   }
 
+  Future<bool> contains(PendingSessionSend entry) {
+    return _runExclusive(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final entries = await _loadAll(prefs);
+      return entries.any((item) => item.key == entry.key);
+    });
+  }
+
+  Future<bool> replaceIfPresent(
+    PendingSessionSend current,
+    PendingSessionSend replacement,
+  ) {
+    return _runExclusive(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final entries = await _loadAll(prefs);
+      final index = entries.indexWhere((item) => item.key == current.key);
+      if (index == -1) return false;
+      final next = entries.toList(growable: true);
+      next[index] = replacement;
+      await _saveAllWithinBudget(prefs, next, replacement.key);
+      notifyListeners();
+      return true;
+    });
+  }
+
+  Future<bool> attemptIfPresent({
+    required PendingSessionSend entry,
+    required Future<void> Function() attempt,
+    required PendingSessionSend Function(Object error) recover,
+  }) {
+    return _runExclusive(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final entries = await _loadAll(prefs);
+      final index = entries.indexWhere((item) => item.key == entry.key);
+      if (index == -1) return false;
+      try {
+        await attempt();
+        final next = entries
+            .where((item) => item.key != entry.key)
+            .toList(growable: false);
+        await _saveAll(prefs, next);
+      } catch (error) {
+        final replacement = recover(error);
+        final next = entries.toList(growable: true);
+        next[index] = replacement;
+        await _saveAllWithinBudget(prefs, next, replacement.key);
+      }
+      notifyListeners();
+      return true;
+    });
+  }
+
+  Future<void> clearAll() {
+    return _runExclusive(() async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_key);
+      notifyListeners();
+    });
+  }
+
   Future<T> _runExclusive<T>(Future<T> Function() action) async {
     final previous = _writeQueue;
     final completer = Completer<void>();

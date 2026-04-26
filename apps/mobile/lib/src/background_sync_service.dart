@@ -20,6 +20,8 @@ class BackgroundSyncService {
 
   bool _initialized = false;
 
+  bool get supportsBackgroundFetch => _supportsBackgroundFetch;
+
   Future<void> initialize() async {
     if (_initialized || kIsWeb || !_supportsBackgroundFetch) return;
     _initialized = true;
