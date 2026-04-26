@@ -52,19 +52,77 @@ class NodeInfo {
     required this.hostname,
     required this.platform,
     required this.codexVersion,
+    required this.provider,
+    required this.providerName,
+    required this.providerVersion,
+    required this.providerCapabilities,
   });
 
   final String label;
   final String hostname;
   final String platform;
   final String codexVersion;
+  final String provider;
+  final String providerName;
+  final String providerVersion;
+  final ProviderCapabilities providerCapabilities;
+
+  String get providerDisplayName {
+    if (providerName.isNotEmpty) return providerName;
+    if (provider.isNotEmpty) return provider;
+    return 'Codex';
+  }
+
+  String get providerDisplayVersion {
+    if (providerVersion.isNotEmpty) return providerVersion;
+    return codexVersion;
+  }
+
+  String get providerPillLabel {
+    final version = providerDisplayVersion;
+    if (version.isEmpty) return providerDisplayName;
+    return '$providerDisplayName $version';
+  }
 
   factory NodeInfo.fromJson(Map<String, dynamic> json) => NodeInfo(
     label: _stringValue(json['label']),
     hostname: _stringValue(json['hostname']),
     platform: _stringValue(json['platform']),
     codexVersion: _stringValue(json['codexVersion']),
+    provider: _stringOrNull(json['provider']) ?? 'codex',
+    providerName: _stringOrNull(json['providerName']) ?? 'Codex',
+    providerVersion:
+        _stringOrNull(json['providerVersion']) ??
+        _stringValue(json['codexVersion']),
+    providerCapabilities: ProviderCapabilities.fromJson(
+      json['providerCapabilities'],
+    ),
   );
+}
+
+class ProviderCapabilities {
+  const ProviderCapabilities(this.values);
+
+  static const empty = ProviderCapabilities(<String, dynamic>{});
+
+  final Map<String, dynamic> values;
+
+  bool supports(String section, String feature) {
+    final rawSection = values[section];
+    if (rawSection is! Map) return false;
+    return rawSection[feature] == true;
+  }
+
+  factory ProviderCapabilities.fromJson(Object? json) {
+    if (json is! Map) return empty;
+    return ProviderCapabilities(
+      Map<String, dynamic>.fromEntries(
+        json.entries.map(
+          (entry) => MapEntry(entry.key.toString(), entry.value),
+        ),
+      ),
+    );
+  }
 }
 
 class GitInfoSummary {

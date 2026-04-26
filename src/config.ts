@@ -11,10 +11,19 @@ export function loadConfig(): NodeConfig {
     port: parseInteger(process.env.SIDEMESH_PORT, 8787),
     token: token || randomBytes(24).toString("hex"),
     tokenSource: token ? "env" : "generated",
+    provider: parseProvider(process.env.SIDEMESH_PROVIDER),
     codexBin: process.env.SIDEMESH_CODEX_BIN?.trim() || "codex",
     stateDir:
       process.env.SIDEMESH_STATE_DIR?.trim() || join(homedir(), ".sidemesh"),
   };
+}
+
+function parseProvider(value: string | undefined): string {
+  const provider = value?.trim() || "codex";
+  if (provider !== "codex") {
+    throw new Error(`Unsupported SIDEMESH_PROVIDER "${provider}". Supported providers: codex`);
+  }
+  return provider;
 }
 
 function parseInteger(value: string | undefined, fallback: number): number {
