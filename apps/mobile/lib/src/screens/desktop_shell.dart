@@ -892,9 +892,9 @@ class _Sidebar extends StatelessWidget {
   final OpenPendingSessionCallback onOpenPendingSession;
   final ValueChanged<HostProfile> onOpenHostDetail;
   final VoidCallback onAddHost;
-  final ValueChanged<HostProfile> onEditHost;
+  final HostProfileActionCallback onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
-  final ValueChanged<HostProfile> onToggleHostEnabled;
+  final HostProfileActionCallback onToggleHostEnabled;
   final ValueChanged<int> onActiveCountChanged;
   final ValueChanged<int> onInboxCountChanged;
   final VoidCallback onShowShortcuts;
@@ -1139,10 +1139,10 @@ class _SidebarPane extends StatelessWidget {
   final void Function(HostProfile, PendingAction) onOpenSessionFromAction;
   final OpenPendingSessionCallback onOpenPendingSession;
   final ValueChanged<HostProfile> onOpenHostDetail;
-  final ValueChanged<HostProfile> onEditHost;
+  final HostProfileActionCallback onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
   final VoidCallback onAddHost;
-  final ValueChanged<HostProfile> onToggleHostEnabled;
+  final HostProfileActionCallback onToggleHostEnabled;
   final ValueChanged<int> onActiveCountChanged;
   final ValueChanged<int> onInboxCountChanged;
 
@@ -1170,6 +1170,8 @@ class _SidebarPane extends StatelessWidget {
           api: api,
           onOpenSession: onOpenSessionFromAction,
           onOpenPendingSession: onOpenPendingSession,
+          onEditHost: onEditHost,
+          onToggleHostEnabled: onToggleHostEnabled,
           onInboxCountChanged: onInboxCountChanged,
           query: query,
           dense: true,

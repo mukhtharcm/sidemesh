@@ -20,6 +20,12 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
 
   static const _idleInterval = Duration(seconds: 30);
   static const _maxSendsPerPass = 3;
+  static const _hostDisabledMessage =
+      'Host is disabled. Enable it before retrying.';
+  static const _hostChangedMessage =
+      'This host changed since the message was queued. Review it before retrying.';
+  static const _hostMissingMessage =
+      'The original host is no longer available. Discard or recreate the message.';
 
   final SessionSendOutboxStore _outbox = SessionSendOutboxStore.instance;
   final ApiClient _api = ApiClient();
@@ -93,17 +99,17 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
         return;
       }
 
-      final hosts = await _enabledHostsByKey();
+      final hosts = await _hostLookup();
       for (final send in pending.take(_maxSendsPerPass)) {
         if (!_isForeground) {
           break;
         }
-        final host = hosts[_hostKey(send.hostId, send.hostFingerprint)];
-        if (host == null) {
-          await _deferRetry(send, 'Host is disabled or unavailable.');
+        final resolution = _resolveHost(send, hosts);
+        if (resolution.blockMessage != null) {
+          await _markBlocked(send, resolution.blockMessage!);
           continue;
         }
-        await _attemptSend(host, send);
+        await _attemptSend(resolution.host!, send);
       }
       await _scheduleNextPass();
     } catch (error) {
@@ -139,13 +145,17 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
     _schedule(next.isAfter(now) ? next.difference(now) : Duration.zero);
   }
 
-  Future<Map<String, HostProfile>> _enabledHostsByKey() async {
+  Future<_OutboxHostLookup> _hostLookup() async {
     final hosts = await _hostStore.loadHosts();
-    return <String, HostProfile>{
-      for (final host in hosts)
-        if (host.enabled)
-          _hostKey(host.id, SessionSendOutboxStore.hostFingerprint(host)): host,
-    };
+    return _OutboxHostLookup(
+      exactByKey: <String, HostProfile>{
+        for (final host in hosts)
+          if (host.enabled)
+            _hostKey(host.id, SessionSendOutboxStore.hostFingerprint(host)):
+                host,
+      },
+      byId: <String, HostProfile>{for (final host in hosts) host.id: host},
+    );
   }
 
   Future<void> _attemptSend(HostProfile host, PendingSessionSend send) async {
@@ -232,6 +242,39 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
     return '$hostId:$hostFingerprint';
   }
 
+  _ResolvedPendingHost _resolveHost(
+    PendingSessionSend send,
+    _OutboxHostLookup lookup,
+  ) {
+    final exact =
+        lookup.exactByKey[_hostKey(send.hostId, send.hostFingerprint)];
+    if (exact != null) {
+      return _ResolvedPendingHost(host: exact);
+    }
+    final current = lookup.byId[send.hostId];
+    if (current == null) {
+      return const _ResolvedPendingHost(blockMessage: _hostMissingMessage);
+    }
+    if (!current.enabled) {
+      return const _ResolvedPendingHost(blockMessage: _hostDisabledMessage);
+    }
+    return const _ResolvedPendingHost(blockMessage: _hostChangedMessage);
+  }
+
   bool get _isForeground =>
       _started && _lifecycleState == AppLifecycleState.resumed;
+}
+
+class _OutboxHostLookup {
+  const _OutboxHostLookup({required this.exactByKey, required this.byId});
+
+  final Map<String, HostProfile> exactByKey;
+  final Map<String, HostProfile> byId;
+}
+
+class _ResolvedPendingHost {
+  const _ResolvedPendingHost({this.host, this.blockMessage});
+
+  final HostProfile? host;
+  final String? blockMessage;
 }
