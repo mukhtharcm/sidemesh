@@ -10,6 +10,7 @@ import type {
   SessionMessage,
   SessionRuntimeSummary,
   ModelSummary,
+  CodexProfileCatalog,
   ThreadRecord,
   TurnDiffActivity,
   WebSearchActivity,
@@ -104,6 +105,10 @@ export interface AgentModelListOptions {
   cwd: string | null;
   profile: string | null;
   provider: string | null;
+}
+
+export interface AgentProfileListOptions {
+  cwd: string | null;
 }
 
 export interface AgentProviderCapabilities {
@@ -242,6 +247,7 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   listSkills(params: Record<string, unknown>): Promise<unknown>;
   writeSkillConfig(params: Record<string, unknown>): Promise<unknown>;
   listModels(options: AgentModelListOptions): Promise<ModelSummary[]>;
+  listProfiles(options: AgentProfileListOptions): Promise<CodexProfileCatalog>;
   readConfig(params: Record<string, unknown>): Promise<unknown>;
 
   fsReadDirectory(path: string): Promise<unknown>;
