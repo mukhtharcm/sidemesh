@@ -1,22 +1,98 @@
 import type { EventEmitter } from "node:events";
 
-export interface AgentProviderNotification {
-  method: string;
-  params: unknown;
-}
-
-export interface AgentProviderServerRequest {
-  id: number | string;
-  method: string;
-  params: unknown;
-}
+import type {
+  CommandActivity,
+  FileChangeActivity,
+  ImageGenerationActivity,
+  PendingAction,
+  SessionActivity,
+  SessionMessage,
+  TurnDiffActivity,
+  WebSearchActivity,
+} from "./types.js";
 
 export interface AgentProviderEvents {
-  notification: [message: AgentProviderNotification];
-  serverRequest: [message: AgentProviderServerRequest];
+  liveEvent: [event: AgentProviderLiveEvent];
   stderr: [line: string];
   exit: [code: number | null];
 }
+
+export type AgentSessionActivityDraft =
+  | Omit<CommandActivity, "createdAt" | "seq">
+  | Omit<FileChangeActivity, "createdAt" | "seq">
+  | Omit<TurnDiffActivity, "createdAt" | "seq">
+  | Omit<WebSearchActivity, "createdAt" | "seq">
+  | Omit<ImageGenerationActivity, "createdAt" | "seq">;
+
+export interface AgentMessageDraft {
+  id: string;
+  text: string;
+  phase?: SessionMessage["phase"];
+}
+
+export interface AgentPendingAction extends PendingAction {
+  providerRequestId: number | string;
+  providerRequestKind: string;
+  providerPayload?: unknown;
+}
+
+export type AgentProviderLiveEvent =
+  | {
+      type: "fs_changed";
+      watchId?: string;
+      changedPaths?: string[];
+    }
+  | {
+      type: "skills_changed";
+    }
+  | {
+      type: "turn_started";
+      sessionId: string;
+      turnId: string;
+    }
+  | {
+      type: "assistant_delta";
+      sessionId: string;
+      delta: string;
+      turnId?: string;
+      itemId?: string;
+    }
+  | {
+      type: "assistant_message_completed";
+      sessionId: string;
+      turnId?: string;
+      message: AgentMessageDraft;
+    }
+  | {
+      type: "activity_updated";
+      sessionId: string;
+      turnId?: string;
+      activity: AgentSessionActivityDraft;
+    }
+  | {
+      type: "activity_output_delta";
+      sessionId: string;
+      turnId?: string;
+      activityId: string;
+      delta: string;
+    }
+  | {
+      type: "activity_terminal_input";
+      sessionId: string;
+      turnId?: string;
+      activityId: string;
+      stdin: string;
+    }
+  | {
+      type: "turn_completed";
+      sessionId: string;
+      turnId: string;
+      status: string;
+    }
+  | {
+      type: "action_opened";
+      action: AgentPendingAction;
+    };
 
 export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   readonly kind: string;
@@ -39,7 +115,7 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   steerTurn(params: Record<string, unknown>): Promise<unknown>;
   interruptTurn(threadId: string, turnId: string): Promise<unknown>;
 
-  respondToServerRequest(id: number | string, result: unknown): void;
+  respondToPendingAction(action: AgentPendingAction, decision: string | null): boolean;
 
   readRemoteGitDiff(cwd: string): Promise<unknown>;
   listSkills(params: Record<string, unknown>): Promise<unknown>;
@@ -60,4 +136,15 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   }): Promise<unknown>;
   fsWatch(path: string): Promise<unknown>;
   fsUnwatch(watchId: string): Promise<unknown>;
+}
+
+export function materializeAgentActivityDraft(
+  draft: AgentSessionActivityDraft,
+  context: { createdAt: number; seq: number },
+): SessionActivity {
+  return {
+    ...draft,
+    createdAt: context.createdAt,
+    seq: context.seq,
+  } as SessionActivity;
 }

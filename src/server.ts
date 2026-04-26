@@ -8,7 +8,12 @@ import cors from "cors";
 import express, { type Request, type Response, type NextFunction } from "express";
 import { WebSocketServer, type WebSocket } from "ws";
 
-import type { AgentProvider } from "./agent-provider.js";
+import {
+  materializeAgentActivityDraft,
+  type AgentPendingAction,
+  type AgentProvider,
+  type AgentSessionActivityDraft,
+} from "./agent-provider.js";
 import type {
   ActiveTurnState,
   ApprovalLiveEvent,
@@ -19,7 +24,6 @@ import type {
   SessionActivity,
   NodeConfig,
   PendingAction,
-  PendingActionRecord,
   SkillCatalogEntry,
   SkillErrorInfo,
   SkillSummary,
@@ -37,9 +41,6 @@ import type {
 import {
   applyCommandTerminalInteraction,
   appendCommandActivityOutput,
-  buildActivityFromThreadItem,
-  buildFileChangeChanges,
-  buildTurnDiffActivity,
   mergeActivity,
   mergeSessionActivities,
 } from "./activity.js";
@@ -162,7 +163,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const socketsBySession = new Map<string, Set<WebSocket>>();
   const approvalSockets = new Set<WebSocket>();
   const activeTurns = new Map<string, ActiveTurnState>();
-  const pendingActions = new Map<string, PendingActionRecord>();
+  const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, SessionActivity>>();
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
   const logCache = new Map<string, SessionLogCacheEntry>();
@@ -243,236 +244,146 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   const fsWatchRegistry = new FsWatchRegistry(provider);
 
-  provider.on("notification", ({ method, params }) => {
-    if (method === "fs/changed") {
-      fsWatchRegistry.deliver(params as { watchId?: string; changedPaths?: string[] });
-      return;
-    }
-
-    if (method === "skills/changed") {
-      broadcastSkillsChanged(socketsBySession);
-      return;
-    }
-
-    const sessionId = extractSessionId(method, params);
-    if (!sessionId) {
-      return;
-    }
-
-    if (method === "turn/started") {
-      const turnId = asString((params as any)?.turn?.id);
-      if (turnId) {
-        activeTurns.set(sessionId, { turnId, startedAt: Date.now() });
-        broadcastLive(sessionId, {
+  provider.on("liveEvent", (event) => {
+    switch (event.type) {
+      case "fs_changed":
+        fsWatchRegistry.deliver({
+          watchId: event.watchId,
+          changedPaths: event.changedPaths,
+        });
+        return;
+      case "skills_changed":
+        broadcastSkillsChanged(socketsBySession);
+        return;
+      case "turn_started":
+        activeTurns.set(event.sessionId, {
+          turnId: event.turnId,
+          startedAt: Date.now(),
+        });
+        broadcastLive(event.sessionId, {
           type: "turn_started",
-          sessionId,
-          turnId,
+          sessionId: event.sessionId,
+          turnId: event.turnId,
         });
-      }
-      return;
-    }
-
-    if (method === "item/agentMessage/delta") {
-      const delta = asString((params as any)?.delta);
-      const itemId = asString((params as any)?.itemId);
-      if (delta) {
-        broadcastLive(sessionId, {
+        return;
+      case "assistant_delta":
+        broadcastLive(event.sessionId, {
           type: "assistant_delta",
-          sessionId,
-          delta,
-          turnId: asString((params as any)?.turnId) || undefined,
-          itemId: itemId || undefined,
+          sessionId: event.sessionId,
+          delta: event.delta,
+          turnId: event.turnId,
+          itemId: event.itemId,
         });
+        return;
+      case "assistant_message_completed": {
+        const seq = allocSeq(event.sessionId);
+        broadcastLive(event.sessionId, {
+          type: "assistant_message_completed",
+          sessionId: event.sessionId,
+          turnId: event.turnId,
+          seq,
+          messageItem: {
+            id: event.message.id,
+            role: "assistant",
+            text: event.message.text,
+            attachments: [],
+            createdAt: Date.now(),
+            seq,
+            phase: event.message.phase,
+          },
+        });
+        return;
       }
-      return;
-    }
-
-    if (method === "item/started" || method === "item/completed") {
-      const item = (params as any)?.item;
-      const turnId = asString((params as any)?.turnId);
-      if (item && typeof item === "object") {
-        const itemType = asString((item as any)?.type);
-        if (method === "item/completed" && itemType === "agentMessage") {
-          const seq = allocSeq(sessionId);
-          const messageItem = buildCompletedAssistantMessage(item as Record<string, unknown>, seq);
-          if (messageItem) {
-            broadcastLive(sessionId, {
-              type: "assistant_message_completed",
-              sessionId,
-              turnId: turnId || undefined,
-              seq,
-              messageItem,
-            });
-          }
-          return;
-        }
-
-        const existingSeq = liveActivities.get(sessionId)?.get(asString((item as any)?.id) || "")?.seq;
-        const activity = buildActivityFromThreadItem(item as any, {
-          turnId,
-          createdAt: Date.now(),
-          seq: existingSeq ?? allocSeq(sessionId),
+      case "activity_updated": {
+        const next = upsertLiveActivity(
+          liveActivities,
+          event.sessionId,
+          materializeLiveActivityDraft(
+            liveActivities,
+            event.sessionId,
+            event.activity,
+            () => allocSeq(event.sessionId),
+          ),
+        );
+        broadcastLive(event.sessionId, {
+          type: "activity_updated",
+          sessionId: event.sessionId,
+          turnId: event.turnId,
+          activity: next,
         });
-        if (activity) {
-          const next = upsertLiveActivity(liveActivities, sessionId, activity);
-          broadcastLive(sessionId, {
+        return;
+      }
+      case "activity_output_delta": {
+        const next = updateLiveCommandActivity(
+          liveActivities,
+          event.sessionId,
+          event.activityId,
+          event.delta,
+        );
+        if (next) {
+          broadcastLive(event.sessionId, {
             type: "activity_updated",
-            sessionId,
-            turnId: turnId || undefined,
+            sessionId: event.sessionId,
+            turnId: event.turnId,
             activity: next,
           });
         }
-      }
-      return;
-    }
-
-    if (method === "item/commandExecution/outputDelta") {
-      const delta = asString((params as any)?.delta);
-      const itemId = asString((params as any)?.itemId);
-      const turnId = asString((params as any)?.turnId);
-      if (!delta || !itemId) {
         return;
       }
-
-      const next = updateLiveCommandActivity(liveActivities, sessionId, itemId, delta);
-      if (next) {
-        broadcastLive(sessionId, {
-          type: "activity_updated",
-          sessionId,
-          turnId: turnId || undefined,
-          activity: next,
-        });
-      }
-      return;
-    }
-
-    if (method === "item/commandExecution/terminalInteraction") {
-      const stdin = asString((params as any)?.stdin);
-      const itemId = asString((params as any)?.itemId);
-      const turnId = asString((params as any)?.turnId);
-      if (!stdin || !itemId) {
+      case "activity_terminal_input": {
+        const next = updateLiveCommandTerminalInteraction(
+          liveActivities,
+          event.sessionId,
+          event.activityId,
+          event.stdin,
+        );
+        if (next) {
+          broadcastLive(event.sessionId, {
+            type: "activity_updated",
+            sessionId: event.sessionId,
+            turnId: event.turnId,
+            activity: next,
+          });
+        }
         return;
       }
-
-      const next = updateLiveCommandTerminalInteraction(
-        liveActivities,
-        sessionId,
-        itemId,
-        stdin,
-      );
-      if (next) {
-        broadcastLive(sessionId, {
-          type: "activity_updated",
-          sessionId,
-          turnId: turnId || undefined,
-          activity: next,
-        });
-      }
-      return;
-    }
-
-    if (method === "item/fileChange/patchUpdated") {
-      const itemId = asString((params as any)?.itemId);
-      const turnId = asString((params as any)?.turnId);
-      if (!itemId) {
-        return;
-      }
-
-      const next = updateLiveFileChangeActivity(
-        liveActivities,
-        sessionId,
-        itemId,
-        turnId,
-        (params as any)?.changes,
-        () => allocSeq(sessionId),
-      );
-      if (next) {
-        broadcastLive(sessionId, {
-          type: "activity_updated",
-          sessionId,
-          turnId: turnId || undefined,
-          activity: next,
-        });
-      }
-      return;
-    }
-
-    if (method === "turn/diff/updated") {
-      const turnId = asString((params as any)?.turnId);
-      const diff = asString((params as any)?.diff);
-      if (!turnId || !diff) {
-        return;
-      }
-
-      const next = updateLiveTurnDiffActivity(liveActivities, sessionId, turnId, diff, () =>
-        allocSeq(sessionId),
-      );
-      if (next) {
-        broadcastLive(sessionId, {
-          type: "activity_updated",
-          sessionId,
-          turnId,
-          activity: next,
-        });
-      }
-      return;
-    }
-
-    if (method === "turn/completed") {
-      const turn = (params as any)?.turn;
-      const turnId = asString(turn?.id);
-      if (turnId) {
+      case "turn_completed":
         // Broadcast the completion first so any concurrent snapshot reader
         // sees both the rollout-flushed history AND the live state still in
         // memory. Clearing liveActivities before the broadcast can briefly
         // leave both the snapshot and live stream blank for a second client.
-        broadcastLive(sessionId, {
+        broadcastLive(event.sessionId, {
           type: "turn_completed",
-          sessionId,
-          turnId,
-          status: asString(turn?.status) || "completed",
+          sessionId: event.sessionId,
+          turnId: event.turnId,
+          status: event.status,
         });
         clearActionsForSession(
           pendingActions,
-          sessionId,
+          event.sessionId,
           broadcastLive,
           broadcastApprovalLive,
         );
-        activeTurns.delete(sessionId);
-        liveActivities.delete(sessionId);
-        clearSessionLogCache(logCache, sessionId);
+        activeTurns.delete(event.sessionId);
+        liveActivities.delete(event.sessionId);
+        clearSessionLogCache(logCache, event.sessionId);
         // NOTE: do NOT reset sessionSeqCursor between turns — clients rely on
         // a monotonically increasing seq across the whole session lifetime to
         // detect gaps after a reconnect.
-      }
+        return;
+      case "action_opened":
+        pendingActions.set(event.action.id, event.action);
+        broadcastLive(event.action.sessionId, {
+          type: "action_opened",
+          sessionId: event.action.sessionId,
+          action: event.action,
+        });
+        broadcastApprovalLive({
+          type: "action_opened",
+          action: event.action,
+        });
+        return;
     }
-  });
-
-  provider.on("serverRequest", ({ id, method, params }) => {
-    if (
-      method !== "item/commandExecution/requestApproval" &&
-      method !== "item/fileChange/requestApproval" &&
-      method !== "item/permissions/requestApproval"
-    ) {
-      return;
-    }
-
-    const sessionId = extractSessionId(method, params);
-    if (!sessionId) {
-      return;
-    }
-
-    const action = buildPendingAction(method, params, id);
-    pendingActions.set(action.id, action);
-    broadcastLive(sessionId, {
-      type: "action_opened",
-      sessionId,
-      action,
-    });
-    broadcastApprovalLive({
-      type: "action_opened",
-      action,
-    });
   });
 
   codexVersion = await provider.getVersion();
@@ -1007,13 +918,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return;
     }
 
-    const result = buildActionResponse(action, decision);
-    if (!result) {
+    const handled = provider.respondToPendingAction(action, decision);
+    if (!handled) {
       response.status(400).json({ error: "unsupported decision" });
       return;
     }
 
-    provider.respondToServerRequest(action.jsonRpcId, result);
     pendingActions.delete(actionId);
     broadcastLive(action.sessionId, {
       type: "action_resolved",
@@ -1264,7 +1174,7 @@ function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
 
 async function listPendingActions(
   provider: AgentProvider,
-  pendingActions: Map<string, PendingActionRecord>,
+  pendingActions: Map<string, AgentPendingAction>,
 ): Promise<PendingAction[]> {
   const actions = [...pendingActions.values()].sort((left, right) => right.requestedAt - left.requestedAt);
   const sessionsById = new Map<string, Promise<ThreadRecord | null>>();
@@ -1358,6 +1268,27 @@ function upsertLiveActivity(
   return merged;
 }
 
+function materializeLiveActivityDraft(
+  liveActivities: Map<string, Map<string, SessionActivity>>,
+  sessionId: string,
+  draft: AgentSessionActivityDraft,
+  allocSeq: () => number,
+): SessionActivity {
+  const existing = liveActivities.get(sessionId)?.get(draft.id);
+  const activity = materializeAgentActivityDraft(draft, {
+    createdAt: existing?.createdAt ?? Date.now(),
+    seq: existing?.seq ?? allocSeq(),
+  });
+  if (
+    existing?.type === "file_change" &&
+    activity.type === "file_change" &&
+    activity.status === "in_progress"
+  ) {
+    return { ...activity, status: existing.status };
+  }
+  return activity;
+}
+
 function updateLiveCommandActivity(
   liveActivities: Map<string, Map<string, SessionActivity>>,
   sessionId: string,
@@ -1406,53 +1337,6 @@ function updateLiveCommandTerminalInteraction(
 
   sessionActivities.set(itemId, updated);
   return updated;
-}
-
-function updateLiveFileChangeActivity(
-  liveActivities: Map<string, Map<string, SessionActivity>>,
-  sessionId: string,
-  itemId: string,
-  turnId: string | null,
-  rawChanges: unknown,
-  allocSeq: () => number,
-): SessionActivity {
-  const sessionActivities = liveActivities.get(sessionId) || new Map<string, SessionActivity>();
-  const existing = sessionActivities.get(itemId);
-  const next: SessionActivity = {
-    id: itemId,
-    type: "file_change",
-    turnId,
-    createdAt: existing?.createdAt || Date.now(),
-    seq: existing?.seq ?? allocSeq(),
-    status: existing?.type === "file_change" ? existing.status : "in_progress",
-    changes: buildFileChangeChanges(rawChanges),
-  };
-  const merged = mergeActivity(existing, next);
-  sessionActivities.set(itemId, merged);
-  liveActivities.set(sessionId, sessionActivities);
-  return merged;
-}
-
-function updateLiveTurnDiffActivity(
-  liveActivities: Map<string, Map<string, SessionActivity>>,
-  sessionId: string,
-  turnId: string,
-  diff: string,
-  allocSeq: () => number,
-): SessionActivity | null {
-  const sessionActivities = liveActivities.get(sessionId) || new Map<string, SessionActivity>();
-  const probeId = `${turnId}::turn_diff`;
-  const existingSeq = sessionActivities.get(probeId)?.seq;
-  const incoming = buildTurnDiffActivity(turnId, diff, Date.now(), existingSeq ?? allocSeq());
-  if (!incoming) {
-    return null;
-  }
-
-  const existing = sessionActivities.get(incoming.id);
-  const merged = mergeActivity(existing, incoming);
-  sessionActivities.set(incoming.id, merged);
-  liveActivities.set(sessionId, sessionActivities);
-  return merged;
 }
 
 function mapSession(
@@ -1579,31 +1463,6 @@ function buildSubmittedUserMessage(
   };
 }
 
-function buildCompletedAssistantMessage(
-  item: Record<string, unknown>,
-  seq: number,
-): SessionMessage | null {
-  const id = asString(item.id);
-  const text = asString(item.text);
-  if (!id || !text) {
-    return null;
-  }
-
-  const phase = asString(item.phase);
-  return {
-    id,
-    role: "assistant",
-    text,
-    attachments: [],
-    createdAt: Date.now(),
-    seq,
-    phase:
-      phase === "commentary" || phase === "final_answer"
-        ? phase
-        : undefined,
-  };
-}
-
 async function loadCachedSessionRuntime(
   provider: AgentProvider,
   thread: ThreadRecord,
@@ -1700,124 +1559,8 @@ async function readSessionResources(
   };
 }
 
-function extractSessionId(method: string, params: unknown): string | null {
-  if (!params || typeof params !== "object") {
-    return null;
-  }
-  const typed = params as Record<string, any>;
-  if (typeof typed.threadId === "string") {
-    return typed.threadId;
-  }
-  if (method === "turn/started" && typeof typed.turn?.threadId === "string") {
-    return typed.turn.threadId;
-  }
-  if (method === "turn/completed" && typeof typed.threadId === "string") {
-    return typed.threadId;
-  }
-  return null;
-}
-
-function buildPendingAction(
-  method: string,
-  params: unknown,
-  jsonRpcId: number | string,
-): PendingActionRecord {
-  const typed = (params || {}) as Record<string, any>;
-  const sessionId = asString(typed.threadId) || "unknown";
-  const requestedAt = Date.now();
-
-  if (method === "item/commandExecution/requestApproval") {
-    const command = asString(typed.command) || "Command approval";
-    return {
-      id: asString(typed.approvalId) || randomUUID(),
-      sessionId,
-      kind: "command",
-      title: "Command approval",
-      detail: command,
-      requestedAt,
-      canApprove: true,
-      canApproveForSession: true,
-      canDecline: true,
-      jsonRpcId,
-      requestMethod: method,
-    };
-  }
-
-  if (method === "item/fileChange/requestApproval") {
-    return {
-      id: randomUUID(),
-      sessionId,
-      kind: "file_change",
-      title: "File change approval",
-      detail: asString(typed.reason) || "Codex wants to modify files.",
-      requestedAt,
-      canApprove: true,
-      canApproveForSession: true,
-      canDecline: true,
-      jsonRpcId,
-      requestMethod: method,
-    };
-  }
-
-  return {
-    id: randomUUID(),
-    sessionId,
-    kind: "permissions",
-    title: "Permission request",
-    detail: formatPermissionRequestDetail(typed.reason, typed.permissions),
-    requestedAt,
-    canApprove: true,
-    canApproveForSession: true,
-    canDecline: true,
-    jsonRpcId,
-    requestMethod: method,
-    requestedPermissions: typed.permissions,
-  };
-}
-
-function buildActionResponse(action: PendingActionRecord, decision: string | null): unknown | null {
-  if (!decision) {
-    return null;
-  }
-
-  if (action.requestMethod === "item/commandExecution/requestApproval") {
-    if (decision === "accept" || decision === "acceptForSession" || decision === "decline" || decision === "cancel") {
-      return { decision };
-    }
-    return null;
-  }
-
-  if (action.requestMethod === "item/fileChange/requestApproval") {
-    if (decision === "accept" || decision === "acceptForSession" || decision === "decline" || decision === "cancel") {
-      return { decision };
-    }
-    return null;
-  }
-
-  if (action.requestMethod === "item/permissions/requestApproval") {
-    if (decision === "accept") {
-      return {
-        scope: "turn",
-        permissions: action.requestedPermissions || {},
-      };
-    }
-    if (decision === "acceptForSession") {
-      return {
-        scope: "session",
-        permissions: action.requestedPermissions || {},
-      };
-    }
-    if (decision === "decline" || decision === "cancel") {
-      return { scope: "turn", permissions: {} };
-    }
-    return null;
-  }
-
-  return null;
-}
-
 function clearActionsForSession(
-  pendingActions: Map<string, PendingActionRecord>,
+  pendingActions: Map<string, AgentPendingAction>,
   sessionId: string,
   broadcastLive: (sessionId: string, event: LiveEvent) => void,
   broadcastApprovalLive: (event: ApprovalLiveEvent) => void,
@@ -1838,7 +1581,7 @@ function clearActionsForSession(
 }
 
 function findPendingActionForSession(
-  pendingActions: Map<string, PendingActionRecord>,
+  pendingActions: Map<string, AgentPendingAction>,
   sessionId: string,
 ): PendingAction | null {
   for (const action of pendingActions.values()) {
@@ -2793,55 +2536,4 @@ function buildThreadConfigOverrides(
     config.model_reasoning_effort = overrides.reasoningEffort;
   }
   return Object.keys(config).length > 0 ? config : null;
-}
-
-function formatPermissionRequestDetail(reason: unknown, permissions: unknown): string {
-  const parts = [asString(reason) || "Codex requested additional permissions."];
-  const summary = summarizePermissions(permissions);
-  if (summary) {
-    parts.push(summary);
-  }
-  return parts.join("\n\n");
-}
-
-function summarizePermissions(permissions: unknown): string | null {
-  if (!permissions || typeof permissions !== "object") {
-    return null;
-  }
-
-  const typed = permissions as Record<string, any>;
-  const lines: string[] = [];
-
-  const fileSystem = typed.fileSystem as Record<string, any> | undefined;
-  if (fileSystem) {
-    appendPermissionPaths(lines, "File read", fileSystem.read);
-    appendPermissionPaths(lines, "File write", fileSystem.write);
-  }
-
-  const network = typed.network as Record<string, any> | undefined;
-  if (network) {
-    if (typeof network.mode === "string") {
-      lines.push(`Network: ${network.mode}`);
-    } else if (network.enabled === true) {
-      lines.push("Network: enabled");
-    }
-  }
-
-  if (lines.length === 0) {
-    const fallback = JSON.stringify(permissions, null, 2);
-    return fallback === "{}" ? null : fallback;
-  }
-
-  return lines.join("\n");
-}
-
-function appendPermissionPaths(lines: string[], label: string, paths: unknown): void {
-  if (!Array.isArray(paths) || paths.length === 0) {
-    return;
-  }
-  const normalized = paths.filter((path): path is string => typeof path === "string" && path.length > 0);
-  if (normalized.length === 0) {
-    return;
-  }
-  lines.push(`${label}: ${normalized.join(", ")}`);
 }
