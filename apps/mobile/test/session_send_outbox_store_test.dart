@@ -64,6 +64,71 @@ void main() {
 
     expect(await store.loadForSession(host, 'session-1'), hasLength(5));
   });
+
+  test('clearAll removes entries checked by stale workers', () async {
+    final store = SessionSendOutboxStore.instance;
+    final pending = _pendingSend(host, sessionId: 'session-1');
+
+    expect(await store.upsert(pending), isTrue);
+    expect(await store.contains(pending), isTrue);
+
+    await store.clearAll();
+
+    expect(await store.contains(pending), isFalse);
+    expect(await store.loadAll(), isEmpty);
+  });
+
+  test('replaceIfPresent does not resurrect entries after clearAll', () async {
+    final store = SessionSendOutboxStore.instance;
+    final pending = _pendingSend(host, sessionId: 'session-1');
+
+    expect(await store.upsert(pending), isTrue);
+
+    await store.clearAll();
+
+    final replaced = await store.replaceIfPresent(
+      pending,
+      pending.copyWith(lastError: 'still failing'),
+    );
+
+    expect(replaced, isFalse);
+    expect(await store.loadAll(), isEmpty);
+  });
+
+  test('replaceIfPresent updates the matching entry while present', () async {
+    final store = SessionSendOutboxStore.instance;
+    final pending = _pendingSend(host, sessionId: 'session-1');
+
+    expect(await store.upsert(pending), isTrue);
+
+    final replaced = await store.replaceIfPresent(
+      pending,
+      pending.copyWith(lastError: 'offline', retryCount: 1),
+    );
+
+    final loaded = await store.loadAll();
+    expect(replaced, isTrue);
+    expect(loaded, hasLength(1));
+    expect(loaded.single.lastError, 'offline');
+    expect(loaded.single.retryCount, 1);
+  });
+
+  test('replaceIfPresent rejects oversized replacements', () async {
+    final store = SessionSendOutboxStore.instance;
+    final pending = _pendingSend(host, sessionId: 'session-1');
+
+    expect(await store.upsert(pending), isTrue);
+
+    final replaced = await store.replaceIfPresent(
+      pending,
+      pending.copyWith(lastError: 'e' * (220 * 1024)),
+    );
+
+    final loaded = await store.loadAll();
+    expect(replaced, isFalse);
+    expect(loaded, hasLength(1));
+    expect(loaded.single.lastError, isNull);
+  });
 }
 
 PendingSessionSend _pendingSend(

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api_client.dart';
+import '../create_session_defaults_store.dart';
 import '../models.dart';
 import '../session_message_seed_store.dart';
 import '../session_policy_store.dart';
@@ -286,9 +287,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   @override
   void initState() {
     super.initState();
+    final defaults = CreateSessionDefaultsStore.instance.defaults;
     _cwdController = TextEditingController(text: widget.initialCwd ?? '');
     _promptController = TextEditingController();
     _profileController = TextEditingController();
+    _approval = defaults.approval;
+    _sandbox = defaults.sandbox;
+    _fastMode = defaults.fastMode;
+    _webSearch = defaults.webSearch;
     _cwdController.addListener(_handleCwdChanged);
   }
 

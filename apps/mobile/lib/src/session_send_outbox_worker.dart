@@ -162,6 +162,9 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
     if (!_isForeground) {
       return;
     }
+    if (!await _outbox.contains(send)) {
+      return;
+    }
     try {
       await _api.sendInput(
         host,
@@ -179,40 +182,40 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
       await _outbox.remove(send);
     } catch (error) {
       final message = friendlyError(error);
-      if (!isRetryableSendError(error)) {
-        await _markBlocked(send, message);
-        return;
-      }
-      final retryCount = send.retryCount + 1;
-      await _deferRetry(send, message, retryCount: retryCount);
+      await _outbox.replaceIfPresent(
+        send,
+        isRetryableSendError(error)
+            ? _deferredSend(send, message, retryCount: send.retryCount + 1)
+            : _blockedSend(send, message),
+      );
     }
   }
 
-  Future<void> _deferRetry(
+  Future<void> _markBlocked(PendingSessionSend send, String message) async {
+    await _outbox.replaceIfPresent(send, _blockedSend(send, message));
+  }
+
+  PendingSessionSend _deferredSend(
     PendingSessionSend send,
     String message, {
-    int? retryCount,
-  }) async {
-    final resolvedRetryCount = retryCount ?? send.retryCount + 1;
-    await _outbox.upsert(
-      send.copyWith(
-        updatedAt: DateTime.now(),
-        nextAttemptAt: DateTime.now().add(_backoff(resolvedRetryCount)),
-        retryCount: resolvedRetryCount,
-        lastError: message,
-        blocked: false,
-      ),
+    required int retryCount,
+  }) {
+    final now = DateTime.now();
+    return send.copyWith(
+      updatedAt: now,
+      nextAttemptAt: now.add(_backoff(retryCount)),
+      retryCount: retryCount,
+      lastError: message,
+      blocked: false,
     );
   }
 
-  Future<void> _markBlocked(PendingSessionSend send, String message) async {
-    await _outbox.upsert(
-      send.copyWith(
-        updatedAt: DateTime.now(),
-        retryCount: send.retryCount + 1,
-        lastError: message,
-        blocked: true,
-      ),
+  PendingSessionSend _blockedSend(PendingSessionSend send, String message) {
+    return send.copyWith(
+      updatedAt: DateTime.now(),
+      retryCount: send.retryCount + 1,
+      lastError: message,
+      blocked: true,
     );
   }
 
