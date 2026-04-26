@@ -9,6 +9,7 @@ import type {
   SessionActivity,
   SessionMessage,
   SessionRuntimeSummary,
+  ModelSummary,
   ThreadRecord,
   TurnDiffActivity,
   WebSearchActivity,
@@ -97,6 +98,12 @@ export interface AgentSubmitInputRequest {
 export interface AgentSubmitInputResult {
   mode: "steer" | "turn";
   turnId: string | null;
+}
+
+export interface AgentModelListOptions {
+  cwd: string | null;
+  profile: string | null;
+  provider: string | null;
 }
 
 export interface AgentProviderCapabilities {
@@ -234,7 +241,7 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   readRemoteGitDiff(cwd: string): Promise<unknown>;
   listSkills(params: Record<string, unknown>): Promise<unknown>;
   writeSkillConfig(params: Record<string, unknown>): Promise<unknown>;
-  listModels(params: Record<string, unknown>): Promise<unknown>;
+  listModels(options: AgentModelListOptions): Promise<ModelSummary[]>;
   readConfig(params: Record<string, unknown>): Promise<unknown>;
 
   fsReadDirectory(path: string): Promise<unknown>;
