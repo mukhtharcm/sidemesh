@@ -59,6 +59,7 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 
 - [ ] Document a VPS-first maintainer workflow so Sidemesh can be updated and operated even when the primary Mac is offline.
 - [ ] Write a lightweight server release playbook for remote nodes: pull latest `main`, restart the daemon/service, and verify Codex + Sidemesh health.
+- [ ] Bring the production launcher and deploy scaffolding into the repo so remote updates cannot delete `run-sidemesh.sh` and break `systemd`.
 
 ## Later
 
