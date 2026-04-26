@@ -175,6 +175,7 @@ class _SessionScreenState extends State<SessionScreen>
   bool _retryingPendingSend = false;
   final Set<String> _completedPendingSendIds = <String>{};
   bool _restoreComposerFocusOnResume = false;
+  bool _keepSessionUnread = false;
   int? _lastEventSeq;
   // Incremented whenever a fresh snapshot is requested so in-flight responses
   // from older requests can be discarded.
@@ -336,6 +337,9 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _markCurrentSessionSeen() {
+    if (_keepSessionUnread) {
+      return;
+    }
     final session = _session ?? widget.session;
     _readStore.markSeen(widget.host, session.id, session.updatedAt);
   }
@@ -2759,6 +2763,20 @@ class _SessionScreenState extends State<SessionScreen>
     await _favorites.toggleFavorite(widget.host, widget.session.id);
   }
 
+  Future<void> _markSessionUnread() async {
+    final session = _session ?? widget.session;
+    setState(() => _keepSessionUnread = true);
+    _readStore.markUnread(widget.host, session.id);
+    await _readStore.flush();
+    if (!mounted) {
+      return;
+    }
+    showAppSnackBar(
+      context,
+      'Marked unread. It will stay unread until you reopen this session.',
+    );
+  }
+
   Future<void> _toggleMessagePin(SessionMessage message) async {
     if (!message.hasVisibleContent) {
       return;
@@ -3732,6 +3750,9 @@ class _SessionScreenState extends State<SessionScreen>
                     case 'favorite':
                       _toggleFavorite();
                       break;
+                    case 'unread':
+                      unawaited(_markSessionUnread());
+                      break;
                     case 'git':
                       _showGitSheet(session);
                       break;
@@ -3798,6 +3819,16 @@ class _SessionScreenState extends State<SessionScreen>
                         ),
                         const SizedBox(width: 10),
                         Text(favorite ? 'Remove favorite' : 'Add favorite'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem<String>(
+                    value: 'unread',
+                    child: Row(
+                      children: [
+                        Icon(Icons.mark_chat_unread_outlined, size: 18),
+                        SizedBox(width: 10),
+                        Text('Mark unread'),
                       ],
                     ),
                   ),
