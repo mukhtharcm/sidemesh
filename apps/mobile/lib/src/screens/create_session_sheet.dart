@@ -264,17 +264,24 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   late final TextEditingController _profileController;
 
   List<ModelCatalogEntry> _models = const <ModelCatalogEntry>[];
+  List<CodexProfileSummary> _profiles = const <CodexProfileSummary>[];
   ModelCatalogEntry? _selectedModel;
   String? _reasoningEffort;
   String? _modelsError;
+  String? _profilesError;
+  String? _defaultProfileName;
   ApprovalPolicy _approval = ApprovalPolicy.onRequest;
   SandboxMode _sandbox = SandboxMode.workspaceWrite;
   bool _loadingModels = false;
+  bool _loadingProfiles = false;
   bool _fastMode = false;
   bool _webSearch = false;
   bool _showAdvanced = false;
   bool _submitting = false;
   String? _error;
+  String? _modelsLoadedForCwd;
+  String? _modelsLoadedForProfile;
+  String? _profilesLoadedForCwd;
 
   @override
   void initState() {
@@ -282,11 +289,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     _cwdController = TextEditingController(text: widget.initialCwd ?? '');
     _promptController = TextEditingController();
     _profileController = TextEditingController();
+    _cwdController.addListener(_handleCwdChanged);
   }
 
   @override
   void dispose() {
-    _cwdController.dispose();
+    _cwdController
+      ..removeListener(_handleCwdChanged)
+      ..dispose();
     _promptController.dispose();
     _profileController.dispose();
     super.dispose();
@@ -299,7 +309,24 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return _models.isEmpty ? null : _models.first;
   }
 
-  ModelCatalogEntry? get _controlModel => _selectedModel ?? _defaultModelEntry;
+  ModelCatalogEntry? get _profileModelEntry {
+    final profile = _selectedProfile;
+    final profileModel = _trimmedOrNull(profile?.model);
+    if (profile == null || profileModel == null) return null;
+    for (final model in _models) {
+      if (model.model == profileModel && model.profileName == profile.name) {
+        return model;
+      }
+    }
+    return null;
+  }
+
+  ModelCatalogEntry? get _controlModel {
+    final selected = _selectedModel;
+    if (selected != null) return selected;
+    if (_profileToSubmit != null) return _profileModelEntry;
+    return _defaultModelEntry;
+  }
 
   bool get _controlModelIsAuto => _controlModel?.isAutoModel ?? false;
 
@@ -323,11 +350,23 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   String get _modelLabel {
     final selected = _selectedModel;
     if (selected != null) return selected.displayName;
+    final profile = _selectedProfile;
+    final profileModel = _trimmedOrNull(profile?.model);
+    if (profile != null && profileModel != null) {
+      return profileModel;
+    }
+    if (_profileToSubmit != null) {
+      return 'Use profile default';
+    }
     return 'Use host default';
   }
 
   String get _modelDescription {
     if (_loadingModels) {
+      final profile = _profileToSubmit;
+      if (profile != null) {
+        return 'Loading models for profile $profile.';
+      }
       return 'Loading the available Codex models from this host.';
     }
     if (_modelsError != null) {
@@ -337,6 +376,15 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (selected != null && selected.description.trim().isNotEmpty) {
       return selected.description.trim();
     }
+    final profile = _selectedProfile;
+    final profileModel = _trimmedOrNull(profile?.model);
+    if (profile != null && profileModel != null) {
+      return 'No model override will be sent. Codex will use profile ${profile.name}\'s model $profileModel.';
+    }
+    final profileName = _profileToSubmit;
+    if (profileName != null) {
+      return 'No model override selected. Choose a provider model only if you want to override profile $profileName.';
+    }
     final defaultModel = _defaultModelEntry;
     if (defaultModel != null) {
       return 'Host default: ${defaultModel.displayName}. Leave unset to let Codex use this host\'s current config.';
@@ -344,28 +392,140 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return 'Leave unset to let Codex use this host\'s current config.';
   }
 
+  String get _profileLabel {
+    final selected = _selectedProfile;
+    if (selected != null) return selected.name;
+    final profile = _profileToSubmit;
+    if (profile != null) return profile;
+    return 'Host default';
+  }
+
+  String get _profileDescription {
+    if (_loadingProfiles) {
+      return 'Loading Codex profiles for this workspace.';
+    }
+    if (_profilesError != null) {
+      return _profilesError!;
+    }
+    final selected = _selectedProfile;
+    if (selected != null) {
+      final provider = _profileProviderLabel(selected);
+      final providerText = provider == null ? '' : ' Provider: $provider.';
+      return '${_describeCodexProfile(selected)}$providerText Model discovery will use this profile first.';
+    }
+    final unresolvedProfile = _profileToSubmit;
+    if (unresolvedProfile != null) {
+      return 'Profile $unresolvedProfile is selected but has not been resolved from the current workspace config yet.';
+    }
+    if (_defaultProfileName != null) {
+      return 'No profile override. Codex will inherit workspace default profile $_defaultProfileName.';
+    }
+    if (_currentCwd == null) {
+      return 'Enter a working directory first to discover Codex profiles.';
+    }
+    if (_profilesLoadedForCwd == _currentCwd && _profiles.isEmpty) {
+      return 'No named profiles were found for this workspace. Codex will use the host config.';
+    }
+    return 'Choose a discovered Codex profile before picking a model, or keep the host config.';
+  }
+
   String? get _reasoningToSubmit {
     if (_controlModelIsAuto) return null;
     return _trimmedOrNull(_reasoningEffort);
   }
 
-  Future<void> _loadModels() async {
+  String? get _currentCwd => _trimmedOrNull(_cwdController.text);
+
+  String? get _profileToSubmit => _trimmedOrNull(_profileController.text);
+
+  CodexProfileSummary? get _selectedProfile {
+    final name = _profileToSubmit;
+    if (name == null) return null;
+    for (final profile in _profiles) {
+      if (profile.name == name) {
+        return profile;
+      }
+    }
+    return null;
+  }
+
+  void _handleCwdChanged() {
+    final cwd = _currentCwd;
+    if (_modelsLoadedForCwd != cwd) {
+      setState(() {
+        _models = const <ModelCatalogEntry>[];
+        _modelsError = null;
+        _modelsLoadedForCwd = null;
+        _modelsLoadedForProfile = null;
+      });
+      if (_showAdvanced && !_loadingModels) {
+        unawaited(_loadModels());
+      }
+    }
+    if (cwd == _profilesLoadedForCwd) {
+      return;
+    }
+    if (_profilesLoadedForCwd == null &&
+        _profiles.isEmpty &&
+        _profilesError == null &&
+        _defaultProfileName == null) {
+      return;
+    }
+    setState(() {
+      _profiles = const <CodexProfileSummary>[];
+      _profilesError = null;
+      _defaultProfileName = null;
+      _profilesLoadedForCwd = null;
+    });
+    if (_showAdvanced && cwd != null && !_loadingProfiles) {
+      unawaited(_loadProfiles());
+    }
+  }
+
+  Future<void> _loadModels({bool force = false}) async {
+    final cwd = _currentCwd;
+    final profile = _profileToSubmit;
     if (_loadingModels) return;
+    if (!force &&
+        _modelsLoadedForCwd == cwd &&
+        _modelsLoadedForProfile == profile &&
+        _modelsError == null) {
+      return;
+    }
     setState(() {
       _loadingModels = true;
       _modelsError = null;
     });
 
     try {
-      final models = await widget.api.fetchModels(widget.host);
+      final models = await widget.api.fetchModels(
+        widget.host,
+        cwd: cwd,
+        profile: profile,
+      );
       models.sort(_compareModelEntries);
       if (!mounted) return;
       setState(() {
         _models = models;
+        _modelsLoadedForCwd = cwd;
+        _modelsLoadedForProfile = profile;
         _loadingModels = false;
         _modelsError = models.isEmpty
-            ? 'Codex did not return any models for this host.'
+            ? profile == null
+                  ? 'Codex did not return any models for this host.'
+                  : 'Codex did not return any models for profile $profile.'
             : null;
+        final selectedModel = _selectedModel;
+        if (selectedModel != null) {
+          ModelCatalogEntry? refreshedSelection;
+          for (final entry in models) {
+            if (entry.model == selectedModel.model) {
+              refreshedSelection = entry;
+              break;
+            }
+          }
+          _selectedModel = refreshedSelection;
+        }
         _coerceCurrentModelOptions();
       });
     } catch (error) {
@@ -373,13 +533,68 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       setState(() {
         _loadingModels = false;
         _modelsError = friendlyError(error);
+        _modelsLoadedForCwd = cwd;
+        _modelsLoadedForProfile = profile;
+      });
+    }
+  }
+
+  Future<void> _loadProfiles({bool force = false}) async {
+    final cwd = _currentCwd;
+    if (cwd == null) {
+      setState(() {
+        _profiles = const <CodexProfileSummary>[];
+        _profilesError =
+            'Enter a working directory to load workspace-aware Codex profiles.';
+        _defaultProfileName = null;
+        _profilesLoadedForCwd = null;
+      });
+      return;
+    }
+    if (_loadingProfiles) return;
+    if (!force && _profilesLoadedForCwd == cwd && _profilesError == null) {
+      return;
+    }
+
+    setState(() {
+      _loadingProfiles = true;
+      _profilesError = null;
+    });
+
+    try {
+      final catalog = await widget.api.fetchProfiles(widget.host, cwd: cwd);
+      if (!mounted) return;
+      setState(() {
+        _profiles = catalog.profiles;
+        _defaultProfileName = catalog.defaultProfile;
+        _profilesError = null;
+        _loadingProfiles = false;
+        _profilesLoadedForCwd = cwd;
+        final selectedProfile = _profileToSubmit;
+        if (selectedProfile != null &&
+            !catalog.profiles.any(
+              (profile) => profile.name == selectedProfile,
+            )) {
+          _selectProfile(null);
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingProfiles = false;
+        _profilesError = friendlyError(error);
+        _profilesLoadedForCwd = cwd;
       });
     }
   }
 
   void _coerceCurrentModelOptions() {
     final model = _controlModel;
-    if (model == null) return;
+    if (model == null) {
+      _reasoningEffort = null;
+      _fastMode = false;
+      return;
+    }
 
     if (model.isAutoModel) {
       _reasoningEffort = null;
@@ -398,16 +613,79 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     }
   }
 
+  void _selectProfile(String? profileName) {
+    final normalized = _trimmedOrNull(profileName);
+    if (normalized == null) {
+      _profileController.clear();
+    } else {
+      _profileController.text = normalized;
+      _profileController.selection = TextSelection.collapsed(
+        offset: normalized.length,
+      );
+    }
+    _selectedModel = null;
+    _models = const <ModelCatalogEntry>[];
+    _modelsError = null;
+    _modelsLoadedForCwd = null;
+    _modelsLoadedForProfile = null;
+    _coerceCurrentModelOptions();
+  }
+
   void _toggleAdvanced() {
     setState(() => _showAdvanced = !_showAdvanced);
-    if (_showAdvanced && _models.isEmpty && _modelsError == null) {
+    if (_showAdvanced &&
+        (_modelsLoadedForCwd != _currentCwd ||
+            _modelsLoadedForProfile != _profileToSubmit ||
+            _models.isEmpty) &&
+        !_loadingModels) {
       unawaited(_loadModels());
     }
+    if (_showAdvanced &&
+        _currentCwd != null &&
+        _profilesLoadedForCwd == null &&
+        !_loadingProfiles) {
+      unawaited(_loadProfiles());
+    }
+  }
+
+  Future<void> _chooseProfile() async {
+    if (_loadingProfiles) return;
+    if (_currentCwd == null) {
+      setState(() {
+        _profilesError =
+            'Enter a working directory to load workspace-aware Codex profiles.';
+      });
+      return;
+    }
+    await _loadProfiles(force: true);
+    if (!mounted) return;
+
+    final result = await showModalBottomSheet<_ProfilePickerResult>(
+      context: context,
+      backgroundColor: context.colors.surface,
+      showDragHandle: true,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => _ProfilePickerSheet(
+        profiles: _profiles,
+        currentProfile: _profileToSubmit,
+        defaultProfile: _defaultProfileName,
+        loadError: _profilesError,
+      ),
+    );
+    if (!mounted || result == null) return;
+
+    setState(() {
+      _selectProfile(result.profileName);
+    });
+    unawaited(_loadModels(force: true));
   }
 
   Future<void> _chooseModel() async {
     if (_loadingModels) return;
-    if (_models.isEmpty) {
+    if (_modelsLoadedForCwd != _currentCwd ||
+        _modelsLoadedForProfile != _profileToSubmit ||
+        _models.isEmpty) {
       await _loadModels();
       if (!mounted || _models.isEmpty) return;
     }
@@ -421,7 +699,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       builder: (context) => _ModelPickerSheet(
         models: _models,
         currentModel: _selectedModel?.model,
-        defaultModel: _defaultModelEntry,
+        profile: _selectedProfile,
+        profileName: _profileToSubmit,
+        inheritedModel: _profileToSubmit == null
+            ? _defaultModelEntry
+            : _profileModelEntry,
       ),
     );
     if (!mounted || result == null) return;
@@ -474,7 +756,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         approvalPolicy: _approval.wire,
         sandboxMode: _sandbox.wire,
         webSearch: _webSearch ? 'live' : null,
-        profile: _trimmedOrNull(_profileController.text),
+        profile: _profileToSubmit,
       );
       final submittedAt = DateTime.now();
       SessionMessageSeedStore.instance.put(
@@ -721,6 +1003,22 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             title: 'Brain',
             children: [
               _ModelSelectionCard(
+                title: 'Profile',
+                icon: Icons.badge_outlined,
+                value: _profileLabel,
+                subtitle: _profileDescription,
+                loading: _loadingProfiles,
+                error: _profilesError,
+                compact: true,
+                badges: _profileBadges(),
+                retryLabel: 'Retry loading profiles',
+                onTap: _chooseProfile,
+                onRetry: () => unawaited(_loadProfiles(force: true)),
+              ),
+              const SizedBox(height: 10),
+              _ModelSelectionCard(
+                title: 'Model',
+                icon: Icons.memory_rounded,
                 value: _modelLabel,
                 subtitle: _modelDescription,
                 loading: _loadingModels,
@@ -728,8 +1026,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                 compact: true,
                 badges: <String>[
                   if (_selectedModel != null) 'override',
+                  if (_selectedModel == null && _profileToSubmit != null)
+                    'profile default',
                   if (_controlModel?.isAutoModel ?? false) 'auto',
                   if (_controlModel?.isDefault ?? false) 'default',
+                  if (_profileToSubmit != null) 'profile scoped',
                   if (_controlModel?.supportsFastMode ?? false) 'fast',
                 ],
                 onTap: _chooseModel,
@@ -830,7 +1131,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           const SizedBox(height: 12),
           _CompactControlGroup(
             icon: Icons.public_rounded,
-            title: 'Network & profile',
+            title: 'Network',
             children: [
               _CompactSwitchRow(
                 icon: Icons.public_rounded,
@@ -839,16 +1140,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                 value: _webSearch,
                 enabled: !_submitting,
                 onChanged: (value) => setState(() => _webSearch = value),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _profileController,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  labelText: 'Profile override',
-                  hintText: 'guardian',
-                  prefixIcon: Icon(Icons.badge_outlined),
-                ),
               ),
             ],
           ),
@@ -888,7 +1179,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final reasoning = _effectiveReasoningEffort;
     return [
       MeshPill(
-        label: _selectedModel?.displayName ?? 'host default',
+        label: _profileLabel,
+        icon: Icons.badge_outlined,
+        tone: _profileToSubmit == null
+            ? MeshPillTone.neutral
+            : MeshPillTone.accent,
+      ),
+      MeshPill(
+        label: _modelLabel,
         icon: Icons.memory_rounded,
         tone: _selectedModel == null
             ? MeshPillTone.neutral
@@ -924,6 +1222,21 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           icon: Icons.public_rounded,
           tone: MeshPillTone.info,
         ),
+    ];
+  }
+
+  List<String> _profileBadges() {
+    final selected = _selectedProfile;
+    if (selected == null) {
+      return <String>[
+        if (_defaultProfileName != null) 'workspace default',
+        if (_profileToSubmit == null) 'host',
+      ];
+    }
+    return <String>[
+      if (selected.isDefault) 'default',
+      if (_profileProviderLabel(selected) != null) 'provider',
+      if (_trimmedOrNull(selected.model) != null) 'model preset',
     ];
   }
 }
@@ -1263,6 +1576,8 @@ class _CompactInfoLine extends StatelessWidget {
 
 class _ModelSelectionCard extends StatelessWidget {
   const _ModelSelectionCard({
+    this.title = 'Model',
+    this.icon = Icons.memory_rounded,
     required this.value,
     required this.subtitle,
     required this.loading,
@@ -1270,9 +1585,12 @@ class _ModelSelectionCard extends StatelessWidget {
     required this.badges,
     required this.onTap,
     required this.onRetry,
+    this.retryLabel = 'Retry loading models',
     this.compact = false,
   });
 
+  final String title;
+  final IconData icon;
   final String value;
   final String subtitle;
   final bool loading;
@@ -1280,6 +1598,7 @@ class _ModelSelectionCard extends StatelessWidget {
   final List<String> badges;
   final VoidCallback onTap;
   final VoidCallback onRetry;
+  final String retryLabel;
   final bool compact;
 
   @override
@@ -1301,9 +1620,11 @@ class _ModelSelectionCard extends StatelessWidget {
           children: [
             Row(
               children: [
+                Icon(icon, size: 16, color: colors.textSecondary),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Model',
+                    title,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -1352,7 +1673,7 @@ class _ModelSelectionCard extends StatelessWidget {
               TextButton.icon(
                 onPressed: onRetry,
                 icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Retry loading models'),
+                label: Text(retryLabel),
               ),
             ],
           ],
@@ -1362,8 +1683,164 @@ class _ModelSelectionCard extends StatelessWidget {
   }
 }
 
+class _ProfilePickerResult {
+  const _ProfilePickerResult(this.profileName);
+
+  final String? profileName;
+}
+
+class _ProfilePickerSheet extends StatefulWidget {
+  const _ProfilePickerSheet({
+    required this.profiles,
+    required this.currentProfile,
+    required this.defaultProfile,
+    required this.loadError,
+  });
+
+  final List<CodexProfileSummary> profiles;
+  final String? currentProfile;
+  final String? defaultProfile;
+  final String? loadError;
+
+  @override
+  State<_ProfilePickerSheet> createState() => _ProfilePickerSheetState();
+}
+
+class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
+  final TextEditingController _queryController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _queryController.addListener(_handleQueryChanged);
+  }
+
+  @override
+  void dispose() {
+    _queryController
+      ..removeListener(_handleQueryChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _handleQueryChanged() {
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final query = _queryController.text.trim().toLowerCase();
+    final filtered = widget.profiles
+        .where((profile) {
+          if (query.isEmpty) return true;
+          final haystack = [
+            profile.name,
+            profile.model ?? '',
+            profile.modelProvider ?? '',
+            profile.modelProviderName ?? '',
+            profile.modelProviderBaseUrl ?? '',
+            _describeCodexProfile(profile),
+          ].join('\n').toLowerCase();
+          return haystack.contains(query);
+        })
+        .toList(growable: false);
+
+    return FractionallySizedBox(
+      heightFactor: 0.78,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Choose profile',
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Pick a Codex config profile first. The model picker will then load models from that profile\'s provider when possible.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: colors.textSecondary,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _queryController,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded),
+                hintText: 'Search profiles',
+              ),
+            ),
+            if (widget.loadError != null) ...[
+              const SizedBox(height: 12),
+              _CompactInfoLine(
+                icon: Icons.info_outline_rounded,
+                text: 'Could not load profiles: ${widget.loadError}',
+              ),
+            ],
+            const SizedBox(height: 14),
+            Expanded(
+              child: filtered.isEmpty && query.isNotEmpty
+                  ? Center(
+                      child: Text(
+                        'No profiles match that search.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: filtered.length + (query.isEmpty ? 1 : 0),
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        if (query.isEmpty && index == 0) {
+                          return _ModelPickerTile(
+                            title: 'Host default',
+                            model: null,
+                            description: widget.defaultProfile == null
+                                ? 'Do not send a profile override. Codex will use the host config.'
+                                : 'Do not send a profile override. Codex will inherit workspace default profile ${widget.defaultProfile}.',
+                            selected: widget.currentProfile == null,
+                            badges: const <String>['inherit'],
+                            onTap: () => Navigator.of(
+                              context,
+                            ).pop(const _ProfilePickerResult(null)),
+                          );
+                        }
+                        final profile =
+                            filtered[index - (query.isEmpty ? 1 : 0)];
+                        return _ModelPickerTile(
+                          title: profile.name,
+                          model: null,
+                          description: _profilePickerDescription(profile),
+                          selected: profile.name == widget.currentProfile,
+                          badges: <String>[
+                            if (profile.isDefault) 'default',
+                            if (_profileProviderLabel(profile) != null)
+                              'provider',
+                            if (_trimmedOrNull(profile.model) != null)
+                              'model preset',
+                          ],
+                          onTap: () => Navigator.of(
+                            context,
+                          ).pop(_ProfilePickerResult(profile.name)),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ModelPickerResult {
-  const _ModelPickerResult(this.model);
+  const _ModelPickerResult({this.model});
 
   final ModelCatalogEntry? model;
 }
@@ -1372,12 +1849,16 @@ class _ModelPickerSheet extends StatefulWidget {
   const _ModelPickerSheet({
     required this.models,
     required this.currentModel,
-    required this.defaultModel,
+    required this.profile,
+    required this.profileName,
+    required this.inheritedModel,
   });
 
   final List<ModelCatalogEntry> models;
   final String? currentModel;
-  final ModelCatalogEntry? defaultModel;
+  final CodexProfileSummary? profile;
+  final String? profileName;
+  final ModelCatalogEntry? inheritedModel;
 
   @override
   State<_ModelPickerSheet> createState() => _ModelPickerSheetState();
@@ -1435,7 +1916,9 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Leave the model unset to inherit this host\'s Codex config, or choose a model for this new session.',
+              widget.profileName == null
+                  ? 'Leave the model unset to inherit this host\'s Codex config, or choose a model for this new session.'
+                  : 'Models are scoped to profile ${widget.profileName}. Leave unset to let Codex use that profile default.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: colors.textSecondary,
                 height: 1.4,
@@ -1465,16 +1948,27 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                       separatorBuilder: (_, _) => const SizedBox(height: 8),
                       itemBuilder: (context, index) {
                         if (query.isEmpty && index == 0) {
+                          final profileName = widget.profileName;
                           return _ModelPickerTile(
-                            title: 'Use host default',
-                            model: widget.defaultModel,
-                            description:
-                                'Do not send a model override. Codex will use the host profile or default config.',
+                            title: profileName == null
+                                ? 'Use host default'
+                                : 'Use profile default',
+                            model: widget.inheritedModel,
+                            description: profileName == null
+                                ? 'Do not send a model override. Codex will use the host or workspace Codex config.'
+                                : _profileModelInheritDescription(
+                                    profileName,
+                                    widget.profile,
+                                  ),
                             selected: widget.currentModel == null,
-                            badges: const <String>['inherit'],
+                            badges: <String>[
+                              'inherit',
+                              if (widget.profile?.isDefault ?? false)
+                                'default profile',
+                            ],
                             onTap: () => Navigator.of(
                               context,
-                            ).pop(const _ModelPickerResult(null)),
+                            ).pop(const _ModelPickerResult()),
                           );
                         }
                         final model = filtered[index - (query.isEmpty ? 1 : 0)];
@@ -1486,6 +1980,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                           badges: <String>[
                             if (model.isAutoModel) 'auto',
                             if (model.isDefault) 'default',
+                            if (model.isProfileModel) 'profile provider',
                             if (model.supportsFastMode) 'fast',
                             ...model.supportedReasoningEfforts
                                 .take(3)
@@ -1497,7 +1992,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                           ],
                           onTap: () => Navigator.of(
                             context,
-                          ).pop(_ModelPickerResult(model)),
+                          ).pop(_ModelPickerResult(model: model)),
                         );
                       },
                     ),
@@ -1627,6 +2122,7 @@ int _compareModelEntries(ModelCatalogEntry left, ModelCatalogEntry right) {
 }
 
 int _modelSortRank(ModelCatalogEntry model) {
+  if (model.isProfileModel) return 4;
   if (!model.isAutoModel) return 10;
   return switch (model.model) {
     'codex-auto-fast' => 0,
@@ -1644,6 +2140,87 @@ String _reasoningEffortLabel(String value) {
     'medium' => 'Medium',
     'high' => 'High',
     'xhigh' => 'Extra high',
+    _ => value,
+  };
+}
+
+String _describeCodexProfile(CodexProfileSummary profile) {
+  final parts = <String>[
+    if ((profile.model ?? '').isNotEmpty) 'model ${profile.model}',
+    if ((profile.serviceTier ?? '').isNotEmpty)
+      'tier ${_serviceTierLabel(profile.serviceTier!)}',
+    if ((profile.reasoningEffort ?? '').isNotEmpty)
+      '${_reasoningEffortLabel(profile.reasoningEffort!)} reasoning',
+    if ((profile.approvalPolicy ?? '').isNotEmpty)
+      'approval ${_approvalPolicyLabel(profile.approvalPolicy!)}',
+    if ((profile.sandboxMode ?? '').isNotEmpty)
+      'sandbox ${_sandboxModeLabel(profile.sandboxMode!)}',
+    if ((profile.webSearch ?? '').isNotEmpty)
+      'web search ${_webSearchModeLabel(profile.webSearch!)}',
+    if ((profile.personality ?? '').isNotEmpty)
+      'personality ${profile.personality}',
+  ];
+  if (parts.isEmpty) {
+    return 'is a named Codex config preset.';
+  }
+  return 'sets ${parts.join(', ')}.';
+}
+
+String? _profileProviderLabel(CodexProfileSummary profile) =>
+    _trimmedOrNull(profile.modelProviderName) ??
+    _trimmedOrNull(profile.modelProvider);
+
+String _profilePickerDescription(CodexProfileSummary profile) {
+  final provider = _profileProviderLabel(profile);
+  final providerText = provider == null ? '' : ' Provider: $provider.';
+  final baseUrl = _trimmedOrNull(profile.modelProviderBaseUrl);
+  final baseUrlText = baseUrl == null ? '' : ' $baseUrl';
+  return '${_describeCodexProfile(profile)}$providerText$baseUrlText';
+}
+
+String _profileModelInheritDescription(
+  String profileName,
+  CodexProfileSummary? profile,
+) {
+  final profileModel = _trimmedOrNull(profile?.model);
+  if (profileModel != null) {
+    return 'Do not send a model override. Codex will use profile $profileName\'s configured model $profileModel.';
+  }
+  return 'Do not send a model override. Codex will use profile $profileName and its provider defaults.';
+}
+
+String _approvalPolicyLabel(String value) {
+  return switch (value) {
+    'on-request' => 'on request',
+    'on-failure' => 'on failure',
+    'untrusted' => 'untrusted',
+    'never' => 'never',
+    _ => value,
+  };
+}
+
+String _sandboxModeLabel(String value) {
+  return switch (value) {
+    'read-only' => 'read-only',
+    'workspace-write' => 'workspace-write',
+    'danger-full-access' => 'danger-full-access',
+    _ => value,
+  };
+}
+
+String _serviceTierLabel(String value) {
+  return switch (value) {
+    'fast' => 'fast',
+    'flex' => 'flex',
+    _ => value,
+  };
+}
+
+String _webSearchModeLabel(String value) {
+  return switch (value) {
+    'disabled' => 'disabled',
+    'cached' => 'cached',
+    'live' => 'live',
     _ => value,
   };
 }

@@ -163,6 +163,7 @@ class SessionSummary {
 class SessionRuntimeSummary {
   const SessionRuntimeSummary({
     this.model,
+    this.modelProvider,
     this.serviceTier,
     this.reasoningEffort,
     this.approvalPolicy,
@@ -174,6 +175,7 @@ class SessionRuntimeSummary {
   });
 
   final String? model;
+  final String? modelProvider;
   final String? serviceTier;
   final String? reasoningEffort;
   final String? approvalPolicy;
@@ -186,6 +188,7 @@ class SessionRuntimeSummary {
   factory SessionRuntimeSummary.fromJson(Map<String, dynamic> json) =>
       SessionRuntimeSummary(
         model: json['model'] as String?,
+        modelProvider: json['modelProvider'] as String?,
         serviceTier: json['serviceTier'] as String?,
         reasoningEffort: json['reasoningEffort'] as String?,
         approvalPolicy: json['approvalPolicy'] as String?,
@@ -200,6 +203,7 @@ class SessionRuntimeSummary {
 
   Map<String, dynamic> toJson() => {
     'model': model,
+    'modelProvider': modelProvider,
     'serviceTier': serviceTier,
     'reasoningEffort': reasoningEffort,
     'approvalPolicy': approvalPolicy,
@@ -500,6 +504,8 @@ class ModelCatalogEntry {
     required this.additionalSpeedTiers,
     required this.inputModalities,
     required this.isDefault,
+    this.source,
+    this.profileName,
   });
 
   final String id;
@@ -512,9 +518,12 @@ class ModelCatalogEntry {
   final List<String> additionalSpeedTiers;
   final List<String> inputModalities;
   final bool isDefault;
+  final String? source;
+  final String? profileName;
 
   bool get supportsFastMode => additionalSpeedTiers.contains('fast');
   bool get isAutoModel => model.startsWith('codex-auto-');
+  bool get isProfileModel => source == 'profile';
 
   factory ModelCatalogEntry.fromJson(
     Map<String, dynamic> json,
@@ -540,6 +549,8 @@ class ModelCatalogEntry {
         .map(_stringValue)
         .toList(),
     isDefault: _boolValue(json['isDefault']),
+    source: _stringOrNull(json['source']),
+    profileName: _stringOrNull(json['profileName']),
   );
 }
 
@@ -556,6 +567,77 @@ class ModelReasoningEffortOption {
       ModelReasoningEffortOption(
         reasoningEffort: _stringValue(json['reasoningEffort']),
         description: _stringValue(json['description']),
+      );
+}
+
+class CodexProfileCatalog {
+  const CodexProfileCatalog({
+    required this.defaultProfile,
+    required this.profiles,
+  });
+
+  final String? defaultProfile;
+  final List<CodexProfileSummary> profiles;
+
+  factory CodexProfileCatalog.fromJson(Map<String, dynamic> json) =>
+      CodexProfileCatalog(
+        defaultProfile: _stringOrNull(json['defaultProfile']),
+        profiles: (json['profiles'] as List<dynamic>? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(CodexProfileSummary.fromJson)
+            .toList(),
+      );
+}
+
+class CodexProfileSummary {
+  const CodexProfileSummary({
+    required this.name,
+    required this.isDefault,
+    this.model,
+    this.modelProvider,
+    this.modelProviderName,
+    this.modelProviderBaseUrl,
+    this.approvalPolicy,
+    this.sandboxMode,
+    this.serviceTier,
+    this.reasoningEffort,
+    this.reasoningSummary,
+    this.verbosity,
+    this.webSearch,
+    this.personality,
+  });
+
+  final String name;
+  final bool isDefault;
+  final String? model;
+  final String? modelProvider;
+  final String? modelProviderName;
+  final String? modelProviderBaseUrl;
+  final String? approvalPolicy;
+  final String? sandboxMode;
+  final String? serviceTier;
+  final String? reasoningEffort;
+  final String? reasoningSummary;
+  final String? verbosity;
+  final String? webSearch;
+  final String? personality;
+
+  factory CodexProfileSummary.fromJson(Map<String, dynamic> json) =>
+      CodexProfileSummary(
+        name: _stringValue(json['name']),
+        isDefault: _boolValue(json['isDefault']),
+        model: _stringOrNull(json['model']),
+        modelProvider: _stringOrNull(json['modelProvider']),
+        modelProviderName: _stringOrNull(json['modelProviderName']),
+        modelProviderBaseUrl: _stringOrNull(json['modelProviderBaseUrl']),
+        approvalPolicy: _stringOrNull(json['approvalPolicy']),
+        sandboxMode: _stringOrNull(json['sandboxMode']),
+        serviceTier: _stringOrNull(json['serviceTier']),
+        reasoningEffort: _stringOrNull(json['reasoningEffort']),
+        reasoningSummary: _stringOrNull(json['reasoningSummary']),
+        verbosity: _stringOrNull(json['verbosity']),
+        webSearch: _stringOrNull(json['webSearch']),
+        personality: _stringOrNull(json['personality']),
       );
 }
 
