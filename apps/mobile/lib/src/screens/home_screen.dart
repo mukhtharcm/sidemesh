@@ -51,7 +51,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     ),
     _TabDef(
       title: 'Hosts',
-      subtitle: 'Your mesh of Codex nodes',
+      subtitle: 'Your mesh of agent nodes',
       icon: Icons.hub_outlined,
       selectedIcon: Icons.hub_rounded,
     ),
@@ -997,7 +997,7 @@ class _RecentPaneState extends State<RecentPane> {
         title: widget.hasSavedHosts ? 'No enabled hosts' : 'No sessions yet',
         body: widget.hasSavedHosts
             ? 'Enable a saved host from Hosts to load recent sessions.'
-            : 'Add a host first — your most recent Codex sessions will land here.',
+            : 'Add a host first — your most recent agent sessions will land here.',
       );
     }
 
@@ -1892,7 +1892,7 @@ class _InboxPaneState extends State<InboxPane> {
                 icon: Icons.verified_rounded,
                 title: 'Inbox is clear',
                 body:
-                    'Queued sends and Codex approval prompts from your nodes will show up here.',
+                    'Queued sends and approval prompts from your nodes will show up here.',
               ),
           ],
         ],

@@ -1436,7 +1436,7 @@ class _SessionScreenState extends State<SessionScreen>
         });
         _thinkingNotifier.value = false;
         _syncSessionLiveActivity();
-        // Background reconcile; do not block UI. Delayed enough for Codex to
+        // Background reconcile; do not block UI. Delayed enough for the agent to
         // finish flushing the rollout .jsonl file — otherwise the snapshot
         // reads a partial file and the new assistant message appears to
         // vanish until the user reloads.
