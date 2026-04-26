@@ -277,10 +277,10 @@ class _SwatchGrid extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       childAspectRatio: compact
           ? (crossAxisCount >= 4
-                ? 1.7
-                : crossAxisCount == 3
                 ? 1.55
-                : 1.38)
+                : crossAxisCount == 3
+                ? 1.38
+                : 1.26)
           : (crossAxisCount == 3 ? 1.15 : 1.05),
       mainAxisSpacing: compact ? 10 : 12,
       crossAxisSpacing: compact ? 10 : 12,
@@ -343,22 +343,22 @@ class _SwatchCard extends StatelessWidget {
               children: [
                 if (compact)
                   SizedBox(
-                    height: 44,
+                    height: 40,
                     child: Stack(
                       children: [
                         Container(color: palette.canvas),
                         Positioned(
                           left: 8,
                           right: 8,
-                          top: 7,
-                          bottom: 7,
+                          top: 6,
+                          bottom: 6,
                           child: Container(
                             decoration: BoxDecoration(
                               color: palette.surface,
                               borderRadius: BorderRadius.circular(7),
                               border: Border.all(color: palette.border),
                             ),
-                            padding: const EdgeInsets.all(6),
+                            padding: const EdgeInsets.all(5),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -375,7 +375,7 @@ class _SwatchCard extends StatelessWidget {
                                 Align(
                                   alignment: Alignment.centerRight,
                                   child: Container(
-                                    height: 8,
+                                    height: 7,
                                     width: 24,
                                     decoration: BoxDecoration(
                                       color: palette.userBubble,
@@ -514,8 +514,8 @@ class _SwatchCard extends StatelessWidget {
   }
 
   Widget _dot(Color color, {bool compact = false}) => Container(
-    width: compact ? 5 : 6,
-    height: compact ? 5 : 6,
+    width: compact ? 4 : 6,
+    height: compact ? 4 : 6,
     decoration: BoxDecoration(color: color, shape: BoxShape.circle),
   );
 }
