@@ -265,7 +265,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   late final TextEditingController _profileController;
 
   List<ModelCatalogEntry> _models = const <ModelCatalogEntry>[];
-  List<CodexProfileSummary> _profiles = const <CodexProfileSummary>[];
+  List<ProviderProfileSummary> _profiles = const <ProviderProfileSummary>[];
   ModelCatalogEntry? _selectedModel;
   String? _reasoningEffort;
   String? _modelsError;
@@ -367,8 +367,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   bool get _supportsApprovalPolicy =>
       _supports('runtimeControls', 'approvalPolicy');
 
-  bool get _supportsSandboxMode =>
-      _supports('runtimeControls', 'sandboxMode');
+  bool get _supportsSandboxMode => _supports('runtimeControls', 'sandboxMode');
 
   bool get _supportsWebSearch => _supports('runtimeControls', 'webSearch');
 
@@ -463,7 +462,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (selected != null) {
       final provider = _profileProviderLabel(selected);
       final providerText = provider == null ? '' : ' Provider: $provider.';
-      return '${_describeCodexProfile(selected)}$providerText Model discovery will use this profile first.';
+      return '${_describeProviderProfile(selected)}$providerText Model discovery will use this profile first.';
     }
     final unresolvedProfile = _profileToSubmit;
     if (unresolvedProfile != null) {
@@ -491,7 +490,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   String? get _profileToSubmit => _trimmedOrNull(_profileController.text);
 
-  CodexProfileSummary? get _selectedProfile {
+  ProviderProfileSummary? get _selectedProfile {
     final name = _profileToSubmit;
     if (name == null) return null;
     for (final profile in _profiles) {
@@ -530,7 +529,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   void _coerceForProviderCapabilities() {
     if (!_supportsProfiles) {
       _profileController.clear();
-      _profiles = const <CodexProfileSummary>[];
+      _profiles = const <ProviderProfileSummary>[];
       _profilesError = null;
       _defaultProfileName = null;
       _profilesLoadedForCwd = null;
@@ -579,12 +578,15 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       return;
     }
     setState(() {
-      _profiles = const <CodexProfileSummary>[];
+      _profiles = const <ProviderProfileSummary>[];
       _profilesError = null;
       _defaultProfileName = null;
       _profilesLoadedForCwd = null;
     });
-    if (_showAdvanced && _supportsProfiles && cwd != null && !_loadingProfiles) {
+    if (_showAdvanced &&
+        _supportsProfiles &&
+        cwd != null &&
+        !_loadingProfiles) {
       unawaited(_loadProfiles());
     }
   }
@@ -658,7 +660,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   Future<void> _loadProfiles({bool force = false}) async {
     if (!_supportsProfiles) {
       setState(() {
-        _profiles = const <CodexProfileSummary>[];
+        _profiles = const <ProviderProfileSummary>[];
         _profilesError = null;
         _defaultProfileName = null;
         _profilesLoadedForCwd = _currentCwd;
@@ -668,7 +670,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final cwd = _currentCwd;
     if (cwd == null) {
       setState(() {
-        _profiles = const <CodexProfileSummary>[];
+        _profiles = const <ProviderProfileSummary>[];
         _profilesError =
             'Enter a working directory to load workspace-aware provider profiles.';
         _defaultProfileName = null;
@@ -1370,9 +1372,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               ? MeshPillTone.neutral
               : MeshPillTone.accent,
         ),
-      if (_supportsReasoningEffort &&
-          _supportsModels &&
-          _supportsModelOverride)
+      if (_supportsReasoningEffort && _supportsModels && _supportsModelOverride)
         MeshPill(
           label: _controlModelIsAuto
               ? 'auto thinking'
@@ -1881,7 +1881,7 @@ class _ProfilePickerSheet extends StatefulWidget {
     required this.providerName,
   });
 
-  final List<CodexProfileSummary> profiles;
+  final List<ProviderProfileSummary> profiles;
   final String? currentProfile;
   final String? defaultProfile;
   final String? loadError;
@@ -1925,7 +1925,7 @@ class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
             profile.modelProvider ?? '',
             profile.modelProviderName ?? '',
             profile.modelProviderBaseUrl ?? '',
-            _describeCodexProfile(profile),
+            _describeProviderProfile(profile),
           ].join('\n').toLowerCase();
           return haystack.contains(query);
         })
@@ -2042,7 +2042,7 @@ class _ModelPickerSheet extends StatefulWidget {
 
   final List<ModelCatalogEntry> models;
   final String? currentModel;
-  final CodexProfileSummary? profile;
+  final ProviderProfileSummary? profile;
   final String? profileName;
   final ModelCatalogEntry? inheritedModel;
   final String providerName;
@@ -2332,7 +2332,7 @@ String _reasoningEffortLabel(String value) {
   };
 }
 
-String _describeCodexProfile(CodexProfileSummary profile) {
+String _describeProviderProfile(ProviderProfileSummary profile) {
   final parts = <String>[
     if ((profile.model ?? '').isNotEmpty) 'model ${profile.model}',
     if ((profile.serviceTier ?? '').isNotEmpty)
@@ -2354,21 +2354,21 @@ String _describeCodexProfile(CodexProfileSummary profile) {
   return 'sets ${parts.join(', ')}.';
 }
 
-String? _profileProviderLabel(CodexProfileSummary profile) =>
+String? _profileProviderLabel(ProviderProfileSummary profile) =>
     _trimmedOrNull(profile.modelProviderName) ??
     _trimmedOrNull(profile.modelProvider);
 
-String _profilePickerDescription(CodexProfileSummary profile) {
+String _profilePickerDescription(ProviderProfileSummary profile) {
   final provider = _profileProviderLabel(profile);
   final providerText = provider == null ? '' : ' Provider: $provider.';
   final baseUrl = _trimmedOrNull(profile.modelProviderBaseUrl);
   final baseUrlText = baseUrl == null ? '' : ' $baseUrl';
-  return '${_describeCodexProfile(profile)}$providerText$baseUrlText';
+  return '${_describeProviderProfile(profile)}$providerText$baseUrlText';
 }
 
 String _profileModelInheritDescription(
   String profileName,
-  CodexProfileSummary? profile,
+  ProviderProfileSummary? profile,
   String providerName,
 ) {
   final profileModel = _trimmedOrNull(profile?.model);

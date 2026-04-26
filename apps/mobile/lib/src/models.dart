@@ -648,27 +648,27 @@ class ModelReasoningEffortOption {
       );
 }
 
-class CodexProfileCatalog {
-  const CodexProfileCatalog({
+class ProviderProfileCatalog {
+  const ProviderProfileCatalog({
     required this.defaultProfile,
     required this.profiles,
   });
 
   final String? defaultProfile;
-  final List<CodexProfileSummary> profiles;
+  final List<ProviderProfileSummary> profiles;
 
-  factory CodexProfileCatalog.fromJson(Map<String, dynamic> json) =>
-      CodexProfileCatalog(
+  factory ProviderProfileCatalog.fromJson(Map<String, dynamic> json) =>
+      ProviderProfileCatalog(
         defaultProfile: _stringOrNull(json['defaultProfile']),
         profiles: (json['profiles'] as List<dynamic>? ?? [])
             .whereType<Map<String, dynamic>>()
-            .map(CodexProfileSummary.fromJson)
+            .map(ProviderProfileSummary.fromJson)
             .toList(),
       );
 }
 
-class CodexProfileSummary {
-  const CodexProfileSummary({
+class ProviderProfileSummary {
+  const ProviderProfileSummary({
     required this.name,
     required this.isDefault,
     this.model,
@@ -700,8 +700,8 @@ class CodexProfileSummary {
   final String? webSearch;
   final String? personality;
 
-  factory CodexProfileSummary.fromJson(Map<String, dynamic> json) =>
-      CodexProfileSummary(
+  factory ProviderProfileSummary.fromJson(Map<String, dynamic> json) =>
+      ProviderProfileSummary(
         name: _stringValue(json['name']),
         isDefault: _boolValue(json['isDefault']),
         model: _stringOrNull(json['model']),

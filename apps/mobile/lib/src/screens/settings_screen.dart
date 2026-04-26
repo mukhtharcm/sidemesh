@@ -393,7 +393,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                   icon: Icons.public_rounded,
                   title: 'Live web search',
                   subtitle:
-                      'Start new sessions with Codex web search enabled by default.',
+                      'Start new sessions with provider web search enabled by default.',
                   value: _draft.webSearch,
                   onChanged: (value) {
                     setState(() => _draft = _draft.copyWith(webSearch: value));
@@ -512,7 +512,12 @@ class _SettingsContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final list = ListView(
-      padding: EdgeInsets.fromLTRB(embedded ? 24 : 16, 16, embedded ? 24 : 16, 28),
+      padding: EdgeInsets.fromLTRB(
+        embedded ? 24 : 16,
+        16,
+        embedded ? 24 : 16,
+        28,
+      ),
       children: [
         _SectionHeader(
           icon: Icons.tune_rounded,
@@ -616,7 +621,8 @@ class _SettingsContent extends StatelessWidget {
             return _SettingsCard(
               icon: Icons.rocket_launch_outlined,
               title: 'New session defaults',
-              subtitle: '${defaults.approval.label} · ${defaults.sandbox.label}',
+              subtitle:
+                  '${defaults.approval.label} · ${defaults.sandbox.label}',
               body:
                   'These defaults seed the create-session flow before any host-specific model or profile selection.',
               footer: Wrap(
