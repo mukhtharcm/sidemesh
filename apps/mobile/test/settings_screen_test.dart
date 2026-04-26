@@ -7,6 +7,7 @@ import 'package:sidemesh_mobile/src/screens/settings_screen.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
+import 'package:sidemesh_mobile/src/widgets/appearance_sheet.dart';
 
 void main() {
   setUp(() {
@@ -104,6 +105,56 @@ void main() {
       expect(find.byType(Dialog), findsOneWidget);
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('App preferences'), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
+
+  testWidgets('opens appearance sheet on narrow mobile width without overflow', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    tester.view
+      ..devicePixelRatio = 1
+      ..physicalSize = const Size(390, 844);
+    try {
+      await CreateSessionDefaultsStore.instance.ensureLoaded();
+      final controller = await ThemeController.load();
+      final palette = ThemeVariant.codexAmber;
+
+      await tester.pumpWidget(
+        ThemeScope(
+          notifier: controller,
+          child: MaterialApp(
+            theme: buildLightTheme(
+              palette.light,
+              typography: controller.typography,
+            ),
+            darkTheme: buildDarkTheme(
+              palette.dark,
+              typography: controller.typography,
+            ),
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: FilledButton(
+                    onPressed: () => showAppearanceSheet(context),
+                    child: const Text('Open appearance'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open appearance'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Appearance'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     } finally {
       debugDefaultTargetPlatformOverride = null;
       tester.view.resetPhysicalSize();
