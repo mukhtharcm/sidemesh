@@ -44,6 +44,52 @@ export interface AgentSessionLogOptions {
   activityLimit?: number | null;
 }
 
+export interface AgentProviderCapabilities {
+  sessions: {
+    create: boolean;
+    resume: boolean;
+    rename: boolean;
+    archive: boolean;
+    interrupt: boolean;
+    history: boolean;
+    eventReplay: boolean;
+    recentFallback: boolean;
+  };
+  input: {
+    text: boolean;
+    imageUrl: boolean;
+    localImage: boolean;
+    skills: boolean;
+  };
+  approvals: {
+    command: boolean;
+    fileChange: boolean;
+    permissions: boolean;
+    approveForSession: boolean;
+  };
+  configuration: {
+    models: boolean;
+    profiles: boolean;
+    skills: boolean;
+    skillManagement: boolean;
+  };
+  runtimeControls: {
+    model: boolean;
+    reasoningEffort: boolean;
+    fastMode: boolean;
+    approvalPolicy: boolean;
+    sandboxMode: boolean;
+    networkAccess: boolean;
+    webSearch: boolean;
+  };
+  workspace: {
+    filesystem: boolean;
+    gitStatus: boolean;
+    gitDiff: boolean;
+    remoteGitDiff: boolean;
+  };
+}
+
 export type AgentProviderLiveEvent =
   | {
       type: "fs_changed";
@@ -105,6 +151,7 @@ export type AgentProviderLiveEvent =
 export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   readonly kind: string;
   readonly displayName: string;
+  readonly capabilities: AgentProviderCapabilities;
 
   start(): Promise<void>;
   getVersion(): Promise<string>;

@@ -44,8 +44,8 @@ import {
   mergeActivity,
   mergeSessionActivities,
 } from "./activity.js";
-import { CodexAgentProvider } from "./codex-provider.js";
 import { buildGitDiff, readGitDiff, readGitStatus, sanitizeGitUrl } from "./git.js";
+import { createAgentProvider } from "./provider-factory.js";
 import { buildSessionResources } from "./resources.js";
 import {
   FsWatchRegistry,
@@ -151,7 +151,7 @@ type SessionInputItem =
     };
 
 export async function startServer(config: NodeConfig): Promise<void> {
-  const provider = new CodexAgentProvider(config.codexBin);
+  const provider = createAgentProvider(config);
   await provider.start();
 
   const app = express();
@@ -179,7 +179,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       receipt: entry.receipt,
     });
   }
-  let codexVersion = "unknown";
+  let providerVersion = "unknown";
 
   function allocSeq(sessionId: string): number {
     const current = sessionSeqCursor.get(sessionId) ?? 0;
@@ -382,7 +382,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
   });
 
-  codexVersion = await provider.getVersion();
+  providerVersion = await provider.getVersion();
 
   app.use(cors());
   // Image attachments are sent as data URLs, so message payloads can be
@@ -406,9 +406,11 @@ export async function startServer(config: NodeConfig): Promise<void> {
       label: config.label,
       hostname: hostname(),
       platform: platform(),
-      codexVersion,
+      codexVersion: providerVersion,
       provider: provider.kind,
       providerName: provider.displayName,
+      providerVersion,
+      providerCapabilities: provider.capabilities,
       startedAt: process.uptime(),
       tokenSource: config.tokenSource,
     });
@@ -1013,7 +1015,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   server.listen(config.port, () => {
     console.log(`[sidemesh] ${config.label} listening on port ${config.port}`);
-    console.log(`[sidemesh] codex: ${config.codexBin}`);
+    console.log(`[sidemesh] provider: ${provider.displayName} (${provider.kind})`);
     console.log(`[sidemesh] token (${config.tokenSource}): ${config.token}`);
   });
 }

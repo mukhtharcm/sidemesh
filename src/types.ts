@@ -3,6 +3,7 @@ export interface NodeConfig {
   port: number;
   token: string;
   tokenSource: "env" | "generated";
+  provider: string;
   codexBin: string;
   stateDir: string;
 }

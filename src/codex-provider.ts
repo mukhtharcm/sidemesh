@@ -5,6 +5,7 @@ import { EventEmitter } from "node:events";
 import {
   type AgentPendingAction,
   type AgentProvider,
+  type AgentProviderCapabilities,
   type AgentProviderEvents,
   type AgentSessionLogOptions,
   type AgentSessionActivityDraft,
@@ -35,6 +36,7 @@ export class CodexAgentProvider
 
   public readonly kind = "codex";
   public readonly displayName = "Codex";
+  public readonly capabilities = CODEX_PROVIDER_CAPABILITIES;
 
   public constructor(private readonly codexBin: string) {
     super();
@@ -524,6 +526,52 @@ function buildCodexPendingAction(
     providerPayload: typed.permissions,
   };
 }
+
+export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
+  sessions: {
+    create: true,
+    resume: true,
+    rename: true,
+    archive: true,
+    interrupt: true,
+    history: true,
+    eventReplay: true,
+    recentFallback: true,
+  },
+  input: {
+    text: true,
+    imageUrl: true,
+    localImage: true,
+    skills: true,
+  },
+  approvals: {
+    command: true,
+    fileChange: true,
+    permissions: true,
+    approveForSession: true,
+  },
+  configuration: {
+    models: true,
+    profiles: true,
+    skills: true,
+    skillManagement: true,
+  },
+  runtimeControls: {
+    model: true,
+    reasoningEffort: true,
+    fastMode: true,
+    approvalPolicy: true,
+    sandboxMode: true,
+    networkAccess: true,
+    webSearch: true,
+  },
+  workspace: {
+    filesystem: true,
+    gitStatus: true,
+    gitDiff: true,
+    remoteGitDiff: true,
+  },
+};
 
 function buildCodexActionResponse(
   action: AgentPendingAction,
