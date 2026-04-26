@@ -43,6 +43,7 @@ import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/composer_paste_text_action.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/diff_view.dart';
 import '../widgets/mesh_widgets.dart';
@@ -5049,7 +5050,7 @@ class _Composer extends StatelessWidget {
     );
     field = Actions(
       actions: <Type, Action<Intent>>{
-        PasteTextIntent: _ComposerPasteTextAction(onPasteImage: onNativePaste),
+        PasteTextIntent: ComposerPasteTextAction(onPasteImage: onNativePaste),
       },
       child: field,
     );
@@ -5245,32 +5246,6 @@ class _ComposerPasteButton extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _ComposerPasteTextAction extends Action<PasteTextIntent> {
-  _ComposerPasteTextAction({required this.onPasteImage});
-
-  final Future<bool> Function() onPasteImage;
-
-  @override
-  bool get isActionEnabled => callingAction?.isActionEnabled ?? true;
-
-  @override
-  bool consumesKey(PasteTextIntent intent) =>
-      callingAction?.consumesKey(intent) ?? true;
-
-  @override
-  Future<Object?> invoke(PasteTextIntent intent) async {
-    final pastedImage = await onPasteImage();
-    if (pastedImage) {
-      return null;
-    }
-    final fallback = callingAction?.invoke(intent);
-    if (fallback is Future<Object?>) {
-      return await fallback;
-    }
-    return fallback;
   }
 }
 
