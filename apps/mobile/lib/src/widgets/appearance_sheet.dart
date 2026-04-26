@@ -58,7 +58,16 @@ class _AppearanceSheet extends StatelessWidget {
     final colors = context.colors;
     final controller = ThemeScope.of(context);
     final width = MediaQuery.sizeOf(context).width;
-    final crossAxisCount = width >= 640 ? 3 : 2;
+    final compactThemeGrid = embedded;
+    final crossAxisCount = compactThemeGrid
+        ? width >= 760
+              ? 4
+              : width >= 560
+              ? 3
+              : 2
+        : width >= 640
+        ? 3
+        : 2;
 
     return AnimatedBuilder(
       animation: controller,
@@ -131,8 +140,9 @@ class _AppearanceSheet extends StatelessWidget {
                       _SwatchGrid(
                         controller: controller,
                         crossAxisCount: crossAxisCount,
+                        compact: compactThemeGrid,
                       ),
-                      const SizedBox(height: 22),
+                      SizedBox(height: compactThemeGrid ? 18 : 22),
                       _SectionLabel(text: 'Typography'),
                       const SizedBox(height: 10),
                       _TypographyCard(controller: controller),
@@ -247,10 +257,15 @@ class _BrightnessSegmented extends StatelessWidget {
 }
 
 class _SwatchGrid extends StatelessWidget {
-  const _SwatchGrid({required this.controller, required this.crossAxisCount});
+  const _SwatchGrid({
+    required this.controller,
+    required this.crossAxisCount,
+    this.compact = false,
+  });
 
   final ThemeController controller;
   final int crossAxisCount;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -260,15 +275,18 @@ class _SwatchGrid extends StatelessWidget {
       crossAxisCount: crossAxisCount,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: crossAxisCount == 3 ? 1.15 : 1.05,
-      mainAxisSpacing: 12,
-      crossAxisSpacing: 12,
+      childAspectRatio: compact
+          ? (crossAxisCount >= 4 ? 1.48 : 1.24)
+          : (crossAxisCount == 3 ? 1.15 : 1.05),
+      mainAxisSpacing: compact ? 10 : 12,
+      crossAxisSpacing: compact ? 10 : 12,
       children: [
         for (final variant in ThemeVariant.values)
           _SwatchCard(
             variant: variant,
             selected: controller.variant == variant,
             isDark: isDark,
+            compact: compact,
             onTap: () => controller.setVariant(variant),
           ),
       ],
@@ -281,12 +299,14 @@ class _SwatchCard extends StatelessWidget {
     required this.variant,
     required this.selected,
     required this.isDark,
+    this.compact = false,
     required this.onTap,
   });
 
   final ThemeVariant variant;
   final bool selected;
   final bool isDark;
+  final bool compact;
   final VoidCallback onTap;
 
   @override
@@ -296,20 +316,24 @@ class _SwatchCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(compact ? 12 : 14),
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
           decoration: BoxDecoration(
             color: frameColors.surface,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(compact ? 12 : 14),
             border: Border.all(
               color: selected ? frameColors.accent : frameColors.border,
               width: selected ? 2 : 1,
             ),
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(selected ? 12 : 13),
+            borderRadius: BorderRadius.circular(
+              compact
+                  ? (selected ? 10 : 11)
+                  : (selected ? 12 : 13),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -320,17 +344,17 @@ class _SwatchCard extends StatelessWidget {
                       Container(color: palette.canvas),
                       // Mini bubble / surface strip mimicking an assistant bubble
                       Positioned(
-                        left: 10,
-                        right: 10,
-                        top: 10,
-                        bottom: 10,
+                        left: compact ? 8 : 10,
+                        right: compact ? 8 : 10,
+                        top: compact ? 8 : 10,
+                        bottom: compact ? 8 : 10,
                         child: Container(
                           decoration: BoxDecoration(
                             color: palette.surface,
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(compact ? 7 : 8),
                             border: Border.all(color: palette.border),
                           ),
-                          padding: const EdgeInsets.all(8),
+                          padding: EdgeInsets.all(compact ? 7 : 8),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -345,8 +369,8 @@ class _SwatchCard extends StatelessWidget {
                                 ],
                               ),
                               Container(
-                                width: 34,
-                                height: 5,
+                                width: compact ? 28 : 34,
+                                height: compact ? 4 : 5,
                                 decoration: BoxDecoration(
                                   color: palette.textPrimary.withValues(
                                     alpha: 0.7,
@@ -357,8 +381,8 @@ class _SwatchCard extends StatelessWidget {
                               Align(
                                 alignment: Alignment.centerRight,
                                 child: Container(
-                                  height: 14,
-                                  width: 40,
+                                  height: compact ? 12 : 14,
+                                  width: compact ? 32 : 40,
                                   decoration: BoxDecoration(
                                     color: palette.userBubble,
                                     borderRadius: BorderRadius.circular(6),
@@ -371,10 +395,10 @@ class _SwatchCard extends StatelessWidget {
                       ),
                       if (selected)
                         Positioned(
-                          right: 6,
-                          top: 6,
+                          right: compact ? 5 : 6,
+                          top: compact ? 5 : 6,
                           child: Container(
-                            padding: const EdgeInsets.all(3),
+                            padding: EdgeInsets.all(compact ? 2.5 : 3),
                             decoration: BoxDecoration(
                               color: frameColors.accent,
                               shape: BoxShape.circle,
@@ -390,7 +414,12 @@ class _SwatchCard extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                  padding: EdgeInsets.fromLTRB(
+                    compact ? 9 : 10,
+                    compact ? 7 : 8,
+                    compact ? 9 : 10,
+                    compact ? 8 : 10,
+                  ),
                   color: frameColors.surface,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -401,21 +430,24 @@ class _SwatchCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           fontWeight: FontWeight.w700,
+                          fontSize: compact ? 12.5 : null,
                           color: selected
                               ? frameColors.accent
                               : frameColors.textPrimary,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        variant.tagline,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: frameColors.textTertiary,
-                          fontSize: 11,
+                      if (!compact) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          variant.tagline,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: frameColors.textTertiary,
+                            fontSize: 11,
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
