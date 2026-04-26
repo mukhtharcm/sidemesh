@@ -55,4 +55,59 @@ void main() {
       tester.view.resetDevicePixelRatio();
     }
   });
+
+  testWidgets('opens desktop settings as an embedded dialog surface', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    tester.view
+      ..devicePixelRatio = 1
+      ..physicalSize = const Size(1440, 1024);
+    try {
+      await CreateSessionDefaultsStore.instance.ensureLoaded();
+      final controller = await ThemeController.load();
+      final palette = ThemeVariant.codexAmber;
+
+      await tester.pumpWidget(
+        ThemeScope(
+          notifier: controller,
+          child: MaterialApp(
+            theme: buildLightTheme(
+              palette.light,
+              typography: controller.typography,
+            ),
+            darkTheme: buildDarkTheme(
+              palette.dark,
+              typography: controller.typography,
+            ),
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: FilledButton(
+                    onPressed: () => openSettingsScreen(
+                      context,
+                      onResetSidebarWidth: () {},
+                      onResetInspectorWidth: () {},
+                    ),
+                    child: const Text('Open settings'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open settings'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.text('Settings'), findsOneWidget);
+      expect(find.text('App preferences'), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
 }

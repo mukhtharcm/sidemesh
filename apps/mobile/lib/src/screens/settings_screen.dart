@@ -22,6 +22,40 @@ Future<void> openSettingsScreen(
   VoidCallback? onResetSidebarWidth,
   VoidCallback? onResetInspectorWidth,
 }) {
+  final desktop = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+  if (desktop) {
+    final colors = context.colors;
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 920, maxHeight: 860),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: colors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 40,
+                  offset: const Offset(0, 20),
+                ),
+              ],
+            ),
+            child: SettingsScreen(
+              embedded: true,
+              onClose: () => Navigator.of(dialogContext).pop(),
+              onResetSidebarWidth: onResetSidebarWidth,
+              onResetInspectorWidth: onResetInspectorWidth,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
   return Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => SettingsScreen(
@@ -35,10 +69,14 @@ Future<void> openSettingsScreen(
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
+    this.embedded = false,
+    this.onClose,
     this.onResetSidebarWidth,
     this.onResetInspectorWidth,
   });
 
+  final bool embedded;
+  final VoidCallback? onClose;
   final VoidCallback? onResetSidebarWidth;
   final VoidCallback? onResetInspectorWidth;
 
@@ -100,13 +138,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _editLaunchDefaults() async {
-    final updated = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _LaunchDefaultsSheet(),
-    );
-    if (updated == true && mounted) {
+    if (!mounted) return;
+    final desktop = widget.embedded;
+    bool? updated;
+    if (desktop) {
+      updated = await showDialog<bool>(
+        context: context,
+        builder: (_) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 36,
+            vertical: 28,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: const _LaunchDefaultsSheet(embedded: true),
+          ),
+        ),
+      );
+    } else {
+      updated = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => const _LaunchDefaultsSheet(),
+      );
+    }
+    if (!mounted) return;
+    if (updated == true) {
       showAppSnackBar(context, 'New session defaults updated.');
     }
   }
@@ -180,287 +239,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final hasDesktopControls =
         widget.onResetSidebarWidth != null ||
         widget.onResetInspectorWidth != null;
+    final content = _SettingsContent(
+      embedded: widget.embedded,
+      onClose: widget.onClose,
+      themeController: themeController,
+      defaultsStore: _defaultsStore,
+      notificationsLoading: _notificationsLoading,
+      notificationsRequesting: _notificationsRequesting,
+      notificationsSupported: _notificationsSupported,
+      notificationsAllowed: _notificationsAllowed,
+      liveActivitiesSupported: _liveActivitiesSupported,
+      busyAction: _busyAction,
+      hasDesktopControls: hasDesktopControls,
+      platformLabel: _platformLabel(),
+      themeModeLabelFor: _themeModeLabel,
+      onRefreshNotifications: _refreshNotificationStatus,
+      onRequestNotifications: _requestNotifications,
+      onEditLaunchDefaults: _editLaunchDefaults,
+      onRunStorageAction: _runStorageAction,
+      onResetSidebarWidth: widget.onResetSidebarWidth,
+      onResetInspectorWidth: widget.onResetInspectorWidth,
+    );
+    if (widget.embedded) {
+      return content;
+    }
     return Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(title: const Text('Settings')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-        children: [
-          _SectionHeader(
-            icon: Icons.tune_rounded,
-            title: 'App preferences',
-            subtitle: 'Global settings that apply across hosts and sessions.',
-          ),
-          const SizedBox(height: 10),
-          ListenableBuilder(
-            listenable: themeController,
-            builder: (context, _) => _SettingsCard(
-              icon: Icons.palette_outlined,
-              title: 'Appearance',
-              subtitle:
-                  '${_themeModeLabel(themeController.mode)} · ${themeController.variant.label} · ${themeController.typography.interfaceFont.label}',
-              body:
-                  'Theme mode, palette, and typography are global. Use the shared appearance controls from here.',
-              trailing: FilledButton(
-                onPressed: () => showAppearanceSheet(context),
-                child: const Text('Customize'),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          _SettingsCard(
-            icon: Icons.notifications_outlined,
-            title: 'Notifications',
-            subtitle: _notificationsLoading
-                ? 'Checking device notification status...'
-                : _notificationsSupported
-                ? _notificationsAllowed
-                      ? 'Approval alerts are enabled.'
-                      : 'Approval alerts are available but currently disabled.'
-                : 'This platform does not support local approval alerts.',
-            body:
-                'Approval notifications, background polling, and Live Activities are app-level behaviors, not per-session toggles.',
-            footer: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                MeshPill(
-                  label: _notificationsLoading
-                      ? 'checking alerts'
-                      : _notificationsAllowed
-                      ? 'alerts on'
-                      : 'alerts off',
-                  tone: _notificationsAllowed
-                      ? MeshPillTone.success
-                      : MeshPillTone.warning,
-                  icon: _notificationsAllowed
-                      ? Icons.notifications_active_outlined
-                      : Icons.notifications_off_outlined,
-                ),
-                MeshPill(
-                  label: BackgroundSyncService.instance.supportsBackgroundFetch
-                      ? 'background polling supported'
-                      : 'background polling unavailable',
-                  tone: BackgroundSyncService.instance.supportsBackgroundFetch
-                      ? MeshPillTone.info
-                      : MeshPillTone.neutral,
-                  icon: Icons.sync_rounded,
-                ),
-                MeshPill(
-                  label: _liveActivitiesSupported
-                      ? 'live activity supported'
-                      : 'live activity unavailable',
-                  tone: _liveActivitiesSupported
-                      ? MeshPillTone.info
-                      : MeshPillTone.neutral,
-                  icon: Icons.view_agenda_outlined,
-                ),
-              ],
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                OutlinedButton(
-                  onPressed: _notificationsLoading
-                      ? null
-                      : () => unawaited(_refreshNotificationStatus()),
-                  child: const Text('Refresh'),
-                ),
-                if (_notificationsSupported && !_notificationsAllowed) ...[
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: _notificationsRequesting
-                        ? null
-                        : () => unawaited(_requestNotifications()),
-                    child: Text(
-                      _notificationsRequesting ? 'Enabling...' : 'Enable',
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          ListenableBuilder(
-            listenable: _defaultsStore,
-            builder: (context, _) {
-              final defaults = _defaultsStore.defaults;
-              return _SettingsCard(
-                icon: Icons.rocket_launch_outlined,
-                title: 'New session defaults',
-                subtitle:
-                    '${defaults.approval.label} · ${defaults.sandbox.label}',
-                body:
-                    'These defaults seed the create-session flow before any host-specific model or profile selection.',
-                footer: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    MeshPill(
-                      label: defaults.approval.label,
-                      icon: Icons.verified_user_rounded,
-                    ),
-                    MeshPill(
-                      label: defaults.sandbox.label,
-                      icon: defaults.sandbox == SandboxMode.dangerFullAccess
-                          ? Icons.warning_amber_rounded
-                          : Icons.folder_special_rounded,
-                      tone: defaults.sandbox == SandboxMode.dangerFullAccess
-                          ? MeshPillTone.warning
-                          : MeshPillTone.neutral,
-                    ),
-                    MeshPill(
-                      label: defaults.fastMode
-                          ? 'fast mode on'
-                          : 'fast mode off',
-                      icon: Icons.bolt_rounded,
-                      tone: defaults.fastMode
-                          ? MeshPillTone.accent
-                          : MeshPillTone.neutral,
-                    ),
-                    MeshPill(
-                      label: defaults.webSearch
-                          ? 'web search on'
-                          : 'web search off',
-                      icon: Icons.public_rounded,
-                      tone: defaults.webSearch
-                          ? MeshPillTone.info
-                          : MeshPillTone.neutral,
-                    ),
-                  ],
-                ),
-                trailing: FilledButton(
-                  onPressed: () => unawaited(_editLaunchDefaults()),
-                  child: const Text('Edit'),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          _SettingsCard(
-            icon: Icons.storage_rounded,
-            title: 'Storage & recovery',
-            subtitle: 'Clear saved caches and queued recovery state.',
-            body:
-                'These actions only touch on-device state. Open panes keep their current contents until refreshed or reopened.',
-            footer: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _ActionRow(
-                  icon: Icons.history_rounded,
-                  title: 'Clear saved transcript cache',
-                  subtitle: 'Drop saved recent sessions and saved logs.',
-                  busy: _busyAction == 'transcript-cache',
-                  onTap: () => unawaited(
-                    _runStorageAction(
-                      key: 'transcript-cache',
-                      title: 'Clear saved transcript cache?',
-                      body:
-                          'This removes saved recent sessions and saved transcripts from this device. Open panes keep their current contents until refreshed.',
-                      action: SessionCacheStore.instance.clearAll,
-                      successMessage: 'Saved transcript cache cleared.',
-                    ),
-                  ),
-                ),
-                Divider(color: colors.border),
-                _ActionRow(
-                  icon: Icons.image_outlined,
-                  title: 'Clear saved image cache',
-                  subtitle: 'Remove saved image blobs from disk.',
-                  busy: _busyAction == 'image-cache',
-                  onTap: () => unawaited(
-                    _runStorageAction(
-                      key: 'image-cache',
-                      title: 'Clear saved image cache?',
-                      body:
-                          'This removes downloaded image blobs saved on this device. Images already open may remain visible until reopened.',
-                      action: ImageBlobCacheStore.instance.clearAll,
-                      successMessage: 'Saved image cache cleared.',
-                    ),
-                  ),
-                ),
-                Divider(color: colors.border),
-                _ActionRow(
-                  icon: Icons.outbox_outlined,
-                  title: 'Clear queued sends',
-                  subtitle:
-                      'Discard queued retries that have not already started.',
-                  busy: _busyAction == 'queued-sends',
-                  onTap: () => unawaited(
-                    _runStorageAction(
-                      key: 'queued-sends',
-                      title: 'Clear queued sends?',
-                      body:
-                          'This discards locally queued messages waiting for retry. A retry already in progress may still finish. Remote sessions are unchanged.',
-                      action: SessionSendOutboxStore.instance.clearAll,
-                      successMessage: 'Queued sends cleared.',
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (hasDesktopControls) ...[
-            const SizedBox(height: 12),
-            _SettingsCard(
-              icon: Icons.desktop_mac_outlined,
-              title: 'Desktop layout',
-              subtitle: 'Reset saved shell sizing preferences.',
-              body:
-                  'These controls only appear inside the desktop shell and affect the local window layout.',
-              footer: Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  if (widget.onResetSidebarWidth != null)
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        widget.onResetSidebarWidth!.call();
-                        showAppSnackBar(context, 'Sidebar width reset.');
-                      },
-                      icon: const Icon(Icons.view_sidebar_outlined, size: 18),
-                      label: const Text('Reset sidebar'),
-                    ),
-                  if (widget.onResetInspectorWidth != null)
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        widget.onResetInspectorWidth!.call();
-                        showAppSnackBar(context, 'Inspector width reset.');
-                      },
-                      icon: const Icon(Icons.tune_rounded, size: 18),
-                      label: const Text('Reset inspector'),
-                    ),
-                ],
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          _SettingsCard(
-            icon: Icons.info_outline_rounded,
-            title: 'About this build',
-            subtitle: _platformLabel(),
-            body:
-                'Hosts, tokens, favorites, pins, caches, and other local state stay inside this app install and flavor.',
-            footer: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                MeshPill(
-                  label: _platformLabel(),
-                  icon: Icons.devices_rounded,
-                  tone: MeshPillTone.neutral,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+      body: content,
     );
   }
 }
 
 class _LaunchDefaultsSheet extends StatefulWidget {
-  const _LaunchDefaultsSheet();
+  const _LaunchDefaultsSheet({this.embedded = false});
+
+  final bool embedded;
 
   @override
   State<_LaunchDefaultsSheet> createState() => _LaunchDefaultsSheetState();
@@ -488,12 +302,14 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        16,
-        12,
-        16,
-        MediaQuery.viewInsetsOf(context).bottom + 16,
-      ),
+      padding: widget.embedded
+          ? EdgeInsets.zero
+          : EdgeInsets.fromLTRB(
+              16,
+              12,
+              16,
+              MediaQuery.viewInsetsOf(context).bottom + 16,
+            ),
       child: MeshCard(
         tone: MeshCardTone.surface,
         padding: const EdgeInsets.all(20),
@@ -636,6 +452,392 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
           ),
         ),
       ),
+    );
+  }
+}
+
+typedef _ThemeModeLabelFor = String Function(ThemeMode mode);
+
+class _SettingsContent extends StatelessWidget {
+  const _SettingsContent({
+    required this.embedded,
+    required this.onClose,
+    required this.themeController,
+    required this.defaultsStore,
+    required this.notificationsLoading,
+    required this.notificationsRequesting,
+    required this.notificationsSupported,
+    required this.notificationsAllowed,
+    required this.liveActivitiesSupported,
+    required this.busyAction,
+    required this.hasDesktopControls,
+    required this.platformLabel,
+    required this.themeModeLabelFor,
+    required this.onRefreshNotifications,
+    required this.onRequestNotifications,
+    required this.onEditLaunchDefaults,
+    required this.onRunStorageAction,
+    required this.onResetSidebarWidth,
+    required this.onResetInspectorWidth,
+  });
+
+  final bool embedded;
+  final VoidCallback? onClose;
+  final ThemeController themeController;
+  final CreateSessionDefaultsStore defaultsStore;
+  final bool notificationsLoading;
+  final bool notificationsRequesting;
+  final bool notificationsSupported;
+  final bool notificationsAllowed;
+  final bool liveActivitiesSupported;
+  final String? busyAction;
+  final bool hasDesktopControls;
+  final String platformLabel;
+  final _ThemeModeLabelFor themeModeLabelFor;
+  final Future<void> Function() onRefreshNotifications;
+  final Future<void> Function() onRequestNotifications;
+  final Future<void> Function() onEditLaunchDefaults;
+  final Future<void> Function({
+    required String key,
+    required String title,
+    required String body,
+    required Future<void> Function() action,
+    required String successMessage,
+  })
+  onRunStorageAction;
+  final VoidCallback? onResetSidebarWidth;
+  final VoidCallback? onResetInspectorWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final list = ListView(
+      padding: EdgeInsets.fromLTRB(embedded ? 24 : 16, 16, embedded ? 24 : 16, 28),
+      children: [
+        _SectionHeader(
+          icon: Icons.tune_rounded,
+          title: 'App preferences',
+          subtitle: 'Global settings that apply across hosts and sessions.',
+        ),
+        const SizedBox(height: 10),
+        ListenableBuilder(
+          listenable: themeController,
+          builder: (context, _) => _SettingsCard(
+            icon: Icons.palette_outlined,
+            title: 'Appearance',
+            subtitle:
+                '${themeModeLabelFor(themeController.mode)} · ${themeController.variant.label} · ${themeController.typography.interfaceFont.label}',
+            body:
+                'Theme mode, palette, and typography are global. Use the shared appearance controls from here.',
+            trailing: FilledButton(
+              onPressed: () => showAppearanceSheet(context),
+              child: const Text('Customize'),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _SettingsCard(
+          icon: Icons.notifications_outlined,
+          title: 'Notifications',
+          subtitle: notificationsLoading
+              ? 'Checking device notification status...'
+              : notificationsSupported
+              ? notificationsAllowed
+                    ? 'Approval alerts are enabled.'
+                    : 'Approval alerts are available but currently disabled.'
+              : 'This platform does not support local approval alerts.',
+          body:
+              'Approval notifications, background polling, and Live Activities are app-level behaviors, not per-session toggles.',
+          footer: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              MeshPill(
+                label: notificationsLoading
+                    ? 'checking alerts'
+                    : notificationsAllowed
+                    ? 'alerts on'
+                    : 'alerts off',
+                tone: notificationsAllowed
+                    ? MeshPillTone.success
+                    : MeshPillTone.warning,
+                icon: notificationsAllowed
+                    ? Icons.notifications_active_outlined
+                    : Icons.notifications_off_outlined,
+              ),
+              MeshPill(
+                label: BackgroundSyncService.instance.supportsBackgroundFetch
+                    ? 'background polling supported'
+                    : 'background polling unavailable',
+                tone: BackgroundSyncService.instance.supportsBackgroundFetch
+                    ? MeshPillTone.info
+                    : MeshPillTone.neutral,
+                icon: Icons.sync_rounded,
+              ),
+              MeshPill(
+                label: liveActivitiesSupported
+                    ? 'live activity supported'
+                    : 'live activity unavailable',
+                tone: liveActivitiesSupported
+                    ? MeshPillTone.info
+                    : MeshPillTone.neutral,
+                icon: Icons.view_agenda_outlined,
+              ),
+            ],
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              OutlinedButton(
+                onPressed: notificationsLoading
+                    ? null
+                    : () => unawaited(onRefreshNotifications()),
+                child: const Text('Refresh'),
+              ),
+              if (notificationsSupported && !notificationsAllowed) ...[
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: notificationsRequesting
+                      ? null
+                      : () => unawaited(onRequestNotifications()),
+                  child: Text(
+                    notificationsRequesting ? 'Enabling...' : 'Enable',
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        ListenableBuilder(
+          listenable: defaultsStore,
+          builder: (context, _) {
+            final defaults = defaultsStore.defaults;
+            return _SettingsCard(
+              icon: Icons.rocket_launch_outlined,
+              title: 'New session defaults',
+              subtitle: '${defaults.approval.label} · ${defaults.sandbox.label}',
+              body:
+                  'These defaults seed the create-session flow before any host-specific model or profile selection.',
+              footer: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  MeshPill(
+                    label: defaults.approval.label,
+                    icon: Icons.verified_user_rounded,
+                  ),
+                  MeshPill(
+                    label: defaults.sandbox.label,
+                    icon: defaults.sandbox == SandboxMode.dangerFullAccess
+                        ? Icons.warning_amber_rounded
+                        : Icons.folder_special_rounded,
+                    tone: defaults.sandbox == SandboxMode.dangerFullAccess
+                        ? MeshPillTone.warning
+                        : MeshPillTone.neutral,
+                  ),
+                  MeshPill(
+                    label: defaults.fastMode ? 'fast mode on' : 'fast mode off',
+                    icon: Icons.bolt_rounded,
+                    tone: defaults.fastMode
+                        ? MeshPillTone.accent
+                        : MeshPillTone.neutral,
+                  ),
+                  MeshPill(
+                    label: defaults.webSearch
+                        ? 'web search on'
+                        : 'web search off',
+                    icon: Icons.public_rounded,
+                    tone: defaults.webSearch
+                        ? MeshPillTone.info
+                        : MeshPillTone.neutral,
+                  ),
+                ],
+              ),
+              trailing: FilledButton(
+                onPressed: () => unawaited(onEditLaunchDefaults()),
+                child: const Text('Edit'),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _SettingsCard(
+          icon: Icons.storage_rounded,
+          title: 'Storage & recovery',
+          subtitle: 'Clear saved caches and queued recovery state.',
+          body:
+              'These actions only touch on-device state. Open panes keep their current contents until refreshed or reopened.',
+          footer: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _ActionRow(
+                icon: Icons.history_rounded,
+                title: 'Clear saved transcript cache',
+                subtitle: 'Drop saved recent sessions and saved logs.',
+                busy: busyAction == 'transcript-cache',
+                onTap: () => unawaited(
+                  onRunStorageAction(
+                    key: 'transcript-cache',
+                    title: 'Clear saved transcript cache?',
+                    body:
+                        'This removes saved recent sessions and saved transcripts from this device. Open panes keep their current contents until refreshed.',
+                    action: SessionCacheStore.instance.clearAll,
+                    successMessage: 'Saved transcript cache cleared.',
+                  ),
+                ),
+              ),
+              Divider(color: colors.border),
+              _ActionRow(
+                icon: Icons.image_outlined,
+                title: 'Clear saved image cache',
+                subtitle: 'Remove saved image blobs from disk.',
+                busy: busyAction == 'image-cache',
+                onTap: () => unawaited(
+                  onRunStorageAction(
+                    key: 'image-cache',
+                    title: 'Clear saved image cache?',
+                    body:
+                        'This removes downloaded image blobs saved on this device. Images already open may remain visible until reopened.',
+                    action: ImageBlobCacheStore.instance.clearAll,
+                    successMessage: 'Saved image cache cleared.',
+                  ),
+                ),
+              ),
+              Divider(color: colors.border),
+              _ActionRow(
+                icon: Icons.outbox_outlined,
+                title: 'Clear queued sends',
+                subtitle:
+                    'Discard queued retries that have not already started.',
+                busy: busyAction == 'queued-sends',
+                onTap: () => unawaited(
+                  onRunStorageAction(
+                    key: 'queued-sends',
+                    title: 'Clear queued sends?',
+                    body:
+                        'This discards locally queued messages waiting for retry. A retry already in progress may still finish. Remote sessions are unchanged.',
+                    action: SessionSendOutboxStore.instance.clearAll,
+                    successMessage: 'Queued sends cleared.',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (hasDesktopControls) ...[
+          const SizedBox(height: 12),
+          _SettingsCard(
+            icon: Icons.desktop_mac_outlined,
+            title: 'Desktop layout',
+            subtitle: 'Reset saved shell sizing preferences.',
+            body:
+                'These controls only appear inside the desktop shell and affect the local window layout.',
+            footer: Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                if (onResetSidebarWidth != null)
+                  OutlinedButton.icon(
+                    onPressed: onResetSidebarWidth,
+                    icon: const Icon(Icons.view_sidebar_outlined, size: 18),
+                    label: const Text('Reset sidebar'),
+                  ),
+                if (onResetInspectorWidth != null)
+                  OutlinedButton.icon(
+                    onPressed: onResetInspectorWidth,
+                    icon: const Icon(Icons.tune_rounded, size: 18),
+                    label: const Text('Reset inspector'),
+                  ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        _SettingsCard(
+          icon: Icons.info_outline_rounded,
+          title: 'About this build',
+          subtitle: platformLabel,
+          body:
+              'Hosts, tokens, favorites, pins, caches, and other local state stay inside this app install and flavor.',
+          footer: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              MeshPill(
+                label: platformLabel,
+                icon: Icons.devices_rounded,
+                tone: MeshPillTone.neutral,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    final centered = Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 860),
+        child: list,
+      ),
+    );
+
+    if (!embedded) {
+      return centered;
+    }
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 22, 24, 18),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: colors.accentMuted,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: colors.accent.withValues(alpha: 0.28),
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Icon(Icons.tune_rounded, size: 20, color: colors.accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Settings',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Global app controls for appearance, defaults, storage, and notifications.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              MeshIconButton(
+                icon: Icons.close_rounded,
+                tooltip: 'Close',
+                onTap: onClose ?? () => Navigator.of(context).maybePop(),
+              ),
+            ],
+          ),
+        ),
+        Divider(height: 1, color: colors.border),
+        Expanded(child: centered),
+      ],
     );
   }
 }
