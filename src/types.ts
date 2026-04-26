@@ -133,12 +133,12 @@ export interface ModelSummary {
   profileName?: string | null;
 }
 
-export interface CodexProfileCatalog {
+export interface ProviderProfileCatalog {
   defaultProfile: string | null;
-  profiles: CodexProfileSummary[];
+  profiles: ProviderProfileSummary[];
 }
 
-export interface CodexProfileSummary {
+export interface ProviderProfileSummary {
   name: string;
   isDefault: boolean;
   model: string | null;
@@ -154,6 +154,9 @@ export interface CodexProfileSummary {
   webSearch: string | null;
   personality: string | null;
 }
+
+export type CodexProfileCatalog = ProviderProfileCatalog;
+export type CodexProfileSummary = ProviderProfileSummary;
 
 export interface SessionMessage {
   id: string;
