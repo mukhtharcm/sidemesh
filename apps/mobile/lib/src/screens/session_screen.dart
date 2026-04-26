@@ -2907,6 +2907,7 @@ class _SessionScreenState extends State<SessionScreen>
       host: widget.host,
       session: session,
       runtimeModel: runtime?.model,
+      runtimeModelProvider: runtime?.modelProvider,
       runtimeServiceTier: runtime?.serviceTier,
       runtimeReasoningEffort: runtime?.reasoningEffort,
       runtimeApproval: ApprovalPolicy.fromWire(runtime?.approvalPolicy),
@@ -7794,6 +7795,9 @@ class _SessionRuntimeDetails extends StatelessWidget {
     final colors = context.colors;
     final details = <({String label, String value})>[
       (label: 'Model', value: runtimeValue(runtime.model)),
+      if ((runtime.modelProvider ?? '').isNotEmpty &&
+          runtime.modelProvider != 'openai')
+        (label: 'Provider', value: runtime.modelProvider!),
       (label: 'Speed', value: runtimeServiceTierValue(runtime.serviceTier)),
       (label: 'Reasoning', value: runtimeValue(runtime.reasoningEffort)),
       (label: 'Approval', value: runtimeValue(runtime.approvalPolicy)),
@@ -7933,6 +7937,7 @@ class SessionControlsSheet extends StatefulWidget {
     required this.host,
     required this.session,
     required this.runtimeModel,
+    required this.runtimeModelProvider,
     required this.runtimeServiceTier,
     required this.runtimeReasoningEffort,
     required this.runtimeApproval,
@@ -7946,6 +7951,7 @@ class SessionControlsSheet extends StatefulWidget {
   final HostProfile host;
   final SessionSummary session;
   final String? runtimeModel;
+  final String? runtimeModelProvider;
   final String? runtimeServiceTier;
   final String? runtimeReasoningEffort;
   final ApprovalPolicy? runtimeApproval;
@@ -8030,6 +8036,10 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
   String get _effectiveModelDescription {
     if (_loadingModels) {
+      final provider = _runtimeModelProvider;
+      if (provider != null) {
+        return 'Loading models from this session\'s $provider provider.';
+      }
       return 'Loading the available Codex models from this host.';
     }
     if (_modelsError != null) {
@@ -8039,7 +8049,19 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     if (selected != null && selected.description.trim().isNotEmpty) {
       return selected.description.trim();
     }
+    final provider = _runtimeModelProvider;
+    if (provider != null) {
+      return 'Use the current $provider provider for new turns.';
+    }
     return 'Use the host default model for new turns.';
+  }
+
+  String? get _runtimeModelProvider {
+    final provider = _trimmedOrNull(widget.runtimeModelProvider);
+    if (provider == null || provider == 'openai') {
+      return null;
+    }
+    return provider;
   }
 
   String? get _effectiveReasoningEffort {
@@ -8101,7 +8123,11 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     });
 
     try {
-      final models = await widget.api.fetchModels(widget.host);
+      final models = await widget.api.fetchModels(
+        widget.host,
+        cwd: widget.session.cwd,
+        provider: _runtimeModelProvider,
+      );
       models.sort(_compareModelEntries);
       if (!mounted) {
         return;
@@ -8110,7 +8136,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         _models = models;
         _loadingModels = false;
         _modelsError = models.isEmpty
-            ? 'Codex did not return any models for this host.'
+            ? _runtimeModelProvider == null
+                  ? 'Codex did not return any models for this host.'
+                  : 'Codex did not return any models for provider $_runtimeModelProvider.'
             : null;
       });
       _coerceTurnConfigForSelectedModel();
@@ -8173,6 +8201,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       builder: (sheetContext) => _ModelPickerSheet(
         models: _models,
         currentModel: _effectiveModelValue,
+        providerName: _runtimeModelProvider,
       ),
     );
     if (!mounted || selected == null) {
@@ -8386,6 +8415,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                     ? widget.runtimeModel
                     : null,
                 badges: <String>[
+                  ?_runtimeModelProvider,
                   if (selectedModel?.isAutoModel ?? false) 'auto',
                   if (selectedModel?.isDefault ?? false) 'default',
                   if (_turnConfig.model != null) 'next turn',
@@ -8828,10 +8858,15 @@ class _FastModeTile extends StatelessWidget {
 }
 
 class _ModelPickerSheet extends StatefulWidget {
-  const _ModelPickerSheet({required this.models, required this.currentModel});
+  const _ModelPickerSheet({
+    required this.models,
+    required this.currentModel,
+    required this.providerName,
+  });
 
   final List<ModelCatalogEntry> models;
   final String? currentModel;
+  final String? providerName;
 
   @override
   State<_ModelPickerSheet> createState() => _ModelPickerSheetState();
@@ -8891,7 +8926,9 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Pick the model for your next fresh turn. Auto models stay simple; specific models let you adjust thinking effort.',
+              widget.providerName == null
+                  ? 'Pick the model for your next fresh turn. Auto models stay simple; specific models let you adjust thinking effort.'
+                  : 'Pick the model for your next fresh turn on this session\'s ${widget.providerName} provider.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: colors.textSecondary,
                 height: 1.4,
@@ -8971,6 +9008,8 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                                   spacing: 8,
                                   runSpacing: 8,
                                   children: [
+                                    if (widget.providerName != null)
+                                      _InlineBadge(label: widget.providerName!),
                                     if (model.isAutoModel)
                                       const _InlineBadge(label: 'auto'),
                                     if (model.isDefault)
