@@ -39,9 +39,7 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     "/api/fs/list",
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(request.query.path, provider, listSessions);
-      const result = (await provider.fsReadDirectory(target)) as {
-        entries: Array<{ fileName: string; isDirectory: boolean; isFile: boolean }>;
-      };
+      const result = await provider.fsReadDirectory(target);
       const entries = (result.entries || []).map((entry) => ({
         name: entry.fileName,
         path: path.join(target, entry.fileName),
@@ -60,13 +58,7 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     "/api/fs/metadata",
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(request.query.path, provider, listSessions);
-      const meta = (await provider.fsGetMetadata(target)) as {
-        isDirectory: boolean;
-        isFile: boolean;
-        isSymlink: boolean;
-        createdAtMs: number;
-        modifiedAtMs: number;
-      };
+      const meta = await provider.fsGetMetadata(target);
       response.json({ path: target, ...meta });
     }),
   );
@@ -75,17 +67,12 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     "/api/fs/read",
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(request.query.path, provider, listSessions);
-      const meta = (await provider.fsGetMetadata(target)) as {
-        isFile: boolean;
-        modifiedAtMs: number;
-      };
+      const meta = await provider.fsGetMetadata(target);
       if (!meta.isFile) {
         response.status(400).json({ error: "path is not a regular file" });
         return;
       }
-      const res = (await provider.fsReadFile(target)) as {
-        dataBase64: string;
-      };
+      const res = await provider.fsReadFile(target);
       const bytes = Buffer.from(res.dataBase64 || "", "base64");
       const size = bytes.byteLength;
       const binary = isBinary(bytes);
@@ -125,9 +112,7 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
         provider,
         listSessions,
       );
-      const res = (await provider.fsReadFile(target)) as {
-        dataBase64: string;
-      };
+      const res = await provider.fsReadFile(target);
       const bytes = Buffer.from(res.dataBase64 || "", "base64");
       response.setHeader("Content-Type", guessMime(target));
       response.setHeader("Content-Length", String(bytes.byteLength));
@@ -307,10 +292,8 @@ export class FsWatchRegistry {
     params: { path: string; userWatchId: string; roots: string[] },
   ): Promise<{ watchId: string; path: string }> {
     const resolved = await resolveWorkspacePath(params.path, params.roots);
-    const result = (await this.provider.fsWatch(resolved)) as {
-      watchId: string;
-    };
-    const watchId = String(result.watchId);
+    const result = await this.provider.fsWatch(resolved);
+    const watchId = result.watchId;
     this.records.set(watchId, { ws, userWatchId: params.userWatchId, path: resolved });
     const set = this.byClient.get(ws) ?? new Set<string>();
     set.add(watchId);
