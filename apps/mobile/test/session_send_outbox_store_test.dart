@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/models.dart';
@@ -80,35 +78,56 @@ void main() {
     expect(await store.loadAll(), isEmpty);
   });
 
-  test('clearAll waits for an in-flight attempt before clearing', () async {
+  test('replaceIfPresent does not resurrect entries after clearAll', () async {
     final store = SessionSendOutboxStore.instance;
     final pending = _pendingSend(host, sessionId: 'session-1');
-    final started = Completer<void>();
-    final release = Completer<void>();
 
     expect(await store.upsert(pending), isTrue);
 
-    final attempt = store.attemptIfPresent(
-      entry: pending,
-      attempt: () async {
-        started.complete();
-        await release.future;
-      },
-      recover: (error) => pending.copyWith(lastError: '$error'),
+    await store.clearAll();
+
+    final replaced = await store.replaceIfPresent(
+      pending,
+      pending.copyWith(lastError: 'still failing'),
     );
-    await started.future;
 
-    var clearCompleted = false;
-    final clear = store.clearAll().then((_) => clearCompleted = true);
-    await Future<void>.delayed(Duration.zero);
-    expect(clearCompleted, isFalse);
-
-    release.complete();
-    await attempt;
-    await clear;
-
-    expect(clearCompleted, isTrue);
+    expect(replaced, isFalse);
     expect(await store.loadAll(), isEmpty);
+  });
+
+  test('replaceIfPresent updates the matching entry while present', () async {
+    final store = SessionSendOutboxStore.instance;
+    final pending = _pendingSend(host, sessionId: 'session-1');
+
+    expect(await store.upsert(pending), isTrue);
+
+    final replaced = await store.replaceIfPresent(
+      pending,
+      pending.copyWith(lastError: 'offline', retryCount: 1),
+    );
+
+    final loaded = await store.loadAll();
+    expect(replaced, isTrue);
+    expect(loaded, hasLength(1));
+    expect(loaded.single.lastError, 'offline');
+    expect(loaded.single.retryCount, 1);
+  });
+
+  test('replaceIfPresent rejects oversized replacements', () async {
+    final store = SessionSendOutboxStore.instance;
+    final pending = _pendingSend(host, sessionId: 'session-1');
+
+    expect(await store.upsert(pending), isTrue);
+
+    final replaced = await store.replaceIfPresent(
+      pending,
+      pending.copyWith(lastError: 'e' * (220 * 1024)),
+    );
+
+    final loaded = await store.loadAll();
+    expect(replaced, isFalse);
+    expect(loaded, hasLength(1));
+    expect(loaded.single.lastError, isNull);
   });
 }
 

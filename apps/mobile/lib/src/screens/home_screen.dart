@@ -1585,7 +1585,8 @@ class _InboxPaneState extends State<InboxPane> {
     final analysis = _analyzePendingSend(send);
     final host = analysis.host;
     if (!analysis.canRetryNow || host == null) {
-      await _outbox.upsert(
+      await _outbox.replaceIfPresent(
+        send,
         send.copyWith(
           updatedAt: DateTime.now(),
           retryCount: send.retryCount + 1,
@@ -1623,7 +1624,8 @@ class _InboxPaneState extends State<InboxPane> {
     } catch (error) {
       final message = friendlyError(error);
       if (isRetryableSendError(error)) {
-        await _outbox.upsert(
+        await _outbox.replaceIfPresent(
+          send,
           send.copyWith(
             updatedAt: DateTime.now(),
             nextAttemptAt: DateTime.now().add(
@@ -1635,7 +1637,8 @@ class _InboxPaneState extends State<InboxPane> {
           ),
         );
       } else {
-        await _outbox.upsert(
+        await _outbox.replaceIfPresent(
+          send,
           send.copyWith(
             updatedAt: DateTime.now(),
             retryCount: send.retryCount + 1,

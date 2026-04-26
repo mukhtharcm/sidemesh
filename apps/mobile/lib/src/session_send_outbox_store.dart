@@ -248,7 +248,12 @@ class SessionSendOutboxStore extends ChangeNotifier {
   Future<bool> replaceIfPresent(
     PendingSessionSend current,
     PendingSessionSend replacement,
-  ) {
+  ) async {
+    final encodedReplacement = jsonEncode(replacement.toJson());
+    if (utf8.encode(encodedReplacement).length > _maxEntryChars) {
+      return false;
+    }
+
     return _runExclusive(() async {
       final prefs = await SharedPreferences.getInstance();
       final entries = await _loadAll(prefs);
@@ -256,36 +261,9 @@ class SessionSendOutboxStore extends ChangeNotifier {
       if (index == -1) return false;
       final next = entries.toList(growable: true);
       next[index] = replacement;
-      await _saveAllWithinBudget(prefs, next, replacement.key);
+      final saved = await _saveAllWithinBudget(prefs, next, replacement.key);
       notifyListeners();
-      return true;
-    });
-  }
-
-  Future<bool> attemptIfPresent({
-    required PendingSessionSend entry,
-    required Future<void> Function() attempt,
-    required PendingSessionSend Function(Object error) recover,
-  }) {
-    return _runExclusive(() async {
-      final prefs = await SharedPreferences.getInstance();
-      final entries = await _loadAll(prefs);
-      final index = entries.indexWhere((item) => item.key == entry.key);
-      if (index == -1) return false;
-      try {
-        await attempt();
-        final next = entries
-            .where((item) => item.key != entry.key)
-            .toList(growable: false);
-        await _saveAll(prefs, next);
-      } catch (error) {
-        final replacement = recover(error);
-        final next = entries.toList(growable: true);
-        next[index] = replacement;
-        await _saveAllWithinBudget(prefs, next, replacement.key);
-      }
-      notifyListeners();
-      return true;
+      return saved;
     });
   }
 

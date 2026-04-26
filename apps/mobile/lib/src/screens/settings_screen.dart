@@ -384,14 +384,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   icon: Icons.outbox_outlined,
                   title: 'Clear queued sends',
                   subtitle:
-                      'Discard locally queued messages that are waiting to retry.',
+                      'Discard queued retries that have not already started.',
                   busy: _busyAction == 'queued-sends',
                   onTap: () => unawaited(
                     _runStorageAction(
                       key: 'queued-sends',
                       title: 'Clear queued sends?',
                       body:
-                          'This discards any locally queued messages waiting for retry. Remote sessions are unchanged.',
+                          'This discards locally queued messages waiting for retry. A retry already in progress may still finish. Remote sessions are unchanged.',
                       action: SessionSendOutboxStore.instance.clearAll,
                       successMessage: 'Queued sends cleared.',
                     ),
