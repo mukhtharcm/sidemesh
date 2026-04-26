@@ -747,6 +747,7 @@ class RecentPane extends StatefulWidget {
     this.dense = false,
     this.hasSavedHosts = false,
     this.screenAwakeSourceKey,
+    this.screenAwakeController,
   });
 
   final List<HostProfile> hosts;
@@ -759,6 +760,7 @@ class RecentPane extends StatefulWidget {
   final bool dense;
   final bool hasSavedHosts;
   final String? screenAwakeSourceKey;
+  final ScreenAwakeController? screenAwakeController;
 
   @override
   State<RecentPane> createState() => _RecentPaneState();
@@ -991,12 +993,14 @@ class _RecentPaneState extends State<RecentPane> {
   void _syncScreenAwakeSource(bool active) {
     final key = widget.screenAwakeSourceKey;
     if (key == null) return;
-    ScreenAwakeController.instance.setSourceActive(key, active);
+    (widget.screenAwakeController ?? ScreenAwakeController.instance)
+        .setSourceActive(key, active);
   }
 
   void _clearScreenAwakeSource(String? key) {
     if (key == null) return;
-    ScreenAwakeController.instance.clearSource(key);
+    (widget.screenAwakeController ?? ScreenAwakeController.instance)
+        .clearSource(key);
   }
 
   List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
