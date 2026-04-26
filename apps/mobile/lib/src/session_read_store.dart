@@ -108,6 +108,19 @@ class SessionReadStore extends ChangeNotifier {
     _scheduleFlush();
   }
 
+  /// Force a session back into the unread state on this device.
+  ///
+  /// We do this by rewinding its seen timestamp to zero. The next explicit
+  /// `markSeen` call will restore normal read tracking.
+  void markUnread(HostProfile host, String sessionId) {
+    final key = _keyFor(host, sessionId);
+    if (_seenAtMs[key] == 0) return;
+    _seenAtMs[key] = 0;
+    _dirty = true;
+    notifyListeners();
+    _scheduleFlush();
+  }
+
   void _scheduleFlush() {
     _flushTimer?.cancel();
     _flushTimer = Timer(_writeDebounce, _flush);
@@ -126,5 +139,16 @@ class SessionReadStore extends ChangeNotifier {
   Future<void> flush() async {
     _flushTimer?.cancel();
     await _flush();
+  }
+
+  @visibleForTesting
+  void resetForTest() {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    _seenAtMs.clear();
+    _prefs = null;
+    _loadFuture = null;
+    _dirty = false;
+    _installEpochMs = 0;
   }
 }
