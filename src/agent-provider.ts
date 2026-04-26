@@ -303,7 +303,6 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   writeSkillConfig(request: AgentSkillConfigWriteRequest): Promise<unknown>;
   listModels(options: AgentModelListOptions): Promise<ModelSummary[]>;
   listProfiles(options: AgentProfileListOptions): Promise<ProviderProfileCatalog>;
-  readConfig(params: Record<string, unknown>): Promise<unknown>;
 
   fsReadDirectory(path: string): Promise<AgentFsDirectoryListing>;
   fsGetMetadata(path: string): Promise<AgentFsMetadata>;
