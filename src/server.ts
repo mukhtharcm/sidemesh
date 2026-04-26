@@ -29,7 +29,6 @@ import type {
   SkillCatalogEntry,
   SkillErrorInfo,
   SkillSummary,
-  ModelSummary,
   SessionMessageAttachment,
   SessionMessage,
   SessionResourcesResponse,
@@ -67,7 +66,6 @@ const SESSION_INPUT_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
-const PROVIDER_MODEL_LIST_TIMEOUT_MS = 2500;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
 
 interface SessionRuntimeCacheEntry {
@@ -596,11 +594,19 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.get("/api/models", asyncRoute(async (request, response) => {
+    if (!provider.capabilities.configuration.models) {
+      response.status(501).json({ error: `${provider.displayName} does not support model listing` });
+      return;
+    }
     const query = request.query as Record<string, unknown>;
     const cwd = asString(query.cwd) || null;
     const profile = asString(query.profile) || null;
     const modelProvider = asString(query.provider) || null;
-    response.json(await listModels(provider, cwd, { profile, provider: modelProvider }));
+    response.json(await provider.listModels({
+      cwd,
+      profile,
+      provider: modelProvider,
+    }));
   }));
 
   app.get("/api/profiles", asyncRoute(async (request, response) => {
@@ -1684,264 +1690,6 @@ function normalizeSkillCatalogEntry(
   };
 }
 
-async function listModels(
-  provider: AgentProvider,
-  cwd: string | null,
-  scope: { profile?: string | null; provider?: string | null } = {},
-): Promise<ModelSummary[]> {
-  const profileName = scope.profile?.trim() || null;
-  const providerName = scope.provider?.trim() || null;
-  if (profileName || providerName) {
-    const profileConfig = await readProfileConfig(provider, cwd);
-    if (profileName) {
-      const profile = profileConfig.profiles.find((entry) => entry.name === profileName);
-      if (!profile) {
-        return [];
-      }
-      return listProfileScopedModels(provider, profileConfig, profile);
-    }
-    if (providerName) {
-      return listProviderScopedModels(provider, profileConfig, providerName);
-    }
-  }
-
-  return listHostModels(provider);
-}
-
-async function listHostModels(provider: AgentProvider): Promise<ModelSummary[]> {
-  const models: ModelSummary[] = [];
-  const seen = new Set<string>();
-  let cursor: string | null = null;
-
-  for (;;) {
-    const payload = (await provider.listModels({
-      includeHidden: false,
-      cursor: cursor ?? undefined,
-    })) as { data?: unknown[]; nextCursor?: unknown };
-    const rawEntries = Array.isArray(payload.data) ? payload.data : [];
-
-    for (const entry of rawEntries) {
-      const model = normalizeModelSummary(entry);
-      if (!model || seen.has(model.model)) {
-        continue;
-      }
-      seen.add(model.model);
-      models.push({ ...model, source: "host", profileName: null });
-    }
-
-    const nextCursor = asString(payload.nextCursor);
-    if (!nextCursor) {
-      break;
-    }
-    cursor = nextCursor;
-  }
-
-  return models;
-}
-
-async function listProfileScopedModels(
-  agentProvider: AgentProvider,
-  config: CodexProfileConfig,
-  profile: CodexProfileSummary,
-): Promise<ModelSummary[]> {
-  const profileProvider = profile.modelProvider?.trim() || null;
-  const defaultProvider = config.modelProvider?.trim() || null;
-  const configProvider = profileProvider ? config.modelProviders.get(profileProvider) : null;
-
-  if (!profileProvider || profileProvider === defaultProvider || profileProvider === "openai") {
-    return mergeProfileModel([...(await listHostModels(agentProvider))], profile);
-  }
-
-  const baseUrl = configProvider?.baseUrl || profile.modelProviderBaseUrl || null;
-  const providerModels = baseUrl
-    ? await fetchProviderModels({
-        baseUrl,
-        envKey: configProvider?.envKey ?? null,
-        profileName: profile.name,
-        providerName: configProvider?.name || profileProvider,
-        defaultReasoningEffort: profile.reasoningEffort,
-      })
-    : [];
-
-  return mergeProfileModel(providerModels, profile);
-}
-
-async function listProviderScopedModels(
-  agentProvider: AgentProvider,
-  config: CodexProfileConfig,
-  providerName: string,
-): Promise<ModelSummary[]> {
-  const defaultProvider = config.modelProvider?.trim() || null;
-  if (providerName === defaultProvider || providerName === "openai") {
-    return listHostModels(agentProvider);
-  }
-
-  const configProvider = config.modelProviders.get(providerName);
-  if (!configProvider?.baseUrl) {
-    return [];
-  }
-  return fetchProviderModels({
-    baseUrl: configProvider.baseUrl,
-    envKey: configProvider.envKey,
-    profileName: null,
-    providerName: configProvider.name || providerName,
-    defaultReasoningEffort: null,
-  });
-}
-
-function mergeProfileModel(
-  models: ModelSummary[],
-  profile: CodexProfileSummary,
-): ModelSummary[] {
-  const model = normalizeProfileModelSummary(profile);
-  if (!model) {
-    return models;
-  }
-  const seen = new Set(models.map((entry) => entry.model));
-  if (!seen.has(model.model)) {
-    return [model, ...models];
-  }
-  return models.map((entry) =>
-    entry.model === model.model && entry.source !== "profile"
-      ? { ...entry, isDefault: true }
-      : entry,
-  );
-}
-
-function normalizeProfileModelSummary(profile: CodexProfileSummary): ModelSummary | null {
-  const model = profile.model?.trim();
-  if (!model) {
-    return null;
-  }
-
-  const profileDetails = [
-    profile.modelProvider ? `provider ${profile.modelProvider}` : null,
-    profile.reasoningEffort ? `${profile.reasoningEffort} reasoning` : null,
-    profile.serviceTier ? `tier ${profile.serviceTier}` : null,
-  ].filter((value): value is string => Boolean(value));
-
-  const suffix =
-    profileDetails.length > 0 ? ` (${profileDetails.join(", ")})` : "";
-
-  return {
-    id: `profile:${profile.name}:${model}`,
-    model,
-    displayName: model,
-    description: `Declared by Codex profile ${profile.name}${suffix}.`,
-    defaultReasoningEffort: profile.reasoningEffort ?? "medium",
-    supportedReasoningEfforts: [],
-    supportsPersonality: false,
-    additionalSpeedTiers: [],
-    inputModalities: ["text", "image"],
-    isDefault: false,
-    source: "profile",
-    profileName: profile.name,
-  };
-}
-
-async function fetchProviderModels(options: {
-  baseUrl: string;
-  envKey: string | null;
-  profileName: string | null;
-  providerName: string;
-  defaultReasoningEffort: string | null;
-}): Promise<ModelSummary[]> {
-  const url = providerModelsUrl(options.baseUrl);
-  if (!url) {
-    return [];
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PROVIDER_MODEL_LIST_TIMEOUT_MS);
-  try {
-    const headers: Record<string, string> = { Accept: "application/json" };
-    const apiKey = options.envKey ? process.env[options.envKey]?.trim() : "";
-    if (apiKey) {
-      headers.Authorization = `Bearer ${apiKey}`;
-    }
-    const response = await fetch(url, {
-      method: "GET",
-      headers,
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      return [];
-    }
-    const payload = (await response.json()) as unknown;
-    const payloadObject =
-      payload && typeof payload === "object" ? (payload as { data?: unknown }) : null;
-    const rawModels: unknown[] = Array.isArray(payloadObject?.data)
-      ? payloadObject.data
-      : Array.isArray(payload)
-        ? payload
-        : [];
-    const models = rawModels
-      .map((entry: unknown) =>
-        normalizeProviderModelSummary(entry, {
-          profileName: options.profileName,
-          providerName: options.providerName,
-          defaultReasoningEffort: options.defaultReasoningEffort,
-        }),
-      )
-      .filter((entry: ModelSummary | null): entry is ModelSummary => entry !== null);
-    const seen = new Set<string>();
-    return models.filter((entry: ModelSummary) => {
-      if (seen.has(entry.model)) {
-        return false;
-      }
-      seen.add(entry.model);
-      return true;
-    });
-  } catch {
-    return [];
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function providerModelsUrl(baseUrl: string): string | null {
-  try {
-    const url = new URL(baseUrl);
-    const path = url.pathname.replace(/\/+$/, "");
-    url.pathname = `${path}/models`;
-    url.search = "";
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-function normalizeProviderModelSummary(
-  raw: unknown,
-  options: {
-    profileName: string | null;
-    providerName: string;
-    defaultReasoningEffort: string | null;
-  },
-): ModelSummary | null {
-  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-  const model = asString(typed?.id) || asString(typed?.model) || asString(raw);
-  if (!model) {
-    return null;
-  }
-  const profileSuffix = options.profileName ? ` via profile ${options.profileName}` : "";
-  return {
-    id: `${options.profileName ? `profile:${options.profileName}` : `provider:${options.providerName}`}:${model}`,
-    model,
-    displayName: model,
-    description: `Available from ${options.providerName}${profileSuffix}.`,
-    defaultReasoningEffort: options.defaultReasoningEffort ?? "medium",
-    supportedReasoningEfforts: [],
-    supportsPersonality: false,
-    additionalSpeedTiers: [],
-    inputModalities: ["text", "image"],
-    isDefault: false,
-    source: options.profileName ? "profile" : "host",
-    profileName: options.profileName,
-  };
-}
-
 async function listProfiles(
   provider: AgentProvider,
   cwd: string | null,
@@ -1962,56 +1710,6 @@ async function readProfileConfig(
     cwd: cwd ?? undefined,
   })) as { config?: unknown };
   return normalizeProfileConfig(payload.config);
-}
-
-function normalizeModelSummary(raw: unknown): ModelSummary | null {
-  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-  if (!typed) {
-    return null;
-  }
-
-  const model = asString(typed.model);
-  const id = asString(typed.id);
-  const displayName = asString(typed.displayName) || model;
-  const description = asString(typed.description);
-  const defaultReasoningEffort =
-    asString(typed.defaultReasoningEffort) || asString(typed.default_reasoning_effort);
-  if (!id || !model || !displayName || !description || !defaultReasoningEffort) {
-    return null;
-  }
-
-  const supportedReasoningEfforts = Array.isArray(typed.supportedReasoningEfforts)
-    ? typed.supportedReasoningEfforts
-        .map((entry) => {
-          const item =
-            entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
-          const reasoningEffort =
-            asString(item?.reasoningEffort) || asString(item?.reasoning_effort);
-          const summaryDescription = asString(item?.description);
-          if (!reasoningEffort || !summaryDescription) {
-            return null;
-          }
-          return { reasoningEffort, description: summaryDescription };
-        })
-        .filter((entry): entry is ModelSummary["supportedReasoningEfforts"][number] => entry !== null)
-    : [];
-
-  return {
-    id,
-    model,
-    displayName,
-    description,
-    defaultReasoningEffort,
-    supportedReasoningEfforts,
-    supportsPersonality: typed.supportsPersonality === true,
-    additionalSpeedTiers: Array.isArray(typed.additionalSpeedTiers)
-      ? typed.additionalSpeedTiers.map((entry) => asString(entry)).filter((entry): entry is string => Boolean(entry))
-      : [],
-    inputModalities: Array.isArray(typed.inputModalities)
-      ? typed.inputModalities.map((entry) => asString(entry)).filter((entry): entry is string => Boolean(entry))
-      : [],
-    isDefault: typed.isDefault === true,
-  };
 }
 
 function normalizeProfileConfig(raw: unknown): CodexProfileConfig {
