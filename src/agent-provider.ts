@@ -11,6 +11,7 @@ import type {
   SessionRuntimeSummary,
   ModelSummary,
   CodexProfileCatalog,
+  SkillCatalogEntry,
   ThreadRecord,
   TurnDiffActivity,
   WebSearchActivity,
@@ -109,6 +110,17 @@ export interface AgentModelListOptions {
 
 export interface AgentProfileListOptions {
   cwd: string | null;
+}
+
+export interface AgentSkillListOptions {
+  cwd: string;
+  forceReload: boolean;
+}
+
+export interface AgentSkillConfigWriteRequest {
+  path: string | null;
+  name: string | null;
+  enabled: boolean;
 }
 
 export interface AgentProviderCapabilities {
@@ -244,8 +256,8 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   respondToPendingAction(action: AgentPendingAction, decision: string | null): boolean;
 
   readRemoteGitDiff(cwd: string): Promise<unknown>;
-  listSkills(params: Record<string, unknown>): Promise<unknown>;
-  writeSkillConfig(params: Record<string, unknown>): Promise<unknown>;
+  listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry>;
+  writeSkillConfig(request: AgentSkillConfigWriteRequest): Promise<unknown>;
   listModels(options: AgentModelListOptions): Promise<ModelSummary[]>;
   listProfiles(options: AgentProfileListOptions): Promise<CodexProfileCatalog>;
   readConfig(params: Record<string, unknown>): Promise<unknown>;
