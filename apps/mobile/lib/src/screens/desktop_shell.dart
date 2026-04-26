@@ -37,9 +37,16 @@ class DesktopShell extends StatefulWidget {
 enum _SidebarSection { recent, inbox, hosts }
 
 class _ActiveSession {
-  const _ActiveSession({required this.host, required this.session});
+  const _ActiveSession({
+    required this.host,
+    required this.session,
+    required this.serial,
+    this.composerSeed,
+  });
   final HostProfile host;
   final SessionSummary session;
+  final int serial;
+  final SessionComposerSeed? composerSeed;
 }
 
 class _DesktopShellState extends State<DesktopShell> {
@@ -55,6 +62,8 @@ class _DesktopShellState extends State<DesktopShell> {
   _ActiveSession? _active;
   HostProfile? _activeHost;
   int _activeCount = 0;
+  int _inboxCount = 0;
+  int _sessionOpenSerial = 0;
   String _query = '';
   double _sidebarWidth = _defaultSidebarWidth;
   Timer? _searchDebounce;
@@ -366,7 +375,11 @@ class _DesktopShellState extends State<DesktopShell> {
     _bumpRefresh();
   }
 
-  void _openSession(HostProfile host, SessionSummary session) {
+  void _openSession(
+    HostProfile host,
+    SessionSummary session, {
+    SessionComposerSeed? composerSeed,
+  }) {
     if (!host.enabled) {
       showAppSnackBar(context, 'Enable ${host.label} before opening sessions.');
       return;
@@ -377,7 +390,12 @@ class _DesktopShellState extends State<DesktopShell> {
     // saved state. That avoids a close/open flash when crossing sessions
     // that both want the inspector open.
     setState(() {
-      _active = _ActiveSession(host: host, session: session);
+      _active = _ActiveSession(
+        host: host,
+        session: session,
+        serial: ++_sessionOpenSerial,
+        composerSeed: composerSeed,
+      );
       _activeHost = null;
     });
   }
@@ -694,7 +712,7 @@ class _DesktopShellState extends State<DesktopShell> {
                                 api: _api,
                                 section: _section,
                                 refreshTick: _refreshTick,
-                                inboxCount: ApprovalInboxStore.instance.count,
+                                inboxCount: _inboxCount,
                                 activeCount: _activeCount,
                                 selectedSessionId: _active?.session.id,
                                 selectedHostId: _activeHost?.id,
@@ -712,6 +730,14 @@ class _DesktopShellState extends State<DesktopShell> {
                                       host,
                                       _sessionFromAction(action),
                                     ),
+                                onOpenPendingSession:
+                                    (host, session, seed) async {
+                                      _openSession(
+                                        host,
+                                        session,
+                                        composerSeed: seed,
+                                      );
+                                    },
                                 onOpenHostDetail: _openHostDetail,
                                 onAddHost: () => _showHostEditor(),
                                 onEditHost: (h) => _showHostEditor(initial: h),
@@ -721,7 +747,10 @@ class _DesktopShellState extends State<DesktopShell> {
                                   if (!mounted) return;
                                   setState(() => _activeCount = n);
                                 },
-                                onInboxCountChanged: (_) {},
+                                onInboxCountChanged: (n) {
+                                  if (!mounted || n == _inboxCount) return;
+                                  setState(() => _inboxCount = n);
+                                },
                                 onShowShortcuts: _showShortcutsSheet,
                               ),
                             ),
@@ -831,6 +860,7 @@ class _Sidebar extends StatelessWidget {
     required this.onSelectSection,
     required this.onOpenSession,
     required this.onOpenSessionFromAction,
+    required this.onOpenPendingSession,
     required this.onOpenHostDetail,
     required this.onAddHost,
     required this.onEditHost,
@@ -859,6 +889,7 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<_SidebarSection> onSelectSection;
   final void Function(HostProfile, SessionSummary) onOpenSession;
   final void Function(HostProfile, PendingAction) onOpenSessionFromAction;
+  final OpenPendingSessionCallback onOpenPendingSession;
   final ValueChanged<HostProfile> onOpenHostDetail;
   final VoidCallback onAddHost;
   final ValueChanged<HostProfile> onEditHost;
@@ -959,6 +990,7 @@ class _Sidebar extends StatelessWidget {
                       query: query,
                       onOpenSession: onOpenSession,
                       onOpenSessionFromAction: onOpenSessionFromAction,
+                      onOpenPendingSession: onOpenPendingSession,
                       onOpenHostDetail: onOpenHostDetail,
                       onEditHost: onEditHost,
                       onRemoveHost: onRemoveHost,
@@ -1087,6 +1119,7 @@ class _SidebarPane extends StatelessWidget {
     required this.query,
     required this.onOpenSession,
     required this.onOpenSessionFromAction,
+    required this.onOpenPendingSession,
     required this.onOpenHostDetail,
     required this.onEditHost,
     required this.onRemoveHost,
@@ -1104,6 +1137,7 @@ class _SidebarPane extends StatelessWidget {
   final String query;
   final void Function(HostProfile, SessionSummary) onOpenSession;
   final void Function(HostProfile, PendingAction) onOpenSessionFromAction;
+  final OpenPendingSessionCallback onOpenPendingSession;
   final ValueChanged<HostProfile> onOpenHostDetail;
   final ValueChanged<HostProfile> onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
@@ -1132,8 +1166,10 @@ class _SidebarPane extends StatelessWidget {
       case _SidebarSection.inbox:
         return InboxPane(
           hosts: enabledHosts,
+          allHosts: hosts,
           api: api,
           onOpenSession: onOpenSessionFromAction,
+          onOpenPendingSession: onOpenPendingSession,
           onInboxCountChanged: onInboxCountChanged,
           query: query,
           dense: true,
@@ -1444,10 +1480,13 @@ class _DetailPaneState extends State<_DetailPane> {
         children: [
           Positioned.fill(
             child: SessionScreen(
-              key: ValueKey('session-${active.host.id}-${active.session.id}'),
+              key: ValueKey(
+                'session-${active.host.id}-${active.session.id}-${active.serial}',
+              ),
               host: active.host,
               session: active.session,
               api: widget.api,
+              initialComposerSeed: active.composerSeed,
               onOpenSession: (session) =>
                   widget.onOpenSession(active.host, session),
               onArchived: () => widget.onArchived(active.host, active.session),

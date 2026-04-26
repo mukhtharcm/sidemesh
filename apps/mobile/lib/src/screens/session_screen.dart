@@ -56,6 +56,7 @@ class SessionScreen extends StatefulWidget {
     required this.api,
     this.onOpenSession,
     this.onArchived,
+    this.initialComposerSeed,
     this.topPadding,
   });
 
@@ -64,12 +65,23 @@ class SessionScreen extends StatefulWidget {
   final ApiClient api;
   final ValueChanged<SessionSummary>? onOpenSession;
   final VoidCallback? onArchived;
+  final SessionComposerSeed? initialComposerSeed;
   // Extra top padding for embedded desktop use (to avoid overlapping the
   // transparent macOS titlebar). When null, SafeArea handles insets.
   final double? topPadding;
 
   @override
   State<SessionScreen> createState() => _SessionScreenState();
+}
+
+class SessionComposerSeed {
+  const SessionComposerSeed({
+    required this.text,
+    this.inputItems = const <SessionInputItem>[],
+  });
+
+  final String text;
+  final List<SessionInputItem> inputItems;
 }
 
 class _SessionScreenState extends State<SessionScreen>
@@ -224,6 +236,7 @@ class _SessionScreenState extends State<SessionScreen>
     _composerController.addListener(_handleComposerChanged);
     _searchController.addListener(_handleSearchChanged);
     _session = widget.session;
+    _applyInitialComposerSeed();
     _optimisticMessages = SessionMessageSeedStore.instance.take(
       widget.host,
       widget.session.id,
@@ -236,6 +249,80 @@ class _SessionScreenState extends State<SessionScreen>
     _loadSkills(forceReload: true);
     unawaited(_loadGitStatus(silent: true));
     _connectLive();
+  }
+
+  void _applyInitialComposerSeed() {
+    final seed = widget.initialComposerSeed;
+    if (seed == null) {
+      return;
+    }
+
+    final draftAttachments = <_ComposerImageAttachment>[];
+    final draftMentions = <_ComposerSkillMention>[];
+    var attachmentIndex = 0;
+    for (final item in seed.inputItems) {
+      switch (item.type) {
+        case 'image':
+          final dataUrl = item.url?.trim();
+          if (dataUrl == null ||
+              dataUrl.isEmpty ||
+              !_isInlineImageDataUrl(dataUrl)) {
+            continue;
+          }
+          final bytes = _decodeInlineImageDataUrl(dataUrl);
+          if (bytes == null) {
+            continue;
+          }
+          final mimeType = _inlineImageMimeType(dataUrl) ?? 'image/png';
+          draftAttachments.add(
+            _ComposerImageAttachment(
+              id: 'seed-image-$attachmentIndex',
+              name:
+                  'attachment-${attachmentIndex + 1}${_imageExtensionForMimeType(mimeType)}',
+              mimeType: mimeType,
+              bytes: bytes,
+              dataUrl: dataUrl,
+            ),
+          );
+          attachmentIndex += 1;
+        case 'skill':
+          final name = item.name?.trim() ?? '';
+          final path = item.path?.trim() ?? '';
+          if (name.isEmpty || path.isEmpty) {
+            continue;
+          }
+          final skill = SkillSummary(
+            name: name,
+            description: '',
+            path: path,
+            scope: 'repo',
+            enabled: true,
+          );
+          draftMentions.add(
+            _ComposerSkillMention(skill: skill, tokenText: skill.mentionToken),
+          );
+        default:
+          continue;
+      }
+    }
+
+    _draftAttachments = draftAttachments;
+    _draftSkillMentions = draftMentions
+        .where((item) => seed.text.contains(item.tokenText))
+        .toList(growable: false);
+    _composerController.value = TextEditingValue(
+      text: seed.text,
+      selection: TextSelection.collapsed(offset: seed.text.length),
+      composing: TextRange.empty,
+    );
+    _restoreComposerFocusOnResume = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _disposed) {
+        return;
+      }
+      _composerFocusNode.requestFocus();
+      _scrollToBottomFast(force: true);
+    });
   }
 
   void _markCurrentSessionSeen() {
@@ -6616,6 +6703,14 @@ bool _isInlineImageDataUrl(String value) => value.startsWith('data:image/');
 Uint8List? _decodeInlineImageDataUrl(String value) {
   try {
     return UriData.parse(value).contentAsBytes();
+  } catch (_) {
+    return null;
+  }
+}
+
+String? _inlineImageMimeType(String value) {
+  try {
+    return UriData.parse(value).mimeType;
   } catch (_) {
     return null;
   }
