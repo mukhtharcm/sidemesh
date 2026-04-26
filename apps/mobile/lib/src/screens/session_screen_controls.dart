@@ -101,7 +101,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     if (selected != null) {
       return selected.displayName;
     }
-    return _effectiveModelValue ?? 'Use Codex default';
+    return _effectiveModelValue ?? 'Use provider default';
   }
 
   String get _effectiveModelDescription {
@@ -110,7 +110,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       if (provider != null) {
         return 'Loading models from this session\'s $provider provider.';
       }
-      return 'Loading the available Codex models from this host.';
+      return 'Loading the available models from this host.';
     }
     if (_modelsError != null) {
       return _modelsError!;
@@ -207,8 +207,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         _loadingModels = false;
         _modelsError = models.isEmpty
             ? _runtimeModelProvider == null
-                  ? 'Codex did not return any models for this host.'
-                  : 'Codex did not return any models for provider $_runtimeModelProvider.'
+                  ? 'This provider did not return any models for this host.'
+                  : 'No models returned for provider $_runtimeModelProvider.'
             : null;
       });
       _coerceTurnConfigForSelectedModel();
@@ -332,7 +332,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       context,
       savedPolicy.isEmpty && savedTurnConfig.isEmpty
           ? 'Session will use default controls on your next fresh turn.'
-          : 'Applied on your next fresh turn — Codex will remember it.',
+          : 'Applied on your next fresh turn.',
     );
   }
 
@@ -460,7 +460,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Change how Codex handles the model, thinking effort, Fast mode, approvals, file access and network for this session. Applied on your next fresh turn. If Codex is already responding, these changes wait until the current turn finishes.',
+                'Change how the agent handles the model, thinking effort, Fast mode, approvals, file access and network for this session. Applied on your next fresh turn. If the agent is already responding, these changes wait until the current turn finishes.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colors.textSecondary,
                   height: 1.4,
@@ -516,7 +516,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                     border: Border.all(color: colors.border),
                   ),
                   child: Text(
-                    'Auto models choose the thinking effort themselves. Codex will use ${_reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
+                    'Auto models choose the thinking effort themselves. The agent will use ${_reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: colors.textSecondary,
                       height: 1.35,
@@ -533,7 +533,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                     border: Border.all(color: colors.border),
                   ),
                   child: Text(
-                    'This model does not expose adjustable thinking effort in Codex.',
+                    'This model does not expose adjustable thinking effort.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: colors.textSecondary,
                       height: 1.35,
@@ -910,8 +910,8 @@ class _FastModeTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   enabled
-                      ? 'Ask Codex for the fast service tier on your next fresh turn.'
-                      : 'This model does not advertise Fast mode in Codex.',
+                      ? 'Ask for the fast service tier on your next fresh turn.'
+                      : 'This model does not advertise Fast mode.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.35,
@@ -1189,7 +1189,7 @@ class _PolicyAutopilotCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Approval = never · Sandbox = full access · Network = on. Codex runs without pausing for approvals and can hit the internet.',
+                    'Approval = never · Sandbox = full access · Network = on. The agent runs without pausing for approvals and can hit the internet.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colors.textSecondary,
                       height: 1.35,
