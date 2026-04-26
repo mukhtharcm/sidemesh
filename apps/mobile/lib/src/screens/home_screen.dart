@@ -1684,6 +1684,7 @@ class _InboxPaneState extends State<InboxPane> {
       showAppSnackBar(context, 'The original host is no longer available.');
       return;
     }
+    await _outbox.remove(analysis.send);
     final rebound = analysis.send.copyWith(
       hostFingerprint: SessionSendOutboxStore.hostFingerprint(host),
       updatedAt: DateTime.now(),
