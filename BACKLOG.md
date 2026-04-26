@@ -55,6 +55,11 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 - [ ] Add host revocation and token rotation.
 - [ ] Investigate device enrollment using Codex device-key APIs instead of static bearer tokens.
 
+## Ops And Handoff
+
+- [ ] Document a VPS-first maintainer workflow so Sidemesh can be updated and operated even when the primary Mac is offline.
+- [ ] Write a lightweight server release playbook for remote nodes: pull latest `main`, restart the daemon/service, and verify Codex + Sidemesh health.
+
 ## Later
 
 - [ ] Expose Codex apps and plugins through `app/list` and related APIs.
