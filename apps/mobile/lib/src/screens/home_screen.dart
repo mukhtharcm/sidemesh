@@ -15,6 +15,7 @@ import '../session_cache_store.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';
 import '../session_runtime.dart';
+import '../session_send_outbox_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
@@ -67,6 +68,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   bool _loading = true;
   int _tabIndex = 0;
   int _activeCount = 0;
+  int _inboxCount = 0;
   String _query = '';
   bool _handlingNotificationIntent = false;
 
@@ -229,7 +231,11 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     await _refreshHosts();
   }
 
-  Future<void> _openSession(HostProfile host, SessionSummary session) async {
+  Future<void> _openSession(
+    HostProfile host,
+    SessionSummary session, {
+    SessionComposerSeed? composerSeed,
+  }) async {
     if (!host.enabled) {
       showAppSnackBar(context, 'Enable ${host.label} before opening sessions.');
       return;
@@ -240,6 +246,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           host: host,
           session: session,
           api: _api,
+          initialComposerSeed: composerSeed,
           onOpenSession: (next) => unawaited(_openSession(host, next)),
         ),
       ),
@@ -421,7 +428,17 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                           hasSavedHosts: _hosts.isNotEmpty,
                           onOpenSession: (host, action) =>
                               _openSession(host, _sessionFromAction(action)),
-                          onInboxCountChanged: (_) {},
+                          onOpenPendingSession: (host, session, composerSeed) =>
+                              _openSession(
+                                host,
+                                session,
+                                composerSeed: composerSeed,
+                              ),
+                          allHosts: _hosts,
+                          onInboxCountChanged: (count) {
+                            if (!mounted || count == _inboxCount) return;
+                            setState(() => _inboxCount = count);
+                          },
                         ),
                         HostsPane(
                           hosts: _hosts,
@@ -446,14 +463,11 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               label: const Text('Add host'),
             )
           : null,
-      bottomNavigationBar: ListenableBuilder(
-        listenable: ApprovalInboxStore.instance,
-        builder: (context, _) => _MeshNavBar(
-          tabs: _tabs,
-          currentIndex: _tabIndex,
-          onTap: (index) => setState(() => _tabIndex = index),
-          badges: [_activeCount, ApprovalInboxStore.instance.count, 0],
-        ),
+      bottomNavigationBar: _MeshNavBar(
+        tabs: _tabs,
+        currentIndex: _tabIndex,
+        onTap: (index) => setState(() => _tabIndex = index),
+        badges: [_activeCount, _inboxCount, 0],
       ),
     );
   }
@@ -1339,12 +1353,21 @@ class _SessionRowCard extends StatelessWidget {
   }
 }
 
+typedef OpenPendingSessionCallback =
+    Future<void> Function(
+      HostProfile host,
+      SessionSummary session,
+      SessionComposerSeed? composerSeed,
+    );
+
 class InboxPane extends StatefulWidget {
   const InboxPane({
     super.key,
     required this.hosts,
+    required this.allHosts,
     required this.api,
     required this.onOpenSession,
+    required this.onOpenPendingSession,
     required this.onInboxCountChanged,
     this.query = '',
     this.dense = false,
@@ -1352,8 +1375,10 @@ class InboxPane extends StatefulWidget {
   });
 
   final List<HostProfile> hosts;
+  final List<HostProfile> allHosts;
   final ApiClient api;
   final void Function(HostProfile host, PendingAction action) onOpenSession;
+  final OpenPendingSessionCallback onOpenPendingSession;
   final ValueChanged<int> onInboxCountChanged;
   final String query;
   final bool dense;
@@ -1365,12 +1390,17 @@ class InboxPane extends StatefulWidget {
 
 class _InboxPaneState extends State<InboxPane> {
   final ApprovalInboxStore _store = ApprovalInboxStore.instance;
+  final SessionSendOutboxStore _outbox = SessionSendOutboxStore.instance;
+  List<PendingSessionSend> _pendingSends = const [];
+  Set<String> _retryingKeys = <String>{};
 
   @override
   void initState() {
     super.initState();
     _store.addListener(_onStoreChanged);
+    _outbox.addListener(_onOutboxChanged);
     _store.configure(hosts: widget.hosts, api: widget.api);
+    unawaited(_loadPendingSends());
     _emitCount();
   }
 
@@ -1380,11 +1410,15 @@ class _InboxPaneState extends State<InboxPane> {
     if (!_sameHostList(oldWidget.hosts, widget.hosts)) {
       _store.configure(hosts: widget.hosts, api: widget.api);
     }
+    if (!_sameHostList(oldWidget.allHosts, widget.allHosts)) {
+      _emitCount();
+    }
   }
 
   @override
   void dispose() {
     _store.removeListener(_onStoreChanged);
+    _outbox.removeListener(_onOutboxChanged);
     super.dispose();
   }
 
@@ -1394,15 +1428,36 @@ class _InboxPaneState extends State<InboxPane> {
     _emitCount();
   }
 
+  void _onOutboxChanged() {
+    unawaited(_loadPendingSends());
+  }
+
   void _emitCount() {
-    final count = _store.count;
+    final count = _store.count + _pendingSends.length;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       widget.onInboxCountChanged(count);
     });
   }
 
-  Future<void> _refresh() => _store.refresh();
+  Future<void> _loadPendingSends() async {
+    final pending = await _outbox.loadAll();
+    if (!mounted) {
+      return;
+    }
+    pending.sort(_comparePendingSends);
+    setState(() {
+      _pendingSends = pending;
+      _retryingKeys = _retryingKeys
+          .where((key) => pending.any((send) => send.key == key))
+          .toSet();
+    });
+    _emitCount();
+  }
+
+  Future<void> _refresh() async {
+    await Future.wait<dynamic>([_store.refresh(), _loadPendingSends()]);
+  }
 
   Future<void> _respond(
     HostProfile host,
@@ -1429,10 +1484,209 @@ class _InboxPaneState extends State<InboxPane> {
     }
   }
 
+  _PendingSendHostResolution _resolvePendingHost(PendingSessionSend send) {
+    HostProfile? changedHost;
+    for (final host in widget.allHosts) {
+      if (host.id != send.hostId) {
+        continue;
+      }
+      if (SessionSendOutboxStore.hostFingerprint(host) ==
+          send.hostFingerprint) {
+        return _PendingSendHostResolution.exact(host);
+      }
+      changedHost = host;
+    }
+    if (changedHost != null) {
+      return _PendingSendHostResolution.changed(changedHost);
+    }
+    return const _PendingSendHostResolution.missing();
+  }
+
+  Future<SessionSummary> _sessionSummaryForPendingSend(
+    HostProfile host,
+    PendingSessionSend send,
+  ) async {
+    final cached = await SessionCacheStore.instance.loadRecentSessions(host);
+    for (final session in cached) {
+      if (session.id == send.sessionId) {
+        return session;
+      }
+    }
+    final text = send.message.text.trim();
+    return SessionSummary(
+      id: send.sessionId,
+      title: text.isEmpty ? 'Queued message' : _truncateSingleLine(text, 40),
+      preview: send.lastError ?? _pendingSendPreview(send),
+      cwd: '',
+      createdAt: send.createdAt,
+      updatedAt: send.updatedAt,
+      source: 'appServer',
+      status: send.blocked ? 'blocked' : 'queued',
+      runtime: SessionRuntimeSummary(
+        model: send.model,
+        serviceTier: send.fastMode == true ? 'fast' : null,
+        reasoningEffort: send.reasoningEffort,
+        approvalPolicy: send.approvalPolicy,
+        sandboxMode: send.sandboxMode,
+        networkAccess: send.networkAccess,
+        updatedAt: send.updatedAt,
+      ),
+      gitInfo: null,
+    );
+  }
+
+  Future<void> _openPendingSend(
+    PendingSessionSend send, {
+    bool seedComposer = false,
+  }) async {
+    final resolution = _resolvePendingHost(send);
+    if (!resolution.canOpenSession) {
+      showAppSnackBar(context, resolution.unavailableMessage);
+      return;
+    }
+    final host = resolution.host!;
+    final session = await _sessionSummaryForPendingSend(host, send);
+    if (!mounted) {
+      return;
+    }
+    await widget.onOpenPendingSession(
+      host,
+      session,
+      seedComposer
+          ? SessionComposerSeed(text: send.text, inputItems: send.inputItems)
+          : null,
+    );
+  }
+
+  Future<void> _discardPendingSend(PendingSessionSend send) async {
+    await _outbox.remove(send);
+    if (!mounted) {
+      return;
+    }
+    showAppSnackBar(context, 'Discarded queued message.');
+  }
+
+  Future<void> _retryPendingSend(PendingSessionSend send) async {
+    if (_retryingKeys.contains(send.key)) {
+      return;
+    }
+    final resolution = _resolvePendingHost(send);
+    final host = resolution.host;
+    if (host == null || !host.enabled || !resolution.fingerprintMatches) {
+      await _outbox.upsert(
+        send.copyWith(
+          updatedAt: DateTime.now(),
+          retryCount: send.retryCount + 1,
+          lastError: resolution.unavailableMessage,
+          blocked: true,
+        ),
+      );
+      if (!mounted) {
+        return;
+      }
+      showAppSnackBar(context, resolution.unavailableMessage);
+      return;
+    }
+
+    setState(() => _retryingKeys = {..._retryingKeys, send.key});
+    try {
+      await widget.api.sendInput(
+        host,
+        sessionId: send.sessionId,
+        text: send.text,
+        input: send.inputItems,
+        clientMessageId: send.clientMessageId,
+        model: send.model,
+        reasoningEffort: send.reasoningEffort,
+        fastMode: send.fastMode,
+        approvalPolicy: send.approvalPolicy,
+        sandboxMode: send.sandboxMode,
+        networkAccess: send.networkAccess,
+      );
+      await _outbox.remove(send);
+      if (!mounted) {
+        return;
+      }
+      showAppSnackBar(context, 'Queued message sent.');
+    } catch (error) {
+      final message = friendlyError(error);
+      if (isRetryableSendError(error)) {
+        await _outbox.upsert(
+          send.copyWith(
+            updatedAt: DateTime.now(),
+            nextAttemptAt: DateTime.now().add(
+              _pendingSendBackoff(send.retryCount + 1),
+            ),
+            retryCount: send.retryCount + 1,
+            lastError: message,
+            blocked: false,
+          ),
+        );
+      } else {
+        await _outbox.upsert(
+          send.copyWith(
+            updatedAt: DateTime.now(),
+            retryCount: send.retryCount + 1,
+            lastError: message,
+            blocked: true,
+          ),
+        );
+      }
+      if (!mounted) {
+        return;
+      }
+      showAppSnackBar(context, 'Retry failed: $message');
+    } finally {
+      if (mounted) {
+        setState(() => _retryingKeys = {..._retryingKeys}..remove(send.key));
+      }
+    }
+  }
+
+  Duration _pendingSendBackoff(int retryCount) {
+    const steps = <Duration>[
+      Duration(seconds: 5),
+      Duration(seconds: 15),
+      Duration(seconds: 45),
+      Duration(minutes: 2),
+      Duration(minutes: 5),
+    ];
+    return steps[retryCount.clamp(0, steps.length - 1).toInt()];
+  }
+
+  int _comparePendingSends(PendingSessionSend left, PendingSessionSend right) {
+    if (left.blocked != right.blocked) {
+      return left.blocked ? -1 : 1;
+    }
+    final nextAttemptCompare = left.nextAttemptAt.compareTo(
+      right.nextAttemptAt,
+    );
+    if (nextAttemptCompare != 0) {
+      return nextAttemptCompare;
+    }
+    return right.updatedAt.compareTo(left.updatedAt);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    if (widget.hosts.isEmpty) {
+    final query = widget.query.trim().toLowerCase();
+    final allPending = _pendingSends;
+    final pending = query.isEmpty
+        ? allPending
+        : allPending
+              .where((send) {
+                final resolution = _resolvePendingHost(send);
+                return _pendingSendPreview(
+                      send,
+                    ).toLowerCase().contains(query) ||
+                    send.sessionId.toLowerCase().contains(query) ||
+                    (send.lastError ?? '').toLowerCase().contains(query) ||
+                    resolution.label.toLowerCase().contains(query);
+              })
+              .toList(growable: false);
+
+    if (widget.allHosts.isEmpty && allPending.isEmpty) {
       return MeshEmptyState(
         icon: widget.hasSavedHosts
             ? Icons.notifications_paused_rounded
@@ -1449,7 +1703,6 @@ class _InboxPaneState extends State<InboxPane> {
       return const MeshLoader();
     }
 
-    final query = widget.query.trim().toLowerCase();
     final allEntries = _store.entries;
     final entries = query.isEmpty
         ? allEntries
@@ -1464,87 +1717,524 @@ class _InboxPaneState extends State<InboxPane> {
     final isRefreshing = _store.isLoading;
     final hasFailures = _store.failedHostLabels.isNotEmpty;
     final hasCachedEntries = allEntries.isNotEmpty;
-
-    if (entries.isEmpty) {
-      return RefreshIndicator(
-        color: colors.accent,
-        onRefresh: _refresh,
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          children: [
-            if (isRefreshing)
-              _RecentProgressStrip(
-                remaining: _store.pendingHostsRemaining,
-                total: _store.totalHosts,
-                showingCached: hasCachedEntries,
+    final hasVisibleContent = pending.isNotEmpty || entries.isNotEmpty;
+    final sectionSpacing = SizedBox(height: widget.dense ? 8 : 12);
+    final cardSpacing = SizedBox(height: widget.dense ? 4 : 10);
+    return RefreshIndicator(
+      color: colors.accent,
+      onRefresh: _refresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: widget.dense
+            ? const EdgeInsets.fromLTRB(8, 4, 8, 24)
+            : const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        children: [
+          if (isRefreshing)
+            _RecentProgressStrip(
+              remaining: _store.pendingHostsRemaining,
+              total: _store.totalHosts,
+              showingCached: hasCachedEntries,
+            ),
+          if (isRefreshing) sectionSpacing,
+          if (hasFailures)
+            _RecentErrorBanner(
+              hostLabels: _store.failedHostLabels,
+              onRetry: _refresh,
+            ),
+          if (hasFailures) sectionSpacing,
+          if (pending.isNotEmpty) ...[
+            _InboxSectionHeader(
+              icon: Icons.cloud_sync_rounded,
+              title: pending.length == 1
+                  ? '1 queued message'
+                  : '${pending.length} queued messages',
+              subtitle:
+                  'Messages Sidemesh is holding until delivery succeeds or you intervene.',
+            ),
+            cardSpacing,
+            for (var index = 0; index < pending.length; index += 1) ...[
+              _PendingSendCard(
+                send: pending[index],
+                dense: widget.dense,
+                resolution: _resolvePendingHost(pending[index]),
+                retrying: _retryingKeys.contains(pending[index].key),
+                onOpenSession: () => _openPendingSend(pending[index]),
+                onEditCopy: () =>
+                    _openPendingSend(pending[index], seedComposer: true),
+                onRetryNow: () => _retryPendingSend(pending[index]),
+                onDiscard: () => _discardPendingSend(pending[index]),
               ),
-            if (hasFailures)
-              _RecentErrorBanner(
-                hostLabels: _store.failedHostLabels,
-                onRetry: _refresh,
+              if (index != pending.length - 1) cardSpacing,
+            ],
+            if (entries.isNotEmpty) sectionSpacing,
+          ],
+          if (entries.isNotEmpty) ...[
+            _InboxSectionHeader(
+              icon: Icons.verified_user_rounded,
+              title: entries.length == 1
+                  ? '1 approval pending'
+                  : '${entries.length} approvals pending',
+              subtitle:
+                  'Command, file, and permission prompts waiting across your hosts.',
+            ),
+            cardSpacing,
+            for (var index = 0; index < entries.length; index += 1) ...[
+              _InboxCard(
+                entry: entries[index],
+                dense: widget.dense,
+                onOpenSession: () => widget.onOpenSession(
+                  entries[index].host,
+                  entries[index].action,
+                ),
+                onRespond: (decision) => _respond(
+                  entries[index].host,
+                  entries[index].action,
+                  decision,
+                ),
               ),
+              if (index != entries.length - 1) cardSpacing,
+            ],
+          ],
+          if (!hasVisibleContent) ...[
             const SizedBox(height: 80),
             if (query.isNotEmpty)
               MeshEmptyState(
                 icon: Icons.search_off_rounded,
                 title: 'No matches',
-                body: 'No pending actions match "${widget.query.trim()}".',
+                body:
+                    'No queued messages or approvals match "${widget.query.trim()}".',
               )
             else
               const MeshEmptyState(
                 icon: Icons.verified_rounded,
-                title: 'No pending approvals',
+                title: 'Inbox is clear',
                 body:
-                    'Command, file, and permission prompts from your Codex nodes will appear here.',
+                    'Queued sends and Codex approval prompts from your nodes will show up here.',
               ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PendingSendHostResolution {
+  const _PendingSendHostResolution._({
+    this.host,
+    required this.label,
+    required this.fingerprintMatches,
+    required this.unavailableMessage,
+  });
+
+  _PendingSendHostResolution.exact(HostProfile host)
+    : this._(
+        host: host,
+        label: host.label,
+        fingerprintMatches: true,
+        unavailableMessage: '',
+      );
+
+  _PendingSendHostResolution.changed(HostProfile host)
+    : this._(
+        host: host,
+        label: host.label,
+        fingerprintMatches: false,
+        unavailableMessage:
+            'This host changed since the message was queued. Review it before retrying.',
+      );
+
+  const _PendingSendHostResolution.missing()
+    : this._(
+        host: null,
+        label: 'Unknown host',
+        fingerprintMatches: false,
+        unavailableMessage:
+            'The original host is no longer available. Discard or recreate the message.',
+      );
+
+  final HostProfile? host;
+  final String label;
+  final bool fingerprintMatches;
+  final String unavailableMessage;
+
+  bool get canOpenSession =>
+      host != null && host!.enabled && fingerprintMatches;
+}
+
+class _InboxSectionHeader extends StatelessWidget {
+  const _InboxSectionHeader({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: colors.accentMuted,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.accent.withValues(alpha: 0.25)),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 18, color: colors.accent),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: colors.textPrimary,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PendingSendCard extends StatelessWidget {
+  const _PendingSendCard({
+    required this.send,
+    required this.resolution,
+    required this.retrying,
+    required this.onOpenSession,
+    required this.onEditCopy,
+    required this.onRetryNow,
+    required this.onDiscard,
+    this.dense = false,
+  });
+
+  final PendingSessionSend send;
+  final _PendingSendHostResolution resolution;
+  final bool retrying;
+  final VoidCallback onOpenSession;
+  final VoidCallback onEditCopy;
+  final VoidCallback onRetryNow;
+  final VoidCallback onDiscard;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final title = _pendingSendTitle(send);
+    final detail = _pendingSendDetail(send, resolution, retrying);
+    final hostMeta = '${resolution.label} · ${send.sessionId}';
+    final actionsEnabled = resolution.canOpenSession;
+    final pillTone = switch ((send.blocked, resolution.fingerprintMatches)) {
+      (true, _) => MeshPillTone.warning,
+      (_, false) => MeshPillTone.danger,
+      _ => MeshPillTone.info,
+    };
+    final pillLabel = switch ((send.blocked, resolution.fingerprintMatches)) {
+      (true, _) => 'attention',
+      (_, false) => 'host changed',
+      _ => retrying ? 'retrying' : 'queued',
+    };
+
+    if (dense) {
+      return MeshCard(
+        tone: MeshCardTone.surface,
+        borderColor: send.blocked
+            ? colors.warning.withValues(alpha: 0.35)
+            : colors.info.withValues(alpha: 0.3),
+        accentStrip: send.blocked ? colors.warning : colors.info,
+        padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                MeshPill(label: pillLabel, tone: pillTone, mono: true),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              hostMeta,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              detail,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                height: 1.3,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                _PendingSendActionChip(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  label: 'Open',
+                  onTap: actionsEnabled ? onOpenSession : null,
+                ),
+                _PendingSendActionChip(
+                  icon: Icons.edit_outlined,
+                  label: 'Edit',
+                  onTap: actionsEnabled ? onEditCopy : null,
+                ),
+                _PendingSendActionChip(
+                  icon: Icons.refresh_rounded,
+                  label: retrying ? 'Retrying' : 'Retry',
+                  onTap: retrying ? null : onRetryNow,
+                ),
+                _PendingSendActionChip(
+                  icon: Icons.delete_outline_rounded,
+                  label: 'Discard',
+                  destructive: true,
+                  onTap: onDiscard,
+                ),
+              ],
+            ),
           ],
         ),
       );
     }
 
-    final leadingStrips = (isRefreshing ? 1 : 0) + (hasFailures ? 1 : 0);
-    return RefreshIndicator(
-      color: colors.accent,
-      onRefresh: _refresh,
-      child: ListView.separated(
-        padding: widget.dense
-            ? const EdgeInsets.fromLTRB(8, 4, 8, 24)
-            : const EdgeInsets.fromLTRB(16, 8, 16, 32),
-        itemCount: entries.length + leadingStrips,
-        separatorBuilder: (_, _) => SizedBox(height: widget.dense ? 4 : 10),
-        itemBuilder: (context, index) {
-          var offset = 0;
-          if (isRefreshing) {
-            if (index == offset) {
-              return _RecentProgressStrip(
-                remaining: _store.pendingHostsRemaining,
-                total: _store.totalHosts,
-                showingCached: hasCachedEntries,
-              );
-            }
-            offset += 1;
-          }
-          if (hasFailures) {
-            if (index == offset) {
-              return _RecentErrorBanner(
-                hostLabels: _store.failedHostLabels,
-                onRetry: _refresh,
-              );
-            }
-            offset += 1;
-          }
-          final entry = entries[index - offset];
-          return _InboxCard(
-            entry: entry,
-            dense: widget.dense,
-            onOpenSession: () => widget.onOpenSession(entry.host, entry.action),
-            onRespond: (decision) =>
-                _respond(entry.host, entry.action, decision),
-          );
-        },
+    return MeshCard(
+      tone: MeshCardTone.surface,
+      borderColor: send.blocked
+          ? colors.warning.withValues(alpha: 0.35)
+          : colors.info.withValues(alpha: 0.3),
+      accentStrip: send.blocked ? colors.warning : colors.info,
+      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    height: 1.25,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              MeshPill(label: pillLabel, tone: pillTone, mono: true),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            hostMeta,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: monoStyle(color: colors.textTertiary, fontSize: 11),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            detail,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+              height: 1.38,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _PendingSendActionChip(
+                icon: Icons.chat_bubble_outline_rounded,
+                label: 'Open session',
+                onTap: actionsEnabled ? onOpenSession : null,
+              ),
+              _PendingSendActionChip(
+                icon: Icons.edit_outlined,
+                label: 'Edit copy',
+                onTap: actionsEnabled ? onEditCopy : null,
+              ),
+              _PendingSendActionChip(
+                icon: Icons.refresh_rounded,
+                label: retrying ? 'Retrying...' : 'Retry now',
+                onTap: retrying ? null : onRetryNow,
+              ),
+              _PendingSendActionChip(
+                icon: Icons.delete_outline_rounded,
+                label: 'Discard',
+                destructive: true,
+                onTap: onDiscard,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
+}
+
+class _PendingSendActionChip extends StatelessWidget {
+  const _PendingSendActionChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.destructive = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final disabled = onTap == null;
+    final fg = disabled
+        ? colors.textTertiary
+        : destructive
+        ? colors.danger
+        : colors.textPrimary;
+    final bg = disabled
+        ? colors.surfaceMuted
+        : destructive
+        ? colors.dangerMuted
+        : colors.surfaceMuted;
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: fg),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: fg,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _pendingSendTitle(PendingSessionSend send) {
+  final text = send.message.text.trim();
+  if (text.isNotEmpty) {
+    return _truncateSingleLine(text, 72);
+  }
+  final imageCount = send.message.attachments
+      .where((item) => item.isImage)
+      .length;
+  if (imageCount > 0) {
+    return imageCount == 1
+        ? 'Queued image message'
+        : 'Queued $imageCount-image message';
+  }
+  return 'Queued message';
+}
+
+String _pendingSendPreview(PendingSessionSend send) {
+  final text = send.message.text.trim();
+  if (text.isNotEmpty) {
+    return _truncateSingleLine(text, 120);
+  }
+  final imageCount = send.message.attachments
+      .where((item) => item.isImage)
+      .length;
+  if (imageCount > 0) {
+    return imageCount == 1
+        ? 'Contains 1 image attachment'
+        : 'Contains $imageCount image attachments';
+  }
+  return 'No text content';
+}
+
+String _pendingSendDetail(
+  PendingSessionSend send,
+  _PendingSendHostResolution resolution,
+  bool retrying,
+) {
+  if (!resolution.fingerprintMatches) {
+    return resolution.unavailableMessage;
+  }
+  if (resolution.host != null && !resolution.host!.enabled) {
+    return 'Host is disabled. Re-enable it, then retry or edit the message.';
+  }
+  final nextAttempt = retrying
+      ? 'Retrying now'
+      : send.blocked
+      ? 'Retry manually'
+      : _formatPendingRetryAt(send.nextAttemptAt);
+  final error = send.lastError?.trim();
+  final suffix = error == null || error.isEmpty ? '' : ' · $error';
+  return '$nextAttempt · ${_pendingSendPreview(send)}$suffix';
+}
+
+String _formatPendingRetryAt(DateTime nextAttemptAt) {
+  final remaining = nextAttemptAt.difference(DateTime.now());
+  if (remaining <= Duration.zero) {
+    return 'Retrying soon';
+  }
+  if (remaining.inMinutes >= 1) {
+    return 'Next retry in ${remaining.inMinutes}m';
+  }
+  return 'Next retry in ${remaining.inSeconds}s';
+}
+
+String _truncateSingleLine(String value, int maxLength) {
+  final normalized = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return '${normalized.substring(0, maxLength - 3)}...';
 }
 
 class _InboxCard extends StatelessWidget {
