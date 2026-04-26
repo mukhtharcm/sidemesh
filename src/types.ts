@@ -115,6 +115,30 @@ export interface ModelSummary {
   additionalSpeedTiers: string[];
   inputModalities: string[];
   isDefault: boolean;
+  source?: string | null;
+  profileName?: string | null;
+}
+
+export interface CodexProfileCatalog {
+  defaultProfile: string | null;
+  profiles: CodexProfileSummary[];
+}
+
+export interface CodexProfileSummary {
+  name: string;
+  isDefault: boolean;
+  model: string | null;
+  modelProvider: string | null;
+  modelProviderName: string | null;
+  modelProviderBaseUrl: string | null;
+  approvalPolicy: string | null;
+  sandboxMode: string | null;
+  serviceTier: string | null;
+  reasoningEffort: string | null;
+  reasoningSummary: string | null;
+  verbosity: string | null;
+  webSearch: string | null;
+  personality: string | null;
 }
 
 export interface SessionMessage {
@@ -335,6 +359,7 @@ export interface RolloutLog {
 
 export interface SessionRuntimeSummary {
   model?: string;
+  modelProvider?: string;
   serviceTier?: string;
   reasoningEffort?: string;
   approvalPolicy?: string;

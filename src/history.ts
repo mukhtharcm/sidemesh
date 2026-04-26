@@ -16,6 +16,7 @@ import type {
   SessionMessageAttachment,
   SessionMessage,
   SessionRuntimeSummary,
+  ThreadRecord,
 } from "./types.js";
 
 export async function loadRolloutLog(
@@ -67,6 +68,27 @@ export async function loadSessionRuntime(
     }
     throw error;
   }
+}
+
+export async function listRecentRolloutThreads(
+  codexHomePath: string | null,
+  limit: number,
+): Promise<ThreadRecord[]> {
+  if (!codexHomePath || limit <= 0) {
+    return [];
+  }
+
+  const sessionsRoot = path.join(codexHomePath, "sessions");
+  const files = (await walkDirectories(sessionsRoot, 0)).filter(
+    (candidate) => candidate.endsWith(".jsonl"),
+  );
+  const threads = (
+    await Promise.all(files.map((filePath) => readRolloutThreadSummary(filePath)))
+  ).filter((thread): thread is ThreadRecord => thread !== null);
+
+  return threads
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, limit);
 }
 
 function emptyRolloutLog(): RolloutLog {
@@ -162,6 +184,76 @@ async function findRolloutPath(sessionId: string, codexHomePath: string | null):
   }
 
   return null;
+}
+
+async function readRolloutThreadSummary(rolloutPath: string): Promise<ThreadRecord | null> {
+  const file = createReadStream(rolloutPath, { encoding: "utf8" });
+  const lines = readline.createInterface({ input: file, crlfDelay: Infinity });
+  let meta: Record<string, any> | null = null;
+  let preview = "";
+  let latestTimestamp = 0;
+  let inProgress = false;
+
+  for await (const line of lines) {
+    const parsed = parseJsonLine(line);
+    if (!parsed) {
+      continue;
+    }
+
+    latestTimestamp = Math.max(latestTimestamp, parseTimestamp(parsed.timestamp));
+    if (parsed.type === "session_meta" && parsed.payload && typeof parsed.payload === "object") {
+      meta = parsed.payload as Record<string, any>;
+      latestTimestamp = Math.max(latestTimestamp, parseTimestamp(meta.timestamp));
+      continue;
+    }
+
+    if (parsed.type !== "event_msg") {
+      continue;
+    }
+
+    if (parsed.payload?.type === "user_message" && !preview) {
+      preview = typeof parsed.payload.message === "string" ? parsed.payload.message : "";
+    }
+    if (parsed.payload?.type === "task_started") {
+      inProgress = true;
+    } else if (
+      parsed.payload?.type === "task_complete" ||
+      parsed.payload?.type === "turn_aborted"
+    ) {
+      inProgress = false;
+    }
+  }
+
+  const id = asOptionalString(meta?.id);
+  const cwd = asOptionalString(meta?.cwd);
+  if (!id || !cwd) {
+    return null;
+  }
+
+  const createdAt = Math.floor(parseTimestamp(meta?.timestamp) / 1000);
+  const updatedAt = Math.floor((latestTimestamp || parseTimestamp(meta?.timestamp)) / 1000);
+  return {
+    id,
+    name: null,
+    preview,
+    createdAt,
+    updatedAt,
+    cwd,
+    source: normalizeThreadSource(meta?.source),
+    path: rolloutPath,
+    status: { type: inProgress ? "running" : "idle" },
+    gitInfo: null,
+  };
+}
+
+function normalizeThreadSource(source: unknown): ThreadRecord["source"] {
+  if (typeof source === "string") {
+    return source;
+  }
+  if (source && typeof source === "object") {
+    return source as ThreadRecord["source"];
+  }
+  return "unknown";
 }
 
 async function walkDirectories(root: string, depth: number): Promise<string[]> {
@@ -299,6 +391,7 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
     const typed = payload as Record<string, any>;
     const runtime = {
       model: asOptionalString(typed.model),
+      modelProvider: asOptionalString(typed.model_provider),
       serviceTier: asOptionalString(typed.service_tier),
       reasoningEffort: asOptionalString(typed.reasoning_effort),
       approvalPolicy: asOptionalString(typed.approval_policy),
@@ -309,6 +402,7 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
 
     if (
       !runtime.model &&
+      !runtime.modelProvider &&
       !runtime.serviceTier &&
       !runtime.reasoningEffort &&
       !runtime.approvalPolicy &&
@@ -319,6 +413,19 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
     }
 
     return runtime;
+  }
+
+  if (parsed.type === "session_meta") {
+    const payload = parsed.payload;
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+    const typed = payload as Record<string, any>;
+    const runtime = {
+      modelProvider: asOptionalString(typed.model_provider),
+      updatedAt: parseTimestamp(parsed.timestamp),
+    };
+    return runtime.modelProvider ? runtime : null;
   }
 
   if (parsed.type !== "turn_context") {
@@ -341,6 +448,7 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
 
   const runtime = {
     model: asOptionalString(typed.model) || asOptionalString(collaborationSettings?.model),
+    modelProvider: asOptionalString(typed.model_provider),
     serviceTier: undefined,
     reasoningEffort:
       asOptionalString(typed.effort) || asOptionalString(collaborationSettings?.reasoning_effort),
@@ -354,6 +462,7 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
 
   if (
     !runtime.model &&
+    !runtime.modelProvider &&
     !runtime.serviceTier &&
     !runtime.reasoningEffort &&
     !runtime.approvalPolicy &&
@@ -378,6 +487,7 @@ function mergeRuntime(
 
   return {
     model: next.model ?? previous.model,
+    modelProvider: next.modelProvider ?? previous.modelProvider,
     serviceTier: next.serviceTier ?? previous.serviceTier,
     reasoningEffort: next.reasoningEffort ?? previous.reasoningEffort,
     approvalPolicy: next.approvalPolicy ?? previous.approvalPolicy,
