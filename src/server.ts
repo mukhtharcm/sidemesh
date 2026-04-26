@@ -858,7 +858,22 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.post("/api/sessions/:sessionId/name", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.rename, "session renaming", "setSessionName")) {
+    if (
+      !requireProviderCapability(
+        response,
+        provider,
+        provider.capabilities.sessions.rename,
+        "session renaming",
+        "setSessionName",
+      ) ||
+      !requireProviderCapability(
+        response,
+        provider,
+        provider.capabilities.sessions.history,
+        "session history",
+        "readSessionThread",
+      )
+    ) {
       return;
     }
     const sessionId = pathParam(request.params.sessionId);
