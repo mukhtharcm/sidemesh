@@ -1,16 +1,25 @@
 import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
+import 'theme_controller.dart';
 
 /// Builds a light [ThemeData] from the given palette.
-ThemeData buildLightTheme(AppColors palette) =>
-    _buildTheme(Brightness.light, palette);
+ThemeData buildLightTheme(
+  AppColors palette, {
+  AppTypographyPreferences typography = AppTypographyPreferences.defaults,
+}) => _buildTheme(Brightness.light, palette, typography);
 
 /// Builds a dark [ThemeData] from the given palette.
-ThemeData buildDarkTheme(AppColors palette) =>
-    _buildTheme(Brightness.dark, palette);
+ThemeData buildDarkTheme(
+  AppColors palette, {
+  AppTypographyPreferences typography = AppTypographyPreferences.defaults,
+}) => _buildTheme(Brightness.dark, palette, typography);
 
-ThemeData _buildTheme(Brightness brightness, AppColors palette) {
+ThemeData _buildTheme(
+  Brightness brightness,
+  AppColors palette,
+  AppTypographyPreferences typography,
+) {
   final colorScheme = ColorScheme(
     brightness: brightness,
     primary: palette.accent,
@@ -34,12 +43,11 @@ ThemeData _buildTheme(Brightness brightness, AppColors palette) {
     splashFactory: InkSparkle.splashFactory,
   );
 
-  final textTheme = base.textTheme
-      .apply(
-        fontFamily: 'SpaceGrotesk',
-        bodyColor: palette.textPrimary,
-        displayColor: palette.textPrimary,
-      );
+  final textTheme = base.textTheme.apply(
+    fontFamily: typography.interfaceFont.fontFamily,
+    bodyColor: palette.textPrimary,
+    displayColor: palette.textPrimary,
+  );
 
   return base.copyWith(
     textTheme: textTheme,
@@ -110,9 +118,7 @@ ThemeData _buildTheme(Brightness brightness, AppColors palette) {
         foregroundColor: palette.accentOn,
         disabledBackgroundColor: palette.surfaceMuted,
         disabledForegroundColor: palette.textTertiary,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         textStyle: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       ),
@@ -121,9 +127,7 @@ ThemeData _buildTheme(Brightness brightness, AppColors palette) {
       style: OutlinedButton.styleFrom(
         foregroundColor: palette.textPrimary,
         side: BorderSide(color: palette.border),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       ),
     ),
@@ -162,9 +166,7 @@ ThemeData _buildTheme(Brightness brightness, AppColors palette) {
       foregroundColor: palette.accentOn,
       elevation: 0,
       highlightElevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
     ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: palette.surface,
@@ -178,9 +180,7 @@ ThemeData _buildTheme(Brightness brightness, AppColors palette) {
       backgroundColor: palette.surfaceMuted,
       side: BorderSide(color: palette.border),
       labelStyle: textTheme.labelMedium?.copyWith(color: palette.textPrimary),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(999),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
     ),
   );
 }

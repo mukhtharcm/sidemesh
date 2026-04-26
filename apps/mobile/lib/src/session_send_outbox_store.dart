@@ -237,6 +237,44 @@ class SessionSendOutboxStore extends ChangeNotifier {
     });
   }
 
+  Future<bool> contains(PendingSessionSend entry) {
+    return _runExclusive(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final entries = await _loadAll(prefs);
+      return entries.any((item) => item.key == entry.key);
+    });
+  }
+
+  Future<bool> replaceIfPresent(
+    PendingSessionSend current,
+    PendingSessionSend replacement,
+  ) async {
+    final encodedReplacement = jsonEncode(replacement.toJson());
+    if (utf8.encode(encodedReplacement).length > _maxEntryChars) {
+      return false;
+    }
+
+    return _runExclusive(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final entries = await _loadAll(prefs);
+      final index = entries.indexWhere((item) => item.key == current.key);
+      if (index == -1) return false;
+      final next = entries.toList(growable: true);
+      next[index] = replacement;
+      final saved = await _saveAllWithinBudget(prefs, next, replacement.key);
+      notifyListeners();
+      return saved;
+    });
+  }
+
+  Future<void> clearAll() {
+    return _runExclusive(() async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_key);
+      notifyListeners();
+    });
+  }
+
   Future<T> _runExclusive<T>(Future<T> Function() action) async {
     final previous = _writeQueue;
     final completer = Completer<void>();

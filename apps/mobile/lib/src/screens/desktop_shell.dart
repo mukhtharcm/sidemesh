@@ -13,15 +13,14 @@ import '../live_activity_service.dart';
 import '../local_notification_service.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
-import '../theme/theme_controller.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/notification_permission_banner.dart';
-import '../widgets/appearance_sheet.dart';
 import 'create_session_sheet.dart';
 import 'home_screen.dart';
 import 'host_detail_screen.dart';
 import 'inspector/inspector_controller.dart';
+import 'settings_screen.dart';
 import 'session_screen.dart';
 
 /// Two-pane macOS shell — sidebar (Recent / Inbox / Hosts) on the left,
@@ -163,6 +162,12 @@ class _DesktopShellState extends State<DesktopShell> {
     );
     if (next == _sidebarWidth) return;
     setState(() => _sidebarWidth = next);
+  }
+
+  void _resetSidebarWidth() {
+    if (_sidebarWidth == _defaultSidebarWidth) return;
+    setState(() => _sidebarWidth = _defaultSidebarWidth);
+    _persistSidebarWidth();
   }
 
   Future<void> _persistSidebarWidth() async {
@@ -315,6 +320,16 @@ class _DesktopShellState extends State<DesktopShell> {
           ),
         );
       },
+    );
+  }
+
+  void _openSettings() {
+    unawaited(
+      openSettingsScreen(
+        context,
+        onResetSidebarWidth: _resetSidebarWidth,
+        onResetInspectorWidth: _resetInspectorWidth,
+      ),
     );
   }
 
@@ -752,6 +767,7 @@ class _DesktopShellState extends State<DesktopShell> {
                                   setState(() => _inboxCount = n);
                                 },
                                 onShowShortcuts: _showShortcutsSheet,
+                                onOpenSettings: _openSettings,
                               ),
                             ),
                           ),
@@ -869,6 +885,7 @@ class _Sidebar extends StatelessWidget {
     required this.onActiveCountChanged,
     required this.onInboxCountChanged,
     required this.onShowShortcuts,
+    required this.onOpenSettings,
   });
 
   final double titlebarInset;
@@ -898,6 +915,7 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<int> onActiveCountChanged;
   final ValueChanged<int> onInboxCountChanged;
   final VoidCallback onShowShortcuts;
+  final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -951,7 +969,11 @@ class _Sidebar extends StatelessWidget {
                     onTap: onShowShortcuts,
                   ),
                   const SizedBox(width: 2),
-                  const _ThemeToggleButton(),
+                  _SidebarIconAction(
+                    icon: Icons.tune_rounded,
+                    tooltip: 'Settings',
+                    onTap: onOpenSettings,
+                  ),
                 ],
               ),
             ),
@@ -1236,59 +1258,6 @@ class _SidebarIconActionState extends State<_SidebarIconAction> {
               alignment: Alignment.center,
               child: Icon(
                 widget.icon,
-                size: 16,
-                color: _hover ? colors.textPrimary : colors.textSecondary,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ThemeToggleButton extends StatefulWidget {
-  const _ThemeToggleButton();
-
-  @override
-  State<_ThemeToggleButton> createState() => _ThemeToggleButtonState();
-}
-
-class _ThemeToggleButtonState extends State<_ThemeToggleButton> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final controller = ThemeScope.of(context);
-    final IconData icon = switch (controller.mode) {
-      ThemeMode.dark => Icons.dark_mode_rounded,
-      ThemeMode.light => Icons.light_mode_rounded,
-      ThemeMode.system => Icons.brightness_auto_rounded,
-    };
-    const String tooltip = 'Appearance';
-    return Tooltip(
-      message: tooltip,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        cursor: SystemMouseCursors.click,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () => showAppearanceSheet(context),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: _hover ? colors.surfaceMuted : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                icon,
                 size: 16,
                 color: _hover ? colors.textPrimary : colors.textSecondary,
               ),

@@ -10,6 +10,7 @@ import 'package:macos_window_utils/macos_window_utils.dart';
 import 'src/screens/desktop_shell.dart';
 import 'src/screens/home_screen.dart';
 import 'src/background_sync_service.dart';
+import 'src/create_session_defaults_store.dart';
 import 'src/local_notification_service.dart';
 import 'src/session_send_outbox_worker.dart';
 import 'src/theme/app_theme.dart';
@@ -37,6 +38,7 @@ Future<void> main() async {
   await LocalNotificationService.instance.initialize();
   await BackgroundSyncService.instance.initialize();
   SessionSendOutboxWorker.instance.start();
+  await CreateSessionDefaultsStore.instance.ensureLoaded();
   final themeController = await ThemeController.load();
   runApp(SidemeshApp(themeController: themeController));
 }
@@ -55,6 +57,7 @@ class SidemeshApp extends StatelessWidget {
         builder: (context, _) {
           final mode = themeController.mode;
           final variant = themeController.variant;
+          final typography = themeController.typography;
           final darkPalette = variant.dark;
           final lightPalette = variant.light;
           final isDark =
@@ -80,9 +83,22 @@ class SidemeshApp extends StatelessWidget {
             child: MaterialApp(
               title: 'Sidemesh',
               debugShowCheckedModeBanner: false,
-              theme: buildLightTheme(lightPalette),
-              darkTheme: buildDarkTheme(darkPalette),
+              theme: buildLightTheme(lightPalette, typography: typography),
+              darkTheme: buildDarkTheme(darkPalette, typography: typography),
               themeMode: mode,
+              builder: (context, child) {
+                final media = MediaQuery.maybeOf(context);
+                final content = child ?? const SizedBox.shrink();
+                if (media == null || typography.isStandardScale) {
+                  return content;
+                }
+                return MediaQuery(
+                  data: media.copyWith(
+                    textScaler: typography.buildTextScaler(media.textScaler),
+                  ),
+                  child: content,
+                );
+              },
               home: home,
             ),
           );
