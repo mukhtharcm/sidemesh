@@ -365,12 +365,18 @@ export async function startServer(config: NodeConfig): Promise<void> {
   });
 
   app.get("/api/sessions", asyncRoute(async (_request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.history, "session history")) {
+      return;
+    }
     const requestedLimit = asInteger((_request.query as Record<string, unknown>)?.limit);
     const sessions = await listSessions(provider, runtimeCache, requestedLimit);
     response.json(sessions);
   }));
 
   app.get("/api/workspaces", asyncRoute(async (_request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.history, "workspace history")) {
+      return;
+    }
     const sessions = await listSessions(provider, runtimeCache);
     response.json(buildWorkspaces(sessions));
   }));
@@ -386,6 +392,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.get("/api/sessions/:sessionId/log", asyncRoute(async (request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.history, "session history")) {
+      return;
+    }
     const sessionId = pathParam(request.params.sessionId);
     const query = request.query as Record<string, unknown>;
     const messageLimit = asInteger(query.messageLimit);
@@ -457,6 +466,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
   // (the highest seq they've already observed) and get only newer
   // messages + activities — no re-downloading the full transcript.
   app.get("/api/sessions/:sessionId/events", asyncRoute(async (request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.eventReplay, "session event replay")) {
+      return;
+    }
     const sessionId = pathParam(request.params.sessionId);
     const query = request.query as Record<string, unknown>;
     const since = asInteger(query.since) ?? 0;
@@ -489,11 +501,17 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.get("/api/sessions/:sessionId/resources", asyncRoute(async (request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.history, "session resources")) {
+      return;
+    }
     const sessionId = pathParam(request.params.sessionId);
     response.json(await readSessionResources(provider, sessionId, liveActivities));
   }));
 
   app.get("/api/sessions/:sessionId/status", asyncRoute(async (request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.history, "session status")) {
+      return;
+    }
     const sessionId = pathParam(request.params.sessionId);
     const state = await loadRunState(provider, sessionId, activeTurns);
     response.json({
@@ -505,6 +523,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.get("/api/sessions/:sessionId/git", asyncRoute(async (request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.workspace.gitStatus, "git status")) {
+      return;
+    }
     const sessionId = pathParam(request.params.sessionId);
     const session = await readSession(provider, sessionId, false);
     response.json(await readGitStatus(session.cwd, mapGitInfo(session.gitInfo)));
@@ -520,11 +541,17 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
     const session = await readSession(provider, sessionId, false);
     if (kind === "remote") {
+      if (!requireProviderCapability(response, provider, provider.capabilities.workspace.remoteGitDiff, "remote git diff")) {
+        return;
+      }
       const result = (await provider.readRemoteGitDiff(session.cwd)) as Record<string, unknown>;
       response.json(buildGitDiff("remote", asString(result.diff) ?? "", normalizeGitSha(result.sha)));
       return;
     }
 
+    if (!requireProviderCapability(response, provider, provider.capabilities.workspace.gitDiff, "git diff")) {
+      return;
+    }
     response.json(await readGitDiff(session.cwd, kind));
   }));
 
@@ -575,7 +602,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   app.get("/api/models", asyncRoute(async (request, response) => {
     if (!provider.capabilities.configuration.models) {
-      response.status(501).json({ error: `${provider.displayName} does not support model listing` });
+      response.status(501).json({
+        error: `${provider.displayName} does not support model listing`,
+      });
       return;
     }
     const query = request.query as Record<string, unknown>;
@@ -602,6 +631,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.post("/api/sessions/create", asyncRoute(async (request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.create, "session creation")) {
+      return;
+    }
     const cwd = asString(request.body?.cwd);
     const prompt = asString(request.body?.prompt);
     const input = parseInputItems(request.body?.input);
@@ -610,8 +642,18 @@ export async function startServer(config: NodeConfig): Promise<void> {
       response.status(400).json({ error: "cwd is required" });
       return;
     }
+    const unsupportedOverride = unsupportedOverrideCapability(provider, overrides);
+    if (unsupportedOverride) {
+      response.status(501).json({ error: unsupportedOverride });
+      return;
+    }
 
     const resolvedInput = input.length > 0 ? input : buildLegacyTextInput(prompt);
+    const unsupportedInput = unsupportedInputCapability(provider, resolvedInput);
+    if (unsupportedInput) {
+      response.status(501).json({ error: unsupportedInput });
+      return;
+    }
     const started = await provider.createSession({
       cwd,
       input: resolvedInput,
@@ -646,8 +688,18 @@ export async function startServer(config: NodeConfig): Promise<void> {
       response.status(400).json({ error: "input is required" });
       return;
     }
+    const unsupportedInput = unsupportedInputCapability(provider, resolvedInput);
+    if (unsupportedInput) {
+      response.status(501).json({ error: unsupportedInput });
+      return;
+    }
 
     const turnOverrides = parseTurnOverrides(request.body);
+    const unsupportedOverride = unsupportedOverrideCapability(provider, turnOverrides);
+    if (unsupportedOverride) {
+      response.status(501).json({ error: unsupportedOverride });
+      return;
+    }
     const inputSignatureHash = hashSessionInputSignature(
       resolvedInput,
       turnOverrides,
@@ -750,6 +802,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.post("/api/sessions/:sessionId/stop", asyncRoute(async (request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.interrupt, "session interruption")) {
+      return;
+    }
     const sessionId = pathParam(request.params.sessionId);
     const state = await loadRunState(provider, sessionId, activeTurns);
     if (!state.turnId) {
@@ -762,6 +817,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.post("/api/sessions/:sessionId/name", asyncRoute(async (request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.rename, "session renaming")) {
+      return;
+    }
     const sessionId = pathParam(request.params.sessionId);
     const name = asString(request.body?.name);
     if (!name) {
@@ -779,6 +837,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.post("/api/sessions/:sessionId/archive", asyncRoute(async (request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.archive, "session archiving")) {
+      return;
+    }
     const sessionId = pathParam(request.params.sessionId);
     await provider.archiveSession(sessionId);
     activeTurns.delete(sessionId);
@@ -789,6 +850,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.post("/api/sessions/:sessionId/unarchive", asyncRoute(async (request, response) => {
+    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.archive, "session unarchiving")) {
+      return;
+    }
     const sessionId = pathParam(request.params.sessionId);
     await provider.unarchiveSession(sessionId);
     response.json({ unarchived: true });
@@ -842,6 +906,10 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
 
     if (pathOnly === "/api/fs/live") {
+      if (!provider.capabilities.workspace.filesystem) {
+        socket.destroy();
+        return;
+      }
       wsServer.handleUpgrade(request, socket, head, (ws) => {
         try { ws.send(JSON.stringify({ type: "hello" })); } catch { /* noop */ }
         attachFsLiveSocket(ws, fsWatchRegistry, {
@@ -941,6 +1009,92 @@ function authenticate(
     return;
   }
   next();
+}
+
+function requireProviderCapability(
+  response: Response,
+  provider: AgentProvider,
+  supported: boolean,
+  feature: string,
+): boolean {
+  if (supported) {
+    return true;
+  }
+  response.status(501).json({
+    error: `${provider.displayName} does not support ${feature}`,
+  });
+  return false;
+}
+
+function unsupportedInputCapability(
+  provider: AgentProvider,
+  input: AgentSessionInputItem[],
+): string | null {
+  for (const item of input) {
+    switch (item.type) {
+      case "text":
+        if (!provider.capabilities.input.text) {
+          return `${provider.displayName} does not support text input`;
+        }
+        break;
+      case "image":
+        if (!provider.capabilities.input.imageUrl) {
+          return `${provider.displayName} does not support image URL input`;
+        }
+        break;
+      case "localImage":
+        if (!provider.capabilities.input.localImage) {
+          return `${provider.displayName} does not support local image input`;
+        }
+        break;
+      case "skill":
+        if (!provider.capabilities.input.skills) {
+          return `${provider.displayName} does not support skill input`;
+        }
+        break;
+    }
+  }
+  return null;
+}
+
+function unsupportedOverrideCapability(
+  provider: AgentProvider,
+  overrides: AgentSessionOverrides,
+): string | null {
+  if (overrides.model && !provider.capabilities.runtimeControls.model) {
+    return `${provider.displayName} does not support model overrides`;
+  }
+  if (
+    overrides.reasoningEffort &&
+    !provider.capabilities.runtimeControls.reasoningEffort
+  ) {
+    return `${provider.displayName} does not support reasoning effort overrides`;
+  }
+  if (overrides.fastMode !== null && !provider.capabilities.runtimeControls.fastMode) {
+    return `${provider.displayName} does not support fast mode`;
+  }
+  if (
+    overrides.approvalPolicy &&
+    !provider.capabilities.runtimeControls.approvalPolicy
+  ) {
+    return `${provider.displayName} does not support approval policy overrides`;
+  }
+  if (overrides.sandboxMode && !provider.capabilities.runtimeControls.sandboxMode) {
+    return `${provider.displayName} does not support sandbox overrides`;
+  }
+  if (
+    overrides.networkAccess !== null &&
+    !provider.capabilities.runtimeControls.networkAccess
+  ) {
+    return `${provider.displayName} does not support network access overrides`;
+  }
+  if (overrides.webSearch && !provider.capabilities.runtimeControls.webSearch) {
+    return `${provider.displayName} does not support web search overrides`;
+  }
+  if (overrides.profile && !provider.capabilities.configuration.profiles) {
+    return `${provider.displayName} does not support profile overrides`;
+  }
+  return null;
 }
 
 async function listSessions(
