@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
@@ -10,6 +11,35 @@ import 'mesh_widgets.dart';
 /// palette, and typography controls. Used by both the mobile top-bar button
 /// and the desktop sidebar footer.
 Future<void> showAppearanceSheet(BuildContext context) {
+  final desktop = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+  if (desktop) {
+    final colors = context.colors;
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 820, maxHeight: 760),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: colors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  blurRadius: 36,
+                  offset: const Offset(0, 18),
+                ),
+              ],
+            ),
+            child: const _AppearanceSheet(embedded: true),
+          ),
+        ),
+      ),
+    );
+  }
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -19,7 +49,9 @@ Future<void> showAppearanceSheet(BuildContext context) {
 }
 
 class _AppearanceSheet extends StatelessWidget {
-  const _AppearanceSheet();
+  const _AppearanceSheet({this.embedded = false});
+
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
@@ -33,30 +65,41 @@ class _AppearanceSheet extends StatelessWidget {
       builder: (context, _) {
         return Padding(
           padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(context).bottom,
+            bottom: embedded ? 0 : MediaQuery.viewInsetsOf(context).bottom,
           ),
           child: Container(
             decoration: BoxDecoration(
               color: colors.surface,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(24),
-              ),
-              border: Border(top: BorderSide(color: colors.border)),
+              borderRadius: embedded
+                  ? BorderRadius.circular(24)
+                  : const BorderRadius.vertical(top: Radius.circular(24)),
+              border: embedded
+                  ? null
+                  : Border(top: BorderSide(color: colors.border)),
             ),
             child: SafeArea(
-              top: false,
+              top: !embedded,
               child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+                  maxHeight: embedded
+                      ? 760
+                      : MediaQuery.sizeOf(context).height * 0.85,
                 ),
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    embedded ? 20 : 10,
+                    20,
+                    20,
+                  ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _grabHandle(colors),
-                      const SizedBox(height: 12),
+                      if (!embedded) ...[
+                        _grabHandle(colors),
+                        const SizedBox(height: 12),
+                      ],
                       Row(
                         children: [
                           Icon(
