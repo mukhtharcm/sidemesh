@@ -87,6 +87,7 @@ flutter install --debug -d <device-id>
 
 - `GET /healthz`
 - `GET /api/node`
+- `GET /api/providers`
 - `GET /api/workspaces`
 - `GET /api/sessions`
 - `GET /api/actions`
