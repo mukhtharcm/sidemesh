@@ -310,10 +310,6 @@ export class CodexAgentProvider
     };
   }
 
-  public readConfig(params: Record<string, unknown>): Promise<unknown> {
-    return this.bridge.request("config/read", params);
-  }
-
   public async fsReadDirectory(path: string): Promise<AgentFsDirectoryListing> {
     const result = (await this.bridge.request("fs/readDirectory", { path })) as {
       entries?: unknown[];
