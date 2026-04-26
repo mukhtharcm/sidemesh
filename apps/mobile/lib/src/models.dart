@@ -55,6 +55,7 @@ class NodeInfo {
     required this.provider,
     required this.providerName,
     required this.providerVersion,
+    required this.providerConfig,
     required this.providerCapabilities,
   });
 
@@ -65,6 +66,7 @@ class NodeInfo {
   final String provider;
   final String providerName;
   final String providerVersion;
+  final ProviderConfigSummary providerConfig;
   final ProviderCapabilities providerCapabilities;
 
   String get providerDisplayName {
@@ -94,10 +96,28 @@ class NodeInfo {
     providerVersion:
         _stringOrNull(json['providerVersion']) ??
         _stringValue(json['codexVersion']),
+    providerConfig: ProviderConfigSummary.fromJson(json['providerConfig']),
     providerCapabilities: ProviderCapabilities.fromJson(
       json['providerCapabilities'],
     ),
   );
+}
+
+class ProviderConfigSummary {
+  const ProviderConfigSummary({required this.kind, required this.command});
+
+  static const empty = ProviderConfigSummary(kind: '', command: null);
+
+  final String kind;
+  final String? command;
+
+  factory ProviderConfigSummary.fromJson(Object? json) {
+    if (json is! Map) return empty;
+    return ProviderConfigSummary(
+      kind: _stringValue(json['kind']),
+      command: _stringOrNull(json['command']),
+    );
+  }
 }
 
 class ProviderCapabilities {

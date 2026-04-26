@@ -448,6 +448,13 @@ class _NodeCard extends StatelessWidget {
                 tone: MeshPillTone.accent,
                 mono: true,
               ),
+              if (node.providerConfig.command != null)
+                MeshPill(
+                  label: node.providerConfig.command!,
+                  icon: Icons.terminal_rounded,
+                  tone: MeshPillTone.neutral,
+                  mono: true,
+                ),
             ],
           ),
         ],
