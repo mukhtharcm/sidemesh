@@ -1,7 +1,6 @@
 import { createServer } from "node:http";
 import { hostname, platform } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
-import { access, stat } from "node:fs/promises";
 import nodePath from "node:path";
 
 import cors from "cors";
@@ -24,9 +23,6 @@ import type {
   SessionActivity,
   NodeConfig,
   PendingAction,
-  SkillCatalogEntry,
-  SkillErrorInfo,
-  SkillSummary,
   SessionMessageAttachment,
   SessionMessage,
   SessionResourcesResponse,
@@ -533,6 +529,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.get("/api/skills", asyncRoute(async (request, response) => {
+    if (!provider.capabilities.configuration.skills) {
+      response.status(501).json({
+        error: `${provider.displayName} does not support skill listing`,
+      });
+      return;
+    }
     const query = request.query as Record<string, unknown>;
     const cwd = asString(query.cwd);
     if (!cwd) {
@@ -541,23 +543,16 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
 
     const forceReload = parseQueryBool(query.forceReload);
-    const workspaceSkillRoots = await findWorkspaceSkillRoots(cwd);
-    const payload = (await provider.listSkills({
-      cwds: [cwd],
-      forceReload: forceReload || workspaceSkillRoots.length > 0,
-      perCwdExtraUserRoots:
-        workspaceSkillRoots.length > 0
-          ? [{ cwd, extraUserRoots: workspaceSkillRoots }]
-          : null,
-    })) as { data?: unknown[] };
-    const rawEntries = Array.isArray(payload.data) ? payload.data : [];
-    const rawEntry =
-      rawEntries.find((entry) => asString((entry as Record<string, unknown>)?.cwd) === cwd) ??
-      rawEntries[0];
-    response.json(normalizeSkillCatalogEntry(rawEntry, cwd, workspaceSkillRoots));
+    response.json(await provider.listSkills({ cwd, forceReload }));
   }));
 
   app.post("/api/skills/config/write", asyncRoute(async (request, response) => {
+    if (!provider.capabilities.configuration.skillManagement) {
+      response.status(501).json({
+        error: `${provider.displayName} does not support skill configuration`,
+      });
+      return;
+    }
     const path = asString(request.body?.path);
     const name = asString(request.body?.name);
     const enabled = parseOptionalBool(request.body?.enabled);
@@ -571,8 +566,8 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
 
     const result = await provider.writeSkillConfig({
-      path: path ?? undefined,
-      name: name ?? undefined,
+      path,
+      name,
       enabled,
     });
     response.json(result);
@@ -1569,191 +1564,6 @@ function buildSubmittedUserMessageAttachments(input: AgentSessionInputItem[]): S
     }
   }
   return attachments;
-}
-
-async function findWorkspaceSkillRoots(cwd: string): Promise<string[]> {
-  const workspaceRoot = await findWorkspaceRoot(cwd);
-  if (!workspaceRoot) {
-    return [];
-  }
-
-  const cwdDir = await resolveDirectoryPath(cwd);
-  const dirs = dirsBetween(workspaceRoot, cwdDir ?? workspaceRoot);
-  const roots: string[] = [];
-  const seen = new Set<string>();
-  for (const dir of dirs) {
-    const candidate = nodePath.join(dir, "skills");
-    if (seen.has(candidate)) {
-      continue;
-    }
-    seen.add(candidate);
-    if (await isDirectory(candidate)) {
-      roots.push(candidate);
-    }
-  }
-  return roots;
-}
-
-async function findWorkspaceRoot(cwd: string): Promise<string | null> {
-  let current = await resolveDirectoryPath(cwd);
-  if (!current) {
-    current = nodePath.resolve(cwd);
-  }
-
-  for (;;) {
-    if (
-      (await pathExists(nodePath.join(current, ".git"))) ||
-      (await pathExists(nodePath.join(current, ".jj"))) ||
-      (await pathExists(nodePath.join(current, ".hg")))
-    ) {
-      return current;
-    }
-    const parent = nodePath.dirname(current);
-    if (parent === current) {
-      return null;
-    }
-    current = parent;
-  }
-}
-
-async function resolveDirectoryPath(rawPath: string): Promise<string | null> {
-  const resolved = nodePath.resolve(rawPath);
-  try {
-    const metadata = await stat(resolved);
-    return metadata.isDirectory() ? resolved : nodePath.dirname(resolved);
-  } catch {
-    return null;
-  }
-}
-
-function dirsBetween(root: string, cwd: string): string[] {
-  const resolvedRoot = nodePath.resolve(root);
-  const resolvedCwd = nodePath.resolve(cwd);
-  const dirs: string[] = [];
-  let current = resolvedCwd;
-  for (;;) {
-    dirs.push(current);
-    if (current === resolvedRoot) {
-      break;
-    }
-    const parent = nodePath.dirname(current);
-    if (parent === current) {
-      return [resolvedRoot];
-    }
-    current = parent;
-  }
-  return dirs.reverse();
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function isDirectory(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-function normalizeSkillCatalogEntry(
-  raw: unknown,
-  cwd: string,
-  workspaceSkillRoots: string[] = [],
-): SkillCatalogEntry {
-  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  return {
-    cwd: asString(typed.cwd) || cwd,
-    skills: Array.isArray(typed.skills)
-      ? typed.skills
-          .map((skill) => normalizeSkillSummary(skill, workspaceSkillRoots))
-          .filter((skill): skill is SkillSummary => skill !== null)
-      : [],
-    errors: Array.isArray(typed.errors)
-      ? typed.errors.map(normalizeSkillErrorInfo).filter((item): item is SkillErrorInfo => item !== null)
-      : [],
-  };
-}
-
-function normalizeSkillSummary(
-  raw: unknown,
-  workspaceSkillRoots: string[] = [],
-): SkillSummary | null {
-  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-  if (!typed) {
-    return null;
-  }
-
-  const name = asString(typed.name);
-  const description = asString(typed.description);
-  const path = asString(typed.path);
-  if (!name || !description || !path) {
-    return null;
-  }
-
-  const interfaceValue =
-    typed.interface && typeof typed.interface === "object"
-      ? (typed.interface as Record<string, unknown>)
-      : null;
-
-  return {
-    name,
-    description,
-    shortDescription: asString(typed.shortDescription) || asString(typed.short_description),
-    interface: interfaceValue
-      ? {
-          displayName:
-            asString(interfaceValue.displayName) || asString(interfaceValue.display_name),
-          shortDescription:
-            asString(interfaceValue.shortDescription) ||
-            asString(interfaceValue.short_description),
-          brandColor:
-            asString(interfaceValue.brandColor) || asString(interfaceValue.brand_color),
-          defaultPrompt:
-            asString(interfaceValue.defaultPrompt) || asString(interfaceValue.default_prompt),
-        }
-      : null,
-    path,
-    scope: isUnderAnyPath(path, workspaceSkillRoots)
-      ? "repo"
-      : asString(typed.scope) || "user",
-    enabled: typed.enabled !== false,
-  };
-}
-
-function isUnderAnyPath(path: string, roots: string[]): boolean {
-  if (roots.length === 0) {
-    return false;
-  }
-  const resolvedPath = nodePath.resolve(path);
-  return roots.some((root) => {
-    const resolvedRoot = nodePath.resolve(root);
-    return (
-      resolvedPath === resolvedRoot ||
-      resolvedPath.startsWith(`${resolvedRoot}${nodePath.sep}`)
-    );
-  });
-}
-
-function normalizeSkillErrorInfo(raw: unknown): SkillErrorInfo | null {
-  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-  if (!typed) {
-    return null;
-  }
-
-  const path = asString(typed.path);
-  const message = asString(typed.message);
-  if (!path || !message) {
-    return null;
-  }
-
-  return { path, message };
 }
 
 function parseCreateSessionOverrides(value: unknown): AgentSessionOverrides {
