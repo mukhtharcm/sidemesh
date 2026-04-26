@@ -1,7 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
-import type { CodexBridge } from "./codex-client.js";
+import type { AgentProvider } from "./agent-provider.js";
 import type { SessionSummary } from "./types.js";
 
 /**
@@ -111,7 +111,7 @@ function stringifyError(error: unknown): string {
  * Collect the distinct cwds of all known sessions for use as workspace roots.
  */
 export async function collectWorkspaceRoots(
-  _bridge: CodexBridge,
+  _provider: AgentProvider,
   listSessions: () => Promise<SessionSummary[]>,
 ): Promise<string[]> {
   try {
