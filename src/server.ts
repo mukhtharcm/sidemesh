@@ -543,8 +543,8 @@ export async function startServer(config: NodeConfig): Promise<void> {
       if (!requireProviderCapability(response, provider, provider.capabilities.workspace.remoteGitDiff, "remote git diff")) {
         return;
       }
-      const result = (await provider.readRemoteGitDiff(session.cwd)) as Record<string, unknown>;
-      response.json(buildGitDiff("remote", asString(result.diff) ?? "", normalizeGitSha(result.sha)));
+      const result = await provider.readRemoteGitDiff(session.cwd);
+      response.json(buildGitDiff("remote", result.diff, normalizeGitSha(result.sha)));
       return;
     }
 

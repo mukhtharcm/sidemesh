@@ -111,6 +111,11 @@ export interface AgentSessionResumeOptions {
   persistExtendedHistory: boolean;
 }
 
+export interface AgentRemoteGitDiff {
+  diff: string;
+  sha: string | null;
+}
+
 export interface AgentModelListOptions {
   cwd: string | null;
   profile: string | null;
@@ -267,7 +272,7 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
 
   respondToPendingAction(action: AgentPendingAction, decision: string | null): boolean;
 
-  readRemoteGitDiff(cwd: string): Promise<unknown>;
+  readRemoteGitDiff(cwd: string): Promise<AgentRemoteGitDiff>;
   listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry>;
   writeSkillConfig(request: AgentSkillConfigWriteRequest): Promise<unknown>;
   listModels(options: AgentModelListOptions): Promise<ModelSummary[]>;
