@@ -58,7 +58,7 @@ class _AppearanceSheet extends StatelessWidget {
     final colors = context.colors;
     final controller = ThemeScope.of(context);
     final width = MediaQuery.sizeOf(context).width;
-    final compactThemeGrid = embedded;
+    final compactThemeGrid = embedded || width < 560;
     final crossAxisCount = compactThemeGrid
         ? width >= 760
               ? 4
@@ -142,7 +142,7 @@ class _AppearanceSheet extends StatelessWidget {
                         crossAxisCount: crossAxisCount,
                         compact: compactThemeGrid,
                       ),
-                      SizedBox(height: compactThemeGrid ? 18 : 22),
+                      SizedBox(height: compactThemeGrid ? 16 : 22),
                       _SectionLabel(text: 'Typography'),
                       const SizedBox(height: 10),
                       _TypographyCard(controller: controller),
