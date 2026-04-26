@@ -32,9 +32,9 @@ import {
   loadSessionRuntime,
 } from "./codex-history.js";
 import type {
-  CodexProfileCatalog,
-  CodexProfileSummary,
   ModelSummary,
+  ProviderProfileCatalog,
+  ProviderProfileSummary,
   SessionActivity,
   SessionLogSnapshot,
   SessionRuntimeSummary,
@@ -55,7 +55,7 @@ interface ConfigModelProviderSummary {
 
 interface CodexProfileConfig {
   defaultProfile: string | null;
-  profiles: CodexProfileSummary[];
+  profiles: ProviderProfileSummary[];
   modelProvider: string | null;
   openaiBaseUrl: string | null;
   modelProviders: Map<string, ConfigModelProviderSummary>;
@@ -265,7 +265,7 @@ export class CodexAgentProvider
 
   public async listProfiles(
     options: AgentProfileListOptions,
-  ): Promise<CodexProfileCatalog> {
+  ): Promise<ProviderProfileCatalog> {
     const profileConfig = await readCodexProfileConfig(this.bridge, options.cwd);
     return {
       defaultProfile: profileConfig.defaultProfile,
@@ -815,7 +815,7 @@ async function listCodexHostModels(bridge: CodexBridge): Promise<ModelSummary[]>
 async function listCodexProfileScopedModels(
   bridge: CodexBridge,
   config: CodexProfileConfig,
-  profile: CodexProfileSummary,
+  profile: ProviderProfileSummary,
 ): Promise<ModelSummary[]> {
   const profileProvider = profile.modelProvider?.trim() || null;
   const defaultProvider = config.modelProvider?.trim() || null;
@@ -864,7 +864,7 @@ async function listCodexProviderScopedModels(
 
 function mergeCodexProfileModel(
   models: ModelSummary[],
-  profile: CodexProfileSummary,
+  profile: ProviderProfileSummary,
 ): ModelSummary[] {
   const model = normalizeCodexProfileModelSummary(profile);
   if (!model) {
@@ -881,7 +881,9 @@ function mergeCodexProfileModel(
   );
 }
 
-function normalizeCodexProfileModelSummary(profile: CodexProfileSummary): ModelSummary | null {
+function normalizeCodexProfileModelSummary(
+  profile: ProviderProfileSummary,
+): ModelSummary | null {
   const model = profile.model?.trim();
   if (!model) {
     return null;
@@ -1091,7 +1093,7 @@ function normalizeCodexProfileConfig(raw: unknown): CodexProfileConfig {
     .map(([name, profile]) =>
       normalizeCodexProfileSummary(name, profile, defaultProfile, modelProviders),
     )
-    .filter((profile): profile is CodexProfileSummary => profile !== null)
+    .filter((profile): profile is ProviderProfileSummary => profile !== null)
     .sort(compareCodexProfiles);
 
   return { defaultProfile, profiles, modelProvider, openaiBaseUrl, modelProviders };
@@ -1124,7 +1126,7 @@ function normalizeCodexProfileSummary(
   raw: unknown,
   defaultProfile: string | null,
   modelProviders: Map<string, ConfigModelProviderSummary>,
-): CodexProfileSummary | null {
+): ProviderProfileSummary | null {
   const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
   if (!typed || !name) {
     return null;
@@ -1160,7 +1162,10 @@ function normalizeCodexProfileSummary(
   };
 }
 
-function compareCodexProfiles(left: CodexProfileSummary, right: CodexProfileSummary): number {
+function compareCodexProfiles(
+  left: ProviderProfileSummary,
+  right: ProviderProfileSummary,
+): number {
   if (left.isDefault !== right.isDefault) {
     return left.isDefault ? -1 : 1;
   }
