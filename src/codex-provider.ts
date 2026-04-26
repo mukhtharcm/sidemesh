@@ -1,8 +1,20 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 
-import type { AgentProvider, AgentProviderEvents } from "./agent-provider.js";
+import {
+  type AgentPendingAction,
+  type AgentProvider,
+  type AgentProviderEvents,
+  type AgentSessionActivityDraft,
+} from "./agent-provider.js";
+import {
+  buildActivityFromThreadItem,
+  buildFileChangeChanges,
+  buildTurnDiffActivity,
+} from "./activity.js";
 import { CodexBridge } from "./codex-client.js";
+import type { SessionActivity } from "./types.js";
 
 export class CodexAgentProvider
   extends EventEmitter<AgentProviderEvents>
@@ -16,8 +28,12 @@ export class CodexAgentProvider
   public constructor(private readonly codexBin: string) {
     super();
     this.bridge = new CodexBridge(codexBin);
-    this.bridge.on("notification", (message) => this.emit("notification", message));
-    this.bridge.on("serverRequest", (message) => this.emit("serverRequest", message));
+    this.bridge.on("notification", (message) => {
+      this.emitCodexNotification(message.method, message.params);
+    });
+    this.bridge.on("serverRequest", (message) => {
+      this.emitCodexServerRequest(message.id, message.method, message.params);
+    });
     this.bridge.on("stderr", (line) => this.emit("stderr", line));
     this.bridge.on("exit", (code) => this.emit("exit", code));
   }
@@ -85,8 +101,16 @@ export class CodexAgentProvider
     return this.bridge.request("turn/interrupt", { threadId, turnId });
   }
 
-  public respondToServerRequest(id: number | string, result: unknown): void {
-    this.bridge.respond(id, result);
+  public respondToPendingAction(
+    action: AgentPendingAction,
+    decision: string | null,
+  ): boolean {
+    const result = buildCodexActionResponse(action, decision);
+    if (!result) {
+      return false;
+    }
+    this.bridge.respond(action.providerRequestId, result);
+    return true;
   }
 
   public readRemoteGitDiff(cwd: string): Promise<unknown> {
@@ -151,4 +175,404 @@ export class CodexAgentProvider
   public fsUnwatch(watchId: string): Promise<unknown> {
     return this.bridge.request("fs/unwatch", { watchId });
   }
+
+  private emitCodexNotification(method: string, params: unknown): void {
+    if (method === "fs/changed") {
+      const typed = params && typeof params === "object"
+        ? (params as Record<string, unknown>)
+        : {};
+      this.emit("liveEvent", {
+        type: "fs_changed",
+        watchId: asString(typed.watchId) || undefined,
+        changedPaths: Array.isArray(typed.changedPaths)
+          ? typed.changedPaths.map((entry) => String(entry))
+          : undefined,
+      });
+      return;
+    }
+
+    if (method === "skills/changed") {
+      this.emit("liveEvent", { type: "skills_changed" });
+      return;
+    }
+
+    const sessionId = extractSessionId(method, params);
+    if (!sessionId) {
+      return;
+    }
+
+    const typed = params && typeof params === "object"
+      ? (params as Record<string, unknown>)
+      : {};
+
+    if (method === "turn/started") {
+      const turn = typed.turn && typeof typed.turn === "object"
+        ? (typed.turn as Record<string, unknown>)
+        : null;
+      const turnId = asString(turn?.id);
+      if (turnId) {
+        this.emit("liveEvent", { type: "turn_started", sessionId, turnId });
+      }
+      return;
+    }
+
+    if (method === "item/agentMessage/delta") {
+      const delta = asString(typed.delta);
+      if (delta) {
+        this.emit("liveEvent", {
+          type: "assistant_delta",
+          sessionId,
+          delta,
+          turnId: asString(typed.turnId) || undefined,
+          itemId: asString(typed.itemId) || undefined,
+        });
+      }
+      return;
+    }
+
+    if (method === "item/started" || method === "item/completed") {
+      const item = typed.item && typeof typed.item === "object"
+        ? (typed.item as Record<string, unknown>)
+        : null;
+      const turnId = asString(typed.turnId);
+      if (!item) {
+        return;
+      }
+
+      const itemType = asString(item.type);
+      if (method === "item/completed" && itemType === "agentMessage") {
+        const message = buildCodexAssistantMessageDraft(item);
+        if (message) {
+          this.emit("liveEvent", {
+            type: "assistant_message_completed",
+            sessionId,
+            turnId: turnId || undefined,
+            message,
+          });
+        }
+        return;
+      }
+
+      const activity = buildActivityFromThreadItem(item as any, {
+        turnId,
+        createdAt: 0,
+        seq: 0,
+      });
+      const draft = activity ? toActivityDraft(activity) : null;
+      if (draft) {
+        this.emit("liveEvent", {
+          type: "activity_updated",
+          sessionId,
+          turnId: turnId || undefined,
+          activity: draft,
+        });
+      }
+      return;
+    }
+
+    if (method === "item/commandExecution/outputDelta") {
+      const delta = asString(typed.delta);
+      const activityId = asString(typed.itemId);
+      if (delta && activityId) {
+        this.emit("liveEvent", {
+          type: "activity_output_delta",
+          sessionId,
+          turnId: asString(typed.turnId) || undefined,
+          activityId,
+          delta,
+        });
+      }
+      return;
+    }
+
+    if (method === "item/commandExecution/terminalInteraction") {
+      const stdin = asString(typed.stdin);
+      const activityId = asString(typed.itemId);
+      if (stdin && activityId) {
+        this.emit("liveEvent", {
+          type: "activity_terminal_input",
+          sessionId,
+          turnId: asString(typed.turnId) || undefined,
+          activityId,
+          stdin,
+        });
+      }
+      return;
+    }
+
+    if (method === "item/fileChange/patchUpdated") {
+      const activityId = asString(typed.itemId);
+      if (activityId) {
+        this.emit("liveEvent", {
+          type: "activity_updated",
+          sessionId,
+          turnId: asString(typed.turnId) || undefined,
+          activity: {
+            id: activityId,
+            type: "file_change",
+            turnId: asString(typed.turnId),
+            status: "in_progress",
+            changes: buildFileChangeChanges(typed.changes),
+          },
+        });
+      }
+      return;
+    }
+
+    if (method === "turn/diff/updated") {
+      const turnId = asString(typed.turnId);
+      const diff = asString(typed.diff);
+      if (!turnId || !diff) {
+        return;
+      }
+      const activity = buildTurnDiffActivity(turnId, diff, 0, 0);
+      const draft = activity ? toActivityDraft(activity) : null;
+      if (draft) {
+        this.emit("liveEvent", {
+          type: "activity_updated",
+          sessionId,
+          turnId,
+          activity: draft,
+        });
+      }
+      return;
+    }
+
+    if (method === "turn/completed") {
+      const turn = typed.turn && typeof typed.turn === "object"
+        ? (typed.turn as Record<string, unknown>)
+        : null;
+      const turnId = asString(turn?.id);
+      if (turnId) {
+        this.emit("liveEvent", {
+          type: "turn_completed",
+          sessionId,
+          turnId,
+          status: asString(turn?.status) || "completed",
+        });
+      }
+    }
+  }
+
+  private emitCodexServerRequest(
+    id: number | string,
+    method: string,
+    params: unknown,
+  ): void {
+    if (
+      method !== "item/commandExecution/requestApproval" &&
+      method !== "item/fileChange/requestApproval" &&
+      method !== "item/permissions/requestApproval"
+    ) {
+      return;
+    }
+
+    const sessionId = extractSessionId(method, params);
+    if (!sessionId) {
+      return;
+    }
+
+    this.emit("liveEvent", {
+      type: "action_opened",
+      action: buildCodexPendingAction(method, params, id, sessionId),
+    });
+  }
+}
+
+function buildCodexAssistantMessageDraft(
+  item: Record<string, unknown>,
+): { id: string; text: string; phase?: "commentary" | "final_answer" } | null {
+  const id = asString(item.id);
+  const text = asString(item.text);
+  if (!id || !text) {
+    return null;
+  }
+
+  const phase = asString(item.phase);
+  return {
+    id,
+    text,
+    phase:
+      phase === "commentary" || phase === "final_answer"
+        ? phase
+        : undefined,
+  };
+}
+
+function toActivityDraft(activity: SessionActivity): AgentSessionActivityDraft {
+  const { createdAt: _createdAt, seq: _seq, ...draft } = activity;
+  return draft as AgentSessionActivityDraft;
+}
+
+function extractSessionId(method: string, params: unknown): string | null {
+  if (!params || typeof params !== "object") {
+    return null;
+  }
+  const typed = params as Record<string, any>;
+  if (typeof typed.threadId === "string") {
+    return typed.threadId;
+  }
+  if (method === "turn/started" && typeof typed.turn?.threadId === "string") {
+    return typed.turn.threadId;
+  }
+  if (method === "turn/completed" && typeof typed.threadId === "string") {
+    return typed.threadId;
+  }
+  return null;
+}
+
+function buildCodexPendingAction(
+  method: string,
+  params: unknown,
+  providerRequestId: number | string,
+  sessionId: string,
+): AgentPendingAction {
+  const typed = (params || {}) as Record<string, any>;
+  const requestedAt = Date.now();
+
+  if (method === "item/commandExecution/requestApproval") {
+    const command = asString(typed.command) || "Command approval";
+    return {
+      id: asString(typed.approvalId) || randomFallbackId(),
+      sessionId,
+      kind: "command",
+      title: "Command approval",
+      detail: command,
+      requestedAt,
+      canApprove: true,
+      canApproveForSession: true,
+      canDecline: true,
+      providerRequestId,
+      providerRequestKind: method,
+    };
+  }
+
+  if (method === "item/fileChange/requestApproval") {
+    return {
+      id: randomFallbackId(),
+      sessionId,
+      kind: "file_change",
+      title: "File change approval",
+      detail: asString(typed.reason) || "Codex wants to modify files.",
+      requestedAt,
+      canApprove: true,
+      canApproveForSession: true,
+      canDecline: true,
+      providerRequestId,
+      providerRequestKind: method,
+    };
+  }
+
+  return {
+    id: randomFallbackId(),
+    sessionId,
+    kind: "permissions",
+    title: "Permission request",
+    detail: formatPermissionRequestDetail(typed.reason, typed.permissions),
+    requestedAt,
+    canApprove: true,
+    canApproveForSession: true,
+    canDecline: true,
+    providerRequestId,
+    providerRequestKind: method,
+    providerPayload: typed.permissions,
+  };
+}
+
+function buildCodexActionResponse(
+  action: AgentPendingAction,
+  decision: string | null,
+): unknown | null {
+  if (!decision) {
+    return null;
+  }
+
+  if (
+    action.providerRequestKind === "item/commandExecution/requestApproval" ||
+    action.providerRequestKind === "item/fileChange/requestApproval"
+  ) {
+    if (decision === "accept" || decision === "acceptForSession" || decision === "decline" || decision === "cancel") {
+      return { decision };
+    }
+    return null;
+  }
+
+  if (action.providerRequestKind === "item/permissions/requestApproval") {
+    if (decision === "accept") {
+      return {
+        scope: "turn",
+        permissions: action.providerPayload || {},
+      };
+    }
+    if (decision === "acceptForSession") {
+      return {
+        scope: "session",
+        permissions: action.providerPayload || {},
+      };
+    }
+    if (decision === "decline" || decision === "cancel") {
+      return { scope: "turn", permissions: {} };
+    }
+  }
+
+  return null;
+}
+
+function formatPermissionRequestDetail(reason: unknown, permissions: unknown): string {
+  const parts = [asString(reason) || "Codex requested additional permissions."];
+  const summary = summarizePermissions(permissions);
+  if (summary) {
+    parts.push(summary);
+  }
+  return parts.join("\n\n");
+}
+
+function summarizePermissions(permissions: unknown): string | null {
+  if (!permissions || typeof permissions !== "object") {
+    return null;
+  }
+
+  const typed = permissions as Record<string, any>;
+  const lines: string[] = [];
+
+  const fileSystem = typed.fileSystem as Record<string, any> | undefined;
+  if (fileSystem) {
+    appendPermissionPaths(lines, "File read", fileSystem.read);
+    appendPermissionPaths(lines, "File write", fileSystem.write);
+  }
+
+  const network = typed.network as Record<string, any> | undefined;
+  if (network) {
+    if (typeof network.mode === "string") {
+      lines.push(`Network: ${network.mode}`);
+    } else if (network.enabled === true) {
+      lines.push("Network: enabled");
+    }
+  }
+
+  if (lines.length === 0) {
+    const fallback = JSON.stringify(permissions, null, 2);
+    return fallback === "{}" ? null : fallback;
+  }
+
+  return lines.join("\n");
+}
+
+function appendPermissionPaths(lines: string[], label: string, paths: unknown): void {
+  if (!Array.isArray(paths) || paths.length === 0) {
+    return;
+  }
+  const normalized = paths.filter((path): path is string => typeof path === "string" && path.length > 0);
+  if (normalized.length === 0) {
+    return;
+  }
+  lines.push(`${label}: ${normalized.join(", ")}`);
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function randomFallbackId(): string {
+  return randomUUID();
 }
