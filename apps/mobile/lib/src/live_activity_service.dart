@@ -36,6 +36,11 @@ class LiveActivityService {
   DateTime? _lastOwnerPersistedAt;
   bool _sentEmptyPrimaryEnd = false;
 
+  Future<bool> isSupportedForCurrentDevice() async {
+    if (!_isEligiblePlatform) return false;
+    return _isSupported();
+  }
+
   Future<void> syncPrimarySession({
     required HostProfile host,
     required SessionSummary session,
