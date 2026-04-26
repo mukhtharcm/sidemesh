@@ -62,7 +62,7 @@ class _AppearanceSheet extends StatelessWidget {
     final crossAxisCount = compactThemeGrid
         ? width >= 760
               ? 4
-              : width >= 560
+              : width >= 360
               ? 3
               : 2
         : width >= 640
@@ -276,7 +276,11 @@ class _SwatchGrid extends StatelessWidget {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       childAspectRatio: compact
-          ? (crossAxisCount >= 4 ? 1.48 : 1.24)
+          ? (crossAxisCount >= 4
+                ? 1.7
+                : crossAxisCount == 3
+                ? 1.55
+                : 1.38)
           : (crossAxisCount == 3 ? 1.15 : 1.05),
       mainAxisSpacing: compact ? 10 : 12,
       crossAxisSpacing: compact ? 10 : 12,
@@ -337,7 +341,74 @@ class _SwatchCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
+                if (compact)
+                  SizedBox(
+                    height: 44,
+                    child: Stack(
+                      children: [
+                        Container(color: palette.canvas),
+                        Positioned(
+                          left: 8,
+                          right: 8,
+                          top: 7,
+                          bottom: 7,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: palette.surface,
+                              borderRadius: BorderRadius.circular(7),
+                              border: Border.all(color: palette.border),
+                            ),
+                            padding: const EdgeInsets.all(6),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    _dot(palette.accent, compact: true),
+                                    const SizedBox(width: 3),
+                                    _dot(palette.info, compact: true),
+                                    const SizedBox(width: 3),
+                                    _dot(palette.success, compact: true),
+                                  ],
+                                ),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Container(
+                                    height: 8,
+                                    width: 24,
+                                    decoration: BoxDecoration(
+                                      color: palette.userBubble,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (selected)
+                          Positioned(
+                            right: 4,
+                            top: 4,
+                            child: Container(
+                              padding: const EdgeInsets.all(2.5),
+                              decoration: BoxDecoration(
+                                color: frameColors.accent,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.check_rounded,
+                                size: 10,
+                                color: frameColors.accentOn,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  )
+                else
+                  Expanded(
                   child: Stack(
                     children: [
                       // Canvas background
@@ -393,23 +464,6 @@ class _SwatchCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                      if (selected)
-                        Positioned(
-                          right: compact ? 5 : 6,
-                          top: compact ? 5 : 6,
-                          child: Container(
-                            padding: EdgeInsets.all(compact ? 2.5 : 3),
-                            decoration: BoxDecoration(
-                              color: frameColors.accent,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              Icons.check_rounded,
-                              size: 12,
-                              color: frameColors.accentOn,
-                            ),
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -430,7 +484,7 @@ class _SwatchCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           fontWeight: FontWeight.w700,
-                          fontSize: compact ? 12.5 : null,
+                          fontSize: compact ? 11.8 : null,
                           color: selected
                               ? frameColors.accent
                               : frameColors.textPrimary,
@@ -459,9 +513,9 @@ class _SwatchCard extends StatelessWidget {
     );
   }
 
-  Widget _dot(Color color) => Container(
-    width: 6,
-    height: 6,
+  Widget _dot(Color color, {bool compact = false}) => Container(
+    width: compact ? 5 : 6,
+    height: compact ? 5 : 6,
     decoration: BoxDecoration(color: color, shape: BoxShape.circle),
   );
 }
