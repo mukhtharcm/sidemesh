@@ -3,12 +3,16 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 
 import {
+  type AgentCreateSessionRequest,
+  type AgentCreateSessionResult,
   type AgentPendingAction,
   type AgentProvider,
   type AgentProviderCapabilities,
   type AgentProviderEvents,
   type AgentSessionLogOptions,
   type AgentSessionActivityDraft,
+  type AgentSubmitInputRequest,
+  type AgentSubmitInputResult,
 } from "./agent-provider.js";
 import {
   buildActivityFromThreadItem,
@@ -79,10 +83,6 @@ export class CodexAgentProvider
     return this.bridge.request("thread/loaded/list", {});
   }
 
-  public startSessionThread(params: Record<string, unknown>): Promise<unknown> {
-    return this.bridge.request("thread/start", params);
-  }
-
   public resumeSessionThread(
     threadId: string,
     params: Record<string, unknown> = {},
@@ -137,12 +137,65 @@ export class CodexAgentProvider
     return loadSessionRuntime(thread.id, thread.path, this.runtimeHome);
   }
 
-  public startTurn(params: Record<string, unknown>): Promise<unknown> {
-    return this.bridge.request("turn/start", params);
+  public async createSession(
+    request: AgentCreateSessionRequest,
+  ): Promise<AgentCreateSessionResult> {
+    const started = (await this.bridge.request(
+      "thread/start",
+      buildCodexThreadStartParams(request),
+    )) as Record<string, unknown>;
+    const thread = started.thread as ThreadRecord;
+    const runtime = buildRuntimeFromThreadStart(started);
+
+    let activeTurnId: string | null = null;
+    if (request.input.length > 0) {
+      const turn = (await this.bridge.request("turn/start", {
+        threadId: thread.id,
+        input: request.input,
+      })) as Record<string, unknown>;
+      activeTurnId = asString(
+        (turn.turn as Record<string, unknown> | undefined)?.id,
+      );
+    }
+
+    return {
+      thread,
+      activeTurnId,
+      runtime,
+    };
   }
 
-  public steerTurn(params: Record<string, unknown>): Promise<unknown> {
-    return this.bridge.request("turn/steer", params);
+  public async submitInput(
+    request: AgentSubmitInputRequest,
+  ): Promise<AgentSubmitInputResult> {
+    if (request.activeTurnId) {
+      const steer = (await this.bridge.request("turn/steer", {
+        threadId: request.sessionId,
+        input: request.input,
+        expectedTurnId: request.activeTurnId,
+      })) as Record<string, unknown>;
+      return {
+        mode: "steer",
+        turnId: asString(steer.turnId) || request.activeTurnId,
+      };
+    }
+
+    if (!(await this.isSessionThreadLoaded(request.sessionId))) {
+      await this.resumeSessionThread(request.sessionId, {
+        persistExtendedHistory: true,
+      });
+    }
+
+    const turn = (await this.bridge.request(
+      "turn/start",
+      buildCodexTurnStartParams(request),
+    )) as Record<string, unknown>;
+    return {
+      mode: "turn",
+      turnId: asString(
+        (turn.turn as Record<string, unknown> | undefined)?.id,
+      ),
+    };
   }
 
   public interruptTurn(threadId: string, turnId: string): Promise<unknown> {
@@ -222,6 +275,12 @@ export class CodexAgentProvider
 
   public fsUnwatch(watchId: string): Promise<unknown> {
     return this.bridge.request("fs/unwatch", { watchId });
+  }
+
+  private async isSessionThreadLoaded(sessionId: string): Promise<boolean> {
+    const result = (await this.listLoadedSessionIds()) as { data?: unknown[] };
+    const data = Array.isArray(result.data) ? result.data : [];
+    return data.includes(sessionId);
   }
 
   private emitCodexNotification(method: string, params: unknown): void {
@@ -447,6 +506,221 @@ function buildCodexAssistantMessageDraft(
   };
 }
 
+function buildCodexThreadStartParams(
+  request: AgentCreateSessionRequest,
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    cwd: request.cwd,
+    experimentalRawEvents: false,
+    persistExtendedHistory: true,
+  };
+  const overrides = request.overrides;
+  if (overrides.model) {
+    params.model = overrides.model;
+  }
+  if (overrides.fastMode !== null) {
+    params.serviceTier = overrides.fastMode ? "fast" : null;
+  }
+  const approvalPolicy = parseCodexApprovalPolicy(overrides.approvalPolicy);
+  if (approvalPolicy) {
+    params.approvalPolicy = approvalPolicy;
+  }
+  const sandboxMode = parseCodexSandboxMode(overrides.sandboxMode);
+  if (sandboxMode) {
+    params.sandbox = sandboxMode;
+  }
+  const config = buildCodexThreadConfigOverrides(overrides);
+  if (config) {
+    params.config = config;
+  }
+  return params;
+}
+
+function buildCodexTurnStartParams(
+  request: AgentSubmitInputRequest,
+): Record<string, unknown> {
+  const overrides = request.overrides;
+  const params: Record<string, unknown> = {
+    threadId: request.sessionId,
+    input: request.input,
+  };
+  const approvalPolicy = parseCodexApprovalPolicy(overrides.approvalPolicy);
+  if (approvalPolicy) {
+    params.approvalPolicy = approvalPolicy;
+  }
+  if (overrides.model) {
+    params.model = overrides.model;
+  }
+  const reasoningEffort = parseCodexReasoningEffort(overrides.reasoningEffort);
+  if (reasoningEffort) {
+    params.effort = reasoningEffort;
+  }
+  if (overrides.fastMode !== null) {
+    params.serviceTier = overrides.fastMode ? "fast" : null;
+  }
+  const sandboxMode = parseCodexSandboxMode(overrides.sandboxMode);
+  if (sandboxMode || overrides.networkAccess !== null) {
+    const sandboxPolicy = buildCodexSandboxPolicyV2(
+      sandboxMode,
+      overrides.networkAccess,
+    );
+    if (sandboxPolicy) {
+      params.sandboxPolicy = sandboxPolicy;
+    }
+  }
+  return params;
+}
+
+function buildRuntimeFromThreadStart(raw: unknown): SessionRuntimeSummary | null {
+  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  if (!typed) {
+    return null;
+  }
+
+  const runtime = {
+    model: asString(typed.model) ?? undefined,
+    modelProvider:
+      asString(typed.modelProvider) ??
+      asString(typed.model_provider) ??
+      undefined,
+    serviceTier:
+      asString(typed.serviceTier) ??
+      asString(typed.service_tier) ??
+      undefined,
+    reasoningEffort:
+      asString(typed.reasoningEffort) ??
+      asString(typed.reasoning_effort) ??
+      undefined,
+    approvalPolicy:
+      asString(typed.approvalPolicy) ??
+      asString(typed.approval_policy) ??
+      undefined,
+    sandboxMode:
+      asString((typed.sandbox as Record<string, unknown> | undefined)?.type) ??
+      asString(
+        (typed.permissionProfile as Record<string, unknown> | undefined)
+          ?.sandboxMode,
+      ) ??
+      undefined,
+    networkAccess:
+      asOptionalBoolean(
+        (typed.sandbox as Record<string, unknown> | undefined)?.networkAccess,
+      ) ??
+      asOptionalBoolean(
+        (typed.sandbox as Record<string, unknown> | undefined)?.network_access,
+      ) ??
+      undefined,
+  } satisfies SessionRuntimeSummary;
+
+  if (
+    !runtime.model &&
+    !runtime.modelProvider &&
+    !runtime.serviceTier &&
+    !runtime.reasoningEffort &&
+    !runtime.approvalPolicy &&
+    !runtime.sandboxMode &&
+    runtime.networkAccess === undefined
+  ) {
+    return null;
+  }
+
+  return runtime;
+}
+
+function buildCodexThreadConfigOverrides(
+  overrides: AgentCreateSessionRequest["overrides"],
+): Record<string, unknown> | null {
+  const config: Record<string, unknown> = {};
+  if (overrides.profile) {
+    config.profile = overrides.profile;
+  }
+  const webSearch = parseCodexWebSearchMode(overrides.webSearch);
+  if (webSearch) {
+    config.web_search = webSearch;
+  }
+  const reasoningEffort = parseCodexReasoningEffort(overrides.reasoningEffort);
+  if (reasoningEffort) {
+    config.model_reasoning_effort = reasoningEffort;
+  }
+  return Object.keys(config).length > 0 ? config : null;
+}
+
+function buildCodexSandboxPolicyV2(
+  mode: CodexSandboxModeValue | null,
+  networkAccess: boolean | null,
+): Record<string, unknown> | null {
+  if (!mode) {
+    return null;
+  }
+  switch (mode) {
+    case "danger-full-access":
+      return { type: "dangerFullAccess" };
+    case "read-only":
+      return {
+        type: "readOnly",
+        networkAccess: networkAccess ?? false,
+      };
+    case "workspace-write":
+      return {
+        type: "workspaceWrite",
+        networkAccess: networkAccess ?? false,
+      };
+  }
+}
+
+type CodexApprovalPolicyValue = "untrusted" | "on-failure" | "on-request" | "never";
+type CodexSandboxModeValue = "read-only" | "workspace-write" | "danger-full-access";
+type CodexWebSearchModeValue = "disabled" | "cached" | "live";
+type CodexReasoningEffortValue = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+function parseCodexApprovalPolicy(value: string | null): CodexApprovalPolicyValue | null {
+  switch (value) {
+    case "untrusted":
+    case "on-failure":
+    case "on-request":
+    case "never":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function parseCodexSandboxMode(value: string | null): CodexSandboxModeValue | null {
+  switch (value) {
+    case "read-only":
+    case "workspace-write":
+    case "danger-full-access":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function parseCodexWebSearchMode(value: string | null): CodexWebSearchModeValue | null {
+  switch (value) {
+    case "disabled":
+    case "cached":
+    case "live":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function parseCodexReasoningEffort(value: string | null): CodexReasoningEffortValue | null {
+  switch (value) {
+    case "none":
+    case "minimal":
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+      return value;
+    default:
+      return null;
+  }
+}
+
 function toActivityDraft(activity: SessionActivity): AgentSessionActivityDraft {
   const { createdAt: _createdAt, seq: _seq, ...draft } = activity;
   return draft as AgentSessionActivityDraft;
@@ -665,6 +939,10 @@ function appendPermissionPaths(lines: string[], label: string, paths: unknown): 
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function asOptionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function randomFallbackId(): string {

@@ -44,6 +44,61 @@ export interface AgentSessionLogOptions {
   activityLimit?: number | null;
 }
 
+export type AgentSessionInputItem =
+  | {
+      type: "text";
+      text: string;
+      text_elements: unknown[];
+    }
+  | {
+      type: "image";
+      url: string;
+    }
+  | {
+      type: "localImage";
+      path: string;
+    }
+  | {
+      type: "skill";
+      name: string;
+      path: string;
+    };
+
+export interface AgentSessionOverrides {
+  model: string | null;
+  reasoningEffort: string | null;
+  fastMode: boolean | null;
+  approvalPolicy: string | null;
+  sandboxMode: string | null;
+  networkAccess: boolean | null;
+  webSearch: string | null;
+  profile: string | null;
+}
+
+export interface AgentCreateSessionRequest {
+  cwd: string;
+  input: AgentSessionInputItem[];
+  overrides: AgentSessionOverrides;
+}
+
+export interface AgentCreateSessionResult {
+  thread: ThreadRecord;
+  activeTurnId: string | null;
+  runtime: SessionRuntimeSummary | null;
+}
+
+export interface AgentSubmitInputRequest {
+  sessionId: string;
+  input: AgentSessionInputItem[];
+  activeTurnId: string | null;
+  overrides: AgentSessionOverrides;
+}
+
+export interface AgentSubmitInputResult {
+  mode: "steer" | "turn";
+  turnId: string | null;
+}
+
 export interface AgentProviderCapabilities {
   sessions: {
     create: boolean;
@@ -159,7 +214,6 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   listSessionThreads(params: Record<string, unknown>): Promise<unknown>;
   readSessionThread(threadId: string, includeTurns: boolean): Promise<unknown>;
   listLoadedSessionIds(): Promise<unknown>;
-  startSessionThread(params: Record<string, unknown>): Promise<unknown>;
   resumeSessionThread(threadId: string, params?: Record<string, unknown>): Promise<unknown>;
   setSessionName(threadId: string, name: string): Promise<unknown>;
   archiveSession(threadId: string): Promise<unknown>;
@@ -170,9 +224,9 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
     options?: AgentSessionLogOptions,
   ): Promise<SessionLogSnapshot>;
   readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null>;
+  createSession(request: AgentCreateSessionRequest): Promise<AgentCreateSessionResult>;
+  submitInput(request: AgentSubmitInputRequest): Promise<AgentSubmitInputResult>;
 
-  startTurn(params: Record<string, unknown>): Promise<unknown>;
-  steerTurn(params: Record<string, unknown>): Promise<unknown>;
   interruptTurn(threadId: string, turnId: string): Promise<unknown>;
 
   respondToPendingAction(action: AgentPendingAction, decision: string | null): boolean;

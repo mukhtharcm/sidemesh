@@ -13,6 +13,8 @@ import {
   type AgentPendingAction,
   type AgentProvider,
   type AgentSessionActivityDraft,
+  type AgentSessionInputItem,
+  type AgentSessionOverrides,
 } from "./agent-provider.js";
 import type {
   ActiveTurnState,
@@ -115,41 +117,6 @@ interface SessionInputDedupeEntry {
   promise?: Promise<SessionInputReceipt>;
   receipt?: SessionInputReceipt;
 }
-
-type ApprovalPolicyValue = "untrusted" | "on-failure" | "on-request" | "never";
-type SandboxModeValue = "read-only" | "workspace-write" | "danger-full-access";
-type WebSearchModeValue = "disabled" | "cached" | "live";
-type ReasoningEffortValue = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
-
-interface CreateSessionOverrides {
-  model: string | null;
-  reasoningEffort: ReasoningEffortValue | null;
-  fastMode: boolean | null;
-  approvalPolicy: ApprovalPolicyValue | null;
-  sandboxMode: SandboxModeValue | null;
-  webSearch: WebSearchModeValue | null;
-  profile: string | null;
-}
-
-type SessionInputItem =
-  | {
-      type: "text";
-      text: string;
-      text_elements: unknown[];
-    }
-  | {
-      type: "image";
-      url: string;
-    }
-  | {
-      type: "localImage";
-      path: string;
-    }
-  | {
-      type: "skill";
-      name: string;
-      path: string;
-    };
 
 export async function startServer(config: NodeConfig): Promise<void> {
   const provider = createAgentProvider(config);
@@ -652,49 +619,22 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return;
     }
 
-    const startedParams: Record<string, unknown> = {
-      cwd,
-      experimentalRawEvents: false,
-      persistExtendedHistory: true,
-    };
-
-    if (overrides.model) {
-      startedParams.model = overrides.model;
-    }
-    if (overrides.fastMode !== null) {
-      startedParams.serviceTier = overrides.fastMode ? "fast" : null;
-    }
-    if (overrides.approvalPolicy) {
-      startedParams.approvalPolicy = overrides.approvalPolicy;
-    }
-    if (overrides.sandboxMode) {
-      startedParams.sandbox = overrides.sandboxMode;
-    }
-    const configOverrides = buildThreadConfigOverrides(overrides);
-    if (configOverrides) {
-      startedParams.config = configOverrides;
-    }
-
-    const started = (await provider.startSessionThread(startedParams)) as any;
-    const thread = started.thread as ThreadRecord;
-    const startedRuntime = buildRuntimeFromThreadStart(started);
-
-    let turnId: string | null = null;
     const resolvedInput = input.length > 0 ? input : buildLegacyTextInput(prompt);
-    if (resolvedInput.length > 0) {
-      const turn = (await provider.startTurn({
-        threadId: thread.id,
-        input: resolvedInput,
-      })) as any;
-      turnId = asString(turn.turn?.id) || null;
-      if (turnId) {
-        activeTurns.set(thread.id, { turnId, startedAt: Date.now() });
-      }
+    const started = await provider.createSession({
+      cwd,
+      input: resolvedInput,
+      overrides,
+    });
+    if (started.activeTurnId) {
+      activeTurns.set(started.thread.id, {
+        turnId: started.activeTurnId,
+        startedAt: Date.now(),
+      });
     }
 
     response.status(201).json({
-      session: mapSession(thread, startedRuntime),
-      activeTurnId: turnId,
+      session: mapSession(started.thread, started.runtime),
+      activeTurnId: started.activeTurnId,
     });
   }));
 
@@ -748,70 +688,30 @@ export async function startServer(config: NodeConfig): Promise<void> {
         allocSeq(sessionId),
       );
       const state = await loadRunState(provider, sessionId, activeTurns);
-      if (state.turnId) {
-        const steer = (await provider.steerTurn({
-          threadId: sessionId,
-          input: resolvedInput,
-          expectedTurnId: state.turnId,
-        })) as any;
-        broadcastLive(sessionId, {
-          type: "user_message_submitted",
-          sessionId,
-          turnId: state.turnId,
-          messageItem: submittedMessage,
-        });
-        return {
-          mode: "steer",
-          turnId: asString(steer.turnId),
-          messageId: submittedMessage.id,
-        };
-      }
-
-      if (!(await isThreadLoaded(provider, sessionId))) {
-        await provider.resumeSessionThread(sessionId, {
-          persistExtendedHistory: true,
-        });
-      }
-      const turnStartParams: Record<string, unknown> = {
-        threadId: sessionId,
+      const submitted = await provider.submitInput({
+        sessionId,
         input: resolvedInput,
-      };
-      if (turnOverrides.approvalPolicy) {
-        turnStartParams.approvalPolicy = turnOverrides.approvalPolicy;
-      }
-      if (turnOverrides.model) {
-        turnStartParams.model = turnOverrides.model;
-      }
-      if (turnOverrides.reasoningEffort) {
-        turnStartParams.effort = turnOverrides.reasoningEffort;
-      }
-      if (turnOverrides.fastMode !== null) {
-        turnStartParams.serviceTier = turnOverrides.fastMode ? "fast" : null;
-      }
-      // NOTE: turn/start expects a tagged `sandboxPolicy` object (v2 protocol),
-      // NOT the simple kebab string that thread/start accepts as `sandbox`.
-      // Sending `sandbox: "workspace-write"` here silently no-ops and leaves the
-      // session's existing sandbox in place.
-      if (turnOverrides.sandboxMode || turnOverrides.networkAccess !== null) {
-        turnStartParams.sandboxPolicy = buildSandboxPolicyV2(
-          turnOverrides.sandboxMode,
-          turnOverrides.networkAccess,
-        );
-      }
-      const turn = (await provider.startTurn(turnStartParams)) as any;
-      const turnId = asString(turn.turn?.id);
-      if (turnId) {
-        activeTurns.set(sessionId, { turnId, startedAt: Date.now() });
+        activeTurnId: state.turnId,
+        overrides: turnOverrides,
+      });
+      if (submitted.turnId) {
+        const previousStartedAt = state.turnId
+          ? activeTurns.get(sessionId)?.startedAt
+          : undefined;
+        activeTurns.set(sessionId, {
+          turnId: submitted.turnId,
+          startedAt: previousStartedAt ?? Date.now(),
+        });
       }
       broadcastLive(sessionId, {
         type: "user_message_submitted",
         sessionId,
-        turnId: turnId || undefined,
+        turnId: submitted.turnId || undefined,
         messageItem: submittedMessage,
       });
       return {
-        mode: "turn",
-        turnId,
+        mode: submitted.mode,
+        turnId: submitted.turnId,
         messageId: submittedMessage.id,
       };
     };
@@ -1353,12 +1253,30 @@ function sanitizeTitle(raw: string): string {
 }
 
 function hashSessionInputSignature(
-  input: SessionInputItem[],
-  overrides: TurnOverrides,
+  input: AgentSessionInputItem[],
+  overrides: AgentSessionOverrides,
 ): string {
   return createHash("sha256")
-    .update(JSON.stringify({ input, overrides }))
+    .update(
+      JSON.stringify({
+        input,
+        overrides: buildTurnInputSignatureOverrides(overrides),
+      }),
+    )
     .digest("hex");
+}
+
+function buildTurnInputSignatureOverrides(
+  overrides: AgentSessionOverrides,
+): Record<string, unknown> {
+  return {
+    model: overrides.model,
+    reasoningEffort: overrides.reasoningEffort,
+    fastMode: overrides.fastMode,
+    approvalPolicy: overrides.approvalPolicy,
+    sandboxMode: overrides.sandboxMode,
+    networkAccess: overrides.networkAccess,
+  };
 }
 
 function isValidClientMessageId(value: string): boolean {
@@ -1398,7 +1316,7 @@ function asInteger(value: unknown): number | null {
 }
 
 function buildSubmittedUserMessage(
-  input: SessionInputItem[],
+  input: AgentSessionInputItem[],
   clientMessageId: string | null,
   seq: number,
 ): SessionMessage {
@@ -1569,19 +1487,19 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function buildLegacyTextInput(text: string | null): SessionInputItem[] {
+function buildLegacyTextInput(text: string | null): AgentSessionInputItem[] {
   if (!text) {
     return [];
   }
   return [{ type: "text", text, text_elements: [] }];
 }
 
-function parseInputItems(value: unknown): SessionInputItem[] {
+function parseInputItems(value: unknown): AgentSessionInputItem[] {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  const items: SessionInputItem[] = [];
+  const items: AgentSessionInputItem[] = [];
   for (const item of value) {
     if (!item || typeof item !== "object") {
       continue;
@@ -1634,15 +1552,15 @@ function parseInputItems(value: unknown): SessionInputItem[] {
   return items;
 }
 
-function buildSubmittedUserMessageText(input: SessionInputItem[]): string {
+function buildSubmittedUserMessageText(input: AgentSessionInputItem[]): string {
   return input
-    .filter((item): item is Extract<SessionInputItem, { type: "text" }> => item.type === "text")
+    .filter((item): item is Extract<AgentSessionInputItem, { type: "text" }> => item.type === "text")
     .map((item) => item.text.trim())
     .filter(Boolean)
     .join("\n\n");
 }
 
-function buildSubmittedUserMessageAttachments(input: SessionInputItem[]): SessionMessageAttachment[] {
+function buildSubmittedUserMessageAttachments(input: AgentSessionInputItem[]): SessionMessageAttachment[] {
   const attachments: SessionMessageAttachment[] = [];
   for (const item of input) {
     if (item.type === "image") {
@@ -2270,93 +2188,31 @@ function normalizeSkillErrorInfo(raw: unknown): SkillErrorInfo | null {
   return { path, message };
 }
 
-function buildRuntimeFromThreadStart(raw: unknown): SessionRuntimeSummary | null {
-  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-  if (!typed) {
-    return null;
-  }
-
-  const runtime = {
-    model: asString(typed.model) ?? undefined,
-    modelProvider:
-      asString(typed.modelProvider) ??
-      asString(typed.model_provider) ??
-      undefined,
-    serviceTier:
-      asString(typed.serviceTier) ??
-      asString(typed.service_tier) ??
-      undefined,
-    reasoningEffort:
-      asString(typed.reasoningEffort) ??
-      asString(typed.reasoning_effort) ??
-      undefined,
-    approvalPolicy:
-      asString(typed.approvalPolicy) ??
-      asString(typed.approval_policy) ??
-      undefined,
-    sandboxMode:
-      asString((typed.sandbox as Record<string, unknown> | undefined)?.type) ??
-      asString(
-        (typed.permissionProfile as Record<string, unknown> | undefined)
-          ?.sandboxMode,
-      ) ??
-      undefined,
-    networkAccess:
-      parseOptionalBool(
-        (typed.sandbox as Record<string, unknown> | undefined)?.networkAccess,
-      ) ??
-      parseOptionalBool(
-        (typed.sandbox as Record<string, unknown> | undefined)?.network_access,
-      ) ??
-      undefined,
-  } satisfies SessionRuntimeSummary;
-
-  if (
-    !runtime.model &&
-    !runtime.modelProvider &&
-    !runtime.serviceTier &&
-    !runtime.reasoningEffort &&
-    !runtime.approvalPolicy &&
-    !runtime.sandboxMode &&
-    runtime.networkAccess === undefined
-  ) {
-    return null;
-  }
-
-  return runtime;
-}
-
-function parseCreateSessionOverrides(value: unknown): CreateSessionOverrides {
+function parseCreateSessionOverrides(value: unknown): AgentSessionOverrides {
   const typed = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return {
     model: asString(typed.model),
-    reasoningEffort: parseReasoningEffort(typed.reasoningEffort),
+    reasoningEffort: asString(typed.reasoningEffort),
     fastMode: parseOptionalBool(typed.fastMode),
-    approvalPolicy: parseApprovalPolicy(typed.approvalPolicy),
-    sandboxMode: parseSandboxMode(typed.sandboxMode),
-    webSearch: parseWebSearchMode(typed.webSearch),
+    approvalPolicy: asString(typed.approvalPolicy),
+    sandboxMode: asString(typed.sandboxMode),
+    networkAccess: parseOptionalBool(typed.networkAccess),
+    webSearch: asString(typed.webSearch),
     profile: asString(typed.profile),
   };
 }
 
-interface TurnOverrides {
-  model: string | null;
-  reasoningEffort: ReasoningEffortValue | null;
-  fastMode: boolean | null;
-  approvalPolicy: ApprovalPolicyValue | null;
-  sandboxMode: SandboxModeValue | null;
-  networkAccess: boolean | null;
-}
-
-function parseTurnOverrides(value: unknown): TurnOverrides {
+function parseTurnOverrides(value: unknown): AgentSessionOverrides {
   const typed = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return {
     model: asString(typed.model),
-    reasoningEffort: parseReasoningEffort(typed.reasoningEffort),
+    reasoningEffort: asString(typed.reasoningEffort),
     fastMode: parseOptionalBool(typed.fastMode),
-    approvalPolicy: parseApprovalPolicy(typed.approvalPolicy),
-    sandboxMode: parseSandboxMode(typed.sandbox ?? typed.sandboxMode),
+    approvalPolicy: asString(typed.approvalPolicy),
+    sandboxMode: asString(typed.sandbox ?? typed.sandboxMode),
     networkAccess: parseOptionalBool(typed.networkAccess),
+    webSearch: null,
+    profile: null,
   };
 }
 
@@ -2380,105 +2236,4 @@ function parseQueryBool(value: unknown): boolean {
     default:
       return false;
   }
-}
-
-/**
- * Build the v2 `SandboxPolicy` tagged object that `turn/start` expects.
- * The wire format uses camelCase variant tags (`workspaceWrite`, etc.) and
- * typed fields like `networkAccess`. This is deliberately different from
- * `thread/start`, which takes a simpler `SandboxMode` string enum.
- */
-function buildSandboxPolicyV2(
-  mode: SandboxModeValue | null,
-  networkAccess: boolean | null,
-): Record<string, unknown> | null {
-  // If only networkAccess was provided without a mode, we can't build a policy
-  // (we don't know which variant to pick). Skip instead of guessing.
-  if (!mode) {
-    return null;
-  }
-  switch (mode) {
-    case "danger-full-access":
-      return { type: "dangerFullAccess" };
-    case "read-only":
-      return {
-        type: "readOnly",
-        networkAccess: networkAccess ?? false,
-      };
-    case "workspace-write":
-      return {
-        type: "workspaceWrite",
-        networkAccess: networkAccess ?? false,
-      };
-    default:
-      return null;
-  }
-}
-
-function parseApprovalPolicy(value: unknown): ApprovalPolicyValue | null {
-  const policy = asString(value);
-  switch (policy) {
-    case "untrusted":
-    case "on-failure":
-    case "on-request":
-    case "never":
-      return policy;
-    default:
-      return null;
-  }
-}
-
-function parseSandboxMode(value: unknown): SandboxModeValue | null {
-  const mode = asString(value);
-  switch (mode) {
-    case "read-only":
-    case "workspace-write":
-    case "danger-full-access":
-      return mode;
-    default:
-      return null;
-  }
-}
-
-function parseWebSearchMode(value: unknown): WebSearchModeValue | null {
-  const mode = asString(value);
-  switch (mode) {
-    case "disabled":
-    case "cached":
-    case "live":
-      return mode;
-    default:
-      return null;
-  }
-}
-
-function parseReasoningEffort(value: unknown): ReasoningEffortValue | null {
-  const effort = asString(value);
-  switch (effort) {
-    case "none":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-      return effort;
-    default:
-      return null;
-  }
-}
-
-function buildThreadConfigOverrides(
-  overrides: CreateSessionOverrides,
-): Record<string, unknown> | null {
-  const config: Record<string, unknown> = {};
-  if (overrides.profile) {
-    config.profile = overrides.profile;
-  }
-  if (overrides.webSearch) {
-    config.web_search = overrides.webSearch;
-  }
-  if (overrides.reasoningEffort) {
-    config.model_reasoning_effort = overrides.reasoningEffort;
-  }
-  return Object.keys(config).length > 0 ? config : null;
 }
