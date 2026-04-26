@@ -144,7 +144,7 @@ class _BannerBody extends StatelessWidget {
               ),
               const SizedBox(height: 3),
               Text(
-                'Get notified when a Codex session is waiting for permission.',
+                'Get notified when an agent session is waiting for permission.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colors.textSecondary,
                   height: 1.25,
@@ -216,7 +216,7 @@ class _CompactBannerBody extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Notify me when Codex needs approval.',
+          'Notify me when an agent needs approval.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             color: colors.textSecondary,
             height: 1.25,

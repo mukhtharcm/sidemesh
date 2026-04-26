@@ -79,7 +79,7 @@ class ApiClient {
     return _decodeList(response).map(ModelCatalogEntry.fromJson).toList();
   }
 
-  Future<CodexProfileCatalog> fetchProfiles(
+  Future<ProviderProfileCatalog> fetchProfiles(
     HostProfile host, {
     String? cwd,
   }) async {
@@ -92,7 +92,7 @@ class ApiClient {
       timeout: _standardReadTimeout,
       operation: 'load profiles',
     );
-    return CodexProfileCatalog.fromJson(_decodeObject(response));
+    return ProviderProfileCatalog.fromJson(_decodeObject(response));
   }
 
   Future<List<SessionSummary>> fetchSessions(
