@@ -5,8 +5,11 @@ import type {
   FileChangeActivity,
   ImageGenerationActivity,
   PendingAction,
+  SessionLogSnapshot,
   SessionActivity,
   SessionMessage,
+  SessionRuntimeSummary,
+  ThreadRecord,
   TurnDiffActivity,
   WebSearchActivity,
 } from "./types.js";
@@ -34,6 +37,11 @@ export interface AgentPendingAction extends PendingAction {
   providerRequestId: number | string;
   providerRequestKind: string;
   providerPayload?: unknown;
+}
+
+export interface AgentSessionLogOptions {
+  messageLimit?: number | null;
+  activityLimit?: number | null;
 }
 
 export type AgentProviderLiveEvent =
@@ -97,7 +105,6 @@ export type AgentProviderLiveEvent =
 export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   readonly kind: string;
   readonly displayName: string;
-  readonly runtimeHome: string | null;
 
   start(): Promise<void>;
   getVersion(): Promise<string>;
@@ -110,6 +117,12 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   setSessionName(threadId: string, name: string): Promise<unknown>;
   archiveSession(threadId: string): Promise<unknown>;
   unarchiveSession(threadId: string): Promise<unknown>;
+  listRecentUnindexedSessionThreads(limit: number): Promise<ThreadRecord[]>;
+  readSessionLog(
+    thread: ThreadRecord,
+    options?: AgentSessionLogOptions,
+  ): Promise<SessionLogSnapshot>;
+  readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null>;
 
   startTurn(params: Record<string, unknown>): Promise<unknown>;
   steerTurn(params: Record<string, unknown>): Promise<unknown>;

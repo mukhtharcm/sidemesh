@@ -6,6 +6,7 @@ import {
   type AgentPendingAction,
   type AgentProvider,
   type AgentProviderEvents,
+  type AgentSessionLogOptions,
   type AgentSessionActivityDraft,
 } from "./agent-provider.js";
 import {
@@ -14,7 +15,17 @@ import {
   buildTurnDiffActivity,
 } from "./activity.js";
 import { CodexBridge } from "./codex-client.js";
-import type { SessionActivity } from "./types.js";
+import {
+  listRecentRolloutThreads,
+  loadRolloutLog,
+  loadSessionRuntime,
+} from "./codex-history.js";
+import type {
+  SessionActivity,
+  SessionLogSnapshot,
+  SessionRuntimeSummary,
+  ThreadRecord,
+} from "./types.js";
 
 export class CodexAgentProvider
   extends EventEmitter<AgentProviderEvents>
@@ -87,6 +98,41 @@ export class CodexAgentProvider
 
   public unarchiveSession(threadId: string): Promise<unknown> {
     return this.bridge.request("thread/unarchive", { threadId });
+  }
+
+  public async listRecentUnindexedSessionThreads(limit: number): Promise<ThreadRecord[]> {
+    const summaries = await listRecentRolloutThreads(this.runtimeHome, limit);
+    const threads: ThreadRecord[] = [];
+
+    for (const summary of summaries) {
+      try {
+        const result = (await this.readSessionThread(summary.id, false)) as {
+          thread?: ThreadRecord;
+        };
+        threads.push(result.thread ?? summary);
+      } catch {
+        threads.push(summary);
+      }
+    }
+
+    return threads;
+  }
+
+  public readSessionLog(
+    thread: ThreadRecord,
+    options: AgentSessionLogOptions = {},
+  ): Promise<SessionLogSnapshot> {
+    return loadRolloutLog(
+      thread.id,
+      thread.path,
+      this.runtimeHome,
+      options.messageLimit ?? null,
+      options.activityLimit ?? null,
+    );
+  }
+
+  public readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null> {
+    return loadSessionRuntime(thread.id, thread.path, this.runtimeHome);
   }
 
   public startTurn(params: Record<string, unknown>): Promise<unknown> {

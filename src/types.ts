@@ -348,7 +348,7 @@ export interface PendingActionRecord extends PendingAction {
   requestedPermissions?: unknown;
 }
 
-export interface RolloutLog {
+export interface SessionLogSnapshot {
   messages: SessionMessage[];
   activities: SessionActivity[];
   runtime: SessionRuntimeSummary | null;
