@@ -12,6 +12,10 @@ List<String> buildRuntimeHighlights(SessionRuntimeSummary? runtime) {
   if ((runtime.model ?? '').isNotEmpty) {
     labels.add(runtime.model!);
   }
+  if ((runtime.modelProvider ?? '').isNotEmpty &&
+      runtime.modelProvider != 'openai') {
+    labels.add(runtime.modelProvider!);
+  }
   if ((runtime.serviceTier ?? '').isNotEmpty) {
     labels.add(
       runtime.serviceTier == 'fast' ? 'fast mode' : runtime.serviceTier!,

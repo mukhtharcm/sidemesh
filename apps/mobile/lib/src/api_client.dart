@@ -59,9 +59,40 @@ class ApiClient {
     return SkillCatalog.fromJson(_decodeObject(response));
   }
 
-  Future<List<ModelCatalogEntry>> fetchModels(HostProfile host) async {
-    final response = await _get(host, '/api/models', operation: 'load models');
+  Future<List<ModelCatalogEntry>> fetchModels(
+    HostProfile host, {
+    String? cwd,
+    String? profile,
+    String? provider,
+  }) async {
+    final queryParameters = <String, String>{
+      if ((cwd ?? '').isNotEmpty) 'cwd': cwd!,
+      if ((profile ?? '').isNotEmpty) 'profile': profile!,
+      if ((provider ?? '').isNotEmpty) 'provider': provider!,
+    };
+    final response = await _get(
+      host,
+      '/api/models',
+      queryParameters: queryParameters.isEmpty ? null : queryParameters,
+      operation: 'load models',
+    );
     return _decodeList(response).map(ModelCatalogEntry.fromJson).toList();
+  }
+
+  Future<CodexProfileCatalog> fetchProfiles(
+    HostProfile host, {
+    String? cwd,
+  }) async {
+    final response = await _get(
+      host,
+      '/api/profiles',
+      queryParameters: (cwd ?? '').isEmpty
+          ? null
+          : <String, String>{'cwd': cwd!},
+      timeout: _standardReadTimeout,
+      operation: 'load profiles',
+    );
+    return CodexProfileCatalog.fromJson(_decodeObject(response));
   }
 
   Future<List<SessionSummary>> fetchSessions(
