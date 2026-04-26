@@ -53,7 +53,6 @@ import {
   type StoredSessionInputDedupeEntry,
 } from "./session-input-dedupe-store.js";
 
-const DEFAULT_SOURCES = ["cli", "vscode", "exec", "appServer"];
 const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
 const SESSION_INPUT_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1103,14 +1102,10 @@ async function listSessions(
   limitOverride: number | null = null,
 ): Promise<SessionSummary[]> {
   const limit = Math.max(1, Math.min(limitOverride ?? 100, 100));
-  const result = (await provider.listSessionThreads({
+  const threads = await provider.listSessionThreads({
     limit,
-    sortKey: "updated_at",
-    sortDirection: "desc",
-    sourceKinds: DEFAULT_SOURCES,
     archived: false,
-  })) as any;
-  const threads = Array.isArray(result.data) ? (result.data as ThreadRecord[]) : [];
+  });
   const mergedThreads = await mergeRecentUnindexedThreads(provider, threads, limit);
   return Promise.all(
     mergedThreads.map(async (thread) =>
@@ -1206,8 +1201,7 @@ async function readSession(
   sessionId: string,
   includeTurns: boolean,
 ): Promise<ThreadRecord> {
-  const result = (await provider.readSessionThread(sessionId, includeTurns)) as any;
-  return result.thread as ThreadRecord;
+  return provider.readSessionThread(sessionId, includeTurns);
 }
 
 async function loadRunState(
@@ -1246,8 +1240,7 @@ async function loadRunState(
 }
 
 async function isThreadLoaded(provider: AgentProvider, sessionId: string): Promise<boolean> {
-  const result = (await provider.listLoadedSessionIds()) as any;
-  const data = Array.isArray(result.data) ? result.data : [];
+  const data = await provider.listLoadedSessionIds();
   return data.includes(sessionId);
 }
 
