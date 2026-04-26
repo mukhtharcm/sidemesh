@@ -64,6 +64,7 @@ void main() {
       settingsStore: store,
       binding: binding,
     );
+    addTearDown(controller.stop);
     await controller.start();
 
     await _pumpRecentPane(
