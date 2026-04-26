@@ -12,6 +12,11 @@ import {
   type AgentSessionListOptions,
   type AgentSessionResumeOptions,
   type AgentRemoteGitDiff,
+  type AgentFsDirectoryEntry,
+  type AgentFsDirectoryListing,
+  type AgentFsFile,
+  type AgentFsMetadata,
+  type AgentFsWatchResult,
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
   type AgentPendingAction,
@@ -309,16 +314,38 @@ export class CodexAgentProvider
     return this.bridge.request("config/read", params);
   }
 
-  public fsReadDirectory(path: string): Promise<unknown> {
-    return this.bridge.request("fs/readDirectory", { path });
+  public async fsReadDirectory(path: string): Promise<AgentFsDirectoryListing> {
+    const result = (await this.bridge.request("fs/readDirectory", { path })) as {
+      entries?: unknown[];
+    };
+    return {
+      entries: Array.isArray(result.entries)
+        ? result.entries
+            .map(normalizeCodexFsDirectoryEntry)
+            .filter((entry): entry is AgentFsDirectoryListing["entries"][number] => entry !== null)
+        : [],
+    };
   }
 
-  public fsGetMetadata(path: string): Promise<unknown> {
-    return this.bridge.request("fs/getMetadata", { path });
+  public async fsGetMetadata(path: string): Promise<AgentFsMetadata> {
+    const result = (await this.bridge.request("fs/getMetadata", { path })) as Record<
+      string,
+      unknown
+    >;
+    return {
+      isDirectory: result.isDirectory === true,
+      isFile: result.isFile === true,
+      isSymlink: result.isSymlink === true,
+      createdAtMs: asNumber(result.createdAtMs) ?? 0,
+      modifiedAtMs: asNumber(result.modifiedAtMs) ?? 0,
+    };
   }
 
-  public fsReadFile(path: string): Promise<unknown> {
-    return this.bridge.request("fs/readFile", { path });
+  public async fsReadFile(path: string): Promise<AgentFsFile> {
+    const result = (await this.bridge.request("fs/readFile", { path })) as {
+      dataBase64?: unknown;
+    };
+    return { dataBase64: asString(result.dataBase64) ?? "" };
   }
 
   public fsWriteFile(path: string, dataBase64: string): Promise<unknown> {
@@ -344,8 +371,15 @@ export class CodexAgentProvider
     return this.bridge.request("fs/copy", params);
   }
 
-  public fsWatch(path: string): Promise<unknown> {
-    return this.bridge.request("fs/watch", { path });
+  public async fsWatch(path: string): Promise<AgentFsWatchResult> {
+    const result = (await this.bridge.request("fs/watch", { path })) as {
+      watchId?: unknown;
+    };
+    const watchId = asString(result.watchId);
+    if (!watchId) {
+      throw new Error("fs/watch did not return a watchId");
+    }
+    return { watchId };
   }
 
   public fsUnwatch(watchId: string): Promise<unknown> {
@@ -577,6 +611,19 @@ function buildCodexAssistantMessageDraft(
       phase === "commentary" || phase === "final_answer"
         ? phase
         : undefined,
+  };
+}
+
+function normalizeCodexFsDirectoryEntry(raw: unknown): AgentFsDirectoryEntry | null {
+  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  const fileName = asString(typed?.fileName);
+  if (!fileName) {
+    return null;
+  }
+  return {
+    fileName,
+    isDirectory: typed?.isDirectory === true,
+    isFile: typed?.isFile === true,
   };
 }
 
@@ -1644,6 +1691,10 @@ function appendPermissionPaths(lines: string[], label: string, paths: unknown): 
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function asOptionalBoolean(value: unknown): boolean | undefined {
