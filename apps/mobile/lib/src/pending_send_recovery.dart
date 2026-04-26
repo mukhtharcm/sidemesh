@@ -34,9 +34,10 @@ class PendingSendAnalysis {
   bool get canEnableHost => host != null && !host!.enabled;
 
   bool get canFixHost =>
-      host != null &&
-      (issue == PendingSendIssueKind.unauthorized ||
-          issue == PendingSendIssueKind.hostChanged);
+      host != null && issue == PendingSendIssueKind.unauthorized;
+
+  bool get canUseCurrentHost =>
+      host != null && issue == PendingSendIssueKind.hostChanged;
 
   bool get canRetryNow =>
       issue != PendingSendIssueKind.hostDisabled &&
