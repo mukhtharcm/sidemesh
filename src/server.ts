@@ -19,8 +19,6 @@ import {
 import type {
   ActiveTurnState,
   ApprovalLiveEvent,
-  CodexProfileCatalog,
-  CodexProfileSummary,
   GitInfoSummary,
   LiveEvent,
   SessionActivity,
@@ -94,19 +92,6 @@ interface SessionInputReceipt {
   mode: "steer" | "turn";
   turnId: string | null;
   messageId: string;
-}
-
-interface ConfigModelProviderSummary {
-  id: string;
-  name: string | null;
-  baseUrl: string | null;
-  envKey: string | null;
-}
-
-interface CodexProfileConfig extends CodexProfileCatalog {
-  modelProvider: string | null;
-  openaiBaseUrl: string | null;
-  modelProviders: Map<string, ConfigModelProviderSummary>;
 }
 
 interface SessionInputDedupeEntry {
@@ -610,9 +595,15 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.get("/api/profiles", asyncRoute(async (request, response) => {
+    if (!provider.capabilities.configuration.profiles) {
+      response.status(501).json({
+        error: `${provider.displayName} does not support profile listing`,
+      });
+      return;
+    }
     const query = request.query as Record<string, unknown>;
     const cwd = asString(query.cwd) || null;
-    response.json(await listProfiles(provider, cwd));
+    response.json(await provider.listProfiles({ cwd }));
   }));
 
   app.post("/api/sessions/create", asyncRoute(async (request, response) => {
@@ -1688,127 +1679,6 @@ function normalizeSkillCatalogEntry(
       ? typed.errors.map(normalizeSkillErrorInfo).filter((item): item is SkillErrorInfo => item !== null)
       : [],
   };
-}
-
-async function listProfiles(
-  provider: AgentProvider,
-  cwd: string | null,
-): Promise<CodexProfileCatalog> {
-  const profileConfig = await readProfileConfig(provider, cwd);
-  return {
-    defaultProfile: profileConfig.defaultProfile,
-    profiles: profileConfig.profiles,
-  };
-}
-
-async function readProfileConfig(
-  provider: AgentProvider,
-  cwd: string | null,
-): Promise<CodexProfileConfig> {
-  const payload = (await provider.readConfig({
-    includeLayers: false,
-    cwd: cwd ?? undefined,
-  })) as { config?: unknown };
-  return normalizeProfileConfig(payload.config);
-}
-
-function normalizeProfileConfig(raw: unknown): CodexProfileConfig {
-  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const defaultProfile = asString(typed.profile);
-  const modelProvider = readStringKey(typed, "modelProvider", "model_provider");
-  const openaiBaseUrl = readStringKey(typed, "openaiBaseUrl", "openai_base_url");
-  const modelProviders = normalizeModelProviders(typed.modelProviders ?? typed.model_providers);
-  const rawProfiles =
-    typed.profiles && typeof typed.profiles === "object"
-      ? (typed.profiles as Record<string, unknown>)
-      : {};
-
-  const profiles = Object.entries(rawProfiles)
-    .map(([name, profile]) =>
-      normalizeProfileSummary(name, profile, defaultProfile, modelProviders),
-    )
-    .filter((profile): profile is CodexProfileSummary => profile !== null)
-    .sort(compareProfiles);
-
-  return { defaultProfile, profiles, modelProvider, openaiBaseUrl, modelProviders };
-}
-
-function normalizeModelProviders(raw: unknown): Map<string, ConfigModelProviderSummary> {
-  const providers = new Map<string, ConfigModelProviderSummary>();
-  if (!raw || typeof raw !== "object") {
-    return providers;
-  }
-
-  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
-    const typed = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-    if (!id || !typed) {
-      continue;
-    }
-    providers.set(id, {
-      id,
-      name: readStringKey(typed, "name"),
-      baseUrl: readStringKey(typed, "baseUrl", "base_url"),
-      envKey: readStringKey(typed, "envKey", "env_key"),
-    });
-  }
-
-  return providers;
-}
-
-function normalizeProfileSummary(
-  name: string,
-  raw: unknown,
-  defaultProfile: string | null,
-  modelProviders: Map<string, ConfigModelProviderSummary>,
-): CodexProfileSummary | null {
-  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-  if (!typed || !name) {
-    return null;
-  }
-
-  const modelProvider = readStringKey(typed, "modelProvider", "model_provider");
-  const provider = modelProvider ? modelProviders.get(modelProvider) : null;
-
-  return {
-    name,
-    isDefault: name === defaultProfile,
-    model: readStringKey(typed, "model"),
-    modelProvider,
-    modelProviderName: provider?.name ?? null,
-    modelProviderBaseUrl:
-      provider?.baseUrl ?? readStringKey(typed, "openaiBaseUrl", "openai_base_url"),
-    approvalPolicy: readStringKey(typed, "approvalPolicy", "approval_policy"),
-    sandboxMode: readStringKey(typed, "sandboxMode", "sandbox_mode"),
-    serviceTier: readStringKey(typed, "serviceTier", "service_tier"),
-    reasoningEffort: readStringKey(
-      typed,
-      "modelReasoningEffort",
-      "model_reasoning_effort",
-    ),
-    reasoningSummary: readStringKey(
-      typed,
-      "modelReasoningSummary",
-      "model_reasoning_summary",
-    ),
-    verbosity: readStringKey(typed, "modelVerbosity", "model_verbosity"),
-    webSearch: readStringKey(typed, "webSearch", "web_search"),
-    personality: readStringKey(typed, "personality"),
-  };
-}
-
-function compareProfiles(left: CodexProfileSummary, right: CodexProfileSummary): number {
-  if (left.isDefault !== right.isDefault) {
-    return left.isDefault ? -1 : 1;
-  }
-  return left.name.toLowerCase().localeCompare(right.name.toLowerCase());
-}
-
-function readStringKey(
-  typed: Record<string, unknown>,
-  camelKey: string,
-  snakeKey?: string,
-): string | null {
-  return asString(typed[camelKey]) ?? (snakeKey ? asString(typed[snakeKey]) : null);
 }
 
 function normalizeSkillSummary(
