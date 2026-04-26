@@ -20,6 +20,13 @@ interface AgentProviderDefinition {
   summarizeConfig(config: AgentProviderConfig): AgentProviderConfigSummary;
 }
 
+export interface AgentProviderDefinitionSummary {
+  kind: string;
+  displayName: string;
+  defaultCommand: string;
+  commandEnvironmentVariables: string[];
+}
+
 export const DEFAULT_AGENT_PROVIDER_KIND: AgentProviderKind = "codex";
 const CODEX_DEFAULT_COMMAND = "codex";
 
@@ -60,6 +67,15 @@ const AGENT_PROVIDER_DEFINITIONS = [CODEX_PROVIDER_DEFINITION] as const;
 
 export function listAgentProviderDefinitions(): readonly AgentProviderDefinition[] {
   return AGENT_PROVIDER_DEFINITIONS;
+}
+
+export function listAgentProviderDefinitionSummaries(): AgentProviderDefinitionSummary[] {
+  return AGENT_PROVIDER_DEFINITIONS.map((definition) => ({
+    kind: definition.kind,
+    displayName: definition.displayName,
+    defaultCommand: definition.defaultCommand,
+    commandEnvironmentVariables: [...definition.commandEnvironmentVariables],
+  }));
 }
 
 export function supportedAgentProviderKinds(): AgentProviderKind[] {
