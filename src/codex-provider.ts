@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 
 import {
   type AgentModelListOptions,
+  type AgentProfileListOptions,
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
   type AgentPendingAction,
@@ -27,6 +28,7 @@ import {
   loadSessionRuntime,
 } from "./codex-history.js";
 import type {
+  CodexProfileCatalog,
   CodexProfileSummary,
   ModelSummary,
   SessionActivity,
@@ -248,6 +250,16 @@ export class CodexAgentProvider
 
   public listModels(options: AgentModelListOptions): Promise<ModelSummary[]> {
     return listCodexModels(this.bridge, options);
+  }
+
+  public async listProfiles(
+    options: AgentProfileListOptions,
+  ): Promise<CodexProfileCatalog> {
+    const profileConfig = await readCodexProfileConfig(this.bridge, options.cwd);
+    return {
+      defaultProfile: profileConfig.defaultProfile,
+      profiles: profileConfig.profiles,
+    };
   }
 
   public readConfig(params: Record<string, unknown>): Promise<unknown> {
