@@ -8,6 +8,7 @@ import cors from "cors";
 import express, { type Request, type Response, type NextFunction } from "express";
 import { WebSocketServer, type WebSocket } from "ws";
 
+import type { AgentProvider } from "./agent-provider.js";
 import type {
   ActiveTurnState,
   ApprovalLiveEvent,
@@ -42,7 +43,7 @@ import {
   mergeActivity,
   mergeSessionActivities,
 } from "./activity.js";
-import { CodexBridge } from "./codex-client.js";
+import { CodexAgentProvider } from "./codex-provider.js";
 import { buildGitDiff, readGitDiff, readGitStatus, sanitizeGitUrl } from "./git.js";
 import { loadRolloutLog, loadSessionRuntime } from "./history.js";
 import { buildSessionResources } from "./resources.js";
@@ -153,8 +154,8 @@ type SessionInputItem =
     };
 
 export async function startServer(config: NodeConfig): Promise<void> {
-  const bridge = new CodexBridge(config.codexBin);
-  await bridge.start();
+  const provider = new CodexAgentProvider(config.codexBin);
+  await provider.start();
 
   const app = express();
   const server = createServer(app);
@@ -236,13 +237,13 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
   }
 
-  bridge.on("stderr", (line) => {
+  provider.on("stderr", (line) => {
     process.stderr.write(line);
   });
 
-  const fsWatchRegistry = new FsWatchRegistry(bridge);
+  const fsWatchRegistry = new FsWatchRegistry(provider);
 
-  bridge.on("notification", ({ method, params }) => {
+  provider.on("notification", ({ method, params }) => {
     if (method === "fs/changed") {
       fsWatchRegistry.deliver(params as { watchId?: string; changedPaths?: string[] });
       return;
@@ -447,7 +448,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
   });
 
-  bridge.on("serverRequest", ({ id, method, params }) => {
+  provider.on("serverRequest", ({ id, method, params }) => {
     if (
       method !== "item/commandExecution/requestApproval" &&
       method !== "item/fileChange/requestApproval" &&
@@ -474,14 +475,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     });
   });
 
-  try {
-    const version = await import("node:child_process").then(({ execFileSync }) =>
-      execFileSync(config.codexBin, ["--version"], { encoding: "utf8" }).trim(),
-    );
-    codexVersion = version;
-  } catch {
-    codexVersion = "unknown";
-  }
+  codexVersion = await provider.getVersion();
 
   app.use(cors());
   // Image attachments are sent as data URLs, so message payloads can be
@@ -506,6 +500,8 @@ export async function startServer(config: NodeConfig): Promise<void> {
       hostname: hostname(),
       platform: platform(),
       codexVersion,
+      provider: provider.kind,
+      providerName: provider.displayName,
       startedAt: process.uptime(),
       tokenSource: config.tokenSource,
     });
@@ -513,23 +509,23 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   app.get("/api/sessions", asyncRoute(async (_request, response) => {
     const requestedLimit = asInteger((_request.query as Record<string, unknown>)?.limit);
-    const sessions = await listSessions(bridge, runtimeCache, requestedLimit);
+    const sessions = await listSessions(provider, runtimeCache, requestedLimit);
     response.json(sessions);
   }));
 
   app.get("/api/workspaces", asyncRoute(async (_request, response) => {
-    const sessions = await listSessions(bridge, runtimeCache);
+    const sessions = await listSessions(provider, runtimeCache);
     response.json(buildWorkspaces(sessions));
   }));
 
   registerFsRoutes(app, {
-    bridge,
-    listSessions: () => listSessions(bridge, runtimeCache),
+    provider,
+    listSessions: () => listSessions(provider, runtimeCache),
     watchRegistry: fsWatchRegistry,
   });
 
   app.get("/api/actions", asyncRoute(async (_request, response) => {
-    response.json(await listPendingActions(bridge, pendingActions));
+    response.json(await listPendingActions(provider, pendingActions));
   }));
 
   app.get("/api/sessions/:sessionId/log", asyncRoute(async (request, response) => {
@@ -541,7 +537,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const cached = logCache.get(cacheKey);
 
     if (cached) {
-      const session = await readSession(bridge, sessionId, false);
+      const session = await readSession(provider, sessionId, false);
       if (cached.threadUpdatedAt === session.updatedAt) {
         ensureSeqCursor(sessionId, cached.nextSeq);
         runtimeCache.set(session.id, {
@@ -562,11 +558,11 @@ export async function startServer(config: NodeConfig): Promise<void> {
       }
     }
 
-    const session = await readSession(bridge, sessionId, false);
+    const session = await readSession(provider, sessionId, false);
     const log = await loadRolloutLog(
       sessionId,
       session.path,
-      bridge.codexHome,
+      provider.runtimeHome,
       messageLimit,
       activityLimit,
     );
@@ -611,11 +607,11 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const query = request.query as Record<string, unknown>;
     const since = asInteger(query.since) ?? 0;
 
-    const session = await readSession(bridge, sessionId, false);
+    const session = await readSession(provider, sessionId, false);
     const log = await loadRolloutLog(
       sessionId,
       session.path,
-      bridge.codexHome,
+      provider.runtimeHome,
     );
     ensureSeqCursor(sessionId, log.nextSeq);
     const activities = mergeSessionActivities(
@@ -644,12 +640,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   app.get("/api/sessions/:sessionId/resources", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
-    response.json(await readSessionResources(bridge, sessionId, liveActivities));
+    response.json(await readSessionResources(provider, sessionId, liveActivities));
   }));
 
   app.get("/api/sessions/:sessionId/status", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
-    const state = await loadRunState(bridge, sessionId, activeTurns);
+    const state = await loadRunState(provider, sessionId, activeTurns);
     response.json({
       sessionId,
       isRunning: Boolean(state.turnId),
@@ -660,7 +656,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   app.get("/api/sessions/:sessionId/git", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
-    const session = await readSession(bridge, sessionId, false);
+    const session = await readSession(provider, sessionId, false);
     response.json(await readGitStatus(session.cwd, mapGitInfo(session.gitInfo)));
   }));
 
@@ -672,11 +668,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return;
     }
 
-    const session = await readSession(bridge, sessionId, false);
+    const session = await readSession(provider, sessionId, false);
     if (kind === "remote") {
-      const result = (await bridge.request("gitDiffToRemote", {
-        cwd: session.cwd,
-      })) as Record<string, unknown>;
+      const result = (await provider.readRemoteGitDiff(session.cwd)) as Record<string, unknown>;
       response.json(buildGitDiff("remote", asString(result.diff) ?? "", normalizeGitSha(result.sha)));
       return;
     }
@@ -694,7 +688,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
     const forceReload = parseQueryBool(query.forceReload);
     const workspaceSkillRoots = await findWorkspaceSkillRoots(cwd);
-    const payload = (await bridge.request("skills/list", {
+    const payload = (await provider.listSkills({
       cwds: [cwd],
       forceReload: forceReload || workspaceSkillRoots.length > 0,
       perCwdExtraUserRoots:
@@ -722,7 +716,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return;
     }
 
-    const result = await bridge.request("skills/config/write", {
+    const result = await provider.writeSkillConfig({
       path: path ?? undefined,
       name: name ?? undefined,
       enabled,
@@ -734,14 +728,14 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const query = request.query as Record<string, unknown>;
     const cwd = asString(query.cwd) || null;
     const profile = asString(query.profile) || null;
-    const provider = asString(query.provider) || null;
-    response.json(await listModels(bridge, cwd, { profile, provider }));
+    const modelProvider = asString(query.provider) || null;
+    response.json(await listModels(provider, cwd, { profile, provider: modelProvider }));
   }));
 
   app.get("/api/profiles", asyncRoute(async (request, response) => {
     const query = request.query as Record<string, unknown>;
     const cwd = asString(query.cwd) || null;
-    response.json(await listProfiles(bridge, cwd));
+    response.json(await listProfiles(provider, cwd));
   }));
 
   app.post("/api/sessions/create", asyncRoute(async (request, response) => {
@@ -777,14 +771,14 @@ export async function startServer(config: NodeConfig): Promise<void> {
       startedParams.config = configOverrides;
     }
 
-    const started = (await bridge.request("thread/start", startedParams)) as any;
+    const started = (await provider.startSessionThread(startedParams)) as any;
     const thread = started.thread as ThreadRecord;
     const startedRuntime = buildRuntimeFromThreadStart(started);
 
     let turnId: string | null = null;
     const resolvedInput = input.length > 0 ? input : buildLegacyTextInput(prompt);
     if (resolvedInput.length > 0) {
-      const turn = (await bridge.request("turn/start", {
+      const turn = (await provider.startTurn({
         threadId: thread.id,
         input: resolvedInput,
       })) as any;
@@ -849,9 +843,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
         clientMessageId,
         allocSeq(sessionId),
       );
-      const state = await loadRunState(bridge, sessionId, activeTurns);
+      const state = await loadRunState(provider, sessionId, activeTurns);
       if (state.turnId) {
-        const steer = (await bridge.request("turn/steer", {
+        const steer = (await provider.steerTurn({
           threadId: sessionId,
           input: resolvedInput,
           expectedTurnId: state.turnId,
@@ -869,9 +863,8 @@ export async function startServer(config: NodeConfig): Promise<void> {
         };
       }
 
-      if (!(await isThreadLoaded(bridge, sessionId))) {
-        await bridge.request("thread/resume", {
-          threadId: sessionId,
+      if (!(await isThreadLoaded(provider, sessionId))) {
+        await provider.resumeSessionThread(sessionId, {
           persistExtendedHistory: true,
         });
       }
@@ -901,7 +894,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
           turnOverrides.networkAccess,
         );
       }
-      const turn = (await bridge.request("turn/start", turnStartParams)) as any;
+      const turn = (await provider.startTurn(turnStartParams)) as any;
       const turnId = asString(turn.turn?.id);
       if (turnId) {
         activeTurns.set(sessionId, { turnId, startedAt: Date.now() });
@@ -962,15 +955,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   app.post("/api/sessions/:sessionId/stop", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
-    const state = await loadRunState(bridge, sessionId, activeTurns);
+    const state = await loadRunState(provider, sessionId, activeTurns);
     if (!state.turnId) {
       response.json({ stopped: false });
       return;
     }
-    await bridge.request("turn/interrupt", {
-      threadId: sessionId,
-      turnId: state.turnId,
-    });
+    await provider.interruptTurn(sessionId, state.turnId);
     activeTurns.delete(sessionId);
     response.json({ stopped: true, turnId: state.turnId });
   }));
@@ -982,23 +972,19 @@ export async function startServer(config: NodeConfig): Promise<void> {
       response.status(400).json({ error: "name is required" });
       return;
     }
-    if (!(await isThreadLoaded(bridge, sessionId))) {
-      await bridge.request("thread/resume", {
-        threadId: sessionId,
+    if (!(await isThreadLoaded(provider, sessionId))) {
+      await provider.resumeSessionThread(sessionId, {
         persistExtendedHistory: true,
       });
     }
-    await bridge.request("thread/name/set", {
-      threadId: sessionId,
-      name,
-    });
-    const thread = await readSession(bridge, sessionId, false);
+    await provider.setSessionName(sessionId, name);
+    const thread = await readSession(provider, sessionId, false);
     response.json({ session: mapSession(thread) });
   }));
 
   app.post("/api/sessions/:sessionId/archive", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
-    await bridge.request("thread/archive", { threadId: sessionId });
+    await provider.archiveSession(sessionId);
     activeTurns.delete(sessionId);
     liveActivities.delete(sessionId);
     clearSessionLogCache(logCache, sessionId);
@@ -1008,7 +994,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   app.post("/api/sessions/:sessionId/unarchive", asyncRoute(async (request, response) => {
     const sessionId = pathParam(request.params.sessionId);
-    await bridge.request("thread/unarchive", { threadId: sessionId });
+    await provider.unarchiveSession(sessionId);
     response.json({ unarchived: true });
   }));
 
@@ -1027,7 +1013,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return;
     }
 
-    bridge.respond(action.jsonRpcId, result);
+    provider.respondToServerRequest(action.jsonRpcId, result);
     pendingActions.delete(actionId);
     broadcastLive(action.sessionId, {
       type: "action_resolved",
@@ -1064,8 +1050,8 @@ export async function startServer(config: NodeConfig): Promise<void> {
       wsServer.handleUpgrade(request, socket, head, (ws) => {
         try { ws.send(JSON.stringify({ type: "hello" })); } catch { /* noop */ }
         attachFsLiveSocket(ws, fsWatchRegistry, {
-          bridge,
-          listSessions: () => listSessions(bridge, runtimeCache),
+          provider,
+          listSessions: () => listSessions(provider, runtimeCache),
         });
       });
       return;
@@ -1075,7 +1061,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       wsServer.handleUpgrade(request, socket, head, (ws) => {
         approvalSockets.add(ws);
         sendEvent(ws, { type: "hello" });
-        void listPendingActions(bridge, pendingActions)
+        void listPendingActions(provider, pendingActions)
           .then((actions) => {
             sendEvent(ws, { type: "snapshot", actions });
           })
@@ -1163,12 +1149,12 @@ function authenticate(
 }
 
 async function listSessions(
-  bridge: CodexBridge,
+  provider: AgentProvider,
   runtimeCache: Map<string, SessionRuntimeCacheEntry>,
   limitOverride: number | null = null,
 ): Promise<SessionSummary[]> {
   const limit = Math.max(1, Math.min(limitOverride ?? 100, 100));
-  const result = (await bridge.request("thread/list", {
+  const result = (await provider.listSessionThreads({
     limit,
     sortKey: "updated_at",
     sortDirection: "desc",
@@ -1176,19 +1162,19 @@ async function listSessions(
     archived: false,
   })) as any;
   const threads = Array.isArray(result.data) ? (result.data as ThreadRecord[]) : [];
-  const mergedThreads = await mergeRecentUnindexedThreads(bridge, threads, limit);
+  const mergedThreads = await mergeRecentUnindexedThreads(provider, threads, limit);
   return Promise.all(
     mergedThreads.map(async (thread) =>
       mapSession(
         thread,
-        await loadCachedSessionRuntime(bridge, thread, runtimeCache),
+        await loadCachedSessionRuntime(provider, thread, runtimeCache),
       ),
     ),
   );
 }
 
 async function mergeRecentUnindexedThreads(
-  bridge: CodexBridge,
+  provider: AgentProvider,
   indexedThreads: ThreadRecord[],
   limit: number,
 ): Promise<ThreadRecord[]> {
@@ -1200,7 +1186,7 @@ async function mergeRecentUnindexedThreads(
       continue;
     }
     try {
-      const thread = await readSession(bridge, id, false);
+      const thread = await readSession(provider, id, false);
       threadsById.set(id, thread);
     } catch {
       // Rollout scans are a best-effort fallback for sessions missing from Codex's index.
@@ -1277,7 +1263,7 @@ function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
 }
 
 async function listPendingActions(
-  bridge: CodexBridge,
+  provider: AgentProvider,
   pendingActions: Map<string, PendingActionRecord>,
 ): Promise<PendingAction[]> {
   const actions = [...pendingActions.values()].sort((left, right) => right.requestedAt - left.requestedAt);
@@ -1291,7 +1277,7 @@ async function listPendingActions(
 
       let sessionPromise = sessionsById.get(action.sessionId);
       if (!sessionPromise) {
-        sessionPromise = readSession(bridge, action.sessionId, false).catch(() => null);
+        sessionPromise = readSession(provider, action.sessionId, false).catch(() => null);
         sessionsById.set(action.sessionId, sessionPromise);
       }
 
@@ -1311,19 +1297,16 @@ async function listPendingActions(
 }
 
 async function readSession(
-  bridge: CodexBridge,
+  provider: AgentProvider,
   sessionId: string,
   includeTurns: boolean,
 ): Promise<ThreadRecord> {
-  const result = (await bridge.request("thread/read", {
-    threadId: sessionId,
-    includeTurns,
-  })) as any;
+  const result = (await provider.readSessionThread(sessionId, includeTurns)) as any;
   return result.thread as ThreadRecord;
 }
 
 async function loadRunState(
-  bridge: CodexBridge,
+  provider: AgentProvider,
   sessionId: string,
   activeTurns: Map<string, ActiveTurnState>,
 ): Promise<{ turnId: string | null }> {
@@ -1334,7 +1317,7 @@ async function loadRunState(
 
   let session: ThreadRecord;
   try {
-    session = await readSession(bridge, sessionId, true);
+    session = await readSession(provider, sessionId, true);
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("includeTurns is unavailable before first user message")) {
@@ -1357,8 +1340,8 @@ async function loadRunState(
   return { turnId: null };
 }
 
-async function isThreadLoaded(bridge: CodexBridge, sessionId: string): Promise<boolean> {
-  const result = (await bridge.request("thread/loaded/list", {})) as any;
+async function isThreadLoaded(provider: AgentProvider, sessionId: string): Promise<boolean> {
+  const result = (await provider.listLoadedSessionIds()) as any;
   const data = Array.isArray(result.data) ? result.data : [];
   return data.includes(sessionId);
 }
@@ -1622,7 +1605,7 @@ function buildCompletedAssistantMessage(
 }
 
 async function loadCachedSessionRuntime(
-  bridge: CodexBridge,
+  provider: AgentProvider,
   thread: ThreadRecord,
   runtimeCache: Map<string, SessionRuntimeCacheEntry>,
 ): Promise<SessionRuntimeSummary | null> {
@@ -1631,7 +1614,7 @@ async function loadCachedSessionRuntime(
     return cached.runtime;
   }
 
-  const runtime = await loadSessionRuntime(thread.id, thread.path, bridge.codexHome);
+  const runtime = await loadSessionRuntime(thread.id, thread.path, provider.runtimeHome);
   runtimeCache.set(thread.id, {
     threadUpdatedAt: thread.updatedAt,
     runtime,
@@ -1695,15 +1678,15 @@ function buildSessionHistorySummary(
 }
 
 async function readSessionResources(
-  bridge: CodexBridge,
+  provider: AgentProvider,
   sessionId: string,
   liveActivities: Map<string, Map<string, SessionActivity>>,
 ): Promise<SessionResourcesResponse> {
-  const session = await readSession(bridge, sessionId, false);
+  const session = await readSession(provider, sessionId, false);
   const log = await loadRolloutLog(
     sessionId,
     session.path,
-    bridge.codexHome,
+    provider.runtimeHome,
   );
   const activities = mergeSessionActivities(
     log.activities,
@@ -2096,36 +2079,36 @@ function normalizeSkillCatalogEntry(
 }
 
 async function listModels(
-  bridge: CodexBridge,
+  provider: AgentProvider,
   cwd: string | null,
   scope: { profile?: string | null; provider?: string | null } = {},
 ): Promise<ModelSummary[]> {
   const profileName = scope.profile?.trim() || null;
   const providerName = scope.provider?.trim() || null;
   if (profileName || providerName) {
-    const profileConfig = await readProfileConfig(bridge, cwd);
+    const profileConfig = await readProfileConfig(provider, cwd);
     if (profileName) {
       const profile = profileConfig.profiles.find((entry) => entry.name === profileName);
       if (!profile) {
         return [];
       }
-      return listProfileScopedModels(bridge, profileConfig, profile);
+      return listProfileScopedModels(provider, profileConfig, profile);
     }
     if (providerName) {
-      return listProviderScopedModels(bridge, profileConfig, providerName);
+      return listProviderScopedModels(provider, profileConfig, providerName);
     }
   }
 
-  return listHostModels(bridge);
+  return listHostModels(provider);
 }
 
-async function listHostModels(bridge: CodexBridge): Promise<ModelSummary[]> {
+async function listHostModels(provider: AgentProvider): Promise<ModelSummary[]> {
   const models: ModelSummary[] = [];
   const seen = new Set<string>();
   let cursor: string | null = null;
 
   for (;;) {
-    const payload = (await bridge.request("model/list", {
+    const payload = (await provider.listModels({
       includeHidden: false,
       cursor: cursor ?? undefined,
     })) as { data?: unknown[]; nextCursor?: unknown };
@@ -2151,25 +2134,25 @@ async function listHostModels(bridge: CodexBridge): Promise<ModelSummary[]> {
 }
 
 async function listProfileScopedModels(
-  bridge: CodexBridge,
+  agentProvider: AgentProvider,
   config: CodexProfileConfig,
   profile: CodexProfileSummary,
 ): Promise<ModelSummary[]> {
   const profileProvider = profile.modelProvider?.trim() || null;
   const defaultProvider = config.modelProvider?.trim() || null;
-  const provider = profileProvider ? config.modelProviders.get(profileProvider) : null;
+  const configProvider = profileProvider ? config.modelProviders.get(profileProvider) : null;
 
   if (!profileProvider || profileProvider === defaultProvider || profileProvider === "openai") {
-    return mergeProfileModel([...(await listHostModels(bridge))], profile);
+    return mergeProfileModel([...(await listHostModels(agentProvider))], profile);
   }
 
-  const baseUrl = provider?.baseUrl || profile.modelProviderBaseUrl || null;
+  const baseUrl = configProvider?.baseUrl || profile.modelProviderBaseUrl || null;
   const providerModels = baseUrl
     ? await fetchProviderModels({
         baseUrl,
-        envKey: provider?.envKey ?? null,
+        envKey: configProvider?.envKey ?? null,
         profileName: profile.name,
-        providerName: provider?.name || profileProvider,
+        providerName: configProvider?.name || profileProvider,
         defaultReasoningEffort: profile.reasoningEffort,
       })
     : [];
@@ -2178,24 +2161,24 @@ async function listProfileScopedModels(
 }
 
 async function listProviderScopedModels(
-  bridge: CodexBridge,
+  agentProvider: AgentProvider,
   config: CodexProfileConfig,
   providerName: string,
 ): Promise<ModelSummary[]> {
   const defaultProvider = config.modelProvider?.trim() || null;
   if (providerName === defaultProvider || providerName === "openai") {
-    return listHostModels(bridge);
+    return listHostModels(agentProvider);
   }
 
-  const provider = config.modelProviders.get(providerName);
-  if (!provider?.baseUrl) {
+  const configProvider = config.modelProviders.get(providerName);
+  if (!configProvider?.baseUrl) {
     return [];
   }
   return fetchProviderModels({
-    baseUrl: provider.baseUrl,
-    envKey: provider.envKey,
+    baseUrl: configProvider.baseUrl,
+    envKey: configProvider.envKey,
     profileName: null,
-    providerName: provider.name || providerName,
+    providerName: configProvider.name || providerName,
     defaultReasoningEffort: null,
   });
 }
@@ -2354,10 +2337,10 @@ function normalizeProviderModelSummary(
 }
 
 async function listProfiles(
-  bridge: CodexBridge,
+  provider: AgentProvider,
   cwd: string | null,
 ): Promise<CodexProfileCatalog> {
-  const profileConfig = await readProfileConfig(bridge, cwd);
+  const profileConfig = await readProfileConfig(provider, cwd);
   return {
     defaultProfile: profileConfig.defaultProfile,
     profiles: profileConfig.profiles,
@@ -2365,10 +2348,10 @@ async function listProfiles(
 }
 
 async function readProfileConfig(
-  bridge: CodexBridge,
+  provider: AgentProvider,
   cwd: string | null,
 ): Promise<CodexProfileConfig> {
-  const payload = (await bridge.request("config/read", {
+  const payload = (await provider.readConfig({
     includeLayers: false,
     cwd: cwd ?? undefined,
   })) as { config?: unknown };
