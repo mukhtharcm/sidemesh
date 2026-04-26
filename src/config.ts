@@ -8,6 +8,13 @@ import type {
   AgentProviderKind,
   NodeConfig,
 } from "./types.js";
+import {
+  DEFAULT_AGENT_PROVIDER_KIND,
+  isAgentProviderKind,
+  loadAgentProviderConfig,
+  summarizeAgentProviderConfig,
+  supportedAgentProviderKinds,
+} from "./provider-registry.js";
 
 export function loadConfig(): NodeConfig {
   const token = process.env.SIDEMESH_TOKEN?.trim();
@@ -25,41 +32,22 @@ export function loadConfig(): NodeConfig {
 export function summarizeProviderConfig(
   provider: AgentProviderConfig,
 ): AgentProviderConfigSummary {
-  switch (provider.kind) {
-    case "codex":
-      return {
-        kind: provider.kind,
-        command: provider.bin,
-      };
-    default:
-      throw new Error(`Unhandled provider config: ${String(provider)}`);
-  }
+  return summarizeAgentProviderConfig(provider);
 }
 
 function loadProviderConfig(): AgentProviderConfig {
   const kind = parseProviderKind(process.env.SIDEMESH_PROVIDER);
-  switch (kind) {
-    case "codex":
-      return {
-        kind,
-        bin:
-          process.env.SIDEMESH_CODEX_BIN?.trim() ||
-          process.env.SIDEMESH_PROVIDER_COMMAND?.trim() ||
-          "codex",
-      };
-    default:
-      throw new Error(`Unhandled provider kind: ${String(kind)}`);
-  }
+  return loadAgentProviderConfig(kind, process.env);
 }
 
 function parseProviderKind(value: string | undefined): AgentProviderKind {
-  const provider = value?.trim() || "codex";
-  switch (provider) {
-    case "codex":
-      return provider;
-    default:
-      throw new Error(`Unsupported SIDEMESH_PROVIDER "${provider}". Supported providers: codex`);
+  const provider = value?.trim() || DEFAULT_AGENT_PROVIDER_KIND;
+  if (isAgentProviderKind(provider)) {
+    return provider;
   }
+  throw new Error(
+    `Unsupported SIDEMESH_PROVIDER "${provider}". Supported providers: ${supportedAgentProviderKinds().join(", ")}`,
+  );
 }
 
 function parseInteger(value: string | undefined, fallback: number): number {
