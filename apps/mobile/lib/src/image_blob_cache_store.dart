@@ -70,10 +70,7 @@ class ImageBlobCacheStore {
     final prefs = await SharedPreferences.getInstance();
     final dir = await _cacheDir();
     await _runIndexMutation(() async {
-      final index = await _loadIndex(prefs);
-      for (final entry in index) {
-        await _deleteFileIfExists(_fileFor(dir, entry.key));
-      }
+      await _deleteDirectoryIfExists(dir);
       await prefs.remove(_indexKey);
     });
   }
@@ -316,6 +313,16 @@ class ImageBlobCacheStore {
     try {
       if (await file.exists()) {
         await file.delete();
+      }
+    } catch (_) {
+      // Cache files are disposable; failed cleanup should not break the UI.
+    }
+  }
+
+  Future<void> _deleteDirectoryIfExists(Directory directory) async {
+    try {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
       }
     } catch (_) {
       // Cache files are disposable; failed cleanup should not break the UI.

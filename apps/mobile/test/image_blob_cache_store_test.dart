@@ -47,15 +47,24 @@ void main() {
     final api = _ImageApi(Uint8List.fromList([1, 2, 3]));
 
     final file = await store.load(host: host, path: '/tmp/image.png', api: api);
+    final orphan = File('${file.parent.path}/orphan.blob');
+    final temp = File('${file.parent.path}/stale.tmp');
+    await orphan.writeAsBytes([4, 5, 6], flush: true);
+    await temp.writeAsBytes([7, 8, 9], flush: true);
 
     expect(api.requestCount, 1);
     expect(await file.exists(), isTrue);
+    expect(await orphan.exists(), isTrue);
+    expect(await temp.exists(), isTrue);
     expect(await file.readAsBytes(), [1, 2, 3]);
     expect(prefs.getKeys(), isNotEmpty);
 
     await store.clearAll();
 
     expect(await file.exists(), isFalse);
+    expect(await orphan.exists(), isFalse);
+    expect(await temp.exists(), isFalse);
+    expect(await file.parent.exists(), isFalse);
     expect(prefs.getKeys(), isEmpty);
   });
 }
