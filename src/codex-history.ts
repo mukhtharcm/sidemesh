@@ -11,7 +11,7 @@ import {
   buildWebSearchActivityFromRolloutEvent,
 } from "./activity.js";
 import type {
-  RolloutLog,
+  SessionLogSnapshot,
   SessionActivity,
   SessionMessageAttachment,
   SessionMessage,
@@ -19,13 +19,15 @@ import type {
   ThreadRecord,
 } from "./types.js";
 
+const RECENT_ROLLOUT_SCAN_DAYS = 3;
+
 export async function loadRolloutLog(
   sessionId: string,
   rolloutPath: string | null,
   codexHomePath: string | null,
   messageLimit: number | null = null,
   activityLimit: number | null = null,
-): Promise<RolloutLog> {
+): Promise<SessionLogSnapshot> {
   const resolvedPath = await resolveRolloutPath(sessionId, rolloutPath, codexHomePath);
   if (!resolvedPath || !(await rolloutExists(resolvedPath))) {
     return emptyRolloutLog();
@@ -79,9 +81,7 @@ export async function listRecentRolloutThreads(
   }
 
   const sessionsRoot = path.join(codexHomePath, "sessions");
-  const files = (await walkDirectories(sessionsRoot, 0)).filter(
-    (candidate) => candidate.endsWith(".jsonl"),
-  );
+  const files = await listRecentRolloutFiles(sessionsRoot, limit);
   const threads = (
     await Promise.all(files.map((filePath) => readRolloutThreadSummary(filePath)))
   ).filter((thread): thread is ThreadRecord => thread !== null);
@@ -91,7 +91,42 @@ export async function listRecentRolloutThreads(
     .slice(0, limit);
 }
 
-function emptyRolloutLog(): RolloutLog {
+async function listRecentRolloutFiles(
+  sessionsRoot: string,
+  limit: number,
+): Promise<string[]> {
+  const candidates: Array<{ path: string; sortKey: string }> = [];
+
+  for (let offset = 0; offset < RECENT_ROLLOUT_SCAN_DAYS; offset += 1) {
+    const day = new Date(Date.now() - offset * 24 * 60 * 60 * 1000);
+    const dayDir = path.join(
+      sessionsRoot,
+      String(day.getFullYear()),
+      String(day.getMonth() + 1).padStart(2, "0"),
+      String(day.getDate()).padStart(2, "0"),
+    );
+
+    const entries = await import("node:fs/promises").then(({ readdir }) =>
+      readdir(dayDir, { withFileTypes: true }).catch(() => []),
+    );
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.startsWith("rollout-") || !entry.name.endsWith(".jsonl")) {
+        continue;
+      }
+      candidates.push({
+        path: path.join(dayDir, entry.name),
+        sortKey: entry.name,
+      });
+    }
+  }
+
+  return candidates
+    .sort((left, right) => right.sortKey.localeCompare(left.sortKey))
+    .slice(0, limit)
+    .map((candidate) => candidate.path);
+}
+
+function emptyRolloutLog(): SessionLogSnapshot {
   return {
     messages: [],
     activities: [],
@@ -127,7 +162,7 @@ async function scanRolloutFile(
     includeActivities: boolean;
     activityLimit?: number | null;
   },
-): Promise<RolloutLog> {
+): Promise<SessionLogSnapshot> {
   const messages: SessionMessage[] = [];
   const activities: SessionActivity[] = [];
   let runtime: SessionRuntimeSummary | null = null;

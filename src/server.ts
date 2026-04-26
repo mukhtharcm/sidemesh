@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
-import { hostname, homedir, platform } from "node:os";
+import { hostname, platform } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
-import { access, readdir, stat } from "node:fs/promises";
+import { access, stat } from "node:fs/promises";
 import nodePath from "node:path";
 
 import cors from "cors";
@@ -46,7 +46,6 @@ import {
 } from "./activity.js";
 import { CodexAgentProvider } from "./codex-provider.js";
 import { buildGitDiff, readGitDiff, readGitStatus, sanitizeGitUrl } from "./git.js";
-import { loadRolloutLog, loadSessionRuntime } from "./history.js";
 import { buildSessionResources } from "./resources.js";
 import {
   FsWatchRegistry,
@@ -66,10 +65,6 @@ const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const PROVIDER_MODEL_LIST_TIMEOUT_MS = 2500;
-const RECENT_ROLLOUT_SCAN_DAYS = 3;
-const RECENT_ROLLOUT_FALLBACK_LIMIT = 50;
-const ROLLOUT_THREAD_ID_PATTERN =
-  /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
 
 interface SessionRuntimeCacheEntry {
   threadUpdatedAt: number;
@@ -349,7 +344,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       }
       case "turn_completed":
         // Broadcast the completion first so any concurrent snapshot reader
-        // sees both the rollout-flushed history AND the live state still in
+        // sees both the provider-flushed history AND the live state still in
         // memory. Clearing liveActivities before the broadcast can briefly
         // leave both the snapshot and live stream blank for a second client.
         broadcastLive(event.sessionId, {
@@ -470,13 +465,10 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
 
     const session = await readSession(provider, sessionId, false);
-    const log = await loadRolloutLog(
-      sessionId,
-      session.path,
-      provider.runtimeHome,
+    const log = await provider.readSessionLog(session, {
       messageLimit,
       activityLimit,
-    );
+    });
     ensureSeqCursor(sessionId, log.nextSeq);
     const activities = mergeSessionActivities(
       log.activities,
@@ -519,11 +511,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     const since = asInteger(query.since) ?? 0;
 
     const session = await readSession(provider, sessionId, false);
-    const log = await loadRolloutLog(
-      sessionId,
-      session.path,
-      provider.runtimeHome,
-    );
+    const log = await provider.readSessionLog(session);
     ensureSeqCursor(sessionId, log.nextSeq);
     const activities = mergeSessionActivities(
       log.activities,
@@ -1089,19 +1077,14 @@ async function mergeRecentUnindexedThreads(
   limit: number,
 ): Promise<ThreadRecord[]> {
   const threadsById = new Map(indexedThreads.map((thread) => [thread.id, thread]));
-  const recentIds = await listRecentRolloutThreadIds();
+  const recentThreads = await provider.listRecentUnindexedSessionThreads(limit);
 
-  for (const id of recentIds) {
-    if (threadsById.has(id)) {
+  for (const thread of recentThreads) {
+    if (threadsById.has(thread.id)) {
       continue;
     }
-    try {
-      const thread = await readSession(provider, id, false);
-      threadsById.set(id, thread);
-    } catch {
-      // Rollout scans are a best-effort fallback for sessions missing from Codex's index.
-    }
-    if (threadsById.size >= limit + RECENT_ROLLOUT_FALLBACK_LIMIT) {
+    threadsById.set(thread.id, thread);
+    if (threadsById.size >= limit) {
       break;
     }
   }
@@ -1109,47 +1092,6 @@ async function mergeRecentUnindexedThreads(
   return [...threadsById.values()]
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, limit);
-}
-
-async function listRecentRolloutThreadIds(): Promise<string[]> {
-  const codexHome = process.env.CODEX_HOME?.trim() || nodePath.join(homedir(), ".codex");
-  const sessionsRoot = nodePath.join(codexHome, "sessions");
-  const candidates: Array<{ id: string; sortKey: string }> = [];
-  const seen = new Set<string>();
-
-  for (let offset = 0; offset < RECENT_ROLLOUT_SCAN_DAYS; offset += 1) {
-    const day = new Date(Date.now() - offset * 24 * 60 * 60 * 1000);
-    const dayDir = nodePath.join(
-      sessionsRoot,
-      String(day.getFullYear()),
-      String(day.getMonth() + 1).padStart(2, "0"),
-      String(day.getDate()).padStart(2, "0"),
-    );
-
-    let entries;
-    try {
-      entries = await readdir(dayDir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.startsWith("rollout-") || !entry.name.endsWith(".jsonl")) {
-        continue;
-      }
-      const id = entry.name.match(ROLLOUT_THREAD_ID_PATTERN)?.[1];
-      if (!id || seen.has(id)) {
-        continue;
-      }
-      seen.add(id);
-      candidates.push({ id, sortKey: entry.name });
-    }
-  }
-
-  return candidates
-    .sort((left, right) => right.sortKey.localeCompare(left.sortKey))
-    .slice(0, RECENT_ROLLOUT_FALLBACK_LIMIT)
-    .map((candidate) => candidate.id);
 }
 
 function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
@@ -1473,7 +1415,7 @@ async function loadCachedSessionRuntime(
     return cached.runtime;
   }
 
-  const runtime = await loadSessionRuntime(thread.id, thread.path, provider.runtimeHome);
+  const runtime = await provider.readSessionRuntime(thread);
   runtimeCache.set(thread.id, {
     threadUpdatedAt: thread.updatedAt,
     runtime,
@@ -1542,11 +1484,7 @@ async function readSessionResources(
   liveActivities: Map<string, Map<string, SessionActivity>>,
 ): Promise<SessionResourcesResponse> {
   const session = await readSession(provider, sessionId, false);
-  const log = await loadRolloutLog(
-    sessionId,
-    session.path,
-    provider.runtimeHome,
-  );
+  const log = await provider.readSessionLog(session);
   const activities = mergeSessionActivities(
     log.activities,
     liveActivities.get(sessionId)?.values() || [],
