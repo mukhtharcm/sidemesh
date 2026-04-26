@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -157,109 +158,152 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   }
 
   ImageViewerSource get _currentSource => widget.sources[_index];
+  ImageViewerPaneState? get _currentPaneState => _paneKeys[_index].currentState;
+  bool get _canGoPrevious => _index > 0;
+  bool get _canGoNext => _index < widget.sources.length - 1;
+
+  void _goPrevious() {
+    if (!_canGoPrevious) return;
+    _pageController.previousPage(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _goNext() {
+    if (!_canGoNext) return;
+    _pageController.nextPage(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _zoomInCurrent() {
+    final state = _currentPaneState;
+    if (state?.canZoomIn == true) state?.zoomIn();
+  }
+
+  void _zoomOutCurrent() {
+    final state = _currentPaneState;
+    if (state?.canZoomOut == true) state?.zoomOut();
+  }
+
+  void _resetCurrentZoom() {
+    final state = _currentPaneState;
+    if (state?.canReset == true) state?.reset();
+  }
 
   @override
   Widget build(BuildContext context) {
     final countLabel = widget.sources.length > 1
         ? '${_index + 1} / ${widget.sources.length}'
         : null;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: SafeArea(
-              child: PageView.builder(
-                controller: _pageController,
-                itemCount: widget.sources.length,
-                onPageChanged: (value) => setState(() => _index = value),
-                itemBuilder: (context, index) => ImageViewerPane(
-                  key: _paneKeys[index],
-                  source: widget.sources[index],
-                  immersive: true,
-                  onTap: _toggleChrome,
-                  observable: _observables[index],
+    return _ImageViewerKeyboardScope(
+      onPrevious: _goPrevious,
+      onNext: _goNext,
+      onZoomIn: _zoomInCurrent,
+      onZoomOut: _zoomOutCurrent,
+      onResetZoom: _resetCurrentZoom,
+      onClose: () => Navigator.of(context).maybePop(),
+      onToggleChrome: _toggleChrome,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: SafeArea(
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: widget.sources.length,
+                  onPageChanged: (value) => setState(() => _index = value),
+                  itemBuilder: (context, index) => ImageViewerPane(
+                    key: _paneKeys[index],
+                    source: widget.sources[index],
+                    immersive: true,
+                    onTap: _toggleChrome,
+                    observable: _observables[index],
+                  ),
                 ),
               ),
             ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            top: 0,
-            child: IgnorePointer(
-              ignoring: !_chromeVisible,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 180),
-                opacity: _chromeVisible ? 1 : 0,
-                child: SafeArea(
-                  bottom: false,
-                  child: Container(
-                    margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                    padding: const EdgeInsets.fromLTRB(8, 8, 10, 8),
-                    decoration: BoxDecoration(
-                      color: const Color.fromRGBO(0, 0, 0, 0.72),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          onPressed: () => Navigator.of(context).maybePop(),
-                          icon: const Icon(
-                            Icons.arrow_back_rounded,
-                            color: Colors.white,
-                          ),
-                        ),
-                        if (countLabel != null)
-                          Expanded(
-                            child: Text(
-                              countLabel,
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                          )
-                        else
-                          const Spacer(),
-                        ListenableBuilder(
-                          listenable: _observables[_index],
-                          builder: (context, _) => SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: ImageViewerActions(
-                              state: _paneKeys[_index].currentState,
-                              compact: true,
-                              dark: true,
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: IgnorePointer(
+                ignoring: !_chromeVisible,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 180),
+                  opacity: _chromeVisible ? 1 : 0,
+                  child: SafeArea(
+                    bottom: false,
+                    child: Container(
+                      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                      padding: const EdgeInsets.fromLTRB(8, 8, 10, 8),
+                      decoration: BoxDecoration(
+                        color: const Color.fromRGBO(0, 0, 0, 0.72),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            onPressed: () => Navigator.of(context).maybePop(),
+                            icon: const Icon(
+                              Icons.arrow_back_rounded,
+                              color: Colors.white,
                             ),
                           ),
-                        ),
-                      ],
+                          if (countLabel != null)
+                            Expanded(
+                              child: Text(
+                                countLabel,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                            )
+                          else
+                            const Spacer(),
+                          ListenableBuilder(
+                            listenable: _observables[_index],
+                            builder: (context, _) => SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: ImageViewerActions(
+                                state: _paneKeys[_index].currentState,
+                                compact: true,
+                                dark: true,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: IgnorePointer(
-              ignoring: !_chromeVisible,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 180),
-                opacity: _chromeVisible ? 1 : 0,
-                child: _ImageViewerCaption(
-                  title: _currentSource.title,
-                  subtitle: _currentSource.subtitle,
-                  dark: true,
-                  margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                ignoring: !_chromeVisible,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 180),
+                  opacity: _chromeVisible ? 1 : 0,
+                  child: _ImageViewerCaption(
+                    title: _currentSource.title,
+                    subtitle: _currentSource.subtitle,
+                    dark: true,
+                    margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -676,6 +720,41 @@ class _ImageViewerDialogState extends State<_ImageViewerDialog> {
     super.dispose();
   }
 
+  ImageViewerPaneState? get _currentPaneState => _paneKeys[_index].currentState;
+  bool get _canGoPrevious => _index > 0;
+  bool get _canGoNext => _index < widget.sources.length - 1;
+
+  void _goPrevious() {
+    if (!_canGoPrevious) return;
+    _pageController.previousPage(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _goNext() {
+    if (!_canGoNext) return;
+    _pageController.nextPage(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _zoomInCurrent() {
+    final state = _currentPaneState;
+    if (state?.canZoomIn == true) state?.zoomIn();
+  }
+
+  void _zoomOutCurrent() {
+    final state = _currentPaneState;
+    if (state?.canZoomOut == true) state?.zoomOut();
+  }
+
+  void _resetCurrentZoom() {
+    final state = _currentPaneState;
+    if (state?.canReset == true) state?.reset();
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -684,80 +763,233 @@ class _ImageViewerDialogState extends State<_ImageViewerDialog> {
     final maxHeight = (mediaSize.height * 0.88).clamp(520.0, 900.0).toDouble();
     final source = widget.sources[_index];
 
-    return Dialog(
-      backgroundColor: colors.surface,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: maxHeight),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
-              child: Row(
-                children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: colors.accentMuted,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: colors.accent.withValues(alpha: 0.32),
+    return _ImageViewerKeyboardScope(
+      onPrevious: _goPrevious,
+      onNext: _goNext,
+      onZoomIn: _zoomInCurrent,
+      onZoomOut: _zoomOutCurrent,
+      onResetZoom: _resetCurrentZoom,
+      onClose: () => Navigator.of(context).maybePop(),
+      child: Dialog(
+        backgroundColor: colors.surface,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: maxHeight),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: colors.accentMuted,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: colors.accent.withValues(alpha: 0.32),
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(
+                        Icons.image_rounded,
+                        size: 18,
+                        color: colors.accent,
                       ),
                     ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      Icons.image_rounded,
-                      size: 18,
-                      color: colors.accent,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _ImageViewerHeaderText(
+                        title: source.title,
+                        subtitle: source.subtitle,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _ImageViewerHeaderText(
-                      title: source.title,
-                      subtitle: source.subtitle,
+                    if (widget.sources.length > 1) ...[
+                      IconButton(
+                        tooltip: 'Previous image',
+                        onPressed: _canGoPrevious ? _goPrevious : null,
+                        icon: const Icon(Icons.chevron_left_rounded, size: 20),
+                      ),
+                      IconButton(
+                        tooltip: 'Next image',
+                        onPressed: _canGoNext ? _goNext : null,
+                        icon: const Icon(Icons.chevron_right_rounded, size: 20),
+                      ),
+                      const SizedBox(width: 4),
+                      MeshPill(
+                        label: '${_index + 1} / ${widget.sources.length}',
+                        mono: true,
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    ListenableBuilder(
+                      listenable: _observables[_index],
+                      builder: (context, _) => ImageViewerActions(
+                        state: _paneKeys[_index].currentState,
+                      ),
                     ),
-                  ),
-                  if (widget.sources.length > 1) ...[
-                    MeshPill(
-                      label: '${_index + 1} / ${widget.sources.length}',
-                      mono: true,
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded, size: 20),
                     ),
-                    const SizedBox(width: 8),
                   ],
-                  ListenableBuilder(
-                    listenable: _observables[_index],
-                    builder: (context, _) => ImageViewerActions(
-                      state: _paneKeys[_index].currentState,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                  ),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: colors.border),
-            Expanded(
-              child: PageView.builder(
-                controller: _pageController,
-                itemCount: widget.sources.length,
-                onPageChanged: (value) => setState(() => _index = value),
-                itemBuilder: (context, index) => ImageViewerPane(
-                  key: _paneKeys[index],
-                  source: widget.sources[index],
-                  dense: true,
-                  observable: _observables[index],
                 ),
               ),
-            ),
-          ],
+              Divider(height: 1, color: colors.border),
+              Expanded(
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: widget.sources.length,
+                  onPageChanged: (value) => setState(() => _index = value),
+                  itemBuilder: (context, index) => ImageViewerPane(
+                    key: _paneKeys[index],
+                    source: widget.sources[index],
+                    dense: true,
+                    observable: _observables[index],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _PreviousImageIntent extends Intent {
+  const _PreviousImageIntent();
+}
+
+class _NextImageIntent extends Intent {
+  const _NextImageIntent();
+}
+
+class _ZoomInImageIntent extends Intent {
+  const _ZoomInImageIntent();
+}
+
+class _ZoomOutImageIntent extends Intent {
+  const _ZoomOutImageIntent();
+}
+
+class _ResetImageZoomIntent extends Intent {
+  const _ResetImageZoomIntent();
+}
+
+class _CloseImageViewerIntent extends Intent {
+  const _CloseImageViewerIntent();
+}
+
+class _ToggleImageChromeIntent extends Intent {
+  const _ToggleImageChromeIntent();
+}
+
+class _ImageViewerKeyboardScope extends StatelessWidget {
+  const _ImageViewerKeyboardScope({
+    required this.child,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onZoomIn,
+    required this.onZoomOut,
+    required this.onResetZoom,
+    required this.onClose,
+    this.onToggleChrome,
+  });
+
+  final Widget child;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+  final VoidCallback onZoomIn;
+  final VoidCallback onZoomOut;
+  final VoidCallback onResetZoom;
+  final VoidCallback onClose;
+  final VoidCallback? onToggleChrome;
+
+  @override
+  Widget build(BuildContext context) {
+    final shortcuts = <ShortcutActivator, Intent>{
+      const SingleActivator(LogicalKeyboardKey.arrowLeft):
+          const _PreviousImageIntent(),
+      const SingleActivator(LogicalKeyboardKey.arrowUp):
+          const _PreviousImageIntent(),
+      const SingleActivator(LogicalKeyboardKey.arrowRight):
+          const _NextImageIntent(),
+      const SingleActivator(LogicalKeyboardKey.arrowDown):
+          const _NextImageIntent(),
+      const SingleActivator(LogicalKeyboardKey.equal):
+          const _ZoomInImageIntent(),
+      const SingleActivator(LogicalKeyboardKey.equal, shift: true):
+          const _ZoomInImageIntent(),
+      const SingleActivator(LogicalKeyboardKey.numpadAdd):
+          const _ZoomInImageIntent(),
+      const SingleActivator(LogicalKeyboardKey.minus):
+          const _ZoomOutImageIntent(),
+      const SingleActivator(LogicalKeyboardKey.numpadSubtract):
+          const _ZoomOutImageIntent(),
+      const SingleActivator(LogicalKeyboardKey.digit0):
+          const _ResetImageZoomIntent(),
+      const SingleActivator(LogicalKeyboardKey.escape):
+          const _CloseImageViewerIntent(),
+    };
+    if (onToggleChrome != null) {
+      shortcuts[const SingleActivator(LogicalKeyboardKey.space)] =
+          const _ToggleImageChromeIntent();
+    }
+
+    return Shortcuts(
+      shortcuts: shortcuts,
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _PreviousImageIntent: CallbackAction<_PreviousImageIntent>(
+            onInvoke: (_) {
+              onPrevious();
+              return null;
+            },
+          ),
+          _NextImageIntent: CallbackAction<_NextImageIntent>(
+            onInvoke: (_) {
+              onNext();
+              return null;
+            },
+          ),
+          _ZoomInImageIntent: CallbackAction<_ZoomInImageIntent>(
+            onInvoke: (_) {
+              onZoomIn();
+              return null;
+            },
+          ),
+          _ZoomOutImageIntent: CallbackAction<_ZoomOutImageIntent>(
+            onInvoke: (_) {
+              onZoomOut();
+              return null;
+            },
+          ),
+          _ResetImageZoomIntent: CallbackAction<_ResetImageZoomIntent>(
+            onInvoke: (_) {
+              onResetZoom();
+              return null;
+            },
+          ),
+          _CloseImageViewerIntent: CallbackAction<_CloseImageViewerIntent>(
+            onInvoke: (_) {
+              onClose();
+              return null;
+            },
+          ),
+          if (onToggleChrome != null)
+            _ToggleImageChromeIntent: CallbackAction<_ToggleImageChromeIntent>(
+              onInvoke: (_) {
+                onToggleChrome?.call();
+                return null;
+              },
+            ),
+        },
+        child: Focus(autofocus: true, child: child),
       ),
     );
   }
