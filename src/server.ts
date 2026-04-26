@@ -65,6 +65,7 @@ const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const PROVIDER_MODEL_LIST_TIMEOUT_MS = 2500;
+const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
 
 interface SessionRuntimeCacheEntry {
   threadUpdatedAt: number;
@@ -1077,7 +1078,9 @@ async function mergeRecentUnindexedThreads(
   limit: number,
 ): Promise<ThreadRecord[]> {
   const threadsById = new Map(indexedThreads.map((thread) => [thread.id, thread]));
-  const recentThreads = await provider.listRecentUnindexedSessionThreads(limit);
+  const recentThreads = await provider.listRecentUnindexedSessionThreads(
+    Math.max(limit, RECENT_UNINDEXED_SESSION_SCAN_LIMIT),
+  );
 
   for (const thread of recentThreads) {
     if (threadsById.has(thread.id)) {
