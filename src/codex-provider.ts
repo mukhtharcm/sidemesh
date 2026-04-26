@@ -9,6 +9,8 @@ import {
   type AgentProfileListOptions,
   type AgentSkillConfigWriteRequest,
   type AgentSkillListOptions,
+  type AgentSessionListOptions,
+  type AgentSessionResumeOptions,
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
   type AgentPendingAction,
@@ -45,6 +47,7 @@ import type {
 } from "./types.js";
 
 const PROVIDER_MODEL_LIST_TIMEOUT_MS = 2500;
+const CODEX_THREAD_SOURCES = ["cli", "vscode", "exec", "appServer"];
 
 interface ConfigModelProviderSummary {
   id: string;
@@ -100,23 +103,47 @@ export class CodexAgentProvider
     }
   }
 
-  public listSessionThreads(params: Record<string, unknown>): Promise<unknown> {
-    return this.bridge.request("thread/list", params);
+  public async listSessionThreads(
+    options: AgentSessionListOptions,
+  ): Promise<ThreadRecord[]> {
+    const result = (await this.bridge.request("thread/list", {
+      limit: options.limit,
+      sortKey: "updated_at",
+      sortDirection: "desc",
+      sourceKinds: CODEX_THREAD_SOURCES,
+      archived: options.archived,
+    })) as { data?: unknown[] };
+    return Array.isArray(result.data) ? (result.data as ThreadRecord[]) : [];
   }
 
-  public readSessionThread(threadId: string, includeTurns: boolean): Promise<unknown> {
-    return this.bridge.request("thread/read", { threadId, includeTurns });
+  public async readSessionThread(
+    threadId: string,
+    includeTurns: boolean,
+  ): Promise<ThreadRecord> {
+    const result = (await this.bridge.request("thread/read", {
+      threadId,
+      includeTurns,
+    })) as { thread?: unknown };
+    if (!result.thread || typeof result.thread !== "object") {
+      throw new Error("thread/read did not return a thread");
+    }
+    return result.thread as ThreadRecord;
   }
 
-  public listLoadedSessionIds(): Promise<unknown> {
-    return this.bridge.request("thread/loaded/list", {});
+  public async listLoadedSessionIds(): Promise<string[]> {
+    const result = (await this.bridge.request("thread/loaded/list", {})) as {
+      data?: unknown[];
+    };
+    return Array.isArray(result.data)
+      ? result.data.filter((item): item is string => typeof item === "string")
+      : [];
   }
 
   public resumeSessionThread(
     threadId: string,
-    params: Record<string, unknown> = {},
+    options?: AgentSessionResumeOptions,
   ): Promise<unknown> {
-    return this.bridge.request("thread/resume", { threadId, ...params });
+    return this.bridge.request("thread/resume", { threadId, ...(options ?? {}) });
   }
 
   public setSessionName(threadId: string, name: string): Promise<unknown> {
@@ -137,10 +164,7 @@ export class CodexAgentProvider
 
     for (const summary of summaries) {
       try {
-        const result = (await this.readSessionThread(summary.id, false)) as {
-          thread?: ThreadRecord;
-        };
-        threads.push(result.thread ?? summary);
+        threads.push(await this.readSessionThread(summary.id, false));
       } catch {
         threads.push(summary);
       }
@@ -321,8 +345,7 @@ export class CodexAgentProvider
   }
 
   private async isSessionThreadLoaded(sessionId: string): Promise<boolean> {
-    const result = (await this.listLoadedSessionIds()) as { data?: unknown[] };
-    const data = Array.isArray(result.data) ? result.data : [];
+    const data = await this.listLoadedSessionIds();
     return data.includes(sessionId);
   }
 

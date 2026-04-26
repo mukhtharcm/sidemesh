@@ -102,6 +102,15 @@ export interface AgentSubmitInputResult {
   turnId: string | null;
 }
 
+export interface AgentSessionListOptions {
+  limit: number;
+  archived: boolean;
+}
+
+export interface AgentSessionResumeOptions {
+  persistExtendedHistory: boolean;
+}
+
 export interface AgentModelListOptions {
   cwd: string | null;
   profile: string | null;
@@ -235,10 +244,13 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   start(): Promise<void>;
   getVersion(): Promise<string>;
 
-  listSessionThreads(params: Record<string, unknown>): Promise<unknown>;
-  readSessionThread(threadId: string, includeTurns: boolean): Promise<unknown>;
-  listLoadedSessionIds(): Promise<unknown>;
-  resumeSessionThread(threadId: string, params?: Record<string, unknown>): Promise<unknown>;
+  listSessionThreads(options: AgentSessionListOptions): Promise<ThreadRecord[]>;
+  readSessionThread(threadId: string, includeTurns: boolean): Promise<ThreadRecord>;
+  listLoadedSessionIds(): Promise<string[]>;
+  resumeSessionThread(
+    threadId: string,
+    options?: AgentSessionResumeOptions,
+  ): Promise<unknown>;
   setSessionName(threadId: string, name: string): Promise<unknown>;
   archiveSession(threadId: string): Promise<unknown>;
   unarchiveSession(threadId: string): Promise<unknown>;
