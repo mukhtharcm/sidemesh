@@ -116,6 +116,32 @@ export interface AgentRemoteGitDiff {
   sha: string | null;
 }
 
+export interface AgentFsDirectoryEntry {
+  fileName: string;
+  isDirectory: boolean;
+  isFile: boolean;
+}
+
+export interface AgentFsDirectoryListing {
+  entries: AgentFsDirectoryEntry[];
+}
+
+export interface AgentFsMetadata {
+  isDirectory: boolean;
+  isFile: boolean;
+  isSymlink: boolean;
+  createdAtMs: number;
+  modifiedAtMs: number;
+}
+
+export interface AgentFsFile {
+  dataBase64: string;
+}
+
+export interface AgentFsWatchResult {
+  watchId: string;
+}
+
 export interface AgentModelListOptions {
   cwd: string | null;
   profile: string | null;
@@ -279,9 +305,9 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   listProfiles(options: AgentProfileListOptions): Promise<ProviderProfileCatalog>;
   readConfig(params: Record<string, unknown>): Promise<unknown>;
 
-  fsReadDirectory(path: string): Promise<unknown>;
-  fsGetMetadata(path: string): Promise<unknown>;
-  fsReadFile(path: string): Promise<unknown>;
+  fsReadDirectory(path: string): Promise<AgentFsDirectoryListing>;
+  fsGetMetadata(path: string): Promise<AgentFsMetadata>;
+  fsReadFile(path: string): Promise<AgentFsFile>;
   fsWriteFile(path: string, dataBase64: string): Promise<unknown>;
   fsCreateDirectory(path: string, recursive: boolean): Promise<unknown>;
   fsRemove(path: string, options: { recursive: boolean; force: boolean }): Promise<unknown>;
@@ -290,7 +316,7 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
     destinationPath: string;
     recursive: boolean;
   }): Promise<unknown>;
-  fsWatch(path: string): Promise<unknown>;
+  fsWatch(path: string): Promise<AgentFsWatchResult>;
   fsUnwatch(watchId: string): Promise<unknown>;
 }
 
