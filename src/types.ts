@@ -1,10 +1,23 @@
+export type AgentProviderKind = "codex";
+
+export type AgentProviderConfig = CodexProviderConfig;
+
+export interface CodexProviderConfig {
+  kind: "codex";
+  bin: string;
+}
+
+export interface AgentProviderConfigSummary {
+  kind: AgentProviderKind | string;
+  command: string | null;
+}
+
 export interface NodeConfig {
   label: string;
   port: number;
   token: string;
   tokenSource: "env" | "generated";
-  provider: string;
-  codexBin: string;
+  provider: AgentProviderConfig;
   stateDir: string;
 }
 

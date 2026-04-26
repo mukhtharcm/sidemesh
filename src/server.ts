@@ -44,6 +44,7 @@ import {
   mergeActivity,
   mergeSessionActivities,
 } from "./activity.js";
+import { summarizeProviderConfig } from "./config.js";
 import { buildGitDiff, readGitDiff, readGitStatus, sanitizeGitUrl } from "./git.js";
 import { createAgentProvider } from "./provider-factory.js";
 import { buildSessionResources } from "./resources.js";
@@ -410,6 +411,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       provider: provider.kind,
       providerName: provider.displayName,
       providerVersion,
+      providerConfig: summarizeProviderConfig(config.provider),
       providerCapabilities: provider.capabilities,
       startedAt: process.uptime(),
       tokenSource: config.tokenSource,
