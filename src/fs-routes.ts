@@ -25,6 +25,16 @@ interface FsRoutesOptions {
 export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   const { provider, listSessions } = opts;
 
+  app.use("/api/fs", (_request, response, next) => {
+    if (!provider.capabilities.workspace.filesystem) {
+      response.status(501).json({
+        error: `${provider.displayName} does not support filesystem access`,
+      });
+      return;
+    }
+    next();
+  });
+
   app.get(
     "/api/fs/list",
     asyncRoute(async (request, response) => {
