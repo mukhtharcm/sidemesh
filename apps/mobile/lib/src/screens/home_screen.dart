@@ -1678,6 +1678,29 @@ class _InboxPaneState extends State<InboxPane> {
     await widget.onToggleHostEnabled(host);
   }
 
+  Future<void> _usePendingCurrentHost(PendingSendAnalysis analysis) async {
+    final host = analysis.host;
+    if (host == null) {
+      showAppSnackBar(context, 'The original host is no longer available.');
+      return;
+    }
+    final rebound = analysis.send.copyWith(
+      hostFingerprint: SessionSendOutboxStore.hostFingerprint(host),
+      updatedAt: DateTime.now(),
+      nextAttemptAt: DateTime.now(),
+      lastError: 'Host configuration updated. Ready to retry.',
+      blocked: false,
+    );
+    await _outbox.upsert(rebound);
+    if (!mounted) {
+      return;
+    }
+    showAppSnackBar(
+      context,
+      'Queued message is now bound to the current host configuration.',
+    );
+  }
+
   Widget _buildPendingSendCard(PendingSessionSend send) {
     final analysis = _analyzePendingSend(
       send,
@@ -1694,6 +1717,9 @@ class _InboxPaneState extends State<InboxPane> {
       onRetryNow: analysis.canRetryNow ? () => _retryPendingSend(send) : null,
       onDiscard: () => _discardPendingSend(send),
       onFixHost: analysis.canFixHost ? () => _fixPendingHost(analysis) : null,
+      onUseCurrentHost: analysis.canUseCurrentHost
+          ? () => _usePendingCurrentHost(analysis)
+          : null,
       onEnableHost: analysis.canEnableHost
           ? () => _enablePendingHost(analysis)
           : null,
@@ -1935,6 +1961,7 @@ class _PendingSendCard extends StatelessWidget {
     this.onRetryNow,
     required this.onDiscard,
     this.onFixHost,
+    this.onUseCurrentHost,
     this.onEnableHost,
     this.dense = false,
   });
@@ -1946,6 +1973,7 @@ class _PendingSendCard extends StatelessWidget {
   final VoidCallback? onRetryNow;
   final VoidCallback onDiscard;
   final VoidCallback? onFixHost;
+  final VoidCallback? onUseCurrentHost;
   final VoidCallback? onEnableHost;
   final bool dense;
 
@@ -2029,6 +2057,12 @@ class _PendingSendCard extends StatelessWidget {
                     icon: Icons.tune_rounded,
                     label: 'Fix host',
                     onTap: onFixHost,
+                  ),
+                if (onUseCurrentHost != null)
+                  _PendingSendActionChip(
+                    icon: Icons.link_rounded,
+                    label: 'Use current',
+                    onTap: onUseCurrentHost,
                   ),
                 if (onOpenSession != null)
                   _PendingSendActionChip(
@@ -2130,6 +2164,12 @@ class _PendingSendCard extends StatelessWidget {
                   icon: Icons.tune_rounded,
                   label: 'Fix host',
                   onTap: onFixHost,
+                ),
+              if (onUseCurrentHost != null)
+                _PendingSendActionChip(
+                  icon: Icons.link_rounded,
+                  label: 'Use current host',
+                  onTap: onUseCurrentHost,
                 ),
               if (onOpenSession != null)
                 _PendingSendActionChip(
