@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
-import { hostname, platform } from "node:os";
+import { hostname, homedir, platform } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
-import { access, stat } from "node:fs/promises";
+import { access, readdir, stat } from "node:fs/promises";
 import nodePath from "node:path";
 
 import cors from "cors";
@@ -11,6 +11,8 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type {
   ActiveTurnState,
   ApprovalLiveEvent,
+  CodexProfileCatalog,
+  CodexProfileSummary,
   GitInfoSummary,
   LiveEvent,
   SessionActivity,
@@ -61,6 +63,11 @@ const SESSION_INPUT_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
+const PROVIDER_MODEL_LIST_TIMEOUT_MS = 2500;
+const RECENT_ROLLOUT_SCAN_DAYS = 3;
+const RECENT_ROLLOUT_FALLBACK_LIMIT = 50;
+const ROLLOUT_THREAD_ID_PATTERN =
+  /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
 
 interface SessionRuntimeCacheEntry {
   threadUpdatedAt: number;
@@ -88,6 +95,19 @@ interface SessionInputReceipt {
   mode: "steer" | "turn";
   turnId: string | null;
   messageId: string;
+}
+
+interface ConfigModelProviderSummary {
+  id: string;
+  name: string | null;
+  baseUrl: string | null;
+  envKey: string | null;
+}
+
+interface CodexProfileConfig extends CodexProfileCatalog {
+  modelProvider: string | null;
+  openaiBaseUrl: string | null;
+  modelProviders: Map<string, ConfigModelProviderSummary>;
 }
 
 interface SessionInputDedupeEntry {
@@ -710,8 +730,18 @@ export async function startServer(config: NodeConfig): Promise<void> {
     response.json(result);
   }));
 
-  app.get("/api/models", asyncRoute(async (_request, response) => {
-    response.json(await listModels(bridge));
+  app.get("/api/models", asyncRoute(async (request, response) => {
+    const query = request.query as Record<string, unknown>;
+    const cwd = asString(query.cwd) || null;
+    const profile = asString(query.profile) || null;
+    const provider = asString(query.provider) || null;
+    response.json(await listModels(bridge, cwd, { profile, provider }));
+  }));
+
+  app.get("/api/profiles", asyncRoute(async (request, response) => {
+    const query = request.query as Record<string, unknown>;
+    const cwd = asString(query.cwd) || null;
+    response.json(await listProfiles(bridge, cwd));
   }));
 
   app.post("/api/sessions/create", asyncRoute(async (request, response) => {
@@ -1146,14 +1176,84 @@ async function listSessions(
     archived: false,
   })) as any;
   const threads = Array.isArray(result.data) ? (result.data as ThreadRecord[]) : [];
+  const mergedThreads = await mergeRecentUnindexedThreads(bridge, threads, limit);
   return Promise.all(
-    threads.map(async (thread) =>
+    mergedThreads.map(async (thread) =>
       mapSession(
         thread,
         await loadCachedSessionRuntime(bridge, thread, runtimeCache),
       ),
     ),
   );
+}
+
+async function mergeRecentUnindexedThreads(
+  bridge: CodexBridge,
+  indexedThreads: ThreadRecord[],
+  limit: number,
+): Promise<ThreadRecord[]> {
+  const threadsById = new Map(indexedThreads.map((thread) => [thread.id, thread]));
+  const recentIds = await listRecentRolloutThreadIds();
+
+  for (const id of recentIds) {
+    if (threadsById.has(id)) {
+      continue;
+    }
+    try {
+      const thread = await readSession(bridge, id, false);
+      threadsById.set(id, thread);
+    } catch {
+      // Rollout scans are a best-effort fallback for sessions missing from Codex's index.
+    }
+    if (threadsById.size >= limit + RECENT_ROLLOUT_FALLBACK_LIMIT) {
+      break;
+    }
+  }
+
+  return [...threadsById.values()]
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, limit);
+}
+
+async function listRecentRolloutThreadIds(): Promise<string[]> {
+  const codexHome = process.env.CODEX_HOME?.trim() || nodePath.join(homedir(), ".codex");
+  const sessionsRoot = nodePath.join(codexHome, "sessions");
+  const candidates: Array<{ id: string; sortKey: string }> = [];
+  const seen = new Set<string>();
+
+  for (let offset = 0; offset < RECENT_ROLLOUT_SCAN_DAYS; offset += 1) {
+    const day = new Date(Date.now() - offset * 24 * 60 * 60 * 1000);
+    const dayDir = nodePath.join(
+      sessionsRoot,
+      String(day.getFullYear()),
+      String(day.getMonth() + 1).padStart(2, "0"),
+      String(day.getDate()).padStart(2, "0"),
+    );
+
+    let entries;
+    try {
+      entries = await readdir(dayDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.startsWith("rollout-") || !entry.name.endsWith(".jsonl")) {
+        continue;
+      }
+      const id = entry.name.match(ROLLOUT_THREAD_ID_PATTERN)?.[1];
+      if (!id || seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      candidates.push({ id, sortKey: entry.name });
+    }
+  }
+
+  return candidates
+    .sort((left, right) => right.sortKey.localeCompare(left.sortKey))
+    .slice(0, RECENT_ROLLOUT_FALLBACK_LIMIT)
+    .map((candidate) => candidate.id);
 }
 
 function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
@@ -1995,7 +2095,31 @@ function normalizeSkillCatalogEntry(
   };
 }
 
-async function listModels(bridge: CodexBridge): Promise<ModelSummary[]> {
+async function listModels(
+  bridge: CodexBridge,
+  cwd: string | null,
+  scope: { profile?: string | null; provider?: string | null } = {},
+): Promise<ModelSummary[]> {
+  const profileName = scope.profile?.trim() || null;
+  const providerName = scope.provider?.trim() || null;
+  if (profileName || providerName) {
+    const profileConfig = await readProfileConfig(bridge, cwd);
+    if (profileName) {
+      const profile = profileConfig.profiles.find((entry) => entry.name === profileName);
+      if (!profile) {
+        return [];
+      }
+      return listProfileScopedModels(bridge, profileConfig, profile);
+    }
+    if (providerName) {
+      return listProviderScopedModels(bridge, profileConfig, providerName);
+    }
+  }
+
+  return listHostModels(bridge);
+}
+
+async function listHostModels(bridge: CodexBridge): Promise<ModelSummary[]> {
   const models: ModelSummary[] = [];
   const seen = new Set<string>();
   let cursor: string | null = null;
@@ -2013,7 +2137,7 @@ async function listModels(bridge: CodexBridge): Promise<ModelSummary[]> {
         continue;
       }
       seen.add(model.model);
-      models.push(model);
+      models.push({ ...model, source: "host", profileName: null });
     }
 
     const nextCursor = asString(payload.nextCursor);
@@ -2024,6 +2148,231 @@ async function listModels(bridge: CodexBridge): Promise<ModelSummary[]> {
   }
 
   return models;
+}
+
+async function listProfileScopedModels(
+  bridge: CodexBridge,
+  config: CodexProfileConfig,
+  profile: CodexProfileSummary,
+): Promise<ModelSummary[]> {
+  const profileProvider = profile.modelProvider?.trim() || null;
+  const defaultProvider = config.modelProvider?.trim() || null;
+  const provider = profileProvider ? config.modelProviders.get(profileProvider) : null;
+
+  if (!profileProvider || profileProvider === defaultProvider || profileProvider === "openai") {
+    return mergeProfileModel([...(await listHostModels(bridge))], profile);
+  }
+
+  const baseUrl = provider?.baseUrl || profile.modelProviderBaseUrl || null;
+  const providerModels = baseUrl
+    ? await fetchProviderModels({
+        baseUrl,
+        envKey: provider?.envKey ?? null,
+        profileName: profile.name,
+        providerName: provider?.name || profileProvider,
+        defaultReasoningEffort: profile.reasoningEffort,
+      })
+    : [];
+
+  return mergeProfileModel(providerModels, profile);
+}
+
+async function listProviderScopedModels(
+  bridge: CodexBridge,
+  config: CodexProfileConfig,
+  providerName: string,
+): Promise<ModelSummary[]> {
+  const defaultProvider = config.modelProvider?.trim() || null;
+  if (providerName === defaultProvider || providerName === "openai") {
+    return listHostModels(bridge);
+  }
+
+  const provider = config.modelProviders.get(providerName);
+  if (!provider?.baseUrl) {
+    return [];
+  }
+  return fetchProviderModels({
+    baseUrl: provider.baseUrl,
+    envKey: provider.envKey,
+    profileName: null,
+    providerName: provider.name || providerName,
+    defaultReasoningEffort: null,
+  });
+}
+
+function mergeProfileModel(
+  models: ModelSummary[],
+  profile: CodexProfileSummary,
+): ModelSummary[] {
+  const model = normalizeProfileModelSummary(profile);
+  if (!model) {
+    return models;
+  }
+  const seen = new Set(models.map((entry) => entry.model));
+  if (!seen.has(model.model)) {
+    return [model, ...models];
+  }
+  return models.map((entry) =>
+    entry.model === model.model && entry.source !== "profile"
+      ? { ...entry, isDefault: true }
+      : entry,
+  );
+}
+
+function normalizeProfileModelSummary(profile: CodexProfileSummary): ModelSummary | null {
+  const model = profile.model?.trim();
+  if (!model) {
+    return null;
+  }
+
+  const profileDetails = [
+    profile.modelProvider ? `provider ${profile.modelProvider}` : null,
+    profile.reasoningEffort ? `${profile.reasoningEffort} reasoning` : null,
+    profile.serviceTier ? `tier ${profile.serviceTier}` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  const suffix =
+    profileDetails.length > 0 ? ` (${profileDetails.join(", ")})` : "";
+
+  return {
+    id: `profile:${profile.name}:${model}`,
+    model,
+    displayName: model,
+    description: `Declared by Codex profile ${profile.name}${suffix}.`,
+    defaultReasoningEffort: profile.reasoningEffort ?? "medium",
+    supportedReasoningEfforts: [],
+    supportsPersonality: false,
+    additionalSpeedTiers: [],
+    inputModalities: ["text", "image"],
+    isDefault: false,
+    source: "profile",
+    profileName: profile.name,
+  };
+}
+
+async function fetchProviderModels(options: {
+  baseUrl: string;
+  envKey: string | null;
+  profileName: string | null;
+  providerName: string;
+  defaultReasoningEffort: string | null;
+}): Promise<ModelSummary[]> {
+  const url = providerModelsUrl(options.baseUrl);
+  if (!url) {
+    return [];
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_MODEL_LIST_TIMEOUT_MS);
+  try {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    const apiKey = options.envKey ? process.env[options.envKey]?.trim() : "";
+    if (apiKey) {
+      headers.Authorization = `Bearer ${apiKey}`;
+    }
+    const response = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return [];
+    }
+    const payload = (await response.json()) as unknown;
+    const payloadObject =
+      payload && typeof payload === "object" ? (payload as { data?: unknown }) : null;
+    const rawModels: unknown[] = Array.isArray(payloadObject?.data)
+      ? payloadObject.data
+      : Array.isArray(payload)
+        ? payload
+        : [];
+    const models = rawModels
+      .map((entry: unknown) =>
+        normalizeProviderModelSummary(entry, {
+          profileName: options.profileName,
+          providerName: options.providerName,
+          defaultReasoningEffort: options.defaultReasoningEffort,
+        }),
+      )
+      .filter((entry: ModelSummary | null): entry is ModelSummary => entry !== null);
+    const seen = new Set<string>();
+    return models.filter((entry: ModelSummary) => {
+      if (seen.has(entry.model)) {
+        return false;
+      }
+      seen.add(entry.model);
+      return true;
+    });
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function providerModelsUrl(baseUrl: string): string | null {
+  try {
+    const url = new URL(baseUrl);
+    const path = url.pathname.replace(/\/+$/, "");
+    url.pathname = `${path}/models`;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeProviderModelSummary(
+  raw: unknown,
+  options: {
+    profileName: string | null;
+    providerName: string;
+    defaultReasoningEffort: string | null;
+  },
+): ModelSummary | null {
+  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  const model = asString(typed?.id) || asString(typed?.model) || asString(raw);
+  if (!model) {
+    return null;
+  }
+  const profileSuffix = options.profileName ? ` via profile ${options.profileName}` : "";
+  return {
+    id: `${options.profileName ? `profile:${options.profileName}` : `provider:${options.providerName}`}:${model}`,
+    model,
+    displayName: model,
+    description: `Available from ${options.providerName}${profileSuffix}.`,
+    defaultReasoningEffort: options.defaultReasoningEffort ?? "medium",
+    supportedReasoningEfforts: [],
+    supportsPersonality: false,
+    additionalSpeedTiers: [],
+    inputModalities: ["text", "image"],
+    isDefault: false,
+    source: options.profileName ? "profile" : "host",
+    profileName: options.profileName,
+  };
+}
+
+async function listProfiles(
+  bridge: CodexBridge,
+  cwd: string | null,
+): Promise<CodexProfileCatalog> {
+  const profileConfig = await readProfileConfig(bridge, cwd);
+  return {
+    defaultProfile: profileConfig.defaultProfile,
+    profiles: profileConfig.profiles,
+  };
+}
+
+async function readProfileConfig(
+  bridge: CodexBridge,
+  cwd: string | null,
+): Promise<CodexProfileConfig> {
+  const payload = (await bridge.request("config/read", {
+    includeLayers: false,
+    cwd: cwd ?? undefined,
+  })) as { config?: unknown };
+  return normalizeProfileConfig(payload.config);
 }
 
 function normalizeModelSummary(raw: unknown): ModelSummary | null {
@@ -2074,6 +2423,105 @@ function normalizeModelSummary(raw: unknown): ModelSummary | null {
       : [],
     isDefault: typed.isDefault === true,
   };
+}
+
+function normalizeProfileConfig(raw: unknown): CodexProfileConfig {
+  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const defaultProfile = asString(typed.profile);
+  const modelProvider = readStringKey(typed, "modelProvider", "model_provider");
+  const openaiBaseUrl = readStringKey(typed, "openaiBaseUrl", "openai_base_url");
+  const modelProviders = normalizeModelProviders(typed.modelProviders ?? typed.model_providers);
+  const rawProfiles =
+    typed.profiles && typeof typed.profiles === "object"
+      ? (typed.profiles as Record<string, unknown>)
+      : {};
+
+  const profiles = Object.entries(rawProfiles)
+    .map(([name, profile]) =>
+      normalizeProfileSummary(name, profile, defaultProfile, modelProviders),
+    )
+    .filter((profile): profile is CodexProfileSummary => profile !== null)
+    .sort(compareProfiles);
+
+  return { defaultProfile, profiles, modelProvider, openaiBaseUrl, modelProviders };
+}
+
+function normalizeModelProviders(raw: unknown): Map<string, ConfigModelProviderSummary> {
+  const providers = new Map<string, ConfigModelProviderSummary>();
+  if (!raw || typeof raw !== "object") {
+    return providers;
+  }
+
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    const typed = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+    if (!id || !typed) {
+      continue;
+    }
+    providers.set(id, {
+      id,
+      name: readStringKey(typed, "name"),
+      baseUrl: readStringKey(typed, "baseUrl", "base_url"),
+      envKey: readStringKey(typed, "envKey", "env_key"),
+    });
+  }
+
+  return providers;
+}
+
+function normalizeProfileSummary(
+  name: string,
+  raw: unknown,
+  defaultProfile: string | null,
+  modelProviders: Map<string, ConfigModelProviderSummary>,
+): CodexProfileSummary | null {
+  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  if (!typed || !name) {
+    return null;
+  }
+
+  const modelProvider = readStringKey(typed, "modelProvider", "model_provider");
+  const provider = modelProvider ? modelProviders.get(modelProvider) : null;
+
+  return {
+    name,
+    isDefault: name === defaultProfile,
+    model: readStringKey(typed, "model"),
+    modelProvider,
+    modelProviderName: provider?.name ?? null,
+    modelProviderBaseUrl:
+      provider?.baseUrl ?? readStringKey(typed, "openaiBaseUrl", "openai_base_url"),
+    approvalPolicy: readStringKey(typed, "approvalPolicy", "approval_policy"),
+    sandboxMode: readStringKey(typed, "sandboxMode", "sandbox_mode"),
+    serviceTier: readStringKey(typed, "serviceTier", "service_tier"),
+    reasoningEffort: readStringKey(
+      typed,
+      "modelReasoningEffort",
+      "model_reasoning_effort",
+    ),
+    reasoningSummary: readStringKey(
+      typed,
+      "modelReasoningSummary",
+      "model_reasoning_summary",
+    ),
+    verbosity: readStringKey(typed, "modelVerbosity", "model_verbosity"),
+    webSearch: readStringKey(typed, "webSearch", "web_search"),
+    personality: readStringKey(typed, "personality"),
+  };
+}
+
+function compareProfiles(left: CodexProfileSummary, right: CodexProfileSummary): number {
+  if (left.isDefault !== right.isDefault) {
+    return left.isDefault ? -1 : 1;
+  }
+  return left.name.toLowerCase().localeCompare(right.name.toLowerCase());
+}
+
+function readStringKey(
+  typed: Record<string, unknown>,
+  camelKey: string,
+  snakeKey?: string,
+): string | null {
+  return asString(typed[camelKey]) ?? (snakeKey ? asString(typed[snakeKey]) : null);
 }
 
 function normalizeSkillSummary(
@@ -2159,6 +2607,10 @@ function buildRuntimeFromThreadStart(raw: unknown): SessionRuntimeSummary | null
 
   const runtime = {
     model: asString(typed.model) ?? undefined,
+    modelProvider:
+      asString(typed.modelProvider) ??
+      asString(typed.model_provider) ??
+      undefined,
     serviceTier:
       asString(typed.serviceTier) ??
       asString(typed.service_tier) ??
@@ -2190,6 +2642,7 @@ function buildRuntimeFromThreadStart(raw: unknown): SessionRuntimeSummary | null
 
   if (
     !runtime.model &&
+    !runtime.modelProvider &&
     !runtime.serviceTier &&
     !runtime.reasoningEffort &&
     !runtime.approvalPolicy &&
