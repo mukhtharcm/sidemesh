@@ -956,6 +956,10 @@ class _SessionScreenState extends State<SessionScreen>
     });
   }
 
+  void _reloadSnapshot() {
+    unawaited(_loadSnapshot(scrollToBottom: false));
+  }
+
   Future<void> _loadSnapshot({
     int? messageLimit,
     int? activityLimit,
@@ -3622,6 +3626,15 @@ class _SessionScreenState extends State<SessionScreen>
           Padding(
             padding: const EdgeInsets.only(right: 6),
             child: MeshIconButton(
+              icon: Icons.refresh_rounded,
+              tooltip: 'Reload session',
+              color: colors.textSecondary,
+              onTap: _reloadSnapshot,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: MeshIconButton(
               icon: Icons.terminal_rounded,
               tooltip: 'New session',
               color: colors.textSecondary,
@@ -3753,9 +3766,6 @@ class _SessionScreenState extends State<SessionScreen>
                         );
                       }
                       break;
-                    case 'reload':
-                      _loadSnapshot();
-                      break;
                     case 'rename':
                       _renameSession();
                       break;
@@ -3809,16 +3819,6 @@ class _SessionScreenState extends State<SessionScreen>
                         Icon(Icons.folder_outlined, size: 18),
                         SizedBox(width: 10),
                         Text('Browse files'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'reload',
-                    child: Row(
-                      children: [
-                        Icon(Icons.refresh_rounded, size: 18),
-                        SizedBox(width: 10),
-                        Text('Reload'),
                       ],
                     ),
                   ),
