@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -67,6 +68,57 @@ void main() {
     expect(await file.parent.exists(), isFalse);
     expect(prefs.getKeys(), isEmpty);
   });
+
+  test('clearHost removes indexed and orphaned files for that host', () async {
+    final store = ImageBlobCacheStore.instance;
+    final prefs = await SharedPreferences.getInstance();
+    final api = _ImageApi(Uint8List.fromList([1, 2, 3]));
+
+    final file = await store.load(host: host, path: '/tmp/image.png', api: api);
+    final fileName = file.uri.pathSegments.last;
+    final hostPrefix = '${fileName.split('-').first}-';
+    final orphan = File('${file.parent.path}/${hostPrefix}orphan.blob');
+    await orphan.writeAsBytes([4, 5, 6], flush: true);
+
+    expect(await file.exists(), isTrue);
+    expect(await orphan.exists(), isTrue);
+    expect(prefs.getKeys(), isNotEmpty);
+
+    await store.clearHost(host);
+
+    expect(await file.exists(), isFalse);
+    expect(await orphan.exists(), isFalse);
+    expect(prefs.getKeys(), isEmpty);
+  });
+
+  test('clearAll prevents in-flight loads from repopulating cache', () async {
+    final store = ImageBlobCacheStore.instance;
+    final prefs = await SharedPreferences.getInstance();
+    final api = _DelayedImageApi([1, 2, 3]);
+
+    final load = store.load(host: host, path: '/tmp/image.png', api: api);
+    await api.started.future;
+
+    await store.clearAll();
+    api.complete();
+
+    final file = await load;
+    addTearDown(() async {
+      final parent = file.parent;
+      if (await parent.exists()) {
+        await parent.delete(recursive: true);
+      }
+    });
+
+    expect(api.requestCount, 1);
+    expect(await file.exists(), isTrue);
+    expect(file.path.contains('sidemesh_image_blobs_v1'), isFalse);
+    expect(
+      await Directory('${tempRoot!.path}/sidemesh_image_blobs_v1').exists(),
+      isFalse,
+    );
+    expect(prefs.getKeys(), isEmpty);
+  });
 }
 
 class _ImageApi extends ApiClient {
@@ -79,5 +131,30 @@ class _ImageApi extends ApiClient {
   Future<Uint8List> fetchFsBlob(HostProfile host, String path) async {
     requestCount += 1;
     return bytes;
+  }
+}
+
+class _DelayedImageApi extends ApiClient {
+  _DelayedImageApi(this.bytes);
+
+  final List<int> bytes;
+  final Completer<void> started = Completer<void>();
+  final Completer<void> release = Completer<void>();
+  var requestCount = 0;
+
+  void complete() {
+    if (!release.isCompleted) {
+      release.complete();
+    }
+  }
+
+  @override
+  Future<Uint8List> fetchFsBlob(HostProfile host, String path) async {
+    requestCount += 1;
+    if (!started.isCompleted) {
+      started.complete();
+    }
+    await release.future;
+    return Uint8List.fromList(bytes);
   }
 }

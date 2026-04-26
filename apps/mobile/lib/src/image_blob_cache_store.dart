@@ -20,6 +20,7 @@ class ImageBlobCacheStore {
 
   final Map<String, Future<File>> _inFlight = <String, Future<File>>{};
   Future<void> _indexMutation = Future<void>.value();
+  var _clearGeneration = 0;
 
   Future<File> load({
     required HostProfile host,
@@ -37,7 +38,13 @@ class ImageBlobCacheStore {
       return existing;
     }
 
-    final request = _fetchAndStore(host: host, path: path, api: api, key: key);
+    final request = _fetchAndStore(
+      host: host,
+      path: path,
+      api: api,
+      key: key,
+      generation: _clearGeneration,
+    );
     _inFlight[key] = request;
     try {
       return await request;
@@ -53,6 +60,7 @@ class ImageBlobCacheStore {
     final dir = await _cacheDir();
     final prefix = _cacheKeyPrefix(host);
     await _runIndexMutation(() async {
+      _clearGeneration += 1;
       final index = await _loadIndex(prefs);
       final kept = <_ImageCacheIndexEntry>[];
       for (final entry in index) {
@@ -62,6 +70,7 @@ class ImageBlobCacheStore {
           kept.add(entry);
         }
       }
+      await _deleteFilesWithPrefix(dir, prefix);
       await _saveIndex(prefs, kept);
     });
   }
@@ -70,6 +79,7 @@ class ImageBlobCacheStore {
     final prefs = await SharedPreferences.getInstance();
     final dir = await _cacheDir();
     await _runIndexMutation(() async {
+      _clearGeneration += 1;
       await _deleteDirectoryIfExists(dir);
       await prefs.remove(_indexKey);
     });
@@ -107,8 +117,13 @@ class ImageBlobCacheStore {
     required String path,
     required ApiClient api,
     required String key,
+    required int generation,
   }) async {
     final bytes = await api.fetchFsBlob(host, path);
+    if (generation != _clearGeneration) {
+      return _writeTransientFile(key, bytes);
+    }
+
     final dir = await _cacheDir();
     final file = _fileFor(dir, key);
     final temp = File(
@@ -118,24 +133,40 @@ class ImageBlobCacheStore {
 
     final now = DateTime.now();
     final prefs = await SharedPreferences.getInstance();
-    await _runIndexMutation(() async {
-      if (await file.exists()) {
-        await file.delete();
-      }
-      await temp.rename(file.path);
-      await _updateIndex(
-        prefs,
-        _ImageCacheIndexEntry(
-          key: key,
-          sizeBytes: bytes.length,
-          cachedAt: now,
-          lastUsedAt: now,
-        ),
-      );
-    }).catchError((Object error) async {
+    var stored = false;
+    try {
+      await _runIndexMutation(() async {
+        if (generation != _clearGeneration) return;
+        if (await file.exists()) {
+          await file.delete();
+        }
+        await temp.rename(file.path);
+        await _updateIndex(
+          prefs,
+          _ImageCacheIndexEntry(
+            key: key,
+            sizeBytes: bytes.length,
+            cachedAt: now,
+            lastUsedAt: now,
+          ),
+        );
+        stored = true;
+      });
+    } catch (error) {
       await _deleteFileIfExists(temp);
-      throw error;
-    });
+      rethrow;
+    }
+    if (!stored) {
+      await _deleteFileIfExists(temp);
+      return _writeTransientFile(key, bytes);
+    }
+    return file;
+  }
+
+  Future<File> _writeTransientFile(String key, List<int> bytes) async {
+    final dir = await Directory.systemTemp.createTemp('sidemesh_image_blob_');
+    final file = File('${dir.path}/$key.blob');
+    await file.writeAsBytes(bytes, flush: true);
     return file;
   }
 
@@ -323,6 +354,21 @@ class ImageBlobCacheStore {
     try {
       if (await directory.exists()) {
         await directory.delete(recursive: true);
+      }
+    } catch (_) {
+      // Cache files are disposable; failed cleanup should not break the UI.
+    }
+  }
+
+  Future<void> _deleteFilesWithPrefix(Directory dir, String prefix) async {
+    try {
+      if (!await dir.exists()) return;
+      await for (final entity in dir.list()) {
+        if (entity is! File) continue;
+        final name = entity.uri.pathSegments.last;
+        if (name.startsWith(prefix)) {
+          await _deleteFileIfExists(entity);
+        }
       }
     } catch (_) {
       // Cache files are disposable; failed cleanup should not break the UI.
