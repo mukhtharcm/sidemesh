@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { CodexAgentProvider } from "./codex-provider.js";
+import { CopilotAgentProvider } from "./copilot-provider.js";
 import { FakeAgentProvider } from "./fake-provider.js";
 import {
   DEFAULT_AGENT_PROVIDER_KIND,
@@ -16,10 +17,10 @@ import {
 describe("provider registry", () => {
   it("reports Codex as the default supported provider", () => {
     assert.equal(DEFAULT_AGENT_PROVIDER_KIND, "codex");
-    assert.deepEqual(supportedAgentProviderKinds(), ["codex", "fake"]);
+    assert.deepEqual(supportedAgentProviderKinds(), ["codex", "fake", "copilot"]);
     assert.equal(isAgentProviderKind("codex"), true);
     assert.equal(isAgentProviderKind("fake"), true);
-    assert.equal(isAgentProviderKind("copilot"), false);
+    assert.equal(isAgentProviderKind("copilot"), true);
   });
 
   it("exposes provider metadata without leaking factory functions", () => {
@@ -42,6 +43,17 @@ describe("provider registry", () => {
           "SIDEMESH_FAKE_SEED",
           "SIDEMESH_FAKE_WORKSPACE_ROOT",
           "SIDEMESH_FAKE_CAPABILITY_PROFILE",
+        ],
+      },
+      {
+        kind: "copilot",
+        displayName: "GitHub Copilot",
+        defaultCommand: "copilot",
+        commandEnvironmentVariables: [
+          "SIDEMESH_COPILOT_BIN",
+          "SIDEMESH_PROVIDER_COMMAND",
+          "SIDEMESH_COPILOT_STATE_DIR",
+          "SIDEMESH_COPILOT_ALLOW_ALL",
         ],
       },
     ]);
@@ -123,5 +135,32 @@ describe("provider registry", () => {
         }),
       /Unsupported SIDEMESH_FAKE_CAPABILITY_PROFILE/,
     );
+  });
+
+  it("loads and constructs the Copilot provider", () => {
+    const config = loadAgentProviderConfig("copilot", {
+      SIDEMESH_COPILOT_BIN: "copilot-beta",
+      SIDEMESH_PROVIDER_COMMAND: "ignored",
+      SIDEMESH_COPILOT_STATE_DIR: "/tmp/sidemesh-copilot",
+      SIDEMESH_COPILOT_ALLOW_ALL: "true",
+    });
+
+    assert.deepEqual(config, {
+      kind: "copilot",
+      bin: "copilot-beta",
+      stateDir: "/tmp/sidemesh-copilot",
+      allowAll: true,
+    });
+    assert.deepEqual(summarizeAgentProviderConfig(config), {
+      kind: "copilot",
+      command: "copilot-beta",
+    });
+
+    const provider = createAgentProviderFromConfig(config);
+    assert.ok(provider instanceof CopilotAgentProvider);
+    assert.equal(provider.kind, "copilot");
+    assert.equal(provider.displayName, "GitHub Copilot");
+    assert.equal(provider.capabilities.input.text, true);
+    assert.equal(provider.capabilities.input.localImage, false);
   });
 });
