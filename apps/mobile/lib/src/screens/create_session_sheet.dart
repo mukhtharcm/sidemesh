@@ -745,7 +745,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     });
 
     try {
-      final catalog = await widget.api.fetchProfiles(widget.host, cwd: cwd);
+      final catalog = await widget.api.fetchProfiles(
+        widget.host,
+        cwd: cwd,
+        agentProvider: _selectedProviderKindOrDefault,
+      );
       if (!mounted) return;
       setState(() {
         _profiles = catalog.profiles;

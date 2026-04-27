@@ -567,6 +567,7 @@ class _SessionScreenState extends State<SessionScreen>
             host: widget.host,
             api: widget.api,
             root: session.cwd,
+            agentProvider: session.provider,
           ),
         );
         break;
@@ -885,6 +886,7 @@ class _SessionScreenState extends State<SessionScreen>
         widget.host,
         cwd: (_session ?? widget.session).cwd,
         forceReload: forceReload,
+        agentProvider: (_session ?? widget.session).provider,
       );
       if (!mounted || requestId != _skillsRequestId) {
         return;
@@ -3297,15 +3299,16 @@ class _SessionScreenState extends State<SessionScreen>
       );
       return;
     }
+    final session = _session ?? widget.session;
     final scope = InspectorScope.maybeOf(context);
     if (widget.desktopMode && scope != null) {
-      final session = _session ?? widget.session;
       scope.show(
         buildInspectorWorkspaceBrowserSurface(
           ownerKey: _inspectorOwnerKey(),
           host: widget.host,
           api: widget.api,
           root: session.cwd,
+          agentProvider: session.provider,
           selectedPath: path,
         ),
       );
@@ -3313,8 +3316,12 @@ class _SessionScreenState extends State<SessionScreen>
     }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            FileViewerScreen(host: widget.host, api: widget.api, path: path),
+        builder: (_) => FileViewerScreen(
+          host: widget.host,
+          api: widget.api,
+          path: path,
+          agentProvider: session.provider,
+        ),
       ),
     );
   }
@@ -4050,6 +4057,7 @@ class _SessionScreenState extends State<SessionScreen>
                             host: widget.host,
                             api: widget.api,
                             root: session.cwd,
+                            agentProvider: session.provider,
                           ),
                         );
                       } else if (isDesktop) {
@@ -4058,6 +4066,7 @@ class _SessionScreenState extends State<SessionScreen>
                           host: widget.host,
                           api: widget.api,
                           root: session.cwd,
+                          agentProvider: session.provider,
                         );
                       } else {
                         Navigator.of(context).push(
@@ -4066,6 +4075,7 @@ class _SessionScreenState extends State<SessionScreen>
                               host: widget.host,
                               api: widget.api,
                               root: session.cwd,
+                              agentProvider: session.provider,
                             ),
                           ),
                         );

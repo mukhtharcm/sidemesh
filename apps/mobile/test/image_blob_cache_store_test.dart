@@ -128,7 +128,11 @@ class _ImageApi extends ApiClient {
   var requestCount = 0;
 
   @override
-  Future<Uint8List> fetchFsBlob(HostProfile host, String path) async {
+  Future<Uint8List> fetchFsBlob(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+  }) async {
     requestCount += 1;
     return bytes;
   }
@@ -149,7 +153,11 @@ class _DelayedImageApi extends ApiClient {
   }
 
   @override
-  Future<Uint8List> fetchFsBlob(HostProfile host, String path) async {
+  Future<Uint8List> fetchFsBlob(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+  }) async {
     requestCount += 1;
     if (!started.isCompleted) {
       started.complete();

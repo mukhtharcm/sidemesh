@@ -445,6 +445,7 @@ class _CapabilityFakeApi extends ApiClient {
   Future<ProviderProfileCatalog> fetchProfiles(
     HostProfile host, {
     String? cwd,
+    String? agentProvider,
   }) async => ProviderProfileCatalog(
     defaultProfile: profiles.isEmpty ? null : profiles.first.name,
     profiles: profiles,
@@ -455,6 +456,7 @@ class _CapabilityFakeApi extends ApiClient {
     HostProfile host, {
     required String cwd,
     bool forceReload = false,
+    String? agentProvider,
   }) async => SkillCatalog(cwd: cwd, skills: const [], errors: const []);
 
   @override

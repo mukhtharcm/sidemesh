@@ -22,6 +22,7 @@ class FileViewerPane extends StatefulWidget {
     required this.host,
     required this.api,
     required this.path,
+    this.agentProvider,
     this.liveStream,
     this.dense = false,
     this.observable,
@@ -30,6 +31,7 @@ class FileViewerPane extends StatefulWidget {
   final HostProfile host;
   final ApiClient api;
   final String path;
+  final String? agentProvider;
   final Stream<FsChangeEvent>? liveStream;
 
   /// When true, uses tighter padding suitable for embedding in a desktop
@@ -114,7 +116,11 @@ class FileViewerPaneState extends State<FileViewerPane> {
       });
     }
     try {
-      final file = await widget.api.readFile(widget.host, widget.path);
+      final file = await widget.api.readFile(
+        widget.host,
+        widget.path,
+        agentProvider: widget.agentProvider,
+      );
       if (!mounted) return;
       setState(() {
         _file = file;
@@ -169,6 +175,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
         widget.host,
         path: widget.path,
         contents: _editController.text,
+        agentProvider: widget.agentProvider,
       );
       if (!mounted) return;
       setState(() {

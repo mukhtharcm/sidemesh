@@ -17,6 +17,7 @@ Future<void> showWorkspaceBrowserDialog(
   required HostProfile host,
   required ApiClient api,
   required String root,
+  String? agentProvider,
 }) {
   return showDialog<void>(
     context: context,
@@ -25,6 +26,7 @@ Future<void> showWorkspaceBrowserDialog(
       host: host,
       api: api,
       root: root,
+      agentProvider: agentProvider,
     ),
   );
 }
@@ -34,11 +36,13 @@ class _WorkspaceBrowserDialog extends StatefulWidget {
     required this.host,
     required this.api,
     required this.root,
+    required this.agentProvider,
   });
 
   final HostProfile host;
   final ApiClient api;
   final String root;
+  final String? agentProvider;
 
   @override
   State<_WorkspaceBrowserDialog> createState() =>
@@ -98,6 +102,7 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                         host: widget.host,
                         api: widget.api,
                         root: widget.root,
+                        agentProvider: widget.agentProvider,
                         selectedPath: _selected,
                         onOpenFile: (path, liveStream) {
                           setState(() {
@@ -123,6 +128,7 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                             host: widget.host,
                             api: widget.api,
                             path: _selected!,
+                            agentProvider: widget.agentProvider,
                             observable: _viewerObservable,
                             dense: true,
                             liveStream: _liveStream,
