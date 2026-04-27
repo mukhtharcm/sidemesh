@@ -19,6 +19,7 @@ import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
 import '../models.dart';
 import '../pending_send_recovery.dart';
+import '../screen_awake_controller.dart';
 import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_screen.dart';
@@ -270,6 +271,16 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _clearLiveAssistantMessage() {
     _liveAssistantNotifier.value = null;
+  }
+
+  String get _screenAwakeSourceKey =>
+      'session:${widget.host.id}:${widget.session.id}';
+
+  void _syncScreenAwakeSource() {
+    ScreenAwakeController.instance.setSourceActive(
+      _screenAwakeSourceKey,
+      _running,
+    );
   }
 
   @override
@@ -589,6 +600,7 @@ class _SessionScreenState extends State<SessionScreen>
   @override
   void dispose() {
     _disposed = true;
+    ScreenAwakeController.instance.clearSource(_screenAwakeSourceKey);
     _inspectorController?.removeListener(_onInspectorChanged);
     _inspectorController = null;
     // Stamp the most recent session state as seen before we unmount so
@@ -1660,6 +1672,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _syncSessionLiveActivity({SessionActivity? latestActivity}) {
+    _syncScreenAwakeSource();
     final session = _session ?? widget.session;
     final pendingAction = _pendingAction;
     if (!_running && pendingAction == null) {
