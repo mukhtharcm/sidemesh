@@ -1392,10 +1392,10 @@ class _DetailPaneState extends State<_DetailPane> {
                     constraints: const BoxConstraints(maxWidth: 360),
                     child: Text(
                       widget.hosts.isEmpty
-                          ? 'Add a host first, then launch Codex from here.'
+                          ? 'Add a host first, then launch an agent from here.'
                           : widget.enabledHosts.isEmpty
-                          ? 'Enable a saved host from the Hosts sidebar before launching Codex.'
-                          : 'Open an existing chat or launch a fresh Codex session on any configured host.',
+                          ? 'Enable a saved host from the Hosts sidebar before launching an agent.'
+                          : 'Open an existing chat or launch a fresh agent session on any configured host.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: colors.textSecondary),
                     ),
