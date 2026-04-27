@@ -5,7 +5,12 @@ import path from "node:path";
 import type { Express, Request, Response, NextFunction } from "express";
 import type { WebSocket, WebSocketServer } from "ws";
 
-import type { AgentProvider } from "./agent-provider.js";
+import {
+  requireProviderMethod,
+  type AgentProviderMethod,
+  type AgentProviderMethodName,
+  type AgentProvider,
+} from "./agent-provider.js";
 import {
   collectWorkspaceRoots,
   resolveWorkspacePath,
@@ -39,7 +44,8 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     "/api/fs/list",
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(request.query.path, provider, listSessions);
-      const result = await provider.fsReadDirectory(target);
+      const readDirectory = requireFilesystemMethod(provider, "fsReadDirectory", "filesystem directory listing");
+      const result = await readDirectory.call(provider, target);
       const entries = (result.entries || []).map((entry) => ({
         name: entry.fileName,
         path: path.join(target, entry.fileName),
@@ -58,7 +64,8 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     "/api/fs/metadata",
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(request.query.path, provider, listSessions);
-      const meta = await provider.fsGetMetadata(target);
+      const getMetadata = requireFilesystemMethod(provider, "fsGetMetadata", "filesystem metadata");
+      const meta = await getMetadata.call(provider, target);
       response.json({ path: target, ...meta });
     }),
   );
@@ -67,12 +74,14 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     "/api/fs/read",
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(request.query.path, provider, listSessions);
-      const meta = await provider.fsGetMetadata(target);
+      const getMetadata = requireFilesystemMethod(provider, "fsGetMetadata", "filesystem metadata");
+      const readFile = requireFilesystemMethod(provider, "fsReadFile", "filesystem file reads");
+      const meta = await getMetadata.call(provider, target);
       if (!meta.isFile) {
         response.status(400).json({ error: "path is not a regular file" });
         return;
       }
-      const res = await provider.fsReadFile(target);
+      const res = await readFile.call(provider, target);
       const bytes = Buffer.from(res.dataBase64 || "", "base64");
       const size = bytes.byteLength;
       const binary = isBinary(bytes);
@@ -112,7 +121,8 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
         provider,
         listSessions,
       );
-      const res = await provider.fsReadFile(target);
+      const readFile = requireFilesystemMethod(provider, "fsReadFile", "filesystem blob reads");
+      const res = await readFile.call(provider, target);
       const bytes = Buffer.from(res.dataBase64 || "", "base64");
       response.setHeader("Content-Type", guessMime(target));
       response.setHeader("Content-Length", String(bytes.byteLength));
@@ -144,7 +154,8 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
         response.status(413).json({ error: "payload too large" });
         return;
       }
-      await provider.fsWriteFile(target, buffer.toString("base64"));
+      const writeFile = requireFilesystemMethod(provider, "fsWriteFile", "filesystem file writes");
+      await writeFile.call(provider, target, buffer.toString("base64"));
       response.json({ path: target, bytes: buffer.byteLength });
     }),
   );
@@ -159,7 +170,8 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
         { allowMissing: true },
       );
       const recursive = request.body?.recursive !== false;
-      await provider.fsCreateDirectory(target, recursive);
+      const createDirectory = requireFilesystemMethod(provider, "fsCreateDirectory", "filesystem directory creation");
+      await createDirectory.call(provider, target, recursive);
       response.json({ path: target });
     }),
   );
@@ -170,7 +182,8 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
       const target = await resolveIncomingPath(request.body?.path, provider, listSessions);
       const recursive = request.body?.recursive !== false;
       const force = request.body?.force !== false;
-      await provider.fsRemove(target, { recursive, force });
+      const remove = requireFilesystemMethod(provider, "fsRemove", "filesystem removal");
+      await remove.call(provider, target, { recursive, force });
       response.json({ path: target });
     }),
   );
@@ -190,7 +203,8 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
         { allowMissing: true },
       );
       const recursive = request.body?.recursive === true;
-      await provider.fsCopy({ sourcePath: source, destinationPath: destination, recursive });
+      const copy = requireFilesystemMethod(provider, "fsCopy", "filesystem copy");
+      await copy.call(provider, { sourcePath: source, destinationPath: destination, recursive });
       response.json({ sourcePath: source, destinationPath: destination });
     }),
   );
@@ -267,6 +281,21 @@ function asyncRoute(
   };
 }
 
+function requireFilesystemMethod<K extends AgentProviderMethodName>(
+  provider: AgentProvider,
+  method: K,
+  feature: string,
+): AgentProviderMethod<K> {
+  try {
+    return requireProviderMethod(provider, method, feature);
+  } catch (error) {
+    throw new WorkspaceAccessError(
+      error instanceof Error ? error.message : String(error),
+      501,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // fs/watch registry — bridges WebSocket clients ↔ provider fs/watch notifications.
 //
@@ -292,7 +321,8 @@ export class FsWatchRegistry {
     params: { path: string; userWatchId: string; roots: string[] },
   ): Promise<{ watchId: string; path: string }> {
     const resolved = await resolveWorkspacePath(params.path, params.roots);
-    const result = await this.provider.fsWatch(resolved);
+    const watch = requireFilesystemMethod(this.provider, "fsWatch", "filesystem watching");
+    const result = await watch.call(this.provider, resolved);
     const watchId = result.watchId;
     this.records.set(watchId, { ws, userWatchId: params.userWatchId, path: resolved });
     const set = this.byClient.get(ws) ?? new Set<string>();
@@ -307,7 +337,8 @@ export class FsWatchRegistry {
     this.records.delete(watchId);
     this.byClient.get(ws)?.delete(watchId);
     try {
-      await this.provider.fsUnwatch(watchId);
+      const unwatch = requireFilesystemMethod(this.provider, "fsUnwatch", "filesystem watching");
+      await unwatch.call(this.provider, watchId);
     } catch {
       // Best-effort; Codex may already have dropped the watch.
     }
@@ -320,7 +351,8 @@ export class FsWatchRegistry {
     for (const watchId of set) {
       this.records.delete(watchId);
       try {
-        await this.provider.fsUnwatch(watchId);
+        const unwatch = requireFilesystemMethod(this.provider, "fsUnwatch", "filesystem watching");
+        await unwatch.call(this.provider, watchId);
       } catch {
         // swallow
       }
