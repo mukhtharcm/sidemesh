@@ -1,13 +1,25 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { describe, it } from "node:test";
 
+import type { AgentPendingAction } from "./agent-provider.js";
+import {
+  type CopilotSdkClient,
+  type CopilotSdkClientFactory,
+  type CopilotSdkMessageOptions,
+  type CopilotSdkModelInfo,
+  type CopilotSdkPermissionResult,
+  type CopilotSdkResumeSessionConfig,
+  type CopilotSdkSession,
+  type CopilotSdkSessionConfig,
+  type CopilotSdkSessionEvent,
+} from "./copilot-sdk-client.js";
 import { CopilotAgentProvider } from "./copilot-provider.js";
 
 describe("Copilot provider", () => {
-  it("imports native Copilot CLI session-state history", async () => {
+  it("imports native Copilot session-state history and resumes through the SDK", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-native-"),
     );
@@ -74,26 +86,11 @@ describe("Copilot provider", () => {
         ].join("\n"),
       );
 
-      const bin = nodePath.join(dir, "fake-copilot");
-      await writeFile(
-        bin,
-        [
-          "#!/usr/bin/env node",
-          "const args = process.argv.slice(2);",
-          "if (args.includes('--name') && args.some((arg) => arg.startsWith('--resume'))) {",
-          "  console.error('name/resume conflict');",
-          "  process.exit(1);",
-          "}",
-          "const prompt = args[args.indexOf('-p') + 1] || '';",
-          "process.stdout.write('resumed: ' + prompt);",
-        ].join("\n"),
-      );
-      await chmod(bin, 0o755);
-
+      const sdk = new FakeCopilotSdkClient();
       const provider = new CopilotAgentProvider({
-        bin,
         stateDir: nodePath.join(dir, "state"),
         sessionStateDir: nodePath.join(dir, "native"),
+        sdkClientFactory: fakeSdkFactory(sdk),
       });
       await provider.start();
 
@@ -115,86 +112,42 @@ describe("Copilot provider", () => {
       assert.equal(log.activities[0]?.type, "command");
       assert.equal(log.runtime?.model, "gpt-5.2");
 
-      const completed = new Promise<void>((resolve) => {
-        provider.on("liveEvent", (event) => {
-          if (event.type === "turn_completed") resolve();
-        });
-      });
+      const completed = waitForTurnCompleted(provider);
       await provider.submitInput!({
         sessionId,
         input: [{ type: "text", text: "continue native", text_elements: [] }],
         activeTurnId: null,
-        overrides: {
-          model: null,
-          reasoningEffort: null,
-          fastMode: null,
-          approvalPolicy: null,
-          sandboxMode: null,
-          networkAccess: null,
-          webSearch: null,
-          profile: null,
-        },
+        overrides: emptyOverrides(),
       });
       await completed;
+
+      assert.equal(sdk.resumed[0]?.sessionId, sessionId);
       const updated = await provider.readSessionLog!(sessions[0]!);
       assert.equal(updated.messages.at(-1)?.text, "resumed: continue native");
     } finally {
+      await settleProviderWrites();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it("runs a text turn through a Copilot-compatible command", async () => {
+  it("runs a text turn through SDK createSession/send", async () => {
     const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-test-"));
     try {
-      const bin = nodePath.join(dir, "fake-copilot");
-      const argsPath = nodePath.join(dir, "args.json");
-      await writeFile(
-        bin,
-        [
-          "#!/usr/bin/env node",
-          "const fs = require('node:fs');",
-          "const args = process.argv.slice(2);",
-          "if (args.includes('--version')) {",
-          "  console.log('GitHub Copilot CLI 9.9.9');",
-          "  process.exit(0);",
-          "}",
-          `fs.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args));`,
-          "const prompt = args[args.indexOf('-p') + 1] || '';",
-          "process.stdout.write('copilot says: ' + prompt);",
-        ].join("\n"),
-      );
-      await chmod(bin, 0o755);
-
+      const sdk = new FakeCopilotSdkClient();
       const provider = new CopilotAgentProvider({
-        bin,
         stateDir: nodePath.join(dir, "state"),
         sessionStateDir: nodePath.join(dir, "native-session-state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
       });
       await provider.start();
 
-      assert.equal(await provider.getVersion(), "GitHub Copilot CLI 9.9.9");
+      assert.equal(await provider.getVersion(), "GitHub Copilot SDK 9.9.9");
 
-      const completed = new Promise<void>((resolve) => {
-        provider.on("liveEvent", (event) => {
-          if (event.type === "turn_completed") {
-            resolve();
-          }
-        });
-      });
-
+      const completed = waitForTurnCompleted(provider);
       const created = await provider.createSession({
         cwd: dir,
         input: [{ type: "text", text: "hello", text_elements: [] }],
-        overrides: {
-          model: null,
-          reasoningEffort: null,
-          fastMode: null,
-          approvalPolicy: null,
-          sandboxMode: null,
-          networkAccess: null,
-          webSearch: null,
-          profile: null,
-        },
+        overrides: emptyOverrides(),
       });
       await completed;
 
@@ -208,12 +161,10 @@ describe("Copilot provider", () => {
       assert.equal(log.runtime?.model, "auto");
       assert.equal(log.runtime?.reasoningEffort, undefined);
 
-      const args = JSON.parse(await readFile(argsPath, "utf8")) as string[];
-      assert.deepEqual(
-        args.slice(args.indexOf("--model"), args.indexOf("--model") + 2),
-        ["--model", "auto"],
-      );
-      assert.equal(args.includes("--effort"), false);
+      assert.equal(sdk.created.length, 1);
+      assert.equal(sdk.created[0]?.config.model, undefined);
+      assert.equal(sdk.created[0]?.config.enableConfigDiscovery, true);
+      assert.equal(sdk.created[0]?.session.sent[0]?.prompt, "hello");
 
       const sessions = await provider.listSessionThreads!({
         limit: 10,
@@ -222,47 +173,41 @@ describe("Copilot provider", () => {
       assert.equal(sessions.length, 1);
       assert.equal(sessions[0]?.source, "copilot");
     } finally {
+      await settleProviderWrites();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it("exposes and forwards only the explicitly configured Copilot model", async () => {
+  it("lists SDK model metadata and filters disabled models", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-model-test-"),
     );
     try {
-      const bin = nodePath.join(dir, "fake-copilot");
-      const argsPath = nodePath.join(dir, "args.json");
-      await writeFile(
-        bin,
-        [
-          "#!/usr/bin/env node",
-          "const fs = require('node:fs');",
-          "const args = process.argv.slice(2);",
-          "if (args[0] === 'help' && args[1] === 'config') {",
-          "  console.log('  `model`: AI model to use for Copilot CLI.');",
-          "  console.log('    - \"claude-haiku-4.5\"');",
-          "  console.log('    - \"gpt-5.3-codex\"');",
-          "  console.log('  `mouse`: whether to enable mouse support.');",
-          "  process.exit(0);",
-          "}",
-          `fs.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args));`,
-          "const prompt = args[args.indexOf('-p') + 1] || '';",
-          "process.stdout.write('configured: ' + prompt);",
-        ].join("\n"),
-      );
-      await chmod(bin, 0o755);
-
+      const sdk = new FakeCopilotSdkClient({
+        models: [
+          sdkModel("claude-haiku-4.5", {
+            name: "Claude Haiku 4.5",
+            multiplier: 1,
+          }),
+          sdkModel("deprecated-model", {
+            name: "Deprecated Model",
+            policy: "disabled",
+          }),
+          sdkModel("vision-model", {
+            name: "Vision Model",
+            vision: true,
+            reasoning: false,
+          }),
+        ],
+      });
       const provider = new CopilotAgentProvider({
-        bin,
         stateDir: nodePath.join(dir, "state"),
         sessionStateDir: nodePath.join(dir, "native-session-state"),
         configuredModel: "safe-test-model",
+        sdkClientFactory: fakeSdkFactory(sdk),
       });
       await provider.start();
 
-      assert.equal(provider.capabilities.configuration.models, true);
-      assert.equal(provider.capabilities.runtimeControls.model, true);
       const models = await provider.listModels!({
         cwd: dir,
         profile: null,
@@ -271,78 +216,82 @@ describe("Copilot provider", () => {
       assert.deepEqual(
         models.map((model) => ({
           model: model.model,
-          displayName: model.displayName,
           source: model.source,
           isDefault: model.isDefault,
+          inputModalities: model.inputModalities,
         })),
         [
           {
             model: "auto",
-            displayName: "Auto",
-            source: "cli-help",
+            source: "sdk",
             isDefault: false,
+            inputModalities: ["text"],
           },
           {
             model: "safe-test-model",
-            displayName: "Safe Test Model",
             source: "config",
             isDefault: true,
+            inputModalities: ["text"],
           },
           {
             model: "claude-haiku-4.5",
-            displayName: "Claude Haiku 4.5",
-            source: "cli-help",
+            source: "sdk",
             isDefault: false,
+            inputModalities: ["text"],
           },
           {
-            model: "gpt-5.3-codex",
-            displayName: "Gpt 5.3 Codex",
-            source: "cli-help",
+            model: "vision-model",
+            source: "sdk",
             isDefault: false,
+            inputModalities: ["text", "image"],
           },
         ],
       );
-
-      const completed = new Promise<void>((resolve) => {
-        provider.on("liveEvent", (event) => {
-          if (event.type === "turn_completed") resolve();
-        });
-      });
-
-      await provider.createSession({
-        cwd: dir,
-        input: [{ type: "text", text: "hello", text_elements: [] }],
-        overrides: {
-          model: null,
-          reasoningEffort: null,
-          fastMode: null,
-          approvalPolicy: null,
-          sandboxMode: null,
-          networkAccess: null,
-          webSearch: null,
-          profile: null,
-        },
-      });
-      await completed;
-
-      const args = JSON.parse(await readFile(argsPath, "utf8")) as string[];
-      assert.deepEqual(
-        args.slice(args.indexOf("--model"), args.indexOf("--model") + 2),
-        ["--model", "safe-test-model"],
-      );
     } finally {
+      await settleProviderWrites();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it("falls back to auto instead of stale persisted Copilot model defaults", async () => {
+  it("forwards explicitly configured SDK model controls", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-configured-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sessionStateDir: nodePath.join(dir, "native-session-state"),
+        configuredModel: "safe-test-model",
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "hello", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      assert.equal(sdk.created[0]?.config.model, "safe-test-model");
+      assert.equal(
+        sdk.created[0]?.session.selectedModels[0]?.model,
+        "safe-test-model",
+      );
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to SDK auto instead of stale persisted Copilot model defaults", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-stale-model-test-"),
     );
     try {
-      const bin = nodePath.join(dir, "fake-copilot");
       const stateDir = nodePath.join(dir, "state");
-      const argsPath = nodePath.join(dir, "args.json");
       const sessionId = "stale-session";
       await mkdir(stateDir, { recursive: true });
       await writeFile(
@@ -363,6 +312,7 @@ describe("Copilot provider", () => {
                 turns: [],
               },
               messages: [],
+              activities: [],
               turns: [],
               runtime: {
                 model: "gpt-5.2",
@@ -371,58 +321,368 @@ describe("Copilot provider", () => {
               },
               nextSeq: 0,
               copilotSessionId: sessionId,
+              copilotSessionCreated: true,
             },
           ],
         }),
       );
-      await writeFile(
-        bin,
-        [
-          "#!/usr/bin/env node",
-          "const fs = require('node:fs');",
-          "const args = process.argv.slice(2);",
-          `fs.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args));`,
-          "process.stdout.write('ok');",
-        ].join("\n"),
-      );
-      await chmod(bin, 0o755);
 
+      const sdk = new FakeCopilotSdkClient();
       const provider = new CopilotAgentProvider({
-        bin,
         stateDir,
         sessionStateDir: nodePath.join(dir, "native-session-state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
       });
       await provider.start();
 
-      const completed = new Promise<void>((resolve) => {
-        provider.on("liveEvent", (event) => {
-          if (event.type === "turn_completed") resolve();
-        });
-      });
+      const completed = waitForTurnCompleted(provider);
       await provider.submitInput!({
         sessionId,
         input: [{ type: "text", text: "hello", text_elements: [] }],
         activeTurnId: null,
-        overrides: {
-          model: null,
-          reasoningEffort: null,
-          fastMode: null,
-          approvalPolicy: null,
-          sandboxMode: null,
-          networkAccess: null,
-          webSearch: null,
-          profile: null,
-        },
+        overrides: emptyOverrides(),
       });
       await completed;
 
-      const args = JSON.parse(await readFile(argsPath, "utf8")) as string[];
-      assert.deepEqual(
-        args.slice(args.indexOf("--model"), args.indexOf("--model") + 2),
-        ["--model", "auto"],
-      );
+      assert.equal(sdk.resumed[0]?.config.model, undefined);
+      assert.equal(sdk.resumed[0]?.session.selectedModels.length, 0);
     } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("bridges SDK permission requests into Sidemesh pending actions", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-approval-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sessionStateDir: nodePath.join(dir, "native-session-state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const actionOpened = waitForActionOpened(provider);
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "needs approval", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+
+      const action = await actionOpened;
+      assert.equal(action.kind, "command");
+      assert.equal(action.detail, "echo approval");
+      assert.equal(provider.respondToPendingAction!(action, "accept"), true);
+      await completed;
+
+      const log = await provider.readSessionLog!({
+        id: action.sessionId,
+        name: null,
+        preview: "",
+        cwd: dir,
+        createdAt: 0,
+        updatedAt: 0,
+        source: "copilot",
+        path: null,
+        status: { type: "idle" },
+      });
+      assert.equal(log.messages.at(-1)?.text, "copilot says: needs approval");
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stores SDK tool events as command activities", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-tools-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sessionStateDir: nodePath.join(dir, "native-session-state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "use tool", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const log = await provider.readSessionLog!(created.thread);
+      assert.equal(log.activities.length, 1);
+      assert.equal(log.activities[0]?.type, "command");
+      assert.equal(log.activities[0]?.status, "completed");
+      assert.match(log.activities[0]?.output ?? "", /tool output/);
+    } finally {
+      await settleProviderWrites();
       await rm(dir, { recursive: true, force: true });
     }
   });
 });
+
+class FakeCopilotSdkClient implements CopilotSdkClient {
+  public readonly created: Array<{
+    config: CopilotSdkSessionConfig;
+    session: FakeCopilotSdkSession;
+  }> = [];
+  public readonly resumed: Array<{
+    sessionId: string;
+    config: CopilotSdkResumeSessionConfig;
+    session: FakeCopilotSdkSession;
+  }> = [];
+  private readonly sessions = new Map<string, FakeCopilotSdkSession>();
+  private readonly models: CopilotSdkModelInfo[];
+
+  public constructor(options: { models?: CopilotSdkModelInfo[] } = {}) {
+    this.models = options.models ?? [];
+  }
+
+  public async start(): Promise<void> {
+    /* fake */
+  }
+
+  public async getStatus(): Promise<{ version: string; protocolVersion: number }> {
+    return { version: "9.9.9", protocolVersion: 1 };
+  }
+
+  public async listModels(): Promise<CopilotSdkModelInfo[]> {
+    return this.models;
+  }
+
+  public async createSession(
+    config: CopilotSdkSessionConfig,
+  ): Promise<CopilotSdkSession> {
+    const session = new FakeCopilotSdkSession(
+      config.sessionId ?? `sdk-session-${this.created.length + 1}`,
+      config,
+      false,
+    );
+    this.created.push({ config, session });
+    this.sessions.set(session.sessionId, session);
+    return session;
+  }
+
+  public async resumeSession(
+    sessionId: string,
+    config: CopilotSdkResumeSessionConfig,
+  ): Promise<CopilotSdkSession> {
+    const session = new FakeCopilotSdkSession(sessionId, config, true);
+    this.resumed.push({ sessionId, config, session });
+    this.sessions.set(sessionId, session);
+    return session;
+  }
+}
+
+class FakeCopilotSdkSession implements CopilotSdkSession {
+  public readonly sent: CopilotSdkMessageOptions[] = [];
+  public readonly selectedModels: Array<{
+    model: string;
+    reasoningEffort: string | undefined;
+  }> = [];
+  public aborted = false;
+
+  public constructor(
+    public readonly sessionId: string,
+    private readonly config:
+      | CopilotSdkSessionConfig
+      | CopilotSdkResumeSessionConfig,
+    private readonly resumed: boolean,
+  ) {}
+
+  public async send(options: CopilotSdkMessageOptions): Promise<string> {
+    this.sent.push(options);
+    if (options.prompt.includes("approval")) {
+      const result = await this.config.onPermissionRequest(
+        {
+          kind: "shell",
+          canOfferSessionApproval: true,
+          commands: [{ identifier: "echo", readOnly: false }],
+          fullCommandText: "echo approval",
+          hasWriteFileRedirection: false,
+          intention: "Run test approval command",
+          possiblePaths: [],
+          possibleUrls: [],
+        } as any,
+        { sessionId: this.sessionId },
+      );
+      if (result.kind === "reject" || result.kind === "user-not-available") {
+        this.emit(
+          event("session.error", {
+            errorType: "permission",
+            warningType: "permission",
+            message: "Permission rejected",
+          }),
+        );
+        return `message-${this.sent.length}`;
+      }
+    }
+
+    queueMicrotask(() => {
+      if (this.aborted) {
+        return;
+      }
+      const messageId = `assistant-${this.sent.length}`;
+      if (options.prompt.includes("tool")) {
+        this.emit(
+          event("tool.execution_start", {
+            toolCallId: "tool-call-1",
+            toolName: "view",
+            arguments: { path: "README.md" },
+          }),
+        );
+        this.emit(
+          event("tool.execution_partial_result", {
+            toolCallId: "tool-call-1",
+            partialOutput: "partial ",
+          }),
+        );
+        this.emit(
+          event("tool.execution_complete", {
+            toolCallId: "tool-call-1",
+            success: true,
+            result: { content: "tool output" },
+          }),
+        );
+      }
+      const text = `${this.resumed ? "resumed" : "copilot says"}: ${options.prompt}`;
+      this.emit(
+        event("assistant.message_delta", {
+          messageId,
+          deltaContent: text.slice(0, 8),
+        }),
+      );
+      this.emit(
+        event("assistant.message_delta", {
+          messageId,
+          deltaContent: text.slice(8),
+        }),
+      );
+      this.emit(
+        event("assistant.message", {
+          messageId,
+          content: text,
+        }),
+      );
+      this.emit(event("assistant.turn_end", { turnId: "sdk-turn-1" }));
+      this.emit(event("session.idle", {}));
+    });
+    return `message-${this.sent.length}`;
+  }
+
+  public async abort(): Promise<void> {
+    this.aborted = true;
+  }
+
+  public async setModel(
+    model: string,
+    options?: { reasoningEffort?: string },
+  ): Promise<void> {
+    this.selectedModels.push({
+      model,
+      reasoningEffort: options?.reasoningEffort,
+    });
+  }
+
+  private emit(event: CopilotSdkSessionEvent): void {
+    this.config.onEvent?.(event);
+  }
+}
+
+function fakeSdkFactory(sdk: FakeCopilotSdkClient): CopilotSdkClientFactory {
+  return () => sdk;
+}
+
+function sdkModel(
+  id: string,
+  options: {
+    name: string;
+    multiplier?: number;
+    policy?: "enabled" | "disabled" | "unconfigured";
+    vision?: boolean;
+    reasoning?: boolean;
+  },
+): CopilotSdkModelInfo {
+  const reasoning = options.reasoning ?? true;
+  return {
+    id,
+    name: options.name,
+    capabilities: {
+      supports: {
+        vision: options.vision === true,
+        reasoningEffort: reasoning,
+      },
+      limits: {
+        max_context_window_tokens: 100000,
+      },
+    },
+    policy: {
+      state: options.policy ?? "enabled",
+      terms: "",
+    },
+    billing:
+      options.multiplier == null
+        ? undefined
+        : { multiplier: options.multiplier },
+    supportedReasoningEfforts: reasoning ? ["low", "medium", "high"] : undefined,
+    defaultReasoningEffort: reasoning ? "medium" : undefined,
+  };
+}
+
+function emptyOverrides() {
+  return {
+    model: null,
+    reasoningEffort: null,
+    fastMode: null,
+    approvalPolicy: null,
+    sandboxMode: null,
+    networkAccess: null,
+    webSearch: null,
+    profile: null,
+  };
+}
+
+function waitForTurnCompleted(provider: CopilotAgentProvider): Promise<void> {
+  return new Promise((resolve) => {
+    provider.on("liveEvent", (liveEvent) => {
+      if (liveEvent.type === "turn_completed") {
+        resolve();
+      }
+    });
+  });
+}
+
+function waitForActionOpened(
+  provider: CopilotAgentProvider,
+): Promise<AgentPendingAction> {
+  return new Promise((resolve) => {
+    provider.on("liveEvent", (liveEvent) => {
+      if (liveEvent.type === "action_opened") {
+        resolve(liveEvent.action);
+      }
+    });
+  });
+}
+
+async function settleProviderWrites(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+function event(type: string, data: unknown): CopilotSdkSessionEvent {
+  return {
+    id: `${type}-${Math.random().toString(16).slice(2)}`,
+    parentId: null,
+    timestamp: new Date().toISOString(),
+    type,
+    data,
+  } as CopilotSdkSessionEvent;
+}
