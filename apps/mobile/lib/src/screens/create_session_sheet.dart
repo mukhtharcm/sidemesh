@@ -2310,14 +2310,9 @@ int _compareModelEntries(ModelCatalogEntry left, ModelCatalogEntry right) {
 }
 
 int _modelSortRank(ModelCatalogEntry model) {
-  if (model.isProfileModel) return 4;
-  if (!model.isAutoModel) return 10;
-  return switch (model.model) {
-    'codex-auto-fast' => 0,
-    'codex-auto-balanced' => 1,
-    'codex-auto-thorough' => 2,
-    _ => 3,
-  };
+  final sortOrder = model.sortOrder;
+  if (sortOrder != null) return sortOrder;
+  return model.isProfileModel ? 4000 : 10000;
 }
 
 String _reasoningEffortLabel(String value) {

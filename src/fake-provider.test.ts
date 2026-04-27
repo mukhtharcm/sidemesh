@@ -172,7 +172,12 @@ describe("fake test provider", () => {
       profile: null,
       provider: null,
     });
-    assert.equal(models.some((model) => model.model === "fake-balanced"), true);
+    const balanced = models.find((model) => model.model === "fake-balanced");
+    const auto = models.find((model) => model.model === "fake-auto");
+    assert.equal(balanced?.reasoningEffortControl, "client");
+    assert.equal(balanced?.sortOrder, 0);
+    assert.equal(auto?.reasoningEffortControl, "provider");
+    assert.equal(auto?.sortOrder, 1);
     assert.equal(models.some((model) => model.inputModalities.includes("image")), true);
 
     const profiles = await provider.listProfiles({ cwd });
