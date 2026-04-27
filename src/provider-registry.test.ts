@@ -175,7 +175,7 @@ describe("provider registry", () => {
     assert.equal(provider.capabilities.runtimeControls.model, true);
   });
 
-  it("does not expose Copilot model controls without an explicit configured model", () => {
+  it("still exposes Copilot model controls without an explicit configured model", () => {
     const config = loadAgentProviderConfig("copilot", {});
 
     assert.deepEqual(config, {
@@ -188,7 +188,7 @@ describe("provider registry", () => {
     });
 
     const provider = createAgentProviderFromConfig(config);
-    assert.equal(provider.capabilities.configuration.models, false);
-    assert.equal(provider.capabilities.runtimeControls.model, false);
+    assert.equal(provider.capabilities.configuration.models, true);
+    assert.equal(provider.capabilities.runtimeControls.model, true);
   });
 });

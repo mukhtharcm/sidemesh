@@ -82,8 +82,9 @@ const DEFAULT_COPILOT_SESSION_STATE_DIR = nodePath.join(
   ".copilot",
   "session-state",
 );
+const DEFAULT_SIDEMESH_COPILOT_MODEL = "auto";
 
-const BASE_COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
+export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   sessions: {
     create: true,
     resume: true,
@@ -107,13 +108,13 @@ const BASE_COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     approveForSession: false,
   },
   configuration: {
-    models: false,
+    models: true,
     profiles: false,
     skills: false,
     skillManagement: false,
   },
   runtimeControls: {
-    model: false,
+    model: true,
     reasoningEffort: true,
     fastMode: false,
     approvalPolicy: false,
@@ -133,7 +134,7 @@ export class CopilotAgentProvider
 {
   public readonly kind = "copilot";
   public readonly displayName = "GitHub Copilot";
-  public readonly capabilities: AgentProviderCapabilities;
+  public readonly capabilities = COPILOT_PROVIDER_CAPABILITIES;
 
   private readonly bin: string;
   private readonly stateDir: string;
@@ -160,7 +161,6 @@ export class CopilotAgentProvider
     );
     this.allowAll = options.allowAll === true;
     this.configuredModel = options.configuredModel?.trim() || null;
-    this.capabilities = copilotCapabilities(this.configuredModel !== null);
   }
 
   public async start(): Promise<void> {
@@ -405,7 +405,26 @@ export class CopilotAgentProvider
   public async listModels(
     _options: AgentModelListOptions,
   ): Promise<ModelSummary[]> {
-    return this.configuredModel ? [copilotModel(this.configuredModel)] : [];
+    const configuredModel =
+      this.configuredModel ?? readEnvironmentConfiguredCopilotModel();
+    const models = await this.listCliModelIds();
+    const ids = mergeModelIds([
+      "auto",
+      ...(configuredModel ? [configuredModel] : []),
+      ...models,
+    ]);
+    return ids.map((model, index) =>
+      copilotModel(model, {
+        isDefault: model === (configuredModel ?? DEFAULT_SIDEMESH_COPILOT_MODEL),
+        sortOrder: index,
+        source: model === configuredModel ? "config" : "cli-help",
+      }),
+    );
+  }
+
+  private async listCliModelIds(): Promise<string[]> {
+    const output = await runProcess(this.bin, ["help", "config"], process.cwd());
+    return parseCopilotConfigModelIds(output);
   }
 
   private createSessionState(
@@ -710,7 +729,7 @@ export class CopilotAgentProvider
           thread: item.thread,
           messages: item.messages ?? [],
           turns: item.turns ?? [],
-          runtime: normalizeStoredRuntime(item.runtime ?? null, this.configuredModel),
+          runtime: normalizeStoredRuntime(item.runtime ?? null),
           archived: item.archived === true,
           nextSeq: item.nextSeq ?? item.messages?.length ?? 0,
           copilotSessionId: item.copilotSessionId ?? null,
@@ -800,25 +819,8 @@ export class CopilotAgentProvider
   }
 }
 
-function copilotCapabilities(hasConfiguredModel: boolean): AgentProviderCapabilities {
-  return {
-    ...BASE_COPILOT_PROVIDER_CAPABILITIES,
-    sessions: { ...BASE_COPILOT_PROVIDER_CAPABILITIES.sessions },
-    input: { ...BASE_COPILOT_PROVIDER_CAPABILITIES.input },
-    approvals: { ...BASE_COPILOT_PROVIDER_CAPABILITIES.approvals },
-    configuration: {
-      ...BASE_COPILOT_PROVIDER_CAPABILITIES.configuration,
-      models: hasConfiguredModel,
-    },
-    runtimeControls: {
-      ...BASE_COPILOT_PROVIDER_CAPABILITIES.runtimeControls,
-      model: hasConfiguredModel,
-    },
-    workspace: { ...BASE_COPILOT_PROVIDER_CAPABILITIES.workspace },
-  };
-}
-
 function displayNameFromModel(model: string): string {
+  if (model === "auto") return "Auto";
   return model
     .split(/[-_:\s]+/)
     .filter(Boolean)
@@ -826,13 +828,15 @@ function displayNameFromModel(model: string): string {
     .join(" ");
 }
 
-function copilotModel(model: string): ModelSummary {
+function copilotModel(
+  model: string,
+  options: { isDefault: boolean; sortOrder: number; source: string },
+): ModelSummary {
   return {
     id: `copilot:${model}`,
     model,
     displayName: displayNameFromModel(model),
-    description:
-      "GitHub Copilot CLI model configured through the host environment.",
+    description: copilotModelDescription(model),
     defaultReasoningEffort: "medium",
     supportedReasoningEfforts: [
       {
@@ -856,10 +860,58 @@ function copilotModel(model: string): ModelSummary {
     supportsPersonality: false,
     additionalSpeedTiers: [],
     inputModalities: ["text"],
-    isDefault: true,
-    sortOrder: 0,
-    source: "env",
+    isDefault: options.isDefault,
+    sortOrder: options.sortOrder,
+    source: options.source,
   };
+}
+
+function copilotModelDescription(model: string): string {
+  if (model === "auto") {
+    return "GitHub Copilot chooses an eligible model for the task. GitHub currently limits auto routing to lower multiplier models, subject to plan and policy.";
+  }
+  if (model.includes("opus")) {
+    return "Premium GitHub Copilot CLI model. Use intentionally; Opus-class models can have high premium request multipliers.";
+  }
+  return "GitHub Copilot CLI model reported by the installed Copilot CLI.";
+}
+
+function parseCopilotConfigModelIds(output: string): string[] {
+  const models: string[] = [];
+  let inModelBlock = false;
+  for (const line of output.split(/\r?\n/)) {
+    if (/^\s*`model`:\s/.test(line)) {
+      inModelBlock = true;
+      continue;
+    }
+    if (inModelBlock && /^\s*`[^`]+`:\s/.test(line)) {
+      break;
+    }
+    if (!inModelBlock) continue;
+    const match = line.match(/^\s*-\s*"([^"]+)"/);
+    if (match?.[1]) {
+      models.push(match[1]);
+    }
+  }
+  return mergeModelIds(models);
+}
+
+function mergeModelIds(ids: string[]): string[] {
+  const seen = new Set<string>();
+  return ids.filter((id) => {
+    const trimmed = id.trim();
+    if (!trimmed || seen.has(trimmed)) return false;
+    seen.add(trimmed);
+    return true;
+  });
+}
+
+function readEnvironmentConfiguredCopilotModel(): string | null {
+  const envModel =
+    process.env.COPILOT_MODEL?.trim() ||
+    process.env.COPILOT_PROVIDER_MODEL_ID?.trim() ||
+    process.env.COPILOT_PROVIDER_WIRE_MODEL?.trim();
+  return envModel || null;
 }
 
 function nativeSessionToThread(
@@ -1132,7 +1184,11 @@ function mergeRuntime(
   },
   configuredModel: string | null,
 ): SessionRuntimeSummary {
-  const model = configuredModel;
+  const model =
+    overrides.model ??
+    runtime?.model ??
+    configuredModel ??
+    DEFAULT_SIDEMESH_COPILOT_MODEL;
   const reasoningEffort =
     overrides.reasoningEffort ?? runtime?.reasoningEffort ?? null;
   return {
@@ -1146,19 +1202,17 @@ function mergeRuntime(
 
 function normalizeStoredRuntime(
   runtime: SessionRuntimeSummary | null,
-  configuredModel: string | null,
 ): SessionRuntimeSummary | null {
   if (!runtime) return null;
-  if (configuredModel) {
+  if (runtime.model === "gpt-5.2" && runtime.modelProvider === "copilot") {
+    const { model: _model, ...rest } = runtime;
     return {
-      ...runtime,
-      model: configuredModel,
+      ...rest,
       modelProvider: "copilot",
     };
   }
-  const { model: _model, ...rest } = runtime;
   return {
-    ...rest,
+    ...runtime,
     modelProvider: "copilot",
   };
 }
