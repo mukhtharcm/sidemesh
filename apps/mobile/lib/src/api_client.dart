@@ -32,6 +32,16 @@ class ApiClient {
     return NodeInfo.fromJson(_decodeObject(response));
   }
 
+  Future<ProviderMetadata> fetchProviders(HostProfile host) async {
+    final response = await _get(
+      host,
+      '/api/providers',
+      timeout: _quickReadTimeout,
+      operation: 'load providers',
+    );
+    return ProviderMetadata.fromJson(_decodeObject(response));
+  }
+
   Future<List<WorkspaceSummary>> fetchWorkspaces(HostProfile host) async {
     final response = await _get(
       host,
