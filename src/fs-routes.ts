@@ -22,18 +22,28 @@ const READ_SOFT_CAP_BYTES = 2 * 1024 * 1024; // 2 MiB — UX preview cap.
 const WRITE_SOFT_CAP_BYTES = 4 * 1024 * 1024; // 4 MiB — payload safety cap.
 
 interface FsRoutesOptions {
-  provider: AgentProvider;
-  listSessions: () => Promise<SessionSummary[]>;
-  watchRegistry: FsWatchRegistry;
+  defaultProvider: AgentProvider;
+  providerForKind: (kind: string | null | undefined) => {
+    kind: string;
+    provider: AgentProvider;
+  } | null;
+  listSessionsForProvider: (
+    kind: string | null | undefined,
+  ) => Promise<SessionSummary[]>;
 }
 
 export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
-  const { provider, listSessions } = opts;
+  const { defaultProvider, providerForKind, listSessionsForProvider } = opts;
 
   app.use("/api/fs", (_request, response, next) => {
-    if (!provider.capabilities.workspace.filesystem) {
+    const selected = providerForRequest(_request, defaultProvider, providerForKind);
+    if (!selected) {
+      response.status(400).json({ error: "unknown provider" });
+      return;
+    }
+    if (!selected.provider.capabilities.workspace.filesystem) {
       response.status(501).json({
-        error: `${provider.displayName} does not support filesystem access`,
+        error: `${selected.provider.displayName} does not support filesystem access`,
       });
       return;
     }
@@ -43,9 +53,22 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.get(
     "/api/fs/list",
     asyncRoute(async (request, response) => {
-      const target = await resolveIncomingPath(request.query.path, provider, listSessions);
-      const readDirectory = requireFilesystemMethod(provider, "fsReadDirectory", "filesystem directory listing");
-      const result = await readDirectory.call(provider, target);
+      const selected = requireFilesystemProvider(
+        request,
+        response,
+        defaultProvider,
+        providerForKind,
+      );
+      if (!selected) {
+        return;
+      }
+      const target = await resolveIncomingPath(
+        request.query.path,
+        selected.provider,
+        () => listSessionsForProvider(selected.kind),
+      );
+      const readDirectory = requireFilesystemMethod(selected.provider, "fsReadDirectory", "filesystem directory listing");
+      const result = await readDirectory.call(selected.provider, target);
       const entries = (result.entries || []).map((entry) => ({
         name: entry.fileName,
         path: path.join(target, entry.fileName),
@@ -63,9 +86,22 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.get(
     "/api/fs/metadata",
     asyncRoute(async (request, response) => {
-      const target = await resolveIncomingPath(request.query.path, provider, listSessions);
-      const getMetadata = requireFilesystemMethod(provider, "fsGetMetadata", "filesystem metadata");
-      const meta = await getMetadata.call(provider, target);
+      const selected = requireFilesystemProvider(
+        request,
+        response,
+        defaultProvider,
+        providerForKind,
+      );
+      if (!selected) {
+        return;
+      }
+      const target = await resolveIncomingPath(
+        request.query.path,
+        selected.provider,
+        () => listSessionsForProvider(selected.kind),
+      );
+      const getMetadata = requireFilesystemMethod(selected.provider, "fsGetMetadata", "filesystem metadata");
+      const meta = await getMetadata.call(selected.provider, target);
       response.json({ path: target, ...meta });
     }),
   );
@@ -73,15 +109,28 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.get(
     "/api/fs/read",
     asyncRoute(async (request, response) => {
-      const target = await resolveIncomingPath(request.query.path, provider, listSessions);
-      const getMetadata = requireFilesystemMethod(provider, "fsGetMetadata", "filesystem metadata");
-      const readFile = requireFilesystemMethod(provider, "fsReadFile", "filesystem file reads");
-      const meta = await getMetadata.call(provider, target);
+      const selected = requireFilesystemProvider(
+        request,
+        response,
+        defaultProvider,
+        providerForKind,
+      );
+      if (!selected) {
+        return;
+      }
+      const target = await resolveIncomingPath(
+        request.query.path,
+        selected.provider,
+        () => listSessionsForProvider(selected.kind),
+      );
+      const getMetadata = requireFilesystemMethod(selected.provider, "fsGetMetadata", "filesystem metadata");
+      const readFile = requireFilesystemMethod(selected.provider, "fsReadFile", "filesystem file reads");
+      const meta = await getMetadata.call(selected.provider, target);
       if (!meta.isFile) {
         response.status(400).json({ error: "path is not a regular file" });
         return;
       }
-      const res = await readFile.call(provider, target);
+      const res = await readFile.call(selected.provider, target);
       const bytes = Buffer.from(res.dataBase64 || "", "base64");
       const size = bytes.byteLength;
       const binary = isBinary(bytes);
@@ -116,13 +165,22 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.get(
     "/api/fs/blob",
     asyncRoute(async (request, response) => {
+      const selected = requireFilesystemProvider(
+        request,
+        response,
+        defaultProvider,
+        providerForKind,
+      );
+      if (!selected) {
+        return;
+      }
       const target = await resolveIncomingBlobPath(
         request.query.path,
-        provider,
-        listSessions,
+        selected.provider,
+        () => listSessionsForProvider(selected.kind),
       );
-      const readFile = requireFilesystemMethod(provider, "fsReadFile", "filesystem blob reads");
-      const res = await readFile.call(provider, target);
+      const readFile = requireFilesystemMethod(selected.provider, "fsReadFile", "filesystem blob reads");
+      const res = await readFile.call(selected.provider, target);
       const bytes = Buffer.from(res.dataBase64 || "", "base64");
       response.setHeader("Content-Type", guessMime(target));
       response.setHeader("Content-Length", String(bytes.byteLength));
@@ -138,10 +196,19 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/write",
     asyncRoute(async (request, response) => {
+      const selected = requireFilesystemProvider(
+        request,
+        response,
+        defaultProvider,
+        providerForKind,
+      );
+      if (!selected) {
+        return;
+      }
       const target = await resolveIncomingPath(
         request.body?.path,
-        provider,
-        listSessions,
+        selected.provider,
+        () => listSessionsForProvider(selected.kind),
         { allowMissing: true },
       );
       const contents = request.body?.contents;
@@ -154,8 +221,8 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
         response.status(413).json({ error: "payload too large" });
         return;
       }
-      const writeFile = requireFilesystemMethod(provider, "fsWriteFile", "filesystem file writes");
-      await writeFile.call(provider, target, buffer.toString("base64"));
+      const writeFile = requireFilesystemMethod(selected.provider, "fsWriteFile", "filesystem file writes");
+      await writeFile.call(selected.provider, target, buffer.toString("base64"));
       response.json({ path: target, bytes: buffer.byteLength });
     }),
   );
@@ -163,15 +230,24 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/createDir",
     asyncRoute(async (request, response) => {
+      const selected = requireFilesystemProvider(
+        request,
+        response,
+        defaultProvider,
+        providerForKind,
+      );
+      if (!selected) {
+        return;
+      }
       const target = await resolveIncomingPath(
         request.body?.path,
-        provider,
-        listSessions,
+        selected.provider,
+        () => listSessionsForProvider(selected.kind),
         { allowMissing: true },
       );
       const recursive = request.body?.recursive !== false;
-      const createDirectory = requireFilesystemMethod(provider, "fsCreateDirectory", "filesystem directory creation");
-      await createDirectory.call(provider, target, recursive);
+      const createDirectory = requireFilesystemMethod(selected.provider, "fsCreateDirectory", "filesystem directory creation");
+      await createDirectory.call(selected.provider, target, recursive);
       response.json({ path: target });
     }),
   );
@@ -179,11 +255,24 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/remove",
     asyncRoute(async (request, response) => {
-      const target = await resolveIncomingPath(request.body?.path, provider, listSessions);
+      const selected = requireFilesystemProvider(
+        request,
+        response,
+        defaultProvider,
+        providerForKind,
+      );
+      if (!selected) {
+        return;
+      }
+      const target = await resolveIncomingPath(
+        request.body?.path,
+        selected.provider,
+        () => listSessionsForProvider(selected.kind),
+      );
       const recursive = request.body?.recursive !== false;
       const force = request.body?.force !== false;
-      const remove = requireFilesystemMethod(provider, "fsRemove", "filesystem removal");
-      await remove.call(provider, target, { recursive, force });
+      const remove = requireFilesystemMethod(selected.provider, "fsRemove", "filesystem removal");
+      await remove.call(selected.provider, target, { recursive, force });
       response.json({ path: target });
     }),
   );
@@ -191,31 +280,88 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/copy",
     asyncRoute(async (request, response) => {
+      const selected = requireFilesystemProvider(
+        request,
+        response,
+        defaultProvider,
+        providerForKind,
+      );
+      if (!selected) {
+        return;
+      }
       const source = await resolveIncomingPath(
         request.body?.sourcePath,
-        provider,
-        listSessions,
+        selected.provider,
+        () => listSessionsForProvider(selected.kind),
       );
       const destination = await resolveIncomingPath(
         request.body?.destinationPath,
-        provider,
-        listSessions,
+        selected.provider,
+        () => listSessionsForProvider(selected.kind),
         { allowMissing: true },
       );
       const recursive = request.body?.recursive === true;
-      const copy = requireFilesystemMethod(provider, "fsCopy", "filesystem copy");
-      await copy.call(provider, { sourcePath: source, destinationPath: destination, recursive });
+      const copy = requireFilesystemMethod(selected.provider, "fsCopy", "filesystem copy");
+      await copy.call(selected.provider, {
+        sourcePath: source,
+        destinationPath: destination,
+        recursive,
+      });
       response.json({ sourcePath: source, destinationPath: destination });
     }),
   );
 
   app.get(
     "/api/fs/roots",
-    asyncRoute(async (_request, response) => {
-      const roots = await collectWorkspaceRoots(provider, listSessions);
+    asyncRoute(async (request, response) => {
+      const selected = requireFilesystemProvider(
+        request,
+        response,
+        defaultProvider,
+        providerForKind,
+      );
+      if (!selected) {
+        return;
+      }
+      const roots = await collectWorkspaceRoots(
+        selected.provider,
+        () => listSessionsForProvider(selected.kind),
+      );
       response.json({ roots });
     }),
   );
+}
+
+function providerForRequest(
+  request: Request,
+  defaultProvider: AgentProvider,
+  providerForKind: FsRoutesOptions["providerForKind"],
+): { kind: string; provider: AgentProvider } | null {
+  const kind =
+    asString(request.query?.agentProvider) ??
+    asString(request.body?.agentProvider) ??
+    null;
+  if (kind) {
+    return providerForKind(kind);
+  }
+  return {
+    kind: defaultProvider.kind,
+    provider: defaultProvider,
+  };
+}
+
+function requireFilesystemProvider(
+  request: Request,
+  response: Response,
+  defaultProvider: AgentProvider,
+  providerForKind: FsRoutesOptions["providerForKind"],
+): { kind: string; provider: AgentProvider } | null {
+  const selected = providerForRequest(request, defaultProvider, providerForKind);
+  if (!selected) {
+    response.status(400).json({ error: "unknown provider" });
+    return null;
+  }
+  return selected;
 }
 
 async function resolveIncomingPath(
@@ -294,6 +440,10 @@ function requireFilesystemMethod<K extends AgentProviderMethodName>(
       501,
     );
   }
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 // ---------------------------------------------------------------------------

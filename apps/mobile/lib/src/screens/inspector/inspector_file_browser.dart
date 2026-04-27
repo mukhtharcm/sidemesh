@@ -18,6 +18,7 @@ InspectorSurface buildInspectorWorkspaceBrowserSurface({
   required HostProfile host,
   required ApiClient api,
   required String root,
+  String? agentProvider,
   String? selectedPath,
 }) {
   return InspectorSurface(
@@ -29,6 +30,7 @@ InspectorSurface buildInspectorWorkspaceBrowserSurface({
       host: host,
       api: api,
       root: root,
+      agentProvider: agentProvider,
       initialSelectedPath: selectedPath,
     ),
   );
@@ -43,12 +45,14 @@ class WorkspaceBrowserPane extends StatefulWidget {
     required this.host,
     required this.api,
     required this.root,
+    this.agentProvider,
     this.initialSelectedPath,
   });
 
   final HostProfile host;
   final ApiClient api;
   final String root;
+  final String? agentProvider;
   final String? initialSelectedPath;
 
   @override
@@ -118,6 +122,7 @@ class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
                 host: widget.host,
                 api: widget.api,
                 root: widget.root,
+                agentProvider: widget.agentProvider,
                 selectedPath: _selected,
                 onOpenFile: (path, liveStream) {
                   setState(() {
@@ -150,6 +155,7 @@ class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
                       host: widget.host,
                       api: widget.api,
                       path: _selected!,
+                      agentProvider: widget.agentProvider,
                       observable: _viewerObservable,
                       dense: true,
                       liveStream: _liveStream,

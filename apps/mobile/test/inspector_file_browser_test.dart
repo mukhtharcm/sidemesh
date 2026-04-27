@@ -76,7 +76,11 @@ class _FakeWorkspaceApi extends ApiClient {
   final List<String> readPaths = <String>[];
 
   @override
-  Future<FsListing> listDirectory(HostProfile host, String path) async {
+  Future<FsListing> listDirectory(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+  }) async {
     final entries = files.keys
         .where((entryPath) => entryPath.startsWith('$path/'))
         .map((entryPath) {
@@ -93,7 +97,11 @@ class _FakeWorkspaceApi extends ApiClient {
   }
 
   @override
-  Future<FsFile> readFile(HostProfile host, String path) async {
+  Future<FsFile> readFile(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+  }) async {
     readPaths.add(path);
     final contents = files[path];
     if (contents == null) {
@@ -112,7 +120,7 @@ class _FakeWorkspaceApi extends ApiClient {
   }
 
   @override
-  IOWebSocketChannel openFsLive(HostProfile host) {
+  IOWebSocketChannel openFsLive(HostProfile host, {String? agentProvider}) {
     throw StateError('WebSocket not needed in this test');
   }
 }

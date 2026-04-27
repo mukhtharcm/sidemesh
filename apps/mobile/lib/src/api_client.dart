@@ -56,6 +56,7 @@ class ApiClient {
     HostProfile host, {
     required String cwd,
     bool forceReload = false,
+    String? agentProvider,
   }) async {
     final response = await _get(
       host,
@@ -63,6 +64,7 @@ class ApiClient {
       queryParameters: <String, String>{
         'cwd': cwd,
         if (forceReload) 'forceReload': 'true',
+        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
       },
       timeout: _standardReadTimeout,
       operation: 'load skills',
@@ -95,13 +97,16 @@ class ApiClient {
   Future<ProviderProfileCatalog> fetchProfiles(
     HostProfile host, {
     String? cwd,
+    String? agentProvider,
   }) async {
+    final queryParameters = <String, String>{
+      if ((cwd ?? '').isNotEmpty) 'cwd': cwd!,
+      if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
+    };
     final response = await _get(
       host,
       '/api/profiles',
-      queryParameters: (cwd ?? '').isEmpty
-          ? null
-          : <String, String>{'cwd': cwd!},
+      queryParameters: queryParameters.isEmpty ? null : queryParameters,
       timeout: _standardReadTimeout,
       operation: 'load profiles',
     );
@@ -418,16 +423,30 @@ class ApiClient {
     );
   }
 
-  Uri fsBlobUri(HostProfile host, String path) {
+  Uri fsBlobUri(HostProfile host, String path, {String? agentProvider}) {
     _ensureHostEnabled(host);
-    return _uri(host, '/api/fs/blob', queryParameters: {'path': path});
+    return _uri(
+      host,
+      '/api/fs/blob',
+      queryParameters: {
+        'path': path,
+        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
+      },
+    );
   }
 
-  Future<Uint8List> fetchFsBlob(HostProfile host, String path) async {
+  Future<Uint8List> fetchFsBlob(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+  }) async {
     final response = await _get(
       host,
       '/api/fs/blob',
-      queryParameters: {'path': path},
+      queryParameters: {
+        'path': path,
+        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
+      },
       timeout: _transcriptReadTimeout,
       operation: 'load image',
     );
@@ -442,39 +461,70 @@ class ApiClient {
 
   // -------------------------- Workspace filesystem --------------------------
 
-  Future<List<String>> fetchFsRoots(HostProfile host) async {
-    final response = await _get(host, '/api/fs/roots', operation: 'load roots');
+  Future<List<String>> fetchFsRoots(
+    HostProfile host, {
+    String? agentProvider,
+  }) async {
+    final response = await _get(
+      host,
+      '/api/fs/roots',
+      queryParameters: (agentProvider ?? '').isEmpty
+          ? null
+          : {'agentProvider': agentProvider!},
+      operation: 'load roots',
+    );
     final decoded = _decodeObject(response);
     return ((decoded['roots'] as List?) ?? const [])
         .map((e) => e.toString())
         .toList();
   }
 
-  Future<FsListing> listDirectory(HostProfile host, String path) async {
+  Future<FsListing> listDirectory(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+  }) async {
     final response = await _get(
       host,
       '/api/fs/list',
-      queryParameters: {'path': path},
+      queryParameters: {
+        'path': path,
+        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
+      },
       operation: 'list directory',
     );
     return FsListing.fromJson(_decodeObject(response));
   }
 
-  Future<FsMetadata> fetchMetadata(HostProfile host, String path) async {
+  Future<FsMetadata> fetchMetadata(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+  }) async {
     final response = await _get(
       host,
       '/api/fs/metadata',
-      queryParameters: {'path': path},
+      queryParameters: {
+        'path': path,
+        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
+      },
       operation: 'load file metadata',
     );
     return FsMetadata.fromJson(_decodeObject(response));
   }
 
-  Future<FsFile> readFile(HostProfile host, String path) async {
+  Future<FsFile> readFile(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+  }) async {
     final response = await _get(
       host,
       '/api/fs/read',
-      queryParameters: {'path': path},
+      queryParameters: {
+        'path': path,
+        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
+      },
       timeout: _transcriptReadTimeout,
       operation: 'read file',
     );
@@ -485,11 +535,16 @@ class ApiClient {
     HostProfile host, {
     required String path,
     required String contents,
+    String? agentProvider,
   }) async {
     await _post(
       host,
       '/api/fs/write',
-      body: {'path': path, 'contents': contents},
+      body: {
+        'path': path,
+        'contents': contents,
+        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider,
+      },
       operation: 'write file',
     );
   }
@@ -498,11 +553,16 @@ class ApiClient {
     HostProfile host, {
     required String path,
     bool recursive = true,
+    String? agentProvider,
   }) async {
     await _post(
       host,
       '/api/fs/createDir',
-      body: {'path': path, 'recursive': recursive},
+      body: {
+        'path': path,
+        'recursive': recursive,
+        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider,
+      },
       operation: 'create directory',
     );
   }
@@ -512,11 +572,17 @@ class ApiClient {
     required String path,
     bool recursive = true,
     bool force = true,
+    String? agentProvider,
   }) async {
     await _post(
       host,
       '/api/fs/remove',
-      body: {'path': path, 'recursive': recursive, 'force': force},
+      body: {
+        'path': path,
+        'recursive': recursive,
+        'force': force,
+        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider,
+      },
       operation: 'remove file',
     );
   }
@@ -526,6 +592,7 @@ class ApiClient {
     required String sourcePath,
     required String destinationPath,
     bool recursive = false,
+    String? agentProvider,
   }) async {
     await _post(
       host,
@@ -534,17 +601,21 @@ class ApiClient {
         'sourcePath': sourcePath,
         'destinationPath': destinationPath,
         'recursive': recursive,
+        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider,
       },
       operation: 'copy file',
     );
   }
 
-  WebSocketChannel openFsLive(HostProfile host) {
+  WebSocketChannel openFsLive(HostProfile host, {String? agentProvider}) {
     _ensureHostEnabled(host);
     final baseUri = Uri.parse(host.baseUrl);
     final wsUri = baseUri.replace(
       scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
       path: '/api/fs/live',
+      queryParameters: (agentProvider ?? '').isEmpty
+          ? null
+          : {'agentProvider': agentProvider!},
     );
     return IOWebSocketChannel.connect(
       wsUri,
