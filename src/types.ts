@@ -132,6 +132,8 @@ export interface ModelReasoningEffortSummary {
   description: string;
 }
 
+export type ModelReasoningEffortControl = "client" | "provider";
+
 export interface ModelSummary {
   id: string;
   model: string;
@@ -139,10 +141,12 @@ export interface ModelSummary {
   description: string;
   defaultReasoningEffort: string;
   supportedReasoningEfforts: ModelReasoningEffortSummary[];
+  reasoningEffortControl: ModelReasoningEffortControl;
   supportsPersonality: boolean;
   additionalSpeedTiers: string[];
   inputModalities: string[];
   isDefault: boolean;
+  sortOrder?: number | null;
   source?: string | null;
   profileName?: string | null;
 }
