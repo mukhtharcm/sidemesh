@@ -87,6 +87,7 @@ flutter install --debug -d <device-id>
 
 - `GET /healthz`
 - `GET /api/node`
+- `GET /api/providers`
 - `GET /api/workspaces`
 - `GET /api/sessions`
 - `GET /api/actions`
@@ -156,4 +157,6 @@ Current limits:
   providers still need their own adapters
 - provider registration is centralized in `src/provider-registry.ts`; future
   adapters should start there instead of adding new config/factory switches
+- the provider adapter contract is documented in
+  `docs/provider-adapter-contract.md`
 - the server assumes a trusted private network or equivalent protection around each daemon
