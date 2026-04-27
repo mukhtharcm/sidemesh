@@ -76,6 +76,8 @@ const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
 const RECENT_LIVE_LIMIT = 40;
+const RECENT_SESSIONS_CACHE_TTL_MS = 1_500;
+const RECENT_SESSION_RUNTIME_CONCURRENCY = 4;
 const HOST_CAPABILITIES: HostCapabilities = {
   workspace: {
     gitStatus: true,
@@ -86,6 +88,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
 interface SessionRuntimeCacheEntry {
   threadUpdatedAt: number;
   runtime: SessionRuntimeSummary | null;
+  promise?: Promise<SessionRuntimeSummary | null>;
 }
 
 interface SessionLogCacheEntry {
@@ -128,6 +131,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const approvalSockets = new Set<WebSocket>();
   const recentSessionsSockets = new Set<WebSocket>();
   const recentSessionBroadcastTimers = new Map<string, NodeJS.Timeout>();
+  let recentSessionsCache: {
+    limit: number;
+    expiresAt: number;
+    promise?: Promise<SessionSummary[]>;
+    value?: SessionSummary[];
+  } | null = null;
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, SessionActivity>>();
@@ -215,17 +224,53 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }
 
   async function sendRecentSessionsSnapshot(socket: WebSocket): Promise<void> {
-    const sessions = await listSessions(
-      provider,
-      runtimeCache,
-      RECENT_LIVE_LIMIT,
-    );
+    const sessions = await loadRecentSessions(RECENT_LIVE_LIMIT);
     sendEvent(socket, { type: "snapshot", sessions });
+  }
+
+  async function loadRecentSessions(limitOverride: number | null = null): Promise<SessionSummary[]> {
+    const limit = normalizedSessionListLimit(limitOverride);
+    const now = Date.now();
+    const cached = recentSessionsCache;
+    if (cached && cached.limit >= limit) {
+      if (cached.promise) {
+        return (await cached.promise).slice(0, limit);
+      }
+      if (cached.value && cached.expiresAt > now) {
+        return cached.value.slice(0, limit);
+      }
+    }
+
+    const promise = listSessions(provider, runtimeCache, limit);
+    recentSessionsCache = {
+      limit,
+      expiresAt: now + RECENT_SESSIONS_CACHE_TTL_MS,
+      promise,
+    };
+    try {
+      const value = await promise;
+      recentSessionsCache = {
+        limit,
+        expiresAt: Date.now() + RECENT_SESSIONS_CACHE_TTL_MS,
+        value,
+      };
+      return value.slice(0, limit);
+    } catch (error) {
+      if (recentSessionsCache?.promise === promise) {
+        recentSessionsCache = null;
+      }
+      throw error;
+    }
+  }
+
+  function invalidateRecentSessionsCache(): void {
+    recentSessionsCache = null;
   }
 
   async function broadcastRecentSessionUpsert(
     sessionId: string,
   ): Promise<void> {
+    invalidateRecentSessionsCache();
     if (recentSessionsSockets.size === 0) {
       return;
     }
@@ -264,6 +309,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }
 
   function broadcastRecentSessionRemove(sessionId: string): void {
+    invalidateRecentSessionsCache();
     cancelRecentSessionUpsert(sessionId);
     broadcastRecentSessionsLive({ type: "remove", sessionId });
   }
@@ -482,11 +528,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       const requestedLimit = asInteger(
         (_request.query as Record<string, unknown>)?.limit,
       );
-      const sessions = await listSessions(
-        provider,
-        runtimeCache,
-        requestedLimit,
-      );
+      const sessions = await loadRecentSessions(requestedLimit);
       response.json(sessions);
     }),
   );
@@ -505,14 +547,14 @@ export async function startServer(config: NodeConfig): Promise<void> {
       ) {
         return;
       }
-      const sessions = await listSessions(provider, runtimeCache);
+      const sessions = await loadRecentSessions();
       response.json(buildWorkspaces(sessions));
     }),
   );
 
   registerFsRoutes(app, {
     provider,
-    listSessions: () => listSessions(provider, runtimeCache),
+    listSessions: () => loadRecentSessions(),
     watchRegistry: fsWatchRegistry,
   });
 
@@ -1341,7 +1383,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         }
         attachFsLiveSocket(ws, fsWatchRegistry, {
           provider,
-          listSessions: () => listSessions(provider, runtimeCache),
+          listSessions: () => loadRecentSessions(),
         });
       });
       return;
@@ -1601,7 +1643,7 @@ async function listSessions(
   runtimeCache: Map<string, SessionRuntimeCacheEntry>,
   limitOverride: number | null = null,
 ): Promise<SessionSummary[]> {
-  const limit = Math.max(1, Math.min(limitOverride ?? 100, 100));
+  const limit = normalizedSessionListLimit(limitOverride);
   const listThreads = requireProviderMethod(
     provider,
     "listSessionThreads",
@@ -1616,14 +1658,19 @@ async function listSessions(
     threads,
     limit,
   );
-  return Promise.all(
-    mergedThreads.map(async (thread) =>
+  return mapWithConcurrency(
+    mergedThreads,
+    RECENT_SESSION_RUNTIME_CONCURRENCY,
+    async (thread) =>
       mapSession(
         thread,
         await loadCachedSessionRuntime(provider, thread, runtimeCache),
       ),
-    ),
   );
+}
+
+function normalizedSessionListLimit(limitOverride: number | null): number {
+  return Math.max(1, Math.min(limitOverride ?? 100, 100));
 }
 
 async function mergeRecentUnindexedThreads(
@@ -2021,17 +2068,48 @@ async function loadCachedSessionRuntime(
 ): Promise<SessionRuntimeSummary | null> {
   const cached = runtimeCache.get(thread.id);
   if (cached && cached.threadUpdatedAt === thread.updatedAt) {
+    if (cached.promise) {
+      return cached.promise;
+    }
     return cached.runtime;
   }
 
-  const runtime = hasProviderMethod(provider, "readSessionRuntime")
-    ? await provider.readSessionRuntime(thread)
-    : null;
+  const promise = hasProviderMethod(provider, "readSessionRuntime")
+    ? provider.readSessionRuntime(thread).catch(() => null)
+    : Promise.resolve(null);
+  runtimeCache.set(thread.id, {
+    threadUpdatedAt: thread.updatedAt,
+    runtime: null,
+    promise,
+  });
+  const runtime = await promise;
   runtimeCache.set(thread.id, {
     threadUpdatedAt: thread.updatedAt,
     runtime,
   });
   return runtime;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(items[index]!);
+      }
+    }),
+  );
+
+  return results;
 }
 
 function setSessionLogCacheEntry(
