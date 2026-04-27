@@ -38,6 +38,7 @@ import {
   type AgentSubmitInputResult,
 } from "./agent-provider.js";
 import type {
+  FakeCapabilityProfile,
   ModelSummary,
   ProviderProfileCatalog,
   ProviderProfileSummary,
@@ -57,6 +58,7 @@ export interface FakeAgentProviderOptions {
   latencyMs?: number;
   seedSessions?: boolean;
   workspaceRoot?: string | null;
+  capabilityProfile?: FakeCapabilityProfile;
 }
 
 interface FakeSessionState {
@@ -127,16 +129,110 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
 };
 
+function capabilitiesForFakeProfile(
+  profile: FakeCapabilityProfile,
+): AgentProviderCapabilities {
+  const capabilities = cloneCapabilities(FAKE_PROVIDER_CAPABILITIES);
+  switch (profile) {
+    case "full":
+      return capabilities;
+    case "chat-only":
+      disableInputAttachments(capabilities);
+      disableApprovals(capabilities);
+      disableConfiguration(capabilities);
+      disableRuntimeControls(capabilities);
+      disableWorkspace(capabilities);
+      return capabilities;
+    case "no-files":
+      capabilities.input.localImage = false;
+      disableWorkspace(capabilities);
+      return capabilities;
+    case "no-model-controls":
+      capabilities.configuration.models = false;
+      capabilities.configuration.profiles = false;
+      capabilities.runtimeControls.model = false;
+      capabilities.runtimeControls.reasoningEffort = false;
+      capabilities.runtimeControls.fastMode = false;
+      return capabilities;
+    case "no-approvals":
+      disableApprovals(capabilities);
+      capabilities.runtimeControls.approvalPolicy = false;
+      return capabilities;
+    case "minimal":
+      capabilities.sessions.resume = false;
+      capabilities.sessions.rename = false;
+      capabilities.sessions.archive = false;
+      capabilities.sessions.interrupt = false;
+      capabilities.sessions.eventReplay = false;
+      capabilities.sessions.recentFallback = false;
+      disableInputAttachments(capabilities);
+      disableApprovals(capabilities);
+      disableConfiguration(capabilities);
+      disableRuntimeControls(capabilities);
+      disableWorkspace(capabilities);
+      return capabilities;
+  }
+}
+
+function cloneCapabilities(
+  capabilities: AgentProviderCapabilities,
+): AgentProviderCapabilities {
+  return {
+    sessions: { ...capabilities.sessions },
+    input: { ...capabilities.input },
+    approvals: { ...capabilities.approvals },
+    configuration: { ...capabilities.configuration },
+    runtimeControls: { ...capabilities.runtimeControls },
+    workspace: { ...capabilities.workspace },
+  };
+}
+
+function disableInputAttachments(capabilities: AgentProviderCapabilities): void {
+  capabilities.input.imageUrl = false;
+  capabilities.input.localImage = false;
+  capabilities.input.skills = false;
+}
+
+function disableApprovals(capabilities: AgentProviderCapabilities): void {
+  capabilities.approvals.command = false;
+  capabilities.approvals.fileChange = false;
+  capabilities.approvals.permissions = false;
+  capabilities.approvals.approveForSession = false;
+}
+
+function disableConfiguration(capabilities: AgentProviderCapabilities): void {
+  capabilities.configuration.models = false;
+  capabilities.configuration.profiles = false;
+  capabilities.configuration.skills = false;
+  capabilities.configuration.skillManagement = false;
+}
+
+function disableRuntimeControls(capabilities: AgentProviderCapabilities): void {
+  capabilities.runtimeControls.model = false;
+  capabilities.runtimeControls.reasoningEffort = false;
+  capabilities.runtimeControls.fastMode = false;
+  capabilities.runtimeControls.approvalPolicy = false;
+  capabilities.runtimeControls.sandboxMode = false;
+  capabilities.runtimeControls.networkAccess = false;
+  capabilities.runtimeControls.webSearch = false;
+}
+
+function disableWorkspace(capabilities: AgentProviderCapabilities): void {
+  capabilities.workspace.filesystem = false;
+  capabilities.workspace.remoteGitDiff = false;
+}
+
 export class FakeAgentProvider
   extends EventEmitter<AgentProviderEvents>
   implements AgentProvider
 {
   public readonly kind = "fake";
   public readonly displayName = "Fake Test Provider";
-  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
+  public readonly capabilities: AgentProviderCapabilities;
 
   private readonly latencyMs: number;
   private readonly workspaceRoot: string;
+  private readonly capabilityProfile: FakeCapabilityProfile;
   private readonly sessions = new Map<string, FakeSessionState>();
   private readonly loadedSessionIds = new Set<string>();
   private readonly activeTurnIds = new Map<string, string>();
@@ -151,6 +247,8 @@ export class FakeAgentProvider
     this.workspaceRoot = nodePath.resolve(
       options.workspaceRoot || DEFAULT_FAKE_WORKSPACE,
     );
+    this.capabilityProfile = options.capabilityProfile ?? "full";
+    this.capabilities = capabilitiesForFakeProfile(this.capabilityProfile);
 
     if (options.seedSessions !== false) {
       this.seedWelcomeSession();
@@ -162,7 +260,7 @@ export class FakeAgentProvider
   }
 
   public async getVersion(): Promise<string> {
-    return "fake-provider 1.0.0";
+    return `fake-provider 1.0.0 (${this.capabilityProfile})`;
   }
 
   public async listSessionThreads(
@@ -677,12 +775,21 @@ export class FakeAgentProvider
     });
 
     const text = inputText(input);
-    if (scenarioRequested(text, "tools")) {
+    if (scenarioRequested(text, "tools") && this.supportsToolingScenario()) {
       await this.emitToolingScenario(session, turnId);
     }
 
     const approvalKinds = requestedApprovalKinds(text);
     for (const kind of approvalKinds) {
+      if (!this.supportsApprovalKind(kind)) {
+        this.appendAssistantMessage(
+          session,
+          turnId,
+          `Fake ${kind} approval skipped by ${this.capabilityProfile} capability profile.`,
+          "commentary",
+        );
+        continue;
+      }
       const decision = await this.openApproval(session, turnId, kind);
       if (!this.isTurnActive(session.thread.id, turnId)) {
         return;
@@ -705,7 +812,7 @@ export class FakeAgentProvider
       );
     }
 
-    if (scenarioRequested(text, "image")) {
+    if (scenarioRequested(text, "image") && this.supportsGeneratedImageScenario()) {
       this.upsertAndEmitActivity(session, turnId, {
         id: `fake-image-${turnId}`,
         type: "image_generation",
@@ -732,56 +839,58 @@ export class FakeAgentProvider
     session: FakeSessionState,
     turnId: string,
   ): Promise<void> {
-    const commandId = `fake-command-${turnId}`;
-    this.upsertAndEmitActivity(session, turnId, {
-      id: commandId,
-      type: "command",
-      turnId,
-      status: "in_progress",
-      command: "printf 'fake provider tooling\\n'",
-      cwd: session.thread.cwd,
-      output: "",
-      exitCode: null,
-      durationMs: null,
-      source: "fake",
-      processId: `fake-pid-${Date.now()}`,
-      commandActions: [{ kind: "unknown", label: "fake command" }],
-      terminalStatus: "input",
-      terminalInput: null,
-    });
-    await sleep(this.latencyMs);
-    this.appendCommandOutput(session, commandId, "fake provider tooling\n");
-    this.emit("liveEvent", {
-      type: "activity_output_delta",
-      sessionId: session.thread.id,
-      turnId,
-      activityId: commandId,
-      delta: "fake provider tooling\n",
-    });
-    this.applyTerminalInput(session, commandId, "y\n");
-    this.emit("liveEvent", {
-      type: "activity_terminal_input",
-      sessionId: session.thread.id,
-      turnId,
-      activityId: commandId,
-      stdin: "y\n",
-    });
-    this.upsertAndEmitActivity(session, turnId, {
-      id: commandId,
-      type: "command",
-      turnId,
-      status: "completed",
-      command: "printf 'fake provider tooling\\n'",
-      cwd: session.thread.cwd,
-      output: "fake provider tooling\n",
-      exitCode: 0,
-      durationMs: 42,
-      source: "fake",
-      processId: `fake-pid-${Date.now()}`,
-      commandActions: [{ kind: "unknown", label: "fake command" }],
-      terminalStatus: null,
-      terminalInput: "y\n",
-    });
+    if (this.capabilityProfile !== "chat-only" && this.capabilityProfile !== "minimal") {
+      const commandId = `fake-command-${turnId}`;
+      this.upsertAndEmitActivity(session, turnId, {
+        id: commandId,
+        type: "command",
+        turnId,
+        status: "in_progress",
+        command: "printf 'fake provider tooling\\n'",
+        cwd: session.thread.cwd,
+        output: "",
+        exitCode: null,
+        durationMs: null,
+        source: "fake",
+        processId: `fake-pid-${Date.now()}`,
+        commandActions: [{ kind: "unknown", label: "fake command" }],
+        terminalStatus: "input",
+        terminalInput: null,
+      });
+      await sleep(this.latencyMs);
+      this.appendCommandOutput(session, commandId, "fake provider tooling\n");
+      this.emit("liveEvent", {
+        type: "activity_output_delta",
+        sessionId: session.thread.id,
+        turnId,
+        activityId: commandId,
+        delta: "fake provider tooling\n",
+      });
+      this.applyTerminalInput(session, commandId, "y\n");
+      this.emit("liveEvent", {
+        type: "activity_terminal_input",
+        sessionId: session.thread.id,
+        turnId,
+        activityId: commandId,
+        stdin: "y\n",
+      });
+      this.upsertAndEmitActivity(session, turnId, {
+        id: commandId,
+        type: "command",
+        turnId,
+        status: "completed",
+        command: "printf 'fake provider tooling\\n'",
+        cwd: session.thread.cwd,
+        output: "fake provider tooling\n",
+        exitCode: 0,
+        durationMs: 42,
+        source: "fake",
+        processId: `fake-pid-${Date.now()}`,
+        commandActions: [{ kind: "unknown", label: "fake command" }],
+        terminalStatus: null,
+        terminalInput: "y\n",
+      });
+    }
 
     const change: SessionActivityChange = {
       path: "fake-provider.md",
@@ -796,30 +905,34 @@ export class FakeAgentProvider
         "",
       ].join("\n"),
     };
-    this.upsertAndEmitActivity(session, turnId, {
-      id: `fake-file-change-${turnId}`,
-      type: "file_change",
-      turnId,
-      status: "completed",
-      changes: [change],
-    });
-    this.upsertAndEmitActivity(session, turnId, {
-      id: `fake-turn-diff-${turnId}`,
-      type: "turn_diff",
-      turnId,
-      status: "completed",
-      diff: change.diff,
-    });
-    this.upsertAndEmitActivity(session, turnId, {
-      id: `fake-web-search-${turnId}`,
-      type: "web_search",
-      turnId,
-      status: "completed",
-      query: "fake provider deterministic web search",
-      queries: ["fake provider deterministic web search"],
-      targetUrl: "https://example.invalid/fake-provider",
-      pattern: "deterministic",
-    });
+    if (this.capabilities.workspace.filesystem) {
+      this.upsertAndEmitActivity(session, turnId, {
+        id: `fake-file-change-${turnId}`,
+        type: "file_change",
+        turnId,
+        status: "completed",
+        changes: [change],
+      });
+      this.upsertAndEmitActivity(session, turnId, {
+        id: `fake-turn-diff-${turnId}`,
+        type: "turn_diff",
+        turnId,
+        status: "completed",
+        diff: change.diff,
+      });
+    }
+    if (this.capabilities.runtimeControls.webSearch) {
+      this.upsertAndEmitActivity(session, turnId, {
+        id: `fake-web-search-${turnId}`,
+        type: "web_search",
+        turnId,
+        status: "completed",
+        query: "fake provider deterministic web search",
+        queries: ["fake provider deterministic web search"],
+        targetUrl: "https://example.invalid/fake-provider",
+        pattern: "deterministic",
+      });
+    }
   }
 
   private async openApproval(
@@ -836,7 +949,7 @@ export class FakeAgentProvider
       detail: fakeApprovalDetail(kind, session.thread.cwd),
       requestedAt: Date.now(),
       canApprove: true,
-      canApproveForSession: true,
+      canApproveForSession: this.capabilities.approvals.approveForSession,
       canDecline: true,
       sessionTitle: session.thread.name ?? session.thread.preview,
       cwd: session.thread.cwd,
@@ -1101,6 +1214,25 @@ export class FakeAgentProvider
 
   private isSkillEnabled(key: string, fallback: boolean): boolean {
     return this.skillEnabled.get(key) ?? this.skillEnabled.get(skillNameKey(key)) ?? fallback;
+  }
+
+  private supportsToolingScenario(): boolean {
+    return this.capabilityProfile !== "chat-only" && this.capabilityProfile !== "minimal";
+  }
+
+  private supportsGeneratedImageScenario(): boolean {
+    return this.capabilityProfile !== "chat-only" && this.capabilityProfile !== "minimal";
+  }
+
+  private supportsApprovalKind(kind: FakeApprovalKind): boolean {
+    switch (kind) {
+      case "command":
+        return this.capabilities.approvals.command;
+      case "file_change":
+        return this.capabilities.approvals.fileChange;
+      case "permissions":
+        return this.capabilities.approvals.permissions;
+    }
   }
 
   private delayFor(input: AgentSessionInputItem[]): number {

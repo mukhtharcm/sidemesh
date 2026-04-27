@@ -6,6 +6,7 @@ import type {
   AgentProviderConfigSummary,
   AgentProviderKind,
   CodexProviderConfig,
+  FakeCapabilityProfile,
   FakeProviderConfig,
 } from "./types.js";
 
@@ -74,6 +75,7 @@ const FAKE_PROVIDER_DEFINITION: AgentProviderDefinition = {
     "SIDEMESH_FAKE_LATENCY_MS",
     "SIDEMESH_FAKE_SEED",
     "SIDEMESH_FAKE_WORKSPACE_ROOT",
+    "SIDEMESH_FAKE_CAPABILITY_PROFILE",
   ],
 
   create(config) {
@@ -82,6 +84,7 @@ const FAKE_PROVIDER_DEFINITION: AgentProviderDefinition = {
       latencyMs: fake.latencyMs,
       seedSessions: fake.seedSessions,
       workspaceRoot: fake.workspaceRoot,
+      capabilityProfile: fake.capabilityProfile,
     });
   },
 
@@ -91,6 +94,9 @@ const FAKE_PROVIDER_DEFINITION: AgentProviderDefinition = {
       latencyMs: parseInteger(env.SIDEMESH_FAKE_LATENCY_MS, 15),
       seedSessions: env.SIDEMESH_FAKE_SEED?.trim() !== "0",
       workspaceRoot: env.SIDEMESH_FAKE_WORKSPACE_ROOT?.trim() || null,
+      capabilityProfile: parseFakeCapabilityProfile(
+        env.SIDEMESH_FAKE_CAPABILITY_PROFILE,
+      ),
     };
   },
 
@@ -178,4 +184,29 @@ function parseInteger(value: string | undefined, fallback: number): number {
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+const FAKE_CAPABILITY_PROFILES = [
+  "full",
+  "chat-only",
+  "no-files",
+  "no-model-controls",
+  "no-approvals",
+  "minimal",
+] as const satisfies readonly FakeCapabilityProfile[];
+
+function parseFakeCapabilityProfile(
+  value: string | undefined,
+): FakeCapabilityProfile {
+  const profile = value?.trim() || "full";
+  if (
+    FAKE_CAPABILITY_PROFILES.includes(
+      profile as (typeof FAKE_CAPABILITY_PROFILES)[number],
+    )
+  ) {
+    return profile as FakeCapabilityProfile;
+  }
+  throw new Error(
+    `Unsupported SIDEMESH_FAKE_CAPABILITY_PROFILE "${profile}". Supported profiles: ${FAKE_CAPABILITY_PROFILES.join(", ")}`,
+  );
 }

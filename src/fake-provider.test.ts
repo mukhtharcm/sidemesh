@@ -259,6 +259,147 @@ describe("fake test provider", () => {
     await provider.fsUnwatch(watch.watchId);
   });
 
+  it("can simulate a chat-only provider without attachments, tools, approvals, or configuration", async () => {
+    const cwd = await tempRoot(tempRoots);
+    const provider = new FakeAgentProvider({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: cwd,
+      capabilityProfile: "chat-only",
+    });
+    const events: AgentProviderLiveEvent[] = [];
+    provider.on("liveEvent", (event) => events.push(event));
+    await provider.start();
+
+    assert.equal(provider.capabilities.input.text, true);
+    assert.equal(provider.capabilities.input.imageUrl, false);
+    assert.equal(provider.capabilities.input.localImage, false);
+    assert.equal(provider.capabilities.input.skills, false);
+    assert.equal(provider.capabilities.configuration.models, false);
+    assert.equal(provider.capabilities.runtimeControls.model, false);
+    assert.equal(provider.capabilities.approvals.command, false);
+    assert.equal(provider.capabilities.workspace.filesystem, false);
+
+    const created = await provider.createSession({
+      cwd,
+      input: [
+        {
+          type: "text",
+          text: "tools approval:command approval:file approval:permissions image",
+          text_elements: [],
+        },
+      ],
+      overrides: EMPTY_OVERRIDES,
+    });
+
+    await waitFor(
+      () =>
+        events.find(
+          (event) =>
+            event.type === "turn_completed" &&
+            event.sessionId === created.thread.id,
+        ),
+      "chat-only turn completion",
+    );
+    assert.equal(
+      events.some((event) => event.type === "action_opened"),
+      false,
+    );
+
+    const log = await provider.readSessionLog(
+      await provider.readSessionThread(created.thread.id, true),
+    );
+    assert.equal(log.activities.length, 0);
+    assert.ok(
+      log.messages.some((message) =>
+        message.text.includes("Fake command approval skipped"),
+      ),
+    );
+  });
+
+  it("can simulate providers without filesystem or model controls", async () => {
+    const cwd = await tempRoot(tempRoots);
+    const noFiles = new FakeAgentProvider({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: cwd,
+      capabilityProfile: "no-files",
+    });
+    const noFilesEvents: AgentProviderLiveEvent[] = [];
+    noFiles.on("liveEvent", (event) => noFilesEvents.push(event));
+    await noFiles.start();
+
+    assert.equal(noFiles.capabilities.workspace.filesystem, false);
+    assert.equal(noFiles.capabilities.workspace.remoteGitDiff, false);
+    assert.equal(noFiles.capabilities.configuration.models, true);
+
+    const noFilesSession = await noFiles.createSession({
+      cwd,
+      input: [{ type: "text", text: "tools", text_elements: [] }],
+      overrides: EMPTY_OVERRIDES,
+    });
+    await waitFor(
+      () =>
+        noFilesEvents.find(
+          (event) =>
+            event.type === "turn_completed" &&
+            event.sessionId === noFilesSession.thread.id,
+        ),
+      "no-files turn completion",
+    );
+    const noFilesLog = await noFiles.readSessionLog(
+      await noFiles.readSessionThread(noFilesSession.thread.id, true),
+    );
+    assert.deepEqual(
+      [...new Set(noFilesLog.activities.map((activity) => activity.type))].sort(),
+      ["command", "web_search"],
+    );
+
+    const noModelControls = new FakeAgentProvider({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: cwd,
+      capabilityProfile: "no-model-controls",
+    });
+    assert.equal(noModelControls.capabilities.configuration.models, false);
+    assert.equal(noModelControls.capabilities.configuration.profiles, false);
+    assert.equal(noModelControls.capabilities.runtimeControls.model, false);
+    assert.equal(noModelControls.capabilities.runtimeControls.fastMode, false);
+    assert.equal(noModelControls.capabilities.approvals.command, true);
+    assert.equal(noModelControls.capabilities.workspace.filesystem, true);
+  });
+
+  it("can simulate providers without approvals and minimal session controls", async () => {
+    const noApprovals = new FakeAgentProvider({
+      latencyMs: 0,
+      seedSessions: false,
+      capabilityProfile: "no-approvals",
+    });
+    assert.equal(noApprovals.capabilities.approvals.command, false);
+    assert.equal(noApprovals.capabilities.approvals.fileChange, false);
+    assert.equal(noApprovals.capabilities.approvals.permissions, false);
+    assert.equal(noApprovals.capabilities.runtimeControls.approvalPolicy, false);
+    assert.equal(noApprovals.capabilities.configuration.models, true);
+    assert.equal(noApprovals.capabilities.workspace.filesystem, true);
+
+    const minimal = new FakeAgentProvider({
+      latencyMs: 0,
+      seedSessions: false,
+      capabilityProfile: "minimal",
+    });
+    assert.equal(minimal.capabilities.sessions.create, true);
+    assert.equal(minimal.capabilities.sessions.history, true);
+    assert.equal(minimal.capabilities.sessions.resume, false);
+    assert.equal(minimal.capabilities.sessions.rename, false);
+    assert.equal(minimal.capabilities.sessions.archive, false);
+    assert.equal(minimal.capabilities.sessions.interrupt, false);
+    assert.equal(minimal.capabilities.sessions.eventReplay, false);
+    assert.equal(minimal.capabilities.input.text, true);
+    assert.equal(minimal.capabilities.input.imageUrl, false);
+    assert.equal(minimal.capabilities.configuration.models, false);
+    assert.equal(minimal.capabilities.workspace.filesystem, false);
+  });
+
   it("can fail and interrupt turns deterministically", async () => {
     const cwd = await tempRoot(tempRoots);
     const provider = new FakeAgentProvider({

@@ -38,6 +38,7 @@ SIDEMESH_PROVIDER_COMMAND=codex
 SIDEMESH_FAKE_LATENCY_MS=15
 SIDEMESH_FAKE_SEED=1
 SIDEMESH_FAKE_WORKSPACE_ROOT=/tmp/sidemesh-fake
+SIDEMESH_FAKE_CAPABILITY_PROFILE=full
 SIDEMESH_STATE_DIR=~/.sidemesh
 ```
 
@@ -51,6 +52,7 @@ provider instead of Codex:
 ```bash
 SIDEMESH_PROVIDER=fake \
 SIDEMESH_LABEL=fake-node \
+SIDEMESH_FAKE_CAPABILITY_PROFILE=full \
 SIDEMESH_TOKEN=replace-me \
 npm run daemon
 ```
@@ -61,6 +63,20 @@ as `tools`, `approval:command`, `approval:file`, `approval:permissions`,
 `image`, `slow`, and `fail` to trigger deterministic UI states. Its model
 catalog includes normal, provider-managed auto-reasoning, fast-mode, and image
 models so provider-neutral model UI can be tested without Codex.
+
+Use `SIDEMESH_FAKE_CAPABILITY_PROFILE` to simulate weaker future providers:
+
+- `full`: every fake capability advertised.
+- `chat-only`: text chat and history only; no attachments, tools, approvals,
+  model controls, skills, or filesystem.
+- `no-files`: chat/tools/config remain, but filesystem and remote git diff are
+  not advertised.
+- `no-model-controls`: chat/tools/approvals remain, but models, profiles,
+  reasoning, and fast mode are not advertised.
+- `no-approvals`: chat/tools/config remain, but approval flows are not
+  advertised.
+- `minimal`: text chat and history only, with rename/archive/interrupt/replay
+  disabled too.
 
 ## Dogfood flow
 

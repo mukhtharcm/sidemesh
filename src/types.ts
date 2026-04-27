@@ -12,7 +12,16 @@ export interface FakeProviderConfig {
   latencyMs: number;
   seedSessions: boolean;
   workspaceRoot: string | null;
+  capabilityProfile: FakeCapabilityProfile;
 }
+
+export type FakeCapabilityProfile =
+  | "full"
+  | "chat-only"
+  | "no-files"
+  | "no-model-controls"
+  | "no-approvals"
+  | "minimal";
 
 export interface AgentProviderConfigSummary {
   kind: AgentProviderKind | string;
