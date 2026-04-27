@@ -20,6 +20,7 @@ void main() {
       createdAt: updatedAt.subtract(const Duration(minutes: 5)),
       updatedAt: updatedAt,
       source: 'cli',
+      provider: null,
       status: 'idle',
       runtime: null,
       gitInfo: null,

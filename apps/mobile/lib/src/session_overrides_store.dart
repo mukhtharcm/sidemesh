@@ -48,6 +48,7 @@ class SessionOverridesStore extends ChangeNotifier {
       createdAt: incoming.createdAt,
       updatedAt: incoming.updatedAt,
       source: incoming.source,
+      provider: incoming.provider,
       status: incoming.status,
       runtime: incoming.runtime,
       gitInfo: incoming.gitInfo,

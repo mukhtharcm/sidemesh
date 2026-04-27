@@ -24,6 +24,7 @@ void main() {
     createdAt: DateTime.fromMillisecondsSinceEpoch(1700000000000),
     updatedAt: DateTime.fromMillisecondsSinceEpoch(1700000300000),
     source: 'cli',
+    provider: null,
     status: 'active',
     runtime: null,
     gitInfo: null,

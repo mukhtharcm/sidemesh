@@ -55,7 +55,18 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     unawaited(_loadModels());
   }
 
-  String get _providerName => _nodeInfo?.providerDisplayName ?? 'agent';
+  String get _providerKind =>
+      widget.session.provider ?? widget.runtimeModelProvider ?? '';
+
+  String get _providerName {
+    final node = _nodeInfo;
+    if (node == null) return 'agent';
+    final summary = node.providerSummary(_providerKind);
+    if (summary.displayName.isNotEmpty) {
+      return summary.displayName;
+    }
+    return node.providerDisplayName;
+  }
 
   bool get _supportsModels => _supports('configuration', 'models');
 
@@ -77,7 +88,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   bool _supports(String section, String feature) {
     final node = _nodeInfo;
     if (node == null) return true;
-    return node.providerCapabilities.supports(section, feature);
+    return node.capabilitiesForProvider(_providerKind).supports(section, feature);
   }
 
   ApprovalPolicy get _effectiveApproval =>
@@ -286,6 +297,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       final models = await widget.api.fetchModels(
         widget.host,
         cwd: widget.session.cwd,
+        agentProvider: widget.session.provider,
         provider: _runtimeModelProvider,
       );
       models.sort(_compareModelEntries);

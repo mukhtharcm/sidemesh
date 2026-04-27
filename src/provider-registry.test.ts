@@ -1,9 +1,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { CodexAgentProvider } from "./codex-provider.js";
-import { CopilotAgentProvider } from "./copilot-provider.js";
-import { FakeAgentProvider } from "./fake-provider.js";
+import {
+  CODEX_PROVIDER_CAPABILITIES,
+  CodexAgentProvider,
+} from "./codex-provider.js";
+import {
+  COPILOT_PROVIDER_CAPABILITIES,
+  CopilotAgentProvider,
+} from "./copilot-provider.js";
+import {
+  FAKE_PROVIDER_CAPABILITIES,
+  FakeAgentProvider,
+} from "./fake-provider.js";
 import {
   DEFAULT_AGENT_PROVIDER_KIND,
   createAgentProviderFromConfig,
@@ -33,6 +42,7 @@ describe("provider registry", () => {
           "SIDEMESH_CODEX_BIN",
           "SIDEMESH_PROVIDER_COMMAND",
         ],
+        capabilities: CODEX_PROVIDER_CAPABILITIES,
       },
       {
         kind: "fake",
@@ -44,6 +54,7 @@ describe("provider registry", () => {
           "SIDEMESH_FAKE_WORKSPACE_ROOT",
           "SIDEMESH_FAKE_CAPABILITY_PROFILE",
         ],
+        capabilities: FAKE_PROVIDER_CAPABILITIES,
       },
       {
         kind: "copilot",
@@ -59,6 +70,7 @@ describe("provider registry", () => {
           "COPILOT_PROVIDER_MODEL_ID",
           "COPILOT_PROVIDER_WIRE_MODEL",
         ],
+        capabilities: COPILOT_PROVIDER_CAPABILITIES,
       },
     ]);
   });

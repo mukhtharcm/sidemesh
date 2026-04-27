@@ -137,6 +137,7 @@ SessionSummary _summary(String id, {required String status}) {
     createdAt: now,
     updatedAt: now,
     source: 'codex',
+    provider: null,
     status: status,
     runtime: null,
     gitInfo: null,
