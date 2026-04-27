@@ -267,16 +267,27 @@ export type AgentProviderLiveEvent =
       action: AgentPendingAction;
     };
 
-export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
+export interface AgentProviderCore extends EventEmitter<AgentProviderEvents> {
   readonly kind: string;
   readonly displayName: string;
   readonly capabilities: AgentProviderCapabilities;
 
   start(): Promise<void>;
   getVersion(): Promise<string>;
+}
 
+export interface AgentSessionHistoryProvider {
   listSessionThreads(options: AgentSessionListOptions): Promise<ThreadRecord[]>;
   readSessionThread(threadId: string, includeTurns: boolean): Promise<ThreadRecord>;
+  listRecentUnindexedSessionThreads(limit: number): Promise<ThreadRecord[]>;
+  readSessionLog(
+    thread: ThreadRecord,
+    options?: AgentSessionLogOptions,
+  ): Promise<SessionLogSnapshot>;
+  readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null>;
+}
+
+export interface AgentSessionLifecycleProvider {
   listLoadedSessionIds(): Promise<string[]>;
   resumeSessionThread(
     threadId: string,
@@ -285,25 +296,27 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   setSessionName(threadId: string, name: string): Promise<unknown>;
   archiveSession(threadId: string): Promise<unknown>;
   unarchiveSession(threadId: string): Promise<unknown>;
-  listRecentUnindexedSessionThreads(limit: number): Promise<ThreadRecord[]>;
-  readSessionLog(
-    thread: ThreadRecord,
-    options?: AgentSessionLogOptions,
-  ): Promise<SessionLogSnapshot>;
-  readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null>;
   createSession(request: AgentCreateSessionRequest): Promise<AgentCreateSessionResult>;
   submitInput(request: AgentSubmitInputRequest): Promise<AgentSubmitInputResult>;
-
   interruptTurn(threadId: string, turnId: string): Promise<unknown>;
+}
 
+export interface AgentApprovalProvider {
   respondToPendingAction(action: AgentPendingAction, decision: string | null): boolean;
+}
 
+export interface AgentWorkspaceProvider {
   readRemoteGitDiff(cwd: string): Promise<AgentRemoteGitDiff>;
+}
+
+export interface AgentConfigurationProvider {
   listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry>;
   writeSkillConfig(request: AgentSkillConfigWriteRequest): Promise<unknown>;
   listModels(options: AgentModelListOptions): Promise<ModelSummary[]>;
   listProfiles(options: AgentProfileListOptions): Promise<ProviderProfileCatalog>;
+}
 
+export interface AgentFilesystemProvider {
   fsReadDirectory(path: string): Promise<AgentFsDirectoryListing>;
   fsGetMetadata(path: string): Promise<AgentFsMetadata>;
   fsReadFile(path: string): Promise<AgentFsFile>;
@@ -317,6 +330,43 @@ export interface AgentProvider extends EventEmitter<AgentProviderEvents> {
   }): Promise<unknown>;
   fsWatch(path: string): Promise<AgentFsWatchResult>;
   fsUnwatch(watchId: string): Promise<unknown>;
+}
+
+export interface AgentProvider
+  extends AgentProviderCore,
+    Partial<AgentSessionHistoryProvider>,
+    Partial<AgentSessionLifecycleProvider>,
+    Partial<AgentApprovalProvider>,
+    Partial<AgentWorkspaceProvider>,
+    Partial<AgentConfigurationProvider>,
+    Partial<AgentFilesystemProvider> {}
+
+export type AgentProviderMethod<K extends keyof AgentProvider> = Extract<
+  NonNullable<AgentProvider[K]>,
+  (...args: any[]) => unknown
+>;
+
+export type AgentProviderMethodName = {
+  [K in keyof AgentProvider]-?: AgentProviderMethod<K> extends never ? never : K;
+}[keyof AgentProvider];
+
+export function hasProviderMethod<K extends AgentProviderMethodName>(
+  provider: AgentProvider,
+  method: K,
+): provider is AgentProvider & { [P in K]-?: AgentProviderMethod<P> } {
+  return typeof provider[method] === "function";
+}
+
+export function requireProviderMethod<K extends AgentProviderMethodName>(
+  provider: AgentProvider,
+  method: K,
+  feature: string,
+): AgentProviderMethod<K> {
+  const candidate = provider[method];
+  if (typeof candidate !== "function") {
+    throw new Error(`${provider.displayName} does not implement ${feature}`);
+  }
+  return candidate as AgentProviderMethod<K>;
 }
 
 export function materializeAgentActivityDraft(
