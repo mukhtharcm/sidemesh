@@ -22,6 +22,7 @@ export interface CopilotProviderConfig {
   kind: "copilot";
   bin: string;
   stateDir: string | null;
+  sessionStateDir: string | null;
   allowAll: boolean;
 }
 
