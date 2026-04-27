@@ -4,7 +4,11 @@ import { createHash, randomUUID } from "node:crypto";
 import nodePath from "node:path";
 
 import cors from "cors";
-import express, { type Request, type Response, type NextFunction } from "express";
+import express, {
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import {
@@ -27,6 +31,7 @@ import type {
   SessionActivity,
   NodeConfig,
   PendingAction,
+  RecentSessionsLiveEvent,
   SessionMessageAttachment,
   SessionMessage,
   SessionResourcesResponse,
@@ -44,7 +49,12 @@ import {
   mergeSessionActivities,
 } from "./activity.js";
 import { summarizeProviderConfig } from "./config.js";
-import { buildGitDiff, readGitDiff, readGitStatus, sanitizeGitUrl } from "./git.js";
+import {
+  buildGitDiff,
+  readGitDiff,
+  readGitStatus,
+  sanitizeGitUrl,
+} from "./git.js";
 import { createAgentProvider } from "./provider-factory.js";
 import { listAgentProviderDefinitionSummaries } from "./provider-registry.js";
 import { buildSessionResources } from "./resources.js";
@@ -65,6 +75,7 @@ const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
+const RECENT_LIVE_LIMIT = 40;
 const HOST_CAPABILITIES: HostCapabilities = {
   workspace: {
     gitStatus: true,
@@ -115,6 +126,8 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const server = createServer(app);
   const socketsBySession = new Map<string, Set<WebSocket>>();
   const approvalSockets = new Set<WebSocket>();
+  const recentSessionsSockets = new Set<WebSocket>();
+  const recentSessionBroadcastTimers = new Map<string, NodeJS.Timeout>();
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, SessionActivity>>();
@@ -151,13 +164,19 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
   }
 
-  function sessionInputDedupeKey(sessionId: string, clientMessageId: string): string {
+  function sessionInputDedupeKey(
+    sessionId: string,
+    clientMessageId: string,
+  ): string {
     return `${sessionId}:${clientMessageId}`;
   }
 
   function pruneSessionInputDedupe(now = Date.now()): void {
     for (const [key, entry] of sessionInputDedupe) {
-      if (!entry.promise && now - entry.createdAt > SESSION_INPUT_DEDUPE_TTL_MS) {
+      if (
+        !entry.promise &&
+        now - entry.createdAt > SESSION_INPUT_DEDUPE_TTL_MS
+      ) {
         sessionInputDedupe.delete(key);
       }
     }
@@ -179,9 +198,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   // and decide whether they need a fresh snapshot.
   function broadcastLive(sessionId: string, event: LiveEvent): void {
     const stamped: LiveEvent =
-      event.seq === undefined
-        ? { ...event, seq: allocSeq(sessionId) }
-        : event;
+      event.seq === undefined ? { ...event, seq: allocSeq(sessionId) } : event;
     broadcast(socketsBySession, sessionId, stamped);
   }
 
@@ -189,6 +206,66 @@ export async function startServer(config: NodeConfig): Promise<void> {
     for (const socket of approvalSockets) {
       sendEvent(socket, event);
     }
+  }
+
+  function broadcastRecentSessionsLive(event: RecentSessionsLiveEvent): void {
+    for (const socket of recentSessionsSockets) {
+      sendEvent(socket, event);
+    }
+  }
+
+  async function sendRecentSessionsSnapshot(socket: WebSocket): Promise<void> {
+    const sessions = await listSessions(
+      provider,
+      runtimeCache,
+      RECENT_LIVE_LIMIT,
+    );
+    sendEvent(socket, { type: "snapshot", sessions });
+  }
+
+  async function broadcastRecentSessionUpsert(
+    sessionId: string,
+  ): Promise<void> {
+    if (recentSessionsSockets.size === 0) {
+      return;
+    }
+    try {
+      const thread = await readSession(provider, sessionId, false);
+      const session = mapSession(
+        thread,
+        await loadCachedSessionRuntime(provider, thread, runtimeCache),
+      );
+      broadcastRecentSessionsLive({ type: "upsert", session });
+    } catch {
+      // The session may have been archived/removed before we could refresh it.
+    }
+  }
+
+  function scheduleRecentSessionUpsert(sessionId: string, delayMs = 150): void {
+    if (recentSessionBroadcastTimers.has(sessionId)) {
+      return;
+    }
+    recentSessionBroadcastTimers.set(
+      sessionId,
+      setTimeout(() => {
+        recentSessionBroadcastTimers.delete(sessionId);
+        void broadcastRecentSessionUpsert(sessionId);
+      }, delayMs),
+    );
+  }
+
+  function cancelRecentSessionUpsert(sessionId: string): void {
+    const timer = recentSessionBroadcastTimers.get(sessionId);
+    if (!timer) {
+      return;
+    }
+    clearTimeout(timer);
+    recentSessionBroadcastTimers.delete(sessionId);
+  }
+
+  function broadcastRecentSessionRemove(sessionId: string): void {
+    cancelRecentSessionUpsert(sessionId);
+    broadcastRecentSessionsLive({ type: "remove", sessionId });
   }
 
   provider.on("stderr", (line) => {
@@ -218,6 +295,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
           sessionId: event.sessionId,
           turnId: event.turnId,
         });
+        scheduleRecentSessionUpsert(event.sessionId, 0);
         return;
       case "assistant_delta":
         broadcastLive(event.sessionId, {
@@ -245,6 +323,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
             phase: event.message.phase,
           },
         });
+        scheduleRecentSessionUpsert(event.sessionId);
         return;
       }
       case "activity_updated": {
@@ -320,6 +399,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         activeTurns.delete(event.sessionId);
         liveActivities.delete(event.sessionId);
         clearSessionLogCache(logCache, event.sessionId);
+        scheduleRecentSessionUpsert(event.sessionId, 0);
         // NOTE: do NOT reset sessionSeqCursor between turns — clients rely on
         // a monotonically increasing seq across the whole session lifetime to
         // detect gaps after a reconnect.
@@ -335,6 +415,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
           type: "action_opened",
           action: event.action,
         });
+        scheduleRecentSessionUpsert(event.action.sessionId);
         return;
     }
   });
@@ -384,22 +465,50 @@ export async function startServer(config: NodeConfig): Promise<void> {
     });
   });
 
-  app.get("/api/sessions", asyncRoute(async (_request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.history, "session history", "listSessionThreads")) {
-      return;
-    }
-    const requestedLimit = asInteger((_request.query as Record<string, unknown>)?.limit);
-    const sessions = await listSessions(provider, runtimeCache, requestedLimit);
-    response.json(sessions);
-  }));
+  app.get(
+    "/api/sessions",
+    asyncRoute(async (_request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.history,
+          "session history",
+          "listSessionThreads",
+        )
+      ) {
+        return;
+      }
+      const requestedLimit = asInteger(
+        (_request.query as Record<string, unknown>)?.limit,
+      );
+      const sessions = await listSessions(
+        provider,
+        runtimeCache,
+        requestedLimit,
+      );
+      response.json(sessions);
+    }),
+  );
 
-  app.get("/api/workspaces", asyncRoute(async (_request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.history, "workspace history", "listSessionThreads")) {
-      return;
-    }
-    const sessions = await listSessions(provider, runtimeCache);
-    response.json(buildWorkspaces(sessions));
-  }));
+  app.get(
+    "/api/workspaces",
+    asyncRoute(async (_request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.history,
+          "workspace history",
+          "listSessionThreads",
+        )
+      ) {
+        return;
+      }
+      const sessions = await listSessions(provider, runtimeCache);
+      response.json(buildWorkspaces(sessions));
+    }),
+  );
 
   registerFsRoutes(app, {
     provider,
@@ -407,579 +516,802 @@ export async function startServer(config: NodeConfig): Promise<void> {
     watchRegistry: fsWatchRegistry,
   });
 
-  app.get("/api/actions", asyncRoute(async (_request, response) => {
-    response.json(await listPendingActions(provider, pendingActions));
-  }));
+  app.get(
+    "/api/actions",
+    asyncRoute(async (_request, response) => {
+      response.json(await listPendingActions(provider, pendingActions));
+    }),
+  );
 
-  app.get("/api/sessions/:sessionId/log", asyncRoute(async (request, response) => {
-    if (
-      !requireProviderCapability(
-        response,
-        provider,
-        provider.capabilities.sessions.history,
-        "session history",
-        "readSessionThread",
-      ) ||
-      !requireProviderCapability(
-        response,
-        provider,
-        provider.capabilities.sessions.history,
-        "session log",
-        "readSessionLog",
-      )
-    ) {
-      return;
-    }
-    const sessionId = pathParam(request.params.sessionId);
-    const query = request.query as Record<string, unknown>;
-    const messageLimit = asInteger(query.messageLimit);
-    const activityLimit = asInteger(query.activityLimit);
-    const cacheKey = buildSessionLogCacheKey(sessionId, messageLimit, activityLimit);
-    const cached = logCache.get(cacheKey);
-
-    if (cached) {
-      const session = await readSession(provider, sessionId, false);
-      if (cached.threadUpdatedAt === session.updatedAt) {
-        ensureSeqCursor(sessionId, cached.nextSeq);
-        runtimeCache.set(session.id, {
-          threadUpdatedAt: session.updatedAt,
-          runtime: cached.runtime,
-        });
-        response.json({
-          session: mapSession(session, cached.runtime),
-          messages: cached.messages,
-          activities: mergeSessionActivities(
-            cached.activities,
-            liveActivities.get(sessionId)?.values() || [],
-          ),
-          pendingAction: findPendingActionForSession(pendingActions, sessionId),
-          history: cached.history,
-        });
+  app.get(
+    "/api/sessions/:sessionId/log",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.history,
+          "session history",
+          "readSessionThread",
+        ) ||
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.history,
+          "session log",
+          "readSessionLog",
+        )
+      ) {
         return;
       }
-    }
+      const sessionId = pathParam(request.params.sessionId);
+      const query = request.query as Record<string, unknown>;
+      const messageLimit = asInteger(query.messageLimit);
+      const activityLimit = asInteger(query.activityLimit);
+      const cacheKey = buildSessionLogCacheKey(
+        sessionId,
+        messageLimit,
+        activityLimit,
+      );
+      const cached = logCache.get(cacheKey);
 
-    const session = await readSession(provider, sessionId, false);
-    const log = await provider.readSessionLog!(session, {
-      messageLimit,
-      activityLimit,
-    });
-    ensureSeqCursor(sessionId, log.nextSeq);
-    const activities = mergeSessionActivities(
-      log.activities,
-      liveActivities.get(sessionId)?.values() || [],
-    );
-    const history = buildSessionHistorySummary(
-      log.totalMessages,
-      log.messages.length,
-      log.totalActivities,
-      log.activities.length,
-    );
+      if (cached) {
+        const session = await readSession(provider, sessionId, false);
+        if (cached.threadUpdatedAt === session.updatedAt) {
+          ensureSeqCursor(sessionId, cached.nextSeq);
+          runtimeCache.set(session.id, {
+            threadUpdatedAt: session.updatedAt,
+            runtime: cached.runtime,
+          });
+          response.json({
+            session: mapSession(session, cached.runtime),
+            messages: cached.messages,
+            activities: mergeSessionActivities(
+              cached.activities,
+              liveActivities.get(sessionId)?.values() || [],
+            ),
+            pendingAction: findPendingActionForSession(
+              pendingActions,
+              sessionId,
+            ),
+            history: cached.history,
+          });
+          return;
+        }
+      }
 
-    setSessionLogCacheEntry(logCache, cacheKey, {
-      threadUpdatedAt: session.updatedAt,
-      messages: log.messages,
-      activities: log.activities,
-      runtime: log.runtime,
-      history,
-      nextSeq: log.nextSeq,
-    });
-    runtimeCache.set(session.id, {
-      threadUpdatedAt: session.updatedAt,
-      runtime: log.runtime,
-    });
-    response.json({
-      session: mapSession(session, log.runtime),
-      messages: log.messages,
-      activities,
-      pendingAction: findPendingActionForSession(pendingActions, sessionId),
-      history,
-    });
-  }));
+      const session = await readSession(provider, sessionId, false);
+      const log = await provider.readSessionLog!(session, {
+        messageLimit,
+        activityLimit,
+      });
+      ensureSeqCursor(sessionId, log.nextSeq);
+      const activities = mergeSessionActivities(
+        log.activities,
+        liveActivities.get(sessionId)?.values() || [],
+      );
+      const history = buildSessionHistorySummary(
+        log.totalMessages,
+        log.messages.length,
+        log.totalActivities,
+        log.activities.length,
+      );
+
+      setSessionLogCacheEntry(logCache, cacheKey, {
+        threadUpdatedAt: session.updatedAt,
+        messages: log.messages,
+        activities: log.activities,
+        runtime: log.runtime,
+        history,
+        nextSeq: log.nextSeq,
+      });
+      runtimeCache.set(session.id, {
+        threadUpdatedAt: session.updatedAt,
+        runtime: log.runtime,
+      });
+      response.json({
+        session: mapSession(session, log.runtime),
+        messages: log.messages,
+        activities,
+        pendingAction: findPendingActionForSession(pendingActions, sessionId),
+        history,
+      });
+    }),
+  );
 
   // Replay endpoint for cheap reconnect / resume. Clients pass `since`
   // (the highest seq they've already observed) and get only newer
   // messages + activities — no re-downloading the full transcript.
-  app.get("/api/sessions/:sessionId/events", asyncRoute(async (request, response) => {
-    if (
-      !requireProviderCapability(
-        response,
-        provider,
-        provider.capabilities.sessions.eventReplay,
-        "session event replay",
-        "readSessionThread",
-      ) ||
-      !requireProviderCapability(
-        response,
-        provider,
-        provider.capabilities.sessions.eventReplay,
-        "session event replay",
-        "readSessionLog",
-      )
-    ) {
-      return;
-    }
-    const sessionId = pathParam(request.params.sessionId);
-    const query = request.query as Record<string, unknown>;
-    const since = asInteger(query.since) ?? 0;
-
-    const session = await readSession(provider, sessionId, false);
-    const log = await provider.readSessionLog!(session);
-    ensureSeqCursor(sessionId, log.nextSeq);
-    const activities = mergeSessionActivities(
-      log.activities,
-      liveActivities.get(sessionId)?.values() || [],
-    );
-    const newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
-    const newActivities = activities.filter((a) => (a.seq ?? 0) > since);
-    let highestSeq = since;
-    for (const m of newMessages) {
-      if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
-    }
-    for (const a of newActivities) {
-      if ((a.seq ?? 0) > highestSeq) highestSeq = a.seq ?? highestSeq;
-    }
-    response.json({
-      sessionId,
-      since,
-      nextSeq: highestSeq,
-      messages: newMessages,
-      activities: newActivities,
-      pendingAction: findPendingActionForSession(pendingActions, sessionId),
-      session: mapSession(session, log.runtime),
-    });
-  }));
-
-  app.get("/api/sessions/:sessionId/resources", asyncRoute(async (request, response) => {
-    if (
-      !requireProviderCapability(
-        response,
-        provider,
-        provider.capabilities.sessions.history,
-        "session resources",
-        "readSessionThread",
-      ) ||
-      !requireProviderCapability(
-        response,
-        provider,
-        provider.capabilities.sessions.history,
-        "session resources",
-        "readSessionLog",
-      )
-    ) {
-      return;
-    }
-    const sessionId = pathParam(request.params.sessionId);
-    response.json(await readSessionResources(provider, sessionId, liveActivities));
-  }));
-
-  app.get("/api/sessions/:sessionId/status", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.history, "session status", "readSessionThread")) {
-      return;
-    }
-    const sessionId = pathParam(request.params.sessionId);
-    const state = await loadRunState(provider, sessionId, activeTurns);
-    response.json({
-      sessionId,
-      isRunning: Boolean(state.turnId),
-      activeTurnId: state.turnId,
-      pendingAction: findPendingActionForSession(pendingActions, sessionId),
-    });
-  }));
-
-  app.get("/api/sessions/:sessionId/git", asyncRoute(async (request, response) => {
-    if (
-      !requireProviderCapability(
-        response,
-        provider,
-        provider.capabilities.sessions.history,
-        "session history",
-        "readSessionThread",
-      ) ||
-      !requireHostCapability(response, HOST_CAPABILITIES.workspace.gitStatus, "git status")
-    ) {
-      return;
-    }
-    const sessionId = pathParam(request.params.sessionId);
-    const session = await readSession(provider, sessionId, false);
-    response.json(await readGitStatus(session.cwd, mapGitInfo(session.gitInfo)));
-  }));
-
-  app.get("/api/sessions/:sessionId/git/diff", asyncRoute(async (request, response) => {
-    const sessionId = pathParam(request.params.sessionId);
-    const kind = parseGitDiffKind((request.query as Record<string, unknown>).kind);
-    if (!kind) {
-      response.status(400).json({ error: "kind must be working, staged, unstaged, or remote" });
-      return;
-    }
-
-    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.history, "session history", "readSessionThread")) {
-      return;
-    }
-    const session = await readSession(provider, sessionId, false);
-    if (kind === "remote") {
-      if (!requireProviderCapability(response, provider, provider.capabilities.workspace.remoteGitDiff, "remote git diff", "readRemoteGitDiff")) {
+  app.get(
+    "/api/sessions/:sessionId/events",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.eventReplay,
+          "session event replay",
+          "readSessionThread",
+        ) ||
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.eventReplay,
+          "session event replay",
+          "readSessionLog",
+        )
+      ) {
         return;
       }
-      const result = await provider.readRemoteGitDiff!(session.cwd);
-      response.json(buildGitDiff("remote", result.diff, normalizeGitSha(result.sha)));
-      return;
-    }
+      const sessionId = pathParam(request.params.sessionId);
+      const query = request.query as Record<string, unknown>;
+      const since = asInteger(query.since) ?? 0;
 
-    if (!requireHostCapability(response, HOST_CAPABILITIES.workspace.gitDiff, "git diff")) {
-      return;
-    }
-    response.json(await readGitDiff(session.cwd, kind));
-  }));
-
-  app.get("/api/skills", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.configuration.skills, "skill listing", "listSkills")) {
-      return;
-    }
-    const query = request.query as Record<string, unknown>;
-    const cwd = asString(query.cwd);
-    if (!cwd) {
-      response.status(400).json({ error: "cwd is required" });
-      return;
-    }
-
-    const forceReload = parseQueryBool(query.forceReload);
-    response.json(await provider.listSkills!({ cwd, forceReload }));
-  }));
-
-  app.post("/api/skills/config/write", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.configuration.skillManagement, "skill configuration", "writeSkillConfig")) {
-      return;
-    }
-    const path = asString(request.body?.path);
-    const name = asString(request.body?.name);
-    const enabled = parseOptionalBool(request.body?.enabled);
-    if (enabled === null) {
-      response.status(400).json({ error: "enabled is required" });
-      return;
-    }
-    if ((path && name) || (!path && !name)) {
-      response.status(400).json({ error: "provide exactly one of path or name" });
-      return;
-    }
-
-    const result = await provider.writeSkillConfig!({
-      path,
-      name,
-      enabled,
-    });
-    response.json(result);
-  }));
-
-  app.get("/api/models", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.configuration.models, "model listing", "listModels")) {
-      return;
-    }
-    const query = request.query as Record<string, unknown>;
-    const cwd = asString(query.cwd) || null;
-    const profile = asString(query.profile) || null;
-    const modelProvider = asString(query.provider) || null;
-    response.json(await provider.listModels!({
-      cwd,
-      profile,
-      provider: modelProvider,
-    }));
-  }));
-
-  app.get("/api/profiles", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.configuration.profiles, "profile listing", "listProfiles")) {
-      return;
-    }
-    const query = request.query as Record<string, unknown>;
-    const cwd = asString(query.cwd) || null;
-    response.json(await provider.listProfiles!({ cwd }));
-  }));
-
-  app.post("/api/sessions/create", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.create, "session creation", "createSession")) {
-      return;
-    }
-    const cwd = asString(request.body?.cwd);
-    const prompt = asString(request.body?.prompt);
-    const input = parseInputItems(request.body?.input);
-    const overrides = parseCreateSessionOverrides(request.body);
-    if (!cwd) {
-      response.status(400).json({ error: "cwd is required" });
-      return;
-    }
-    const unsupportedOverride = unsupportedOverrideCapability(provider, overrides);
-    if (unsupportedOverride) {
-      response.status(501).json({ error: unsupportedOverride });
-      return;
-    }
-
-    const resolvedInput = input.length > 0 ? input : buildLegacyTextInput(prompt);
-    const unsupportedInput = unsupportedInputCapability(provider, resolvedInput);
-    if (unsupportedInput) {
-      response.status(501).json({ error: unsupportedInput });
-      return;
-    }
-    const started = await provider.createSession!({
-      cwd,
-      input: resolvedInput,
-      overrides,
-    });
-    if (started.activeTurnId) {
-      activeTurns.set(started.thread.id, {
-        turnId: started.activeTurnId,
-        startedAt: Date.now(),
-      });
-    }
-
-    response.status(201).json({
-      session: mapSession(started.thread, started.runtime),
-      activeTurnId: started.activeTurnId,
-    });
-  }));
-
-  app.post("/api/sessions/:sessionId/input", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, true, "session input submission", "submitInput")) {
-      return;
-    }
-    const sessionId = pathParam(request.params.sessionId);
-    const text = asString(request.body?.text);
-    const input = parseInputItems(request.body?.input);
-    const clientMessageId = asString(request.body?.clientMessageId);
-    if (clientMessageId && !isValidClientMessageId(clientMessageId)) {
-      response.status(400).json({
-        error: "clientMessageId must be 1-128 URL-safe characters",
-      });
-      return;
-    }
-    const resolvedInput = input.length > 0 ? input : buildLegacyTextInput(text);
-    if (resolvedInput.length === 0) {
-      response.status(400).json({ error: "input is required" });
-      return;
-    }
-    const unsupportedInput = unsupportedInputCapability(provider, resolvedInput);
-    if (unsupportedInput) {
-      response.status(501).json({ error: unsupportedInput });
-      return;
-    }
-
-    const turnOverrides = parseTurnOverrides(request.body);
-    const unsupportedOverride = unsupportedOverrideCapability(provider, turnOverrides);
-    if (unsupportedOverride) {
-      response.status(501).json({ error: unsupportedOverride });
-      return;
-    }
-    const inputSignatureHash = hashSessionInputSignature(
-      resolvedInput,
-      turnOverrides,
-    );
-    const dedupeKey = clientMessageId
-      ? sessionInputDedupeKey(sessionId, clientMessageId)
-      : null;
-    if (dedupeKey) {
-      pruneSessionInputDedupe();
-      const existing = sessionInputDedupe.get(dedupeKey);
-      if (existing) {
-        if (existing.signatureHash !== inputSignatureHash) {
-          response.status(409).json({
-            error: "clientMessageId was already used with different input",
-          });
-          return;
-        }
-        const receipt = existing.receipt ?? (await existing.promise);
-        if (receipt) {
-          response.json({ ...receipt, replayed: true });
-          return;
-        }
-      }
-    }
-
-    const submit = async (): Promise<SessionInputReceipt> => {
-      const submittedMessage = buildSubmittedUserMessage(
-        resolvedInput,
-        clientMessageId,
-        allocSeq(sessionId),
+      const session = await readSession(provider, sessionId, false);
+      const log = await provider.readSessionLog!(session);
+      ensureSeqCursor(sessionId, log.nextSeq);
+      const activities = mergeSessionActivities(
+        log.activities,
+        liveActivities.get(sessionId)?.values() || [],
       );
-      const state = await loadRunState(provider, sessionId, activeTurns);
-      const submitted = await provider.submitInput!({
+      const newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
+      const newActivities = activities.filter((a) => (a.seq ?? 0) > since);
+      let highestSeq = since;
+      for (const m of newMessages) {
+        if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
+      }
+      for (const a of newActivities) {
+        if ((a.seq ?? 0) > highestSeq) highestSeq = a.seq ?? highestSeq;
+      }
+      response.json({
         sessionId,
-        input: resolvedInput,
-        activeTurnId: state.turnId,
-        overrides: turnOverrides,
+        since,
+        nextSeq: highestSeq,
+        messages: newMessages,
+        activities: newActivities,
+        pendingAction: findPendingActionForSession(pendingActions, sessionId),
+        session: mapSession(session, log.runtime),
       });
-      if (submitted.turnId) {
-        const previousStartedAt = state.turnId
-          ? activeTurns.get(sessionId)?.startedAt
-          : undefined;
-        activeTurns.set(sessionId, {
-          turnId: submitted.turnId,
-          startedAt: previousStartedAt ?? Date.now(),
+    }),
+  );
+
+  app.get(
+    "/api/sessions/:sessionId/resources",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.history,
+          "session resources",
+          "readSessionThread",
+        ) ||
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.history,
+          "session resources",
+          "readSessionLog",
+        )
+      ) {
+        return;
+      }
+      const sessionId = pathParam(request.params.sessionId);
+      response.json(
+        await readSessionResources(provider, sessionId, liveActivities),
+      );
+    }),
+  );
+
+  app.get(
+    "/api/sessions/:sessionId/status",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.history,
+          "session status",
+          "readSessionThread",
+        )
+      ) {
+        return;
+      }
+      const sessionId = pathParam(request.params.sessionId);
+      const state = await loadRunState(provider, sessionId, activeTurns);
+      response.json({
+        sessionId,
+        isRunning: Boolean(state.turnId),
+        activeTurnId: state.turnId,
+        pendingAction: findPendingActionForSession(pendingActions, sessionId),
+      });
+    }),
+  );
+
+  app.get(
+    "/api/sessions/:sessionId/git",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.history,
+          "session history",
+          "readSessionThread",
+        ) ||
+        !requireHostCapability(
+          response,
+          HOST_CAPABILITIES.workspace.gitStatus,
+          "git status",
+        )
+      ) {
+        return;
+      }
+      const sessionId = pathParam(request.params.sessionId);
+      const session = await readSession(provider, sessionId, false);
+      response.json(
+        await readGitStatus(session.cwd, mapGitInfo(session.gitInfo)),
+      );
+    }),
+  );
+
+  app.get(
+    "/api/sessions/:sessionId/git/diff",
+    asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const kind = parseGitDiffKind(
+        (request.query as Record<string, unknown>).kind,
+      );
+      if (!kind) {
+        response
+          .status(400)
+          .json({ error: "kind must be working, staged, unstaged, or remote" });
+        return;
+      }
+
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.history,
+          "session history",
+          "readSessionThread",
+        )
+      ) {
+        return;
+      }
+      const session = await readSession(provider, sessionId, false);
+      if (kind === "remote") {
+        if (
+          !requireProviderCapability(
+            response,
+            provider,
+            provider.capabilities.workspace.remoteGitDiff,
+            "remote git diff",
+            "readRemoteGitDiff",
+          )
+        ) {
+          return;
+        }
+        const result = await provider.readRemoteGitDiff!(session.cwd);
+        response.json(
+          buildGitDiff("remote", result.diff, normalizeGitSha(result.sha)),
+        );
+        return;
+      }
+
+      if (
+        !requireHostCapability(
+          response,
+          HOST_CAPABILITIES.workspace.gitDiff,
+          "git diff",
+        )
+      ) {
+        return;
+      }
+      response.json(await readGitDiff(session.cwd, kind));
+    }),
+  );
+
+  app.get(
+    "/api/skills",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.configuration.skills,
+          "skill listing",
+          "listSkills",
+        )
+      ) {
+        return;
+      }
+      const query = request.query as Record<string, unknown>;
+      const cwd = asString(query.cwd);
+      if (!cwd) {
+        response.status(400).json({ error: "cwd is required" });
+        return;
+      }
+
+      const forceReload = parseQueryBool(query.forceReload);
+      response.json(await provider.listSkills!({ cwd, forceReload }));
+    }),
+  );
+
+  app.post(
+    "/api/skills/config/write",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.configuration.skillManagement,
+          "skill configuration",
+          "writeSkillConfig",
+        )
+      ) {
+        return;
+      }
+      const path = asString(request.body?.path);
+      const name = asString(request.body?.name);
+      const enabled = parseOptionalBool(request.body?.enabled);
+      if (enabled === null) {
+        response.status(400).json({ error: "enabled is required" });
+        return;
+      }
+      if ((path && name) || (!path && !name)) {
+        response
+          .status(400)
+          .json({ error: "provide exactly one of path or name" });
+        return;
+      }
+
+      const result = await provider.writeSkillConfig!({
+        path,
+        name,
+        enabled,
+      });
+      response.json(result);
+    }),
+  );
+
+  app.get(
+    "/api/models",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.configuration.models,
+          "model listing",
+          "listModels",
+        )
+      ) {
+        return;
+      }
+      const query = request.query as Record<string, unknown>;
+      const cwd = asString(query.cwd) || null;
+      const profile = asString(query.profile) || null;
+      const modelProvider = asString(query.provider) || null;
+      response.json(
+        await provider.listModels!({
+          cwd,
+          profile,
+          provider: modelProvider,
+        }),
+      );
+    }),
+  );
+
+  app.get(
+    "/api/profiles",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.configuration.profiles,
+          "profile listing",
+          "listProfiles",
+        )
+      ) {
+        return;
+      }
+      const query = request.query as Record<string, unknown>;
+      const cwd = asString(query.cwd) || null;
+      response.json(await provider.listProfiles!({ cwd }));
+    }),
+  );
+
+  app.post(
+    "/api/sessions/create",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.create,
+          "session creation",
+          "createSession",
+        )
+      ) {
+        return;
+      }
+      const cwd = asString(request.body?.cwd);
+      const prompt = asString(request.body?.prompt);
+      const input = parseInputItems(request.body?.input);
+      const overrides = parseCreateSessionOverrides(request.body);
+      if (!cwd) {
+        response.status(400).json({ error: "cwd is required" });
+        return;
+      }
+      const unsupportedOverride = unsupportedOverrideCapability(
+        provider,
+        overrides,
+      );
+      if (unsupportedOverride) {
+        response.status(501).json({ error: unsupportedOverride });
+        return;
+      }
+
+      const resolvedInput =
+        input.length > 0 ? input : buildLegacyTextInput(prompt);
+      const unsupportedInput = unsupportedInputCapability(
+        provider,
+        resolvedInput,
+      );
+      if (unsupportedInput) {
+        response.status(501).json({ error: unsupportedInput });
+        return;
+      }
+      const started = await provider.createSession!({
+        cwd,
+        input: resolvedInput,
+        overrides,
+      });
+      if (started.activeTurnId) {
+        activeTurns.set(started.thread.id, {
+          turnId: started.activeTurnId,
+          startedAt: Date.now(),
         });
       }
-      broadcastLive(sessionId, {
-        type: "user_message_submitted",
-        sessionId,
-        turnId: submitted.turnId || undefined,
-        messageItem: submittedMessage,
-      });
-      return {
-        mode: submitted.mode,
-        turnId: submitted.turnId,
-        messageId: submittedMessage.id,
-      };
-    };
 
-    const promise = submit();
-    if (dedupeKey) {
-      sessionInputDedupe.set(dedupeKey, {
-        signatureHash: inputSignatureHash,
-        createdAt: Date.now(),
-        promise,
+      const session = mapSession(started.thread, started.runtime);
+      response.status(201).json({
+        session,
+        activeTurnId: started.activeTurnId,
       });
-      pruneSessionInputDedupe();
-    }
+      broadcastRecentSessionsLive({ type: "upsert", session });
+    }),
+  );
 
-    try {
-      const receipt = await promise;
+  app.post(
+    "/api/sessions/:sessionId/input",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          true,
+          "session input submission",
+          "submitInput",
+        )
+      ) {
+        return;
+      }
+      const sessionId = pathParam(request.params.sessionId);
+      const text = asString(request.body?.text);
+      const input = parseInputItems(request.body?.input);
+      const clientMessageId = asString(request.body?.clientMessageId);
+      if (clientMessageId && !isValidClientMessageId(clientMessageId)) {
+        response.status(400).json({
+          error: "clientMessageId must be 1-128 URL-safe characters",
+        });
+        return;
+      }
+      const resolvedInput =
+        input.length > 0 ? input : buildLegacyTextInput(text);
+      if (resolvedInput.length === 0) {
+        response.status(400).json({ error: "input is required" });
+        return;
+      }
+      const unsupportedInput = unsupportedInputCapability(
+        provider,
+        resolvedInput,
+      );
+      if (unsupportedInput) {
+        response.status(501).json({ error: unsupportedInput });
+        return;
+      }
+
+      const turnOverrides = parseTurnOverrides(request.body);
+      const unsupportedOverride = unsupportedOverrideCapability(
+        provider,
+        turnOverrides,
+      );
+      if (unsupportedOverride) {
+        response.status(501).json({ error: unsupportedOverride });
+        return;
+      }
+      const inputSignatureHash = hashSessionInputSignature(
+        resolvedInput,
+        turnOverrides,
+      );
+      const dedupeKey = clientMessageId
+        ? sessionInputDedupeKey(sessionId, clientMessageId)
+        : null;
       if (dedupeKey) {
-        const createdAt =
-          sessionInputDedupe.get(dedupeKey)?.createdAt ?? Date.now();
+        pruneSessionInputDedupe();
+        const existing = sessionInputDedupe.get(dedupeKey);
+        if (existing) {
+          if (existing.signatureHash !== inputSignatureHash) {
+            response.status(409).json({
+              error: "clientMessageId was already used with different input",
+            });
+            return;
+          }
+          const receipt = existing.receipt ?? (await existing.promise);
+          if (receipt) {
+            response.json({ ...receipt, replayed: true });
+            return;
+          }
+        }
+      }
+
+      const submit = async (): Promise<SessionInputReceipt> => {
+        const submittedMessage = buildSubmittedUserMessage(
+          resolvedInput,
+          clientMessageId,
+          allocSeq(sessionId),
+        );
+        const state = await loadRunState(provider, sessionId, activeTurns);
+        const submitted = await provider.submitInput!({
+          sessionId,
+          input: resolvedInput,
+          activeTurnId: state.turnId,
+          overrides: turnOverrides,
+        });
+        if (submitted.turnId) {
+          const previousStartedAt = state.turnId
+            ? activeTurns.get(sessionId)?.startedAt
+            : undefined;
+          activeTurns.set(sessionId, {
+            turnId: submitted.turnId,
+            startedAt: previousStartedAt ?? Date.now(),
+          });
+        }
+        broadcastLive(sessionId, {
+          type: "user_message_submitted",
+          sessionId,
+          turnId: submitted.turnId || undefined,
+          messageItem: submittedMessage,
+        });
+        return {
+          mode: submitted.mode,
+          turnId: submitted.turnId,
+          messageId: submittedMessage.id,
+        };
+      };
+
+      const promise = submit();
+      if (dedupeKey) {
         sessionInputDedupe.set(dedupeKey, {
           signatureHash: inputSignatureHash,
-          createdAt,
-          receipt,
+          createdAt: Date.now(),
+          promise,
         });
-        await persistSessionInputDedupeReceipt(
-          sessionInputDedupeStore,
-          dedupeKey,
-          inputSignatureHash,
-          createdAt,
-          receipt,
-        );
         pruneSessionInputDedupe();
       }
-      response.json({ ...receipt, replayed: false });
-    } catch (error) {
-      if (dedupeKey) {
-        const current = sessionInputDedupe.get(dedupeKey);
-        if (current?.promise === promise) {
-          sessionInputDedupe.delete(dedupeKey);
+
+      try {
+        const receipt = await promise;
+        if (dedupeKey) {
+          const createdAt =
+            sessionInputDedupe.get(dedupeKey)?.createdAt ?? Date.now();
+          sessionInputDedupe.set(dedupeKey, {
+            signatureHash: inputSignatureHash,
+            createdAt,
+            receipt,
+          });
+          await persistSessionInputDedupeReceipt(
+            sessionInputDedupeStore,
+            dedupeKey,
+            inputSignatureHash,
+            createdAt,
+            receipt,
+          );
+          pruneSessionInputDedupe();
         }
+        response.json({ ...receipt, replayed: false });
+        scheduleRecentSessionUpsert(sessionId, 0);
+      } catch (error) {
+        if (dedupeKey) {
+          const current = sessionInputDedupe.get(dedupeKey);
+          if (current?.promise === promise) {
+            sessionInputDedupe.delete(dedupeKey);
+          }
+        }
+        throw error;
       }
-      throw error;
-    }
-  }));
+    }),
+  );
 
-  app.post("/api/sessions/:sessionId/stop", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.interrupt, "session interruption", "interruptTurn")) {
-      return;
-    }
-    const sessionId = pathParam(request.params.sessionId);
-    const state = await loadRunState(provider, sessionId, activeTurns);
-    if (!state.turnId) {
-      response.json({ stopped: false });
-      return;
-    }
-    await provider.interruptTurn!(sessionId, state.turnId);
-    activeTurns.delete(sessionId);
-    response.json({ stopped: true, turnId: state.turnId });
-  }));
-
-  app.post("/api/sessions/:sessionId/name", asyncRoute(async (request, response) => {
-    if (
-      !requireProviderCapability(
-        response,
-        provider,
-        provider.capabilities.sessions.rename,
-        "session renaming",
-        "setSessionName",
-      ) ||
-      !requireProviderCapability(
-        response,
-        provider,
-        provider.capabilities.sessions.history,
-        "session history",
-        "readSessionThread",
-      )
-    ) {
-      return;
-    }
-    const sessionId = pathParam(request.params.sessionId);
-    const name = asString(request.body?.name);
-    if (!name) {
-      response.status(400).json({ error: "name is required" });
-      return;
-    }
-    if (hasProviderMethod(provider, "listLoadedSessionIds") && !(await isThreadLoaded(provider, sessionId))) {
-      if (!requireProviderCapability(response, provider, provider.capabilities.sessions.resume, "session resume", "resumeSessionThread")) {
+  app.post(
+    "/api/sessions/:sessionId/stop",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.interrupt,
+          "session interruption",
+          "interruptTurn",
+        )
+      ) {
         return;
       }
-      await provider.resumeSessionThread!(sessionId, {
-        persistExtendedHistory: true,
+      const sessionId = pathParam(request.params.sessionId);
+      const state = await loadRunState(provider, sessionId, activeTurns);
+      if (!state.turnId) {
+        response.json({ stopped: false });
+        return;
+      }
+      await provider.interruptTurn!(sessionId, state.turnId);
+      activeTurns.delete(sessionId);
+      response.json({ stopped: true, turnId: state.turnId });
+    }),
+  );
+
+  app.post(
+    "/api/sessions/:sessionId/name",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.rename,
+          "session renaming",
+          "setSessionName",
+        ) ||
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.history,
+          "session history",
+          "readSessionThread",
+        )
+      ) {
+        return;
+      }
+      const sessionId = pathParam(request.params.sessionId);
+      const name = asString(request.body?.name);
+      if (!name) {
+        response.status(400).json({ error: "name is required" });
+        return;
+      }
+      if (
+        hasProviderMethod(provider, "listLoadedSessionIds") &&
+        !(await isThreadLoaded(provider, sessionId))
+      ) {
+        if (
+          !requireProviderCapability(
+            response,
+            provider,
+            provider.capabilities.sessions.resume,
+            "session resume",
+            "resumeSessionThread",
+          )
+        ) {
+          return;
+        }
+        await provider.resumeSessionThread!(sessionId, {
+          persistExtendedHistory: true,
+        });
+      }
+      await provider.setSessionName!(sessionId, name);
+      const thread = await readSession(provider, sessionId, false);
+      const session = mapSession(thread);
+      response.json({ session });
+      broadcastRecentSessionsLive({ type: "upsert", session });
+    }),
+  );
+
+  app.post(
+    "/api/sessions/:sessionId/archive",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.archive,
+          "session archiving",
+          "archiveSession",
+        )
+      ) {
+        return;
+      }
+      const sessionId = pathParam(request.params.sessionId);
+      await provider.archiveSession!(sessionId);
+      activeTurns.delete(sessionId);
+      liveActivities.delete(sessionId);
+      clearSessionLogCache(logCache, sessionId);
+      sessionSeqCursor.delete(sessionId);
+      response.json({ archived: true });
+      broadcastRecentSessionRemove(sessionId);
+    }),
+  );
+
+  app.post(
+    "/api/sessions/:sessionId/unarchive",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.archive,
+          "session unarchiving",
+          "unarchiveSession",
+        )
+      ) {
+        return;
+      }
+      const sessionId = pathParam(request.params.sessionId);
+      await provider.unarchiveSession!(sessionId);
+      response.json({ unarchived: true });
+      void broadcastRecentSessionUpsert(sessionId);
+    }),
+  );
+
+  app.post(
+    "/api/actions/:actionId/respond",
+    asyncRoute(async (request, response) => {
+      const actionId = pathParam(request.params.actionId);
+      const decision = asString(request.body?.decision);
+      const action = pendingActions.get(actionId);
+      if (!action) {
+        response.status(404).json({ error: "action not found" });
+        return;
+      }
+
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          true,
+          "approval responses",
+          "respondToPendingAction",
+        )
+      ) {
+        return;
+      }
+      const handled = provider.respondToPendingAction!(action, decision);
+      if (!handled) {
+        response.status(400).json({ error: "unsupported decision" });
+        return;
+      }
+
+      pendingActions.delete(actionId);
+      broadcastLive(action.sessionId, {
+        type: "action_resolved",
+        sessionId: action.sessionId,
+        actionId,
       });
-    }
-    await provider.setSessionName!(sessionId, name);
-    const thread = await readSession(provider, sessionId, false);
-    response.json({ session: mapSession(thread) });
-  }));
-
-  app.post("/api/sessions/:sessionId/archive", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.archive, "session archiving", "archiveSession")) {
-      return;
-    }
-    const sessionId = pathParam(request.params.sessionId);
-    await provider.archiveSession!(sessionId);
-    activeTurns.delete(sessionId);
-    liveActivities.delete(sessionId);
-    clearSessionLogCache(logCache, sessionId);
-    sessionSeqCursor.delete(sessionId);
-    response.json({ archived: true });
-  }));
-
-  app.post("/api/sessions/:sessionId/unarchive", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.sessions.archive, "session unarchiving", "unarchiveSession")) {
-      return;
-    }
-    const sessionId = pathParam(request.params.sessionId);
-    await provider.unarchiveSession!(sessionId);
-    response.json({ unarchived: true });
-  }));
-
-  app.post("/api/actions/:actionId/respond", asyncRoute(async (request, response) => {
-    const actionId = pathParam(request.params.actionId);
-    const decision = asString(request.body?.decision);
-    const action = pendingActions.get(actionId);
-    if (!action) {
-      response.status(404).json({ error: "action not found" });
-      return;
-    }
-
-    if (!requireProviderCapability(response, provider, true, "approval responses", "respondToPendingAction")) {
-      return;
-    }
-    const handled = provider.respondToPendingAction!(action, decision);
-    if (!handled) {
-      response.status(400).json({ error: "unsupported decision" });
-      return;
-    }
-
-    pendingActions.delete(actionId);
-    broadcastLive(action.sessionId, {
-      type: "action_resolved",
-      sessionId: action.sessionId,
-      actionId,
-    });
-    broadcastApprovalLive({
-      type: "action_resolved",
-      actionId,
-    });
-    response.json({ ok: true });
-  }));
+      broadcastApprovalLive({
+        type: "action_resolved",
+        actionId,
+      });
+      scheduleRecentSessionUpsert(action.sessionId);
+      response.json({ ok: true });
+    }),
+  );
 
   const wsServer = new WebSocketServer({ noServer: true });
   server.on("upgrade", (request, socket, head) => {
     const [pathOnly, queryString] = (request.url || "").split("?");
     if (
       pathOnly !== "/api/live" &&
+      pathOnly !== "/api/sessions/live" &&
       pathOnly !== "/api/fs/live" &&
       pathOnly !== "/api/actions/live"
     ) {
@@ -988,7 +1320,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
 
     const authHeader = request.headers.authorization;
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : "";
+    const token = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length)
+      : "";
     if (token !== config.token) {
       socket.destroy();
       return;
@@ -1000,7 +1334,11 @@ export async function startServer(config: NodeConfig): Promise<void> {
         return;
       }
       wsServer.handleUpgrade(request, socket, head, (ws) => {
-        try { ws.send(JSON.stringify({ type: "hello" })); } catch { /* noop */ }
+        try {
+          ws.send(JSON.stringify({ type: "hello" }));
+        } catch {
+          /* noop */
+        }
         attachFsLiveSocket(ws, fsWatchRegistry, {
           provider,
           listSessions: () => listSessions(provider, runtimeCache),
@@ -1020,11 +1358,38 @@ export async function startServer(config: NodeConfig): Promise<void> {
           .catch((error: unknown) => {
             sendEvent(ws, {
               type: "error",
-              message: error instanceof Error ? error.message : "Failed to load pending actions",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Failed to load pending actions",
             });
           });
         ws.on("close", () => {
           approvalSockets.delete(ws);
+        });
+      });
+      return;
+    }
+
+    if (pathOnly === "/api/sessions/live") {
+      if (!provider.capabilities.sessions.history) {
+        socket.destroy();
+        return;
+      }
+      wsServer.handleUpgrade(request, socket, head, (ws) => {
+        recentSessionsSockets.add(ws);
+        sendEvent(ws, { type: "hello" });
+        void sendRecentSessionsSnapshot(ws).catch((error: unknown) => {
+          sendEvent(ws, {
+            type: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Failed to load recent sessions",
+          });
+        });
+        ws.on("close", () => {
+          recentSessionsSockets.delete(ws);
         });
       });
       return;
@@ -1059,20 +1424,34 @@ export async function startServer(config: NodeConfig): Promise<void> {
     });
   });
 
-  app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
-    const message = error instanceof Error ? error.message : "Internal server error";
-    response.status(500).json({ error: message });
-  });
+  app.use(
+    (
+      error: unknown,
+      _request: Request,
+      response: Response,
+      _next: NextFunction,
+    ) => {
+      const message =
+        error instanceof Error ? error.message : "Internal server error";
+      response.status(500).json({ error: message });
+    },
+  );
 
   server.listen(config.port, () => {
     console.log(`[sidemesh] ${config.label} listening on port ${config.port}`);
-    console.log(`[sidemesh] provider: ${provider.displayName} (${provider.kind})`);
+    console.log(
+      `[sidemesh] provider: ${provider.displayName} (${provider.kind})`,
+    );
     console.log(`[sidemesh] token (${config.tokenSource}): ${config.token}`);
   });
 }
 
 function asyncRoute(
-  handler: (request: Request, response: Response, next: NextFunction) => Promise<void>,
+  handler: (
+    request: Request,
+    response: Response,
+    next: NextFunction,
+  ) => Promise<void>,
 ): (request: Request, response: Response, next: NextFunction) => void {
   return (request, response, next) => {
     void handler(request, response, next).catch(next);
@@ -1093,7 +1472,11 @@ function authenticate(
   token: string,
 ): void {
   const auth = request.headers.authorization;
-  if (!auth || !auth.startsWith("Bearer ") || auth.slice("Bearer ".length) !== token) {
+  if (
+    !auth ||
+    !auth.startsWith("Bearer ") ||
+    auth.slice("Bearer ".length) !== token
+  ) {
     response.status(401).json({ error: "unauthorized" });
     return;
   }
@@ -1180,7 +1563,10 @@ function unsupportedOverrideCapability(
   ) {
     return `${provider.displayName} does not support reasoning effort overrides`;
   }
-  if (overrides.fastMode !== null && !provider.capabilities.runtimeControls.fastMode) {
+  if (
+    overrides.fastMode !== null &&
+    !provider.capabilities.runtimeControls.fastMode
+  ) {
     return `${provider.displayName} does not support fast mode`;
   }
   if (
@@ -1189,7 +1575,10 @@ function unsupportedOverrideCapability(
   ) {
     return `${provider.displayName} does not support approval policy overrides`;
   }
-  if (overrides.sandboxMode && !provider.capabilities.runtimeControls.sandboxMode) {
+  if (
+    overrides.sandboxMode &&
+    !provider.capabilities.runtimeControls.sandboxMode
+  ) {
     return `${provider.displayName} does not support sandbox overrides`;
   }
   if (
@@ -1213,12 +1602,20 @@ async function listSessions(
   limitOverride: number | null = null,
 ): Promise<SessionSummary[]> {
   const limit = Math.max(1, Math.min(limitOverride ?? 100, 100));
-  const listThreads = requireProviderMethod(provider, "listSessionThreads", "session history");
+  const listThreads = requireProviderMethod(
+    provider,
+    "listSessionThreads",
+    "session history",
+  );
   const threads = await listThreads.call(provider, {
     limit,
     archived: false,
   });
-  const mergedThreads = await mergeRecentUnindexedThreads(provider, threads, limit);
+  const mergedThreads = await mergeRecentUnindexedThreads(
+    provider,
+    threads,
+    limit,
+  );
   return Promise.all(
     mergedThreads.map(async (thread) =>
       mapSession(
@@ -1240,7 +1637,9 @@ async function mergeRecentUnindexedThreads(
   ) {
     return indexedThreads;
   }
-  const threadsById = new Map(indexedThreads.map((thread) => [thread.id, thread]));
+  const threadsById = new Map(
+    indexedThreads.map((thread) => [thread.id, thread]),
+  );
   const recentThreads = await provider.listRecentUnindexedSessionThreads(
     Math.max(limit, RECENT_UNINDEXED_SESSION_SCAN_LIMIT),
   );
@@ -1277,14 +1676,18 @@ function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
     existing.sessionCount += 1;
     existing.lastUsedAt = Math.max(existing.lastUsedAt, session.updatedAt);
   }
-  return [...grouped.values()].sort((left, right) => right.lastUsedAt - left.lastUsedAt);
+  return [...grouped.values()].sort(
+    (left, right) => right.lastUsedAt - left.lastUsedAt,
+  );
 }
 
 async function listPendingActions(
   provider: AgentProvider,
   pendingActions: Map<string, AgentPendingAction>,
 ): Promise<PendingAction[]> {
-  const actions = [...pendingActions.values()].sort((left, right) => right.requestedAt - left.requestedAt);
+  const actions = [...pendingActions.values()].sort(
+    (left, right) => right.requestedAt - left.requestedAt,
+  );
   const sessionsById = new Map<string, Promise<ThreadRecord | null>>();
 
   return Promise.all(
@@ -1295,7 +1698,9 @@ async function listPendingActions(
 
       let sessionPromise = sessionsById.get(action.sessionId);
       if (!sessionPromise) {
-        sessionPromise = readSession(provider, action.sessionId, false).catch(() => null);
+        sessionPromise = readSession(provider, action.sessionId, false).catch(
+          () => null,
+        );
         sessionsById.set(action.sessionId, sessionPromise);
       }
 
@@ -1319,7 +1724,11 @@ async function readSession(
   sessionId: string,
   includeTurns: boolean,
 ): Promise<ThreadRecord> {
-  const readThread = requireProviderMethod(provider, "readSessionThread", "session history");
+  const readThread = requireProviderMethod(
+    provider,
+    "readSessionThread",
+    "session history",
+  );
   return readThread.call(provider, sessionId, includeTurns);
 }
 
@@ -1341,7 +1750,9 @@ async function loadRunState(
     session = await readSession(provider, sessionId, true);
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    if (message.includes("includeTurns is unavailable before first user message")) {
+    if (
+      message.includes("includeTurns is unavailable before first user message")
+    ) {
       return { turnId: null };
     }
     throw error;
@@ -1361,7 +1772,10 @@ async function loadRunState(
   return { turnId: null };
 }
 
-async function isThreadLoaded(provider: AgentProvider, sessionId: string): Promise<boolean> {
+async function isThreadLoaded(
+  provider: AgentProvider,
+  sessionId: string,
+): Promise<boolean> {
   if (!hasProviderMethod(provider, "listLoadedSessionIds")) {
     return true;
   }
@@ -1374,7 +1788,8 @@ function upsertLiveActivity(
   sessionId: string,
   activity: SessionActivity,
 ): SessionActivity {
-  const sessionActivities = liveActivities.get(sessionId) || new Map<string, SessionActivity>();
+  const sessionActivities =
+    liveActivities.get(sessionId) || new Map<string, SessionActivity>();
   const merged = mergeActivity(sessionActivities.get(activity.id), activity);
   sessionActivities.set(activity.id, merged);
   liveActivities.set(sessionId, sessionActivities);
@@ -1463,7 +1878,10 @@ function mapSession(
     cwd: thread.cwd,
     createdAt: thread.createdAt * 1000,
     updatedAt: thread.updatedAt * 1000,
-    source: typeof thread.source === "string" ? thread.source : JSON.stringify(thread.source),
+    source:
+      typeof thread.source === "string"
+        ? thread.source
+        : JSON.stringify(thread.source),
     status: thread.status?.type || "notLoaded",
     rolloutPath: thread.path,
     runtime,
@@ -1484,7 +1902,9 @@ function mapGitInfo(raw: unknown): GitInfoSummary | null {
   return info.sha || info.branch || info.originUrl ? info : null;
 }
 
-function parseGitDiffKind(value: unknown): "working" | "staged" | "unstaged" | "remote" | null {
+function parseGitDiffKind(
+  value: unknown,
+): "working" | "staged" | "unstaged" | "remote" | null {
   const kind = asString(value);
   switch (kind) {
     case "working":
@@ -1675,13 +2095,20 @@ async function readSessionResources(
   liveActivities: Map<string, Map<string, SessionActivity>>,
 ): Promise<SessionResourcesResponse> {
   const session = await readSession(provider, sessionId, false);
-  const readLog = requireProviderMethod(provider, "readSessionLog", "session resources");
+  const readLog = requireProviderMethod(
+    provider,
+    "readSessionLog",
+    "session resources",
+  );
   const log = await readLog.call(provider, session);
   const activities = mergeSessionActivities(
     log.activities,
     liveActivities.get(sessionId)?.values() || [],
   );
-  const resources: SessionResource[] = buildSessionResources(log.messages, activities);
+  const resources: SessionResource[] = buildSessionResources(
+    log.messages,
+    activities,
+  );
   return {
     sessionId,
     updatedAt: session.updatedAt,
@@ -1695,7 +2122,9 @@ function clearActionsForSession(
   broadcastLive: (sessionId: string, event: LiveEvent) => void,
   broadcastApprovalLive: (event: ApprovalLiveEvent) => void,
 ): void {
-  const toDelete = [...pendingActions.values()].filter((action) => action.sessionId === sessionId);
+  const toDelete = [...pendingActions.values()].filter(
+    (action) => action.sessionId === sessionId,
+  );
   for (const action of toDelete) {
     pendingActions.delete(action.id);
     broadcastLive(sessionId, {
@@ -1736,7 +2165,9 @@ function broadcast(
   }
 }
 
-function broadcastSkillsChanged(socketsBySession: Map<string, Set<WebSocket>>): void {
+function broadcastSkillsChanged(
+  socketsBySession: Map<string, Set<WebSocket>>,
+): void {
   for (const [sessionId, sockets] of socketsBySession) {
     for (const socket of sockets) {
       sendEvent(socket, { type: "skills_changed", sessionId });
@@ -1781,7 +2212,9 @@ function parseInputItems(value: unknown): AgentSessionInputItem[] {
         items.push({
           type: "text",
           text,
-          text_elements: Array.isArray(typed.text_elements) ? typed.text_elements : [],
+          text_elements: Array.isArray(typed.text_elements)
+            ? typed.text_elements
+            : [],
         });
         break;
       }
@@ -1821,13 +2254,18 @@ function parseInputItems(value: unknown): AgentSessionInputItem[] {
 
 function buildSubmittedUserMessageText(input: AgentSessionInputItem[]): string {
   return input
-    .filter((item): item is Extract<AgentSessionInputItem, { type: "text" }> => item.type === "text")
+    .filter(
+      (item): item is Extract<AgentSessionInputItem, { type: "text" }> =>
+        item.type === "text",
+    )
     .map((item) => item.text.trim())
     .filter(Boolean)
     .join("\n\n");
 }
 
-function buildSubmittedUserMessageAttachments(input: AgentSessionInputItem[]): SessionMessageAttachment[] {
+function buildSubmittedUserMessageAttachments(
+  input: AgentSessionInputItem[],
+): SessionMessageAttachment[] {
   const attachments: SessionMessageAttachment[] = [];
   for (const item of input) {
     if (item.type === "image") {
@@ -1842,7 +2280,10 @@ function buildSubmittedUserMessageAttachments(input: AgentSessionInputItem[]): S
 }
 
 function parseCreateSessionOverrides(value: unknown): AgentSessionOverrides {
-  const typed = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const typed =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
   return {
     model: asString(typed.model),
     reasoningEffort: asString(typed.reasoningEffort),
@@ -1856,7 +2297,10 @@ function parseCreateSessionOverrides(value: unknown): AgentSessionOverrides {
 }
 
 function parseTurnOverrides(value: unknown): AgentSessionOverrides {
-  const typed = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const typed =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
   return {
     model: asString(typed.model),
     reasoningEffort: asString(typed.reasoningEffort),

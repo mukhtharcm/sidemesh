@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,6 +12,8 @@ import 'package:sidemesh_mobile/src/session_cache_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
+import 'package:stream_channel/stream_channel.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -152,6 +156,7 @@ class _FakeApiClient extends ApiClient {
 
   final List<SessionSummary> _sessions;
   final Object? _error;
+  final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
 
   @override
   Future<List<SessionSummary>> fetchSessions(HostProfile host, {int? limit}) {
@@ -161,6 +166,9 @@ class _FakeApiClient extends ApiClient {
     }
     return Future<List<SessionSummary>>.value(_sessions);
   }
+
+  @override
+  WebSocketChannel openSessionsLive(HostProfile host) => _channel;
 }
 
 class _FakeScreenAwakeBinding implements ScreenAwakeBinding {
@@ -170,4 +178,51 @@ class _FakeScreenAwakeBinding implements ScreenAwakeBinding {
   Future<void> setEnabled(bool enabled) async {
     calls.add(enabled);
   }
+}
+
+class _IdleWebSocketChannel extends StreamChannelMixin<dynamic>
+    implements WebSocketChannel {
+  final StreamController<dynamic> _incoming = StreamController<dynamic>();
+  final StreamController<dynamic> _outgoing = StreamController<dynamic>();
+
+  @override
+  Stream<dynamic> get stream => _incoming.stream;
+
+  @override
+  WebSocketSink get sink => _IdleWebSocketSink(_outgoing.sink);
+
+  @override
+  int? get closeCode => null;
+
+  @override
+  String? get closeReason => null;
+
+  @override
+  String? get protocol => null;
+
+  @override
+  Future<void> get ready async {}
+}
+
+class _IdleWebSocketSink implements WebSocketSink {
+  _IdleWebSocketSink(this._delegate);
+
+  final StreamSink<dynamic> _delegate;
+
+  @override
+  Future<void> addStream(Stream<dynamic> stream) => _delegate.addStream(stream);
+
+  @override
+  Future<void> close([int? closeCode, String? closeReason]) =>
+      _delegate.close();
+
+  @override
+  Future<void> get done => _delegate.done;
+
+  @override
+  void add(dynamic data) => _delegate.add(data);
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) =>
+      _delegate.addError(error, stackTrace);
 }

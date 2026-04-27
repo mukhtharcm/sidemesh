@@ -221,7 +221,12 @@ export interface SessionActivityChange {
 
 export interface SessionActivityBase {
   id: string;
-  type: "command" | "file_change" | "turn_diff" | "web_search" | "image_generation";
+  type:
+    | "command"
+    | "file_change"
+    | "turn_diff"
+    | "web_search"
+    | "image_generation";
   turnId: string | null;
   createdAt: number;
   seq: number;
@@ -324,6 +329,14 @@ export interface ApprovalLiveEvent {
   actions?: PendingAction[];
   action?: PendingAction;
   actionId?: string;
+  message?: string;
+}
+
+export interface RecentSessionsLiveEvent {
+  type: "hello" | "snapshot" | "upsert" | "remove" | "error";
+  sessions?: SessionSummary[];
+  session?: SessionSummary;
+  sessionId?: string;
   message?: string;
 }
 
