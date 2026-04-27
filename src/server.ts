@@ -45,6 +45,7 @@ import {
 import { summarizeProviderConfig } from "./config.js";
 import { buildGitDiff, readGitDiff, readGitStatus, sanitizeGitUrl } from "./git.js";
 import { createAgentProvider } from "./provider-factory.js";
+import { listAgentProviderDefinitionSummaries } from "./provider-registry.js";
 import { buildSessionResources } from "./resources.js";
 import {
   FsWatchRegistry,
@@ -351,6 +352,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   });
 
   app.get("/api/node", (_request, response) => {
+    const supportedProviders = listAgentProviderDefinitionSummaries();
     response.json({
       label: config.label,
       hostname: hostname(),
@@ -361,8 +363,16 @@ export async function startServer(config: NodeConfig): Promise<void> {
       providerVersion,
       providerConfig: summarizeProviderConfig(config.provider),
       providerCapabilities: provider.capabilities,
+      supportedProviders,
       startedAt: process.uptime(),
       tokenSource: config.tokenSource,
+    });
+  });
+
+  app.get("/api/providers", (_request, response) => {
+    response.json({
+      currentProvider: provider.kind,
+      providers: listAgentProviderDefinitionSummaries(),
     });
   });
 
