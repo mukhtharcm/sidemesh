@@ -159,7 +159,7 @@ class _HostPickerSurface extends StatelessWidget {
                               ?.copyWith(fontWeight: FontWeight.w800),
                         ),
                         Text(
-                          'Pick where the new Codex session should run.',
+                          'Pick where the new agent session should run.',
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(color: colors.textSecondary),
                         ),
@@ -265,7 +265,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   late final TextEditingController _profileController;
 
   List<ModelCatalogEntry> _models = const <ModelCatalogEntry>[];
-  List<CodexProfileSummary> _profiles = const <CodexProfileSummary>[];
+  List<ProviderProfileSummary> _profiles = const <ProviderProfileSummary>[];
   ModelCatalogEntry? _selectedModel;
   String? _reasoningEffort;
   String? _modelsError;
@@ -279,7 +279,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   bool _webSearch = false;
   bool _showAdvanced = false;
   bool _submitting = false;
+  bool _loadingNode = false;
   String? _error;
+  String? _nodeError;
+  NodeInfo? _nodeInfo;
   String? _modelsLoadedForCwd;
   String? _modelsLoadedForProfile;
   String? _profilesLoadedForCwd;
@@ -296,6 +299,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     _fastMode = defaults.fastMode;
     _webSearch = defaults.webSearch;
     _cwdController.addListener(_handleCwdChanged);
+    unawaited(_loadNodeInfo());
   }
 
   @override
@@ -336,7 +340,42 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   bool get _controlModelIsAuto => _controlModel?.isAutoModel ?? false;
 
-  bool get _fastSupported => _controlModel?.supportsFastMode ?? false;
+  bool get _fastSupported =>
+      _supportsFastMode && (_controlModel?.supportsFastMode ?? false);
+
+  String get _providerName => _nodeInfo?.providerDisplayName ?? 'agent';
+
+  String get _providerPillLabel {
+    final node = _nodeInfo;
+    if (node != null) return node.providerPillLabel;
+    if (_loadingNode) return 'checking provider';
+    if (_nodeError != null) return 'provider unknown';
+    return 'agent provider';
+  }
+
+  bool get _supportsModels => _supports('configuration', 'models');
+
+  bool get _supportsProfiles => _supports('configuration', 'profiles');
+
+  bool get _supportsModelOverride => _supports('runtimeControls', 'model');
+
+  bool get _supportsReasoningEffort =>
+      _supports('runtimeControls', 'reasoningEffort');
+
+  bool get _supportsFastMode => _supports('runtimeControls', 'fastMode');
+
+  bool get _supportsApprovalPolicy =>
+      _supports('runtimeControls', 'approvalPolicy');
+
+  bool get _supportsSandboxMode => _supports('runtimeControls', 'sandboxMode');
+
+  bool get _supportsWebSearch => _supports('runtimeControls', 'webSearch');
+
+  bool _supports(String section, String feature) {
+    final node = _nodeInfo;
+    if (node == null) return true;
+    return node.providerCapabilities.supports(section, feature);
+  }
 
   String? get _effectiveReasoningEffort {
     final model = _controlModel;
@@ -368,12 +407,15 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   String get _modelDescription {
+    if (!_supportsModels) {
+      return 'This provider does not expose a model catalog through Sidemesh.';
+    }
     if (_loadingModels) {
       final profile = _profileToSubmit;
       if (profile != null) {
         return 'Loading models for profile $profile.';
       }
-      return 'Loading the available Codex models from this host.';
+      return 'Loading available models from this host.';
     }
     if (_modelsError != null) {
       return _modelsError!;
@@ -385,7 +427,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final profile = _selectedProfile;
     final profileModel = _trimmedOrNull(profile?.model);
     if (profile != null && profileModel != null) {
-      return 'No model override will be sent. Codex will use profile ${profile.name}\'s model $profileModel.';
+      return 'No model override will be sent. $_providerName will use profile ${profile.name}\'s model $profileModel.';
     }
     final profileName = _profileToSubmit;
     if (profileName != null) {
@@ -393,9 +435,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     }
     final defaultModel = _defaultModelEntry;
     if (defaultModel != null) {
-      return 'Host default: ${defaultModel.displayName}. Leave unset to let Codex use this host\'s current config.';
+      return 'Host default: ${defaultModel.displayName}. Leave unset to let $_providerName use this host\'s current config.';
     }
-    return 'Leave unset to let Codex use this host\'s current config.';
+    return 'Leave unset to let $_providerName use this host\'s current config.';
   }
 
   String get _profileLabel {
@@ -407,8 +449,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   String get _profileDescription {
+    if (!_supportsProfiles) {
+      return 'This provider does not expose config profiles through Sidemesh.';
+    }
     if (_loadingProfiles) {
-      return 'Loading Codex profiles for this workspace.';
+      return 'Loading provider profiles for this workspace.';
     }
     if (_profilesError != null) {
       return _profilesError!;
@@ -417,25 +462,26 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (selected != null) {
       final provider = _profileProviderLabel(selected);
       final providerText = provider == null ? '' : ' Provider: $provider.';
-      return '${_describeCodexProfile(selected)}$providerText Model discovery will use this profile first.';
+      return '${_describeProviderProfile(selected)}$providerText Model discovery will use this profile first.';
     }
     final unresolvedProfile = _profileToSubmit;
     if (unresolvedProfile != null) {
       return 'Profile $unresolvedProfile is selected but has not been resolved from the current workspace config yet.';
     }
     if (_defaultProfileName != null) {
-      return 'No profile override. Codex will inherit workspace default profile $_defaultProfileName.';
+      return 'No profile override. $_providerName will inherit workspace default profile $_defaultProfileName.';
     }
     if (_currentCwd == null) {
-      return 'Enter a working directory first to discover Codex profiles.';
+      return 'Enter a working directory first to discover provider profiles.';
     }
     if (_profilesLoadedForCwd == _currentCwd && _profiles.isEmpty) {
-      return 'No named profiles were found for this workspace. Codex will use the host config.';
+      return 'No named profiles were found for this workspace. $_providerName will use the host config.';
     }
-    return 'Choose a discovered Codex profile before picking a model, or keep the host config.';
+    return 'Choose a discovered provider profile before picking a model, or keep the host config.';
   }
 
   String? get _reasoningToSubmit {
+    if (!_supportsReasoningEffort) return null;
     if (_controlModelIsAuto) return null;
     return _trimmedOrNull(_reasoningEffort);
   }
@@ -444,7 +490,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   String? get _profileToSubmit => _trimmedOrNull(_profileController.text);
 
-  CodexProfileSummary? get _selectedProfile {
+  ProviderProfileSummary? get _selectedProfile {
     final name = _profileToSubmit;
     if (name == null) return null;
     for (final profile in _profiles) {
@@ -453,6 +499,57 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       }
     }
     return null;
+  }
+
+  Future<void> _loadNodeInfo() async {
+    if (_loadingNode) return;
+    setState(() {
+      _loadingNode = true;
+      _nodeError = null;
+    });
+
+    try {
+      final node = await widget.api.fetchNode(widget.host);
+      if (!mounted) return;
+      setState(() {
+        _nodeInfo = node;
+        _loadingNode = false;
+        _nodeError = null;
+        _coerceForProviderCapabilities();
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingNode = false;
+        _nodeError = friendlyError(error);
+      });
+    }
+  }
+
+  void _coerceForProviderCapabilities() {
+    if (!_supportsProfiles) {
+      _profileController.clear();
+      _profiles = const <ProviderProfileSummary>[];
+      _profilesError = null;
+      _defaultProfileName = null;
+      _profilesLoadedForCwd = null;
+    }
+    if (!_supportsModels || !_supportsModelOverride) {
+      _selectedModel = null;
+      _models = const <ModelCatalogEntry>[];
+      _modelsError = null;
+      _modelsLoadedForCwd = null;
+      _modelsLoadedForProfile = null;
+    }
+    if (!_supportsReasoningEffort) {
+      _reasoningEffort = null;
+    }
+    if (!_supportsFastMode) {
+      _fastMode = false;
+    }
+    if (!_supportsWebSearch) {
+      _webSearch = false;
+    }
   }
 
   void _handleCwdChanged() {
@@ -464,7 +561,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         _modelsLoadedForCwd = null;
         _modelsLoadedForProfile = null;
       });
-      if (_showAdvanced && !_loadingModels) {
+      if (_showAdvanced &&
+          _supportsModels &&
+          _supportsModelOverride &&
+          !_loadingModels) {
         unawaited(_loadModels());
       }
     }
@@ -478,17 +578,29 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       return;
     }
     setState(() {
-      _profiles = const <CodexProfileSummary>[];
+      _profiles = const <ProviderProfileSummary>[];
       _profilesError = null;
       _defaultProfileName = null;
       _profilesLoadedForCwd = null;
     });
-    if (_showAdvanced && cwd != null && !_loadingProfiles) {
+    if (_showAdvanced &&
+        _supportsProfiles &&
+        cwd != null &&
+        !_loadingProfiles) {
       unawaited(_loadProfiles());
     }
   }
 
   Future<void> _loadModels({bool force = false}) async {
+    if (!_supportsModels || !_supportsModelOverride) {
+      setState(() {
+        _models = const <ModelCatalogEntry>[];
+        _modelsError = null;
+        _modelsLoadedForCwd = _currentCwd;
+        _modelsLoadedForProfile = _profileToSubmit;
+      });
+      return;
+    }
     final cwd = _currentCwd;
     final profile = _profileToSubmit;
     if (_loadingModels) return;
@@ -518,8 +630,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         _loadingModels = false;
         _modelsError = models.isEmpty
             ? profile == null
-                  ? 'Codex did not return any models for this host.'
-                  : 'Codex did not return any models for profile $profile.'
+                  ? 'This provider did not return any models for this host.'
+                  : 'This provider did not return any models for profile $profile.'
             : null;
         final selectedModel = _selectedModel;
         if (selectedModel != null) {
@@ -546,12 +658,21 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   Future<void> _loadProfiles({bool force = false}) async {
+    if (!_supportsProfiles) {
+      setState(() {
+        _profiles = const <ProviderProfileSummary>[];
+        _profilesError = null;
+        _defaultProfileName = null;
+        _profilesLoadedForCwd = _currentCwd;
+      });
+      return;
+    }
     final cwd = _currentCwd;
     if (cwd == null) {
       setState(() {
-        _profiles = const <CodexProfileSummary>[];
+        _profiles = const <ProviderProfileSummary>[];
         _profilesError =
-            'Enter a working directory to load workspace-aware Codex profiles.';
+            'Enter a working directory to load workspace-aware provider profiles.';
         _defaultProfileName = null;
         _profilesLoadedForCwd = null;
       });
@@ -640,6 +761,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   void _toggleAdvanced() {
     setState(() => _showAdvanced = !_showAdvanced);
     if (_showAdvanced &&
+        _supportsModels &&
+        _supportsModelOverride &&
         (_modelsLoadedForCwd != _currentCwd ||
             _modelsLoadedForProfile != _profileToSubmit ||
             _models.isEmpty) &&
@@ -647,6 +770,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       unawaited(_loadModels());
     }
     if (_showAdvanced &&
+        _supportsProfiles &&
         _currentCwd != null &&
         _profilesLoadedForCwd == null &&
         !_loadingProfiles) {
@@ -655,11 +779,12 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   Future<void> _chooseProfile() async {
+    if (!_supportsProfiles) return;
     if (_loadingProfiles) return;
     if (_currentCwd == null) {
       setState(() {
         _profilesError =
-            'Enter a working directory to load workspace-aware Codex profiles.';
+            'Enter a working directory to load workspace-aware provider profiles.';
       });
       return;
     }
@@ -677,6 +802,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         currentProfile: _profileToSubmit,
         defaultProfile: _defaultProfileName,
         loadError: _profilesError,
+        providerName: _providerName,
       ),
     );
     if (!mounted || result == null) return;
@@ -688,6 +814,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   Future<void> _chooseModel() async {
+    if (!_supportsModels || !_supportsModelOverride) return;
     if (_loadingModels) return;
     if (_modelsLoadedForCwd != _currentCwd ||
         _modelsLoadedForProfile != _profileToSubmit ||
@@ -710,6 +837,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         inheritedModel: _profileToSubmit == null
             ? _defaultModelEntry
             : _profileModelEntry,
+        providerName: _providerName,
       ),
     );
     if (!mounted || result == null) return;
@@ -733,8 +861,12 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   void _applyAutopilot() {
     setState(() {
-      _approval = ApprovalPolicy.never;
-      _sandbox = SandboxMode.dangerFullAccess;
+      if (_supportsApprovalPolicy) {
+        _approval = ApprovalPolicy.never;
+      }
+      if (_supportsSandboxMode) {
+        _sandbox = SandboxMode.dangerFullAccess;
+      }
     });
   }
 
@@ -756,13 +888,13 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         widget.host,
         cwd: cwd,
         prompt: prompt,
-        model: _selectedModel?.model,
+        model: _supportsModelOverride ? _selectedModel?.model : null,
         reasoningEffort: _reasoningToSubmit,
-        fastMode: _fastMode ? true : null,
-        approvalPolicy: _approval.wire,
-        sandboxMode: _sandbox.wire,
-        webSearch: _webSearch ? 'live' : null,
-        profile: _profileToSubmit,
+        fastMode: _supportsFastMode && _fastMode ? true : null,
+        approvalPolicy: _supportsApprovalPolicy ? _approval.wire : null,
+        sandboxMode: _supportsSandboxMode ? _sandbox.wire : null,
+        webSearch: _supportsWebSearch && _webSearch ? 'live' : null,
+        profile: _supportsProfiles ? _profileToSubmit : null,
       );
       final submittedAt = DateTime.now();
       SessionMessageSeedStore.instance.put(
@@ -872,7 +1004,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Launch Codex',
+                'Launch $_providerName',
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w800,
                   letterSpacing: -0.3,
@@ -891,6 +1023,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                   MeshPill(
                     label: 'fresh session',
                     icon: Icons.play_circle_outline_rounded,
+                    tone: MeshPillTone.neutral,
+                  ),
+                  MeshPill(
+                    label: _providerPillLabel,
+                    icon: Icons.smart_toy_rounded,
                     tone: MeshPillTone.neutral,
                   ),
                 ],
@@ -933,7 +1070,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             maxLines: 10,
             decoration: const InputDecoration(
               labelText: 'Prompt',
-              hintText: 'Ask Codex what to work on...',
+              hintText: 'Ask the agent what to work on...',
               alignLabelWithHint: true,
               prefixIcon: Icon(Icons.keyboard_command_key_rounded),
             ),
@@ -996,7 +1133,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           _PanelHeading(
             icon: Icons.tune_rounded,
             title: 'Launch controls',
-            subtitle: 'Model, thinking, speed and safety for the first turn.',
+            subtitle:
+                'Only controls supported by $_providerName are shown here.',
             trailing: IconButton(
               tooltip: 'Hide advanced',
               onPressed: _submitting ? null : _toggleAdvanced,
@@ -1008,147 +1146,176 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             icon: Icons.memory_rounded,
             title: 'Brain',
             children: [
-              _ModelSelectionCard(
-                title: 'Profile',
-                icon: Icons.badge_outlined,
-                value: _profileLabel,
-                subtitle: _profileDescription,
-                loading: _loadingProfiles,
-                error: _profilesError,
-                compact: true,
-                badges: _profileBadges(),
-                retryLabel: 'Retry loading profiles',
-                onTap: _chooseProfile,
-                onRetry: () => unawaited(_loadProfiles(force: true)),
-              ),
-              const SizedBox(height: 10),
-              _ModelSelectionCard(
-                title: 'Model',
-                icon: Icons.memory_rounded,
-                value: _modelLabel,
-                subtitle: _modelDescription,
-                loading: _loadingModels,
-                error: _modelsError,
-                compact: true,
-                badges: <String>[
-                  if (_selectedModel != null) 'override',
-                  if (_selectedModel == null && _profileToSubmit != null)
-                    'profile default',
-                  if (_controlModel?.isAutoModel ?? false) 'auto',
-                  if (_controlModel?.isDefault ?? false) 'default',
-                  if (_profileToSubmit != null) 'profile scoped',
-                  if (_controlModel?.supportsFastMode ?? false) 'fast',
-                ],
-                onTap: _chooseModel,
-                onRetry: () => unawaited(_loadModels()),
-              ),
-              const SizedBox(height: 10),
-              if (_loadingModels && _models.isEmpty)
-                const LinearProgressIndicator(minHeight: 3)
-              else if (_controlModelIsAuto)
-                _CompactInfoLine(
-                  icon: Icons.psychology_alt_rounded,
-                  text:
-                      'Auto thinking: ${_reasoningEffortLabel(effectiveReasoning ?? 'medium')}',
-                )
-              else if (_supportedReasoningOptions.isEmpty)
-                const _CompactInfoLine(
-                  icon: Icons.psychology_alt_rounded,
-                  text: 'Pick a model to tune reasoning.',
-                )
-              else ...[
-                _MiniChoiceWrap<String>(
-                  icon: Icons.psychology_alt_rounded,
-                  label: 'Reasoning',
-                  value: effectiveReasoning,
-                  options: _supportedReasoningOptions
-                      .map((option) => option.reasoningEffort)
-                      .toList(),
-                  optionLabel: _reasoningEffortLabel,
-                  isDefault: (value) =>
-                      value == _controlModel?.defaultReasoningEffort,
-                  onChanged: (value) {
-                    setState(() {
-                      _reasoningEffort = value;
-                    });
-                  },
+              if (_supportsProfiles) ...[
+                _ModelSelectionCard(
+                  title: 'Profile',
+                  icon: Icons.badge_outlined,
+                  value: _profileLabel,
+                  subtitle: _profileDescription,
+                  loading: _loadingProfiles,
+                  error: _profilesError,
+                  compact: true,
+                  badges: _profileBadges(),
+                  retryLabel: 'Retry loading profiles',
+                  onTap: _chooseProfile,
+                  onRetry: () => unawaited(_loadProfiles(force: true)),
                 ),
-                if (reasoningDescription != null &&
-                    reasoningDescription.trim().isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      reasoningDescription.trim(),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                        height: 1.3,
+                const SizedBox(height: 10),
+              ],
+              if (_supportsModels && _supportsModelOverride) ...[
+                _ModelSelectionCard(
+                  title: 'Model',
+                  icon: Icons.memory_rounded,
+                  value: _modelLabel,
+                  subtitle: _modelDescription,
+                  loading: _loadingModels,
+                  error: _modelsError,
+                  compact: true,
+                  badges: <String>[
+                    if (_selectedModel != null) 'override',
+                    if (_selectedModel == null && _profileToSubmit != null)
+                      'profile default',
+                    if (_controlModel?.isAutoModel ?? false) 'auto',
+                    if (_controlModel?.isDefault ?? false) 'default',
+                    if (_profileToSubmit != null) 'profile scoped',
+                    if (_controlModel?.supportsFastMode ?? false) 'fast',
+                  ],
+                  onTap: _chooseModel,
+                  onRetry: () => unawaited(_loadModels()),
+                ),
+                const SizedBox(height: 10),
+              ],
+              if (!_supportsProfiles &&
+                  (!_supportsModels || !_supportsModelOverride))
+                _CompactInfoLine(
+                  icon: Icons.info_outline_rounded,
+                  text:
+                      '$_providerName does not advertise profile or model controls.',
+                ),
+              if (_supportsReasoningEffort &&
+                  _supportsModels &&
+                  _supportsModelOverride) ...[
+                if (_loadingModels && _models.isEmpty)
+                  const LinearProgressIndicator(minHeight: 3)
+                else if (_controlModelIsAuto)
+                  _CompactInfoLine(
+                    icon: Icons.psychology_alt_rounded,
+                    text:
+                        'Auto thinking: ${_reasoningEffortLabel(effectiveReasoning ?? 'medium')}',
+                  )
+                else if (_supportedReasoningOptions.isEmpty)
+                  const _CompactInfoLine(
+                    icon: Icons.psychology_alt_rounded,
+                    text: 'Pick a model to tune reasoning.',
+                  )
+                else ...[
+                  _MiniChoiceWrap<String>(
+                    icon: Icons.psychology_alt_rounded,
+                    label: 'Reasoning',
+                    value: effectiveReasoning,
+                    options: _supportedReasoningOptions
+                        .map((option) => option.reasoningEffort)
+                        .toList(),
+                    optionLabel: _reasoningEffortLabel,
+                    isDefault: (value) =>
+                        value == _controlModel?.defaultReasoningEffort,
+                    onChanged: (value) {
+                      setState(() {
+                        _reasoningEffort = value;
+                      });
+                    },
+                  ),
+                  if (reasoningDescription != null &&
+                      reasoningDescription.trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        reasoningDescription.trim(),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                          height: 1.3,
+                        ),
                       ),
                     ),
-                  ),
+                ],
               ],
-              const SizedBox(height: 10),
-              _CompactSwitchRow(
-                icon: Icons.bolt_rounded,
-                title: 'Fast mode',
-                subtitle: _fastSupported
-                    ? 'Ask for the fast service tier.'
-                    : 'Not advertised by this model.',
-                value: _fastMode,
-                enabled: _fastSupported,
-                onChanged: (value) => setState(() => _fastMode = value),
-              ),
+              if (_supportsFastMode) ...[
+                const SizedBox(height: 10),
+                _CompactSwitchRow(
+                  icon: Icons.bolt_rounded,
+                  title: 'Fast mode',
+                  subtitle: _fastSupported
+                      ? 'Ask for the fast service tier.'
+                      : 'Not advertised by this model.',
+                  value: _fastMode,
+                  enabled: _fastSupported,
+                  onChanged: (value) => setState(() => _fastMode = value),
+                ),
+              ],
             ],
           ),
-          const SizedBox(height: 12),
-          _CompactControlGroup(
-            icon: Icons.verified_user_rounded,
-            title: 'Permissions',
-            trailing: TextButton.icon(
-              onPressed: _applyAutopilot,
-              icon: const Icon(Icons.auto_awesome_rounded, size: 16),
-              label: const Text('Autopilot'),
+          if (_supportsApprovalPolicy || _supportsSandboxMode) ...[
+            const SizedBox(height: 12),
+            _CompactControlGroup(
+              icon: Icons.verified_user_rounded,
+              title: 'Permissions',
+              trailing: TextButton.icon(
+                onPressed: _applyAutopilot,
+                icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                label: const Text('Autopilot'),
+              ),
+              children: [
+                if (_supportsApprovalPolicy) ...[
+                  _MiniChoiceWrap<ApprovalPolicy>(
+                    icon: Icons.verified_user_rounded,
+                    label: 'Approval',
+                    value: _approval,
+                    options: ApprovalPolicy.values,
+                    optionLabel: (policy) => policy.label,
+                    onChanged: (value) => setState(() => _approval = value),
+                  ),
+                ],
+                if (_supportsApprovalPolicy && _supportsSandboxMode)
+                  const SizedBox(height: 10),
+                if (_supportsSandboxMode)
+                  _MiniChoiceWrap<SandboxMode>(
+                    icon: Icons.folder_special_rounded,
+                    label: 'Sandbox',
+                    value: _sandbox,
+                    options: SandboxMode.values,
+                    optionLabel: (sandbox) => sandbox.label,
+                    danger: (sandbox) =>
+                        sandbox == SandboxMode.dangerFullAccess,
+                    onChanged: (value) => setState(() => _sandbox = value),
+                  ),
+                const SizedBox(height: 8),
+                _CompactInfoLine(
+                  icon: Icons.info_outline_rounded,
+                  text: [
+                    if (_supportsApprovalPolicy) _approval.description,
+                    if (_supportsSandboxMode) _sandbox.description,
+                  ].join(' '),
+                ),
+              ],
             ),
-            children: [
-              _MiniChoiceWrap<ApprovalPolicy>(
-                icon: Icons.verified_user_rounded,
-                label: 'Approval',
-                value: _approval,
-                options: ApprovalPolicy.values,
-                optionLabel: (policy) => policy.label,
-                onChanged: (value) => setState(() => _approval = value),
-              ),
-              const SizedBox(height: 10),
-              _MiniChoiceWrap<SandboxMode>(
-                icon: Icons.folder_special_rounded,
-                label: 'Sandbox',
-                value: _sandbox,
-                options: SandboxMode.values,
-                optionLabel: (sandbox) => sandbox.label,
-                danger: (sandbox) => sandbox == SandboxMode.dangerFullAccess,
-                onChanged: (value) => setState(() => _sandbox = value),
-              ),
-              const SizedBox(height: 8),
-              _CompactInfoLine(
-                icon: Icons.info_outline_rounded,
-                text: '${_approval.description} ${_sandbox.description}',
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _CompactControlGroup(
-            icon: Icons.public_rounded,
-            title: 'Network',
-            children: [
-              _CompactSwitchRow(
-                icon: Icons.public_rounded,
-                title: 'Live web search',
-                subtitle: 'Starts the thread with Codex web search enabled.',
-                value: _webSearch,
-                enabled: !_submitting,
-                onChanged: (value) => setState(() => _webSearch = value),
-              ),
-            ],
-          ),
+          ],
+          if (_supportsWebSearch) ...[
+            const SizedBox(height: 12),
+            _CompactControlGroup(
+              icon: Icons.public_rounded,
+              title: 'Network',
+              children: [
+                _CompactSwitchRow(
+                  icon: Icons.public_rounded,
+                  title: 'Live web search',
+                  subtitle: 'Starts the thread with web search enabled.',
+                  value: _webSearch,
+                  enabled: !_submitting,
+                  onChanged: (value) => setState(() => _webSearch = value),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -1185,44 +1352,54 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final reasoning = _effectiveReasoningEffort;
     return [
       MeshPill(
-        label: _profileLabel,
-        icon: Icons.badge_outlined,
-        tone: _profileToSubmit == null
-            ? MeshPillTone.neutral
-            : MeshPillTone.accent,
+        label: _providerPillLabel,
+        icon: Icons.smart_toy_rounded,
+        tone: MeshPillTone.neutral,
       ),
-      MeshPill(
-        label: _modelLabel,
-        icon: Icons.memory_rounded,
-        tone: _selectedModel == null
-            ? MeshPillTone.neutral
-            : MeshPillTone.accent,
-      ),
-      MeshPill(
-        label: _controlModelIsAuto
-            ? 'auto thinking'
-            : reasoning == null
-            ? 'default thinking'
-            : _reasoningEffortLabel(reasoning),
-        icon: Icons.psychology_alt_rounded,
-      ),
-      if (_fastMode)
+      if (_supportsProfiles)
+        MeshPill(
+          label: _profileLabel,
+          icon: Icons.badge_outlined,
+          tone: _profileToSubmit == null
+              ? MeshPillTone.neutral
+              : MeshPillTone.accent,
+        ),
+      if (_supportsModels && _supportsModelOverride)
+        MeshPill(
+          label: _modelLabel,
+          icon: Icons.memory_rounded,
+          tone: _selectedModel == null
+              ? MeshPillTone.neutral
+              : MeshPillTone.accent,
+        ),
+      if (_supportsReasoningEffort && _supportsModels && _supportsModelOverride)
+        MeshPill(
+          label: _controlModelIsAuto
+              ? 'auto thinking'
+              : reasoning == null
+              ? 'default thinking'
+              : _reasoningEffortLabel(reasoning),
+          icon: Icons.psychology_alt_rounded,
+        ),
+      if (_supportsFastMode && _fastMode)
         const MeshPill(
           label: 'fast',
           icon: Icons.bolt_rounded,
           tone: MeshPillTone.warning,
         ),
-      MeshPill(label: _approval.label, icon: Icons.verified_user_rounded),
-      MeshPill(
-        label: _sandbox.label,
-        icon: _sandbox == SandboxMode.dangerFullAccess
-            ? Icons.lock_open_rounded
-            : Icons.folder_special_rounded,
-        tone: _sandbox == SandboxMode.dangerFullAccess
-            ? MeshPillTone.danger
-            : MeshPillTone.neutral,
-      ),
-      if (_webSearch)
+      if (_supportsApprovalPolicy)
+        MeshPill(label: _approval.label, icon: Icons.verified_user_rounded),
+      if (_supportsSandboxMode)
+        MeshPill(
+          label: _sandbox.label,
+          icon: _sandbox == SandboxMode.dangerFullAccess
+              ? Icons.lock_open_rounded
+              : Icons.folder_special_rounded,
+          tone: _sandbox == SandboxMode.dangerFullAccess
+              ? MeshPillTone.danger
+              : MeshPillTone.neutral,
+        ),
+      if (_supportsWebSearch && _webSearch)
         const MeshPill(
           label: 'web search',
           icon: Icons.public_rounded,
@@ -1701,12 +1878,14 @@ class _ProfilePickerSheet extends StatefulWidget {
     required this.currentProfile,
     required this.defaultProfile,
     required this.loadError,
+    required this.providerName,
   });
 
-  final List<CodexProfileSummary> profiles;
+  final List<ProviderProfileSummary> profiles;
   final String? currentProfile;
   final String? defaultProfile;
   final String? loadError;
+  final String providerName;
 
   @override
   State<_ProfilePickerSheet> createState() => _ProfilePickerSheetState();
@@ -1746,7 +1925,7 @@ class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
             profile.modelProvider ?? '',
             profile.modelProviderName ?? '',
             profile.modelProviderBaseUrl ?? '',
-            _describeCodexProfile(profile),
+            _describeProviderProfile(profile),
           ].join('\n').toLowerCase();
           return haystack.contains(query);
         })
@@ -1767,7 +1946,7 @@ class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Pick a Codex config profile first. The model picker will then load models from that profile\'s provider when possible.',
+              'Pick a provider profile first. The model picker will then load models from that profile when possible.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: colors.textSecondary,
                 height: 1.4,
@@ -1808,8 +1987,8 @@ class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
                             title: 'Host default',
                             model: null,
                             description: widget.defaultProfile == null
-                                ? 'Do not send a profile override. Codex will use the host config.'
-                                : 'Do not send a profile override. Codex will inherit workspace default profile ${widget.defaultProfile}.',
+                                ? 'Do not send a profile override. ${widget.providerName} will use the host config.'
+                                : 'Do not send a profile override. ${widget.providerName} will inherit workspace default profile ${widget.defaultProfile}.',
                             selected: widget.currentProfile == null,
                             badges: const <String>['inherit'],
                             onTap: () => Navigator.of(
@@ -1858,13 +2037,15 @@ class _ModelPickerSheet extends StatefulWidget {
     required this.profile,
     required this.profileName,
     required this.inheritedModel,
+    required this.providerName,
   });
 
   final List<ModelCatalogEntry> models;
   final String? currentModel;
-  final CodexProfileSummary? profile;
+  final ProviderProfileSummary? profile;
   final String? profileName;
   final ModelCatalogEntry? inheritedModel;
+  final String providerName;
 
   @override
   State<_ModelPickerSheet> createState() => _ModelPickerSheetState();
@@ -1923,8 +2104,8 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
             const SizedBox(height: 6),
             Text(
               widget.profileName == null
-                  ? 'Leave the model unset to inherit this host\'s Codex config, or choose a model for this new session.'
-                  : 'Models are scoped to profile ${widget.profileName}. Leave unset to let Codex use that profile default.',
+                  ? 'Leave the model unset to inherit this host\'s provider config, or choose a model for this new session.'
+                  : 'Models are scoped to profile ${widget.profileName}. Leave unset to let ${widget.providerName} use that profile default.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: colors.textSecondary,
                 height: 1.4,
@@ -1961,10 +2142,11 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                                 : 'Use profile default',
                             model: widget.inheritedModel,
                             description: profileName == null
-                                ? 'Do not send a model override. Codex will use the host or workspace Codex config.'
+                                ? 'Do not send a model override. ${widget.providerName} will use the host or workspace provider config.'
                                 : _profileModelInheritDescription(
                                     profileName,
                                     widget.profile,
+                                    widget.providerName,
                                   ),
                             selected: widget.currentModel == null,
                             badges: <String>[
@@ -2150,7 +2332,7 @@ String _reasoningEffortLabel(String value) {
   };
 }
 
-String _describeCodexProfile(CodexProfileSummary profile) {
+String _describeProviderProfile(ProviderProfileSummary profile) {
   final parts = <String>[
     if ((profile.model ?? '').isNotEmpty) 'model ${profile.model}',
     if ((profile.serviceTier ?? '').isNotEmpty)
@@ -2167,32 +2349,33 @@ String _describeCodexProfile(CodexProfileSummary profile) {
       'personality ${profile.personality}',
   ];
   if (parts.isEmpty) {
-    return 'is a named Codex config preset.';
+    return 'is a named provider config preset.';
   }
   return 'sets ${parts.join(', ')}.';
 }
 
-String? _profileProviderLabel(CodexProfileSummary profile) =>
+String? _profileProviderLabel(ProviderProfileSummary profile) =>
     _trimmedOrNull(profile.modelProviderName) ??
     _trimmedOrNull(profile.modelProvider);
 
-String _profilePickerDescription(CodexProfileSummary profile) {
+String _profilePickerDescription(ProviderProfileSummary profile) {
   final provider = _profileProviderLabel(profile);
   final providerText = provider == null ? '' : ' Provider: $provider.';
   final baseUrl = _trimmedOrNull(profile.modelProviderBaseUrl);
   final baseUrlText = baseUrl == null ? '' : ' $baseUrl';
-  return '${_describeCodexProfile(profile)}$providerText$baseUrlText';
+  return '${_describeProviderProfile(profile)}$providerText$baseUrlText';
 }
 
 String _profileModelInheritDescription(
   String profileName,
-  CodexProfileSummary? profile,
+  ProviderProfileSummary? profile,
+  String providerName,
 ) {
   final profileModel = _trimmedOrNull(profile?.model);
   if (profileModel != null) {
-    return 'Do not send a model override. Codex will use profile $profileName\'s configured model $profileModel.';
+    return 'Do not send a model override. $providerName will use profile $profileName\'s configured model $profileModel.';
   }
-  return 'Do not send a model override. Codex will use profile $profileName and its provider defaults.';
+  return 'Do not send a model override. $providerName will use profile $profileName and its provider defaults.';
 }
 
 String _approvalPolicyLabel(String value) {

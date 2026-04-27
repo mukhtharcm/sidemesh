@@ -140,7 +140,7 @@ class LiveActivityService {
         ? 'Approval needed'
         : '$count approvals waiting';
     final detail = title.trim().isEmpty
-        ? 'Codex is waiting for permission.'
+        ? 'Agent is waiting for permission.'
         : title.trim();
     final footnote = sessionTitle.trim();
     await _syncPrimaryActivity({
@@ -361,7 +361,7 @@ class LiveActivityService {
         'headline': 'Approval needed',
         'detail': _nonEmpty(
           pendingAction.title,
-          fallback: 'Codex is waiting for permission.',
+          fallback: 'Agent is waiting for permission.',
         ),
         'footnote': title,
         'status': 'approval',
@@ -399,7 +399,7 @@ class LiveActivityService {
     if (isThinking) {
       return {
         'headline': 'Thinking',
-        'detail': 'Codex is planning the next step.',
+        'detail': 'Agent is planning the next step.',
         'footnote': footnote.isEmpty ? title : '$title - $footnote',
         'status': 'thinking',
         'host': host.label,
@@ -473,14 +473,14 @@ class LiveActivityService {
     if (activity.isTurnDiff) {
       return const _LiveActivitySummary(
         headline: 'Preparing diff',
-        detail: 'Codex is summarizing the turn patch.',
+        detail: 'Agent is summarizing the turn patch.',
         status: 'diff',
         badge: 'DIFF',
       );
     }
     return const _LiveActivitySummary(
       headline: 'Working',
-      detail: 'Codex is running an activity.',
+      detail: 'Agent is running an activity.',
       status: 'running',
       badge: 'RUN',
     );

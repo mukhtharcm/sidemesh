@@ -12,8 +12,8 @@ class SessionTurnConfig {
   final String? model;
   final String? reasoningEffort;
 
-  /// `true` forces Codex Fast mode on, `false` clears it, `null` leaves the
-  /// current thread setting untouched.
+  /// `true` requests Fast mode, `false` clears it, `null` leaves the current
+  /// thread setting untouched.
   final bool? fastMode;
 
   bool get isEmpty =>

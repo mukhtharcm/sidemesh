@@ -1,10 +1,13 @@
 # Sidemesh
 
-Sidemesh is a fleet-first mobile control plane for Codex sessions.
+Sidemesh is a fleet-first mobile control plane for agent sessions. The daemon
+currently ships with a Codex provider, while the server/client boundaries are
+structured around provider capabilities so other coding agents can be added
+behind the same API later.
 
 This repo contains:
 
-- a Node daemon that owns a single local `codex app-server` process over stdio
+- a Node daemon that owns one local agent provider process
 - a Flutter client that can store multiple hosts and connect to each one manually
 - a mobile/desktop control surface for chat, approvals, session policy, workspace files, and live activity
 
@@ -29,9 +32,15 @@ Optional environment variables:
 SIDEMESH_LABEL=MacBook
 SIDEMESH_PORT=8787
 SIDEMESH_TOKEN=your-shared-token
+SIDEMESH_PROVIDER=codex
 SIDEMESH_CODEX_BIN=codex
+SIDEMESH_PROVIDER_COMMAND=codex
 SIDEMESH_STATE_DIR=~/.sidemesh
 ```
+
+`SIDEMESH_PROVIDER` defaults to `codex`. `SIDEMESH_PROVIDER_COMMAND` is a
+provider-neutral command override; for Codex, `SIDEMESH_CODEX_BIN` remains
+supported and takes precedence.
 
 ## Dogfood flow
 
@@ -78,6 +87,7 @@ flutter install --debug -d <device-id>
 
 - `GET /healthz`
 - `GET /api/node`
+- `GET /api/providers`
 - `GET /api/workspaces`
 - `GET /api/sessions`
 - `GET /api/actions`
@@ -85,6 +95,12 @@ flutter install --debug -d <device-id>
 - `GET /api/sessions/:sessionId/resources`
 - `GET /api/sessions/:sessionId/events?since=<seq>`
 - `GET /api/sessions/:sessionId/status`
+- `GET /api/sessions/:sessionId/git`
+- `GET /api/sessions/:sessionId/git/diff?kind=working|staged|unstaged|remote`
+- `GET /api/models`
+- `GET /api/profiles`
+- `GET /api/skills`
+- `POST /api/skills/config`
 - `POST /api/sessions/create`
 - `POST /api/sessions/:sessionId/input`
 - `POST /api/sessions/:sessionId/stop`
@@ -93,6 +109,7 @@ flutter install --debug -d <device-id>
 - `POST /api/sessions/:sessionId/unarchive`
 - `POST /api/actions/:actionId/respond`
 - `WS /api/live?sessionId=...`
+- `WS /api/actions/live`
 
 Workspace filesystem endpoints:
 
@@ -126,7 +143,8 @@ The app currently supports:
 - pending approval inbox
 - live chat with reconnect/delta replay
 - per-session resources view for links, images, and local artifacts
-- per-session approval, sandbox, model, and network controls
+- per-session approval, sandbox, model, and network controls, shown according to
+  provider capabilities
 - command, file-change, terminal-input, and turn-diff activity cards
 - session rename, archive, unarchive, favorite, and unread state
 - workspace file browsing, reading, editing, and live file-change refresh
@@ -135,5 +153,10 @@ Current limits:
 
 - host tokens are stored in platform secure storage, but pairing/revocation is not implemented yet
 - the iOS and Android builds allow plain `http://` traffic so Tailscale and private LAN nodes work immediately
-- the daemon is Codex-only for now; there is no Pi adapter or multi-agent adapter layer yet
+- Codex is the only implemented provider for now; Copilot/OpenClaw/Pi-style
+  providers still need their own adapters
+- provider registration is centralized in `src/provider-registry.ts`; future
+  adapters should start there instead of adding new config/factory switches
+- the provider adapter contract is documented in
+  `docs/provider-adapter-contract.md`
 - the server assumes a trusted private network or equivalent protection around each daemon
