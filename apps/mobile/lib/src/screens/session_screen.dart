@@ -11,7 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../api_client.dart';
 import '../host_status_store.dart';
@@ -171,7 +171,7 @@ class _SessionScreenState extends State<SessionScreen>
   String? _failedSendRetryClientMessageId;
   String? _failedSendRetrySignature;
   DateTime? _failedSendRetryExpiresAt;
-  IOWebSocketChannel? _channel;
+  WebSocketChannel? _channel;
   StreamSubscription? _subscription;
   Timer? _liveFlushTimer;
   Timer? _sessionCachePersistTimer;

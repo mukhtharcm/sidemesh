@@ -11,6 +11,7 @@ import '../live_activity_service.dart';
 import '../local_notification_service.dart';
 import '../models.dart';
 import '../pending_send_recovery.dart';
+import '../recent_sessions_live_store.dart';
 import '../screen_awake_controller.dart';
 import '../session_favorites_store.dart';
 import '../session_cache_store.dart';
@@ -787,31 +788,22 @@ String _hostListSignature(HostProfile host) {
 
 class _RecentPaneState extends State<RecentPane> {
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
-  final HostStatusStore _statuses = HostStatusStore.instance;
-  // Progressive load state: entries stream in per-host as each fetch
-  // resolves rather than blocking on Future.wait(all).
-  List<RemoteSessionEntry> _entries = const [];
-  Set<String> _pendingHostIds = <String>{};
-  Set<String> _screenAwakeConfirmedHostIds = <String>{};
-  List<String> _failedHostLabels = const [];
-  int _loadGen = 0;
-  bool _initialLoadStarted = false;
-  Timer? _refreshTimer;
-  static const Duration _refreshInterval = Duration(seconds: 20);
+  final RecentSessionsStore _store = RecentSessionsStore();
 
   @override
   void initState() {
     super.initState();
     _favorites.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
-    _kickoffLoad();
-    _syncRefreshTimer();
+    _store.addListener(_handleStoreChanged);
+    _store.configure(hosts: widget.hosts, api: widget.api);
   }
 
   @override
   void dispose() {
     _clearScreenAwakeSource(widget.screenAwakeSourceKey);
-    _refreshTimer?.cancel();
+    _store.removeListener(_handleStoreChanged);
+    _store.dispose();
     super.dispose();
   }
 
@@ -822,149 +814,12 @@ class _RecentPaneState extends State<RecentPane> {
       _clearScreenAwakeSource(oldWidget.screenAwakeSourceKey);
       _syncScreenAwakeSource(_screenAwakeActiveEntryCount() > 0);
     }
-    if (!_sameHostList(oldWidget.hosts, widget.hosts)) {
-      _kickoffLoad();
-      _syncRefreshTimer();
-    }
+    _store.configure(hosts: widget.hosts, api: widget.api);
   }
 
-  void _syncRefreshTimer() {
-    if (widget.hosts.isEmpty) {
-      _refreshTimer?.cancel();
-      _refreshTimer = null;
-      return;
-    }
-    _refreshTimer ??= Timer.periodic(_refreshInterval, (_) => _silentRefresh());
-  }
-
-  void _kickoffLoad() {
-    final gen = ++_loadGen;
-    _initialLoadStarted = true;
-    _screenAwakeConfirmedHostIds = <String>{};
-    _syncScreenAwakeSource(false);
-    setState(() {
-      _entries = const [];
-      _pendingHostIds = widget.hosts.map((h) => h.id).toSet();
-      _failedHostLabels = const [];
-    });
-    for (final host in widget.hosts) {
-      _statuses.markProbing(host.id);
-      _loadHost(host, gen);
-    }
-    if (widget.hosts.isEmpty) {
-      _syncScreenAwakeSource(false);
-      // Emit zero active so the nav badge clears immediately.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        widget.onActiveCountChanged(0);
-      });
-    }
-  }
-
-  Future<void> _silentRefresh() async {
-    if (!mounted || widget.hosts.isEmpty) return;
-    final gen = _loadGen;
-    // Fetch per host without tearing down the current list. Merge fresh
-    // entries by (host, session) so the unread store sees new updatedAt
-    // values even when the user hasn't pulled-to-refresh.
-    final hosts = widget.hosts.toList();
-    final fetches = await Future.wait(
-      hosts.map<Future<List<SessionSummary>?>>((host) async {
-        try {
-          final sessions = await widget.api.fetchSessions(host, limit: 40);
-          unawaited(
-            SessionCacheStore.instance.saveRecentSessions(host, sessions),
-          );
-          return sessions;
-        } catch (_) {
-          return null;
-        }
-      }),
-      eagerError: false,
-    );
-    if (!mounted || gen != _loadGen) return;
-    final merged = <RemoteSessionEntry>[];
-    final handled = <String>{};
-    final confirmedHostIds = <String>{};
-    for (var i = 0; i < hosts.length; i++) {
-      final host = hosts[i];
-      final fresh = fetches[i];
-      if (fresh == null) {
-        // Fetch failed — keep whatever we had for this host visually, but do
-        // not let stale active status hold the screen awake.
-        merged.addAll(_entries.where((e) => e.host.id == host.id));
-        handled.add(host.id);
-        continue;
-      }
-      confirmedHostIds.add(host.id);
-      for (final session in fresh.take(20)) {
-        merged.add(RemoteSessionEntry(host: host, session: session));
-      }
-      handled.add(host.id);
-    }
-    // Preserve entries from hosts no longer in widget.hosts (rare) just
-    // in case — they'll fall off the next kickoff.
-    for (final entry in _entries) {
-      if (!handled.contains(entry.host.id)) {
-        merged.add(entry);
-      }
-    }
-    _screenAwakeConfirmedHostIds = confirmedHostIds;
-    setState(() {
-      _entries = merged;
-    });
+  void _handleStoreChanged() {
+    if (!mounted) return;
     _emitActiveCount();
-  }
-
-  Future<void> _loadHost(HostProfile host, int gen) async {
-    try {
-      final cached = await SessionCacheStore.instance.loadRecentSessions(host);
-      if (mounted && gen == _loadGen && cached.isNotEmpty) {
-        final cachedEntries = cached
-            .take(20)
-            .map((session) => RemoteSessionEntry(host: host, session: session))
-            .toList(growable: false);
-        setState(() {
-          _entries = [
-            ..._entries.where((entry) => entry.host.id != host.id),
-            ...cachedEntries,
-          ];
-        });
-        _emitActiveCount();
-      }
-    } catch (_) {
-      // Cache is an optimization only; network remains the source of truth.
-    }
-
-    try {
-      final sessions = await widget.api.fetchSessions(host, limit: 40);
-      if (!mounted || gen != _loadGen) return;
-      unawaited(SessionCacheStore.instance.saveRecentSessions(host, sessions));
-      _statuses.markOnline(host.id);
-      final newEntries = sessions
-          .take(20)
-          .map((session) => RemoteSessionEntry(host: host, session: session))
-          .toList();
-      _screenAwakeConfirmedHostIds = {..._screenAwakeConfirmedHostIds, host.id};
-      setState(() {
-        _entries = [
-          ..._entries.where((entry) => entry.host.id != host.id),
-          ...newEntries,
-        ];
-        _pendingHostIds = {..._pendingHostIds}..remove(host.id);
-      });
-      _emitActiveCount();
-    } catch (error) {
-      if (!mounted || gen != _loadGen) return;
-      _statuses.markOffline(host.id, error: friendlyError(error));
-      _screenAwakeConfirmedHostIds = {..._screenAwakeConfirmedHostIds}
-        ..remove(host.id);
-      setState(() {
-        _failedHostLabels = [..._failedHostLabels, host.label];
-        _pendingHostIds = {..._pendingHostIds}..remove(host.id);
-      });
-      _emitActiveCount();
-    }
   }
 
   void _emitActiveCount() {
@@ -977,15 +832,15 @@ class _RecentPaneState extends State<RecentPane> {
   }
 
   int _activeEntryCount() {
-    return _entries.where((e) => e.session.isActive).length;
+    return _store.entries.where((e) => e.session.isActive).length;
   }
 
   int _screenAwakeActiveEntryCount() {
-    return _entries
+    return _store.entries
         .where(
           (entry) =>
               entry.session.isActive &&
-              _screenAwakeConfirmedHostIds.contains(entry.host.id),
+              _store.confirmedHostIds.contains(entry.host.id),
         )
         .length;
   }
@@ -1052,10 +907,10 @@ class _RecentPaneState extends State<RecentPane> {
     }
 
     final stillLoadingInitial =
-        _initialLoadStarted &&
-        _entries.isEmpty &&
-        _failedHostLabels.isEmpty &&
-        _pendingHostIds.isNotEmpty;
+        !_store.hasLoadedOnce &&
+        _store.entries.isEmpty &&
+        _store.failedHostLabels.isEmpty &&
+        _store.pendingHostIds.isNotEmpty;
 
     if (stillLoadingInitial) {
       return const MeshLoader();
@@ -1063,15 +918,18 @@ class _RecentPaneState extends State<RecentPane> {
 
     return ListenableBuilder(
       listenable: Listenable.merge([
+        _store,
         _favorites,
-        _statuses,
+        HostStatusStore.instance,
         SessionOverridesStore.instance,
       ]),
       builder: (context, _) {
-        final sortedEntries = _sortEntries(_entries);
-        final hasCachedEntries = _entries.isNotEmpty;
-        final isRefreshing = _pendingHostIds.isNotEmpty;
-        final hasFailures = _failedHostLabels.isNotEmpty;
+        final sortedEntries = _sortEntries(_store.entries);
+        final hasCachedEntries =
+            _store.entries.isNotEmpty &&
+            _store.confirmedHostIds.length < widget.hosts.length;
+        final isRefreshing = _store.pendingHostIds.isNotEmpty;
+        final hasFailures = _store.failedHostLabels.isNotEmpty;
         final noResults = sortedEntries.isEmpty;
         final basePadding =
             widget.padding ??
@@ -1079,7 +937,7 @@ class _RecentPaneState extends State<RecentPane> {
                 ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
                 : const EdgeInsets.fromLTRB(16, 8, 16, 32));
         Future<void> handleRefresh() async {
-          _kickoffLoad();
+          await _store.refresh();
         }
 
         if (noResults) {
@@ -1091,13 +949,13 @@ class _RecentPaneState extends State<RecentPane> {
               children: [
                 if (isRefreshing)
                   _RecentProgressStrip(
-                    remaining: _pendingHostIds.length,
+                    remaining: _store.pendingHostIds.length,
                     total: widget.hosts.length,
                     showingCached: hasCachedEntries,
                   ),
                 if (hasFailures)
                   _RecentErrorBanner(
-                    hostLabels: _failedHostLabels,
+                    hostLabels: _store.failedHostLabels,
                     onRetry: handleRefresh,
                   ),
                 const SizedBox(height: 80),
@@ -1129,7 +987,7 @@ class _RecentPaneState extends State<RecentPane> {
               if (isRefreshing) {
                 if (index == offset) {
                   return _RecentProgressStrip(
-                    remaining: _pendingHostIds.length,
+                    remaining: _store.pendingHostIds.length,
                     total: widget.hosts.length,
                     showingCached: hasCachedEntries,
                   );
@@ -1139,7 +997,7 @@ class _RecentPaneState extends State<RecentPane> {
               if (hasFailures) {
                 if (index == offset) {
                   return _RecentErrorBanner(
-                    hostLabels: _failedHostLabels,
+                    hostLabels: _store.failedHostLabels,
                     onRetry: handleRefresh,
                   );
                 }
@@ -3353,13 +3211,6 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
       ),
     );
   }
-}
-
-class RemoteSessionEntry {
-  const RemoteSessionEntry({required this.host, required this.session});
-
-  final HostProfile host;
-  final SessionSummary session;
 }
 
 String _randomId() {

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'models.dart';
 import 'fs_models.dart';
@@ -362,7 +363,7 @@ class ApiClient {
     );
   }
 
-  IOWebSocketChannel openLive(HostProfile host, String sessionId) {
+  WebSocketChannel openLive(HostProfile host, String sessionId) {
     _ensureHostEnabled(host);
     final baseUri = Uri.parse(host.baseUrl);
     final wsUri = baseUri.replace(
@@ -379,12 +380,28 @@ class ApiClient {
     );
   }
 
-  IOWebSocketChannel openActionsLive(HostProfile host) {
+  WebSocketChannel openActionsLive(HostProfile host) {
     _ensureHostEnabled(host);
     final baseUri = Uri.parse(host.baseUrl);
     final wsUri = baseUri.replace(
       scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
       path: '/api/actions/live',
+    );
+
+    return IOWebSocketChannel.connect(
+      wsUri,
+      headers: {'Authorization': 'Bearer ${host.token}'},
+      connectTimeout: _webSocketConnectTimeout,
+      pingInterval: _webSocketPingInterval,
+    );
+  }
+
+  WebSocketChannel openSessionsLive(HostProfile host) {
+    _ensureHostEnabled(host);
+    final baseUri = Uri.parse(host.baseUrl);
+    final wsUri = baseUri.replace(
+      scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
+      path: '/api/sessions/live',
     );
 
     return IOWebSocketChannel.connect(
@@ -516,7 +533,7 @@ class ApiClient {
     );
   }
 
-  IOWebSocketChannel openFsLive(HostProfile host) {
+  WebSocketChannel openFsLive(HostProfile host) {
     _ensureHostEnabled(host);
     final baseUri = Uri.parse(host.baseUrl);
     final wsUri = baseUri.replace(
