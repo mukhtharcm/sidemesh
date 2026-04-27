@@ -80,6 +80,10 @@ describe("Copilot provider", () => {
         [
           "#!/usr/bin/env node",
           "const args = process.argv.slice(2);",
+          "if (args.includes('--name') && args.some((arg) => arg.startsWith('--resume'))) {",
+          "  console.error('name/resume conflict');",
+          "  process.exit(1);",
+          "}",
           "const prompt = args[args.indexOf('-p') + 1] || '';",
           "process.stdout.write('resumed: ' + prompt);",
         ].join("\n"),
