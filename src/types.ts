@@ -307,6 +307,103 @@ export type SessionActivity =
   | WebSearchActivity
   | ImageGenerationActivity;
 
+export type PendingActionApprovalScope = "once" | "session" | "location";
+
+export type PendingActionDecisionId =
+  | "accept"
+  | "acceptForSession"
+  | "acceptForLocation"
+  | "decline"
+  | "cancel";
+
+export type PendingActionDecisionKind = "approve" | "decline" | "cancel";
+
+export interface PendingActionDecisionRequest {
+  decision: PendingActionDecisionKind;
+  scope: PendingActionApprovalScope;
+  legacyDecision: PendingActionDecisionId;
+}
+
+export type PendingActionApprovalCategory =
+  | "command"
+  | "file_change"
+  | "filesystem"
+  | "network"
+  | "tool"
+  | "memory"
+  | "hook"
+  | "permissions";
+
+export type PendingActionApprovalTarget =
+  | {
+      type: "command";
+      command: string;
+      cwd?: string;
+      identifiers?: string[];
+      readOnly?: boolean;
+      possiblePaths?: string[];
+      possibleUrls?: string[];
+      intention?: string;
+      warning?: string;
+    }
+  | {
+      type: "file";
+      path: string;
+      access: "read" | "write";
+      diff?: string;
+      intention?: string;
+    }
+  | {
+      type: "url";
+      url: string;
+      intention?: string;
+    }
+  | {
+      type: "tool";
+      name: string;
+      title?: string;
+      serverName?: string;
+      readOnly?: boolean;
+      description?: string;
+      args?: unknown;
+    }
+  | {
+      type: "memory";
+      fact?: string;
+      subject?: string;
+      action?: string;
+      direction?: string;
+      reason?: string;
+      citations?: string;
+    }
+  | {
+      type: "hook";
+      toolName?: string;
+      message?: string;
+      args?: unknown;
+    }
+  | {
+      type: "permission_profile";
+      permissions: unknown;
+      cwd?: string;
+      reason?: string;
+    }
+  | {
+      type: "unknown";
+      label: string;
+    };
+
+export interface PendingActionApproval {
+  category: PendingActionApprovalCategory;
+  operation: string;
+  summary: string;
+  detail?: string;
+  cwd?: string;
+  targets: PendingActionApprovalTarget[];
+  supportedScopes: PendingActionApprovalScope[];
+  suggestedScope?: PendingActionApprovalScope;
+}
+
 export interface PendingAction {
   id: string;
   sessionId: string;
@@ -319,6 +416,7 @@ export interface PendingAction {
   canDecline: boolean;
   sessionTitle?: string;
   cwd?: string;
+  approval?: PendingActionApproval;
 }
 
 export interface LiveEvent {

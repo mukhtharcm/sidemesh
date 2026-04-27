@@ -21,6 +21,10 @@ import {
   type AgentSubmitInputResult,
 } from "./agent-provider.js";
 import {
+  normalizePendingActionDecision,
+  type PendingActionDecisionInput,
+} from "./approvals.js";
+import {
   approveOnce,
   createCopilotSdkClient,
   rejectPermission,
@@ -42,6 +46,7 @@ import type {
   SessionMessage,
   SessionMessageAttachment,
   SessionRuntimeSummary,
+  PendingActionDecisionRequest,
   ThreadRecord,
   TurnRecord,
 } from "./types.js";
@@ -403,9 +408,10 @@ export class CopilotAgentProvider
 
   public respondToPendingAction(
     action: AgentPendingAction,
-    decision: string | null,
+    decision: PendingActionDecisionInput,
   ): boolean {
-    if (!decision) {
+    const normalized = normalizePendingActionDecision(decision);
+    if (!normalized) {
       return false;
     }
     const pending = this.pendingPermissions.get(action.id);
@@ -413,7 +419,7 @@ export class CopilotAgentProvider
       return false;
     }
     const result = buildCopilotPermissionResult(
-      decision,
+      normalized,
       pending.action.providerPayload,
     );
     if (!result) {
@@ -1391,18 +1397,30 @@ function buildCopilotPendingAction(
 ): AgentPendingAction {
   const typed = request as Record<string, any>;
   const actionId = `copilot-permission-${randomUUID()}`;
+  const detail = copilotPermissionDetail(typed);
+  const canApproveForSession = canApproveCopilotPermissionForSession(typed);
   return {
     id: actionId,
     sessionId: session.thread.id,
     kind: copilotPendingActionKind(request.kind),
     title: copilotPermissionTitle(request.kind),
-    detail: copilotPermissionDetail(typed),
+    detail,
     requestedAt: Date.now(),
     canApprove: true,
-    canApproveForSession: canApproveCopilotPermissionForSession(typed),
+    canApproveForSession,
     canDecline: true,
     sessionTitle: session.thread.name ?? session.thread.preview,
     cwd: session.thread.cwd,
+    approval: {
+      category: copilotApprovalCategory(request.kind),
+      operation: `copilot.${request.kind}`,
+      summary: copilotPermissionSummary(typed),
+      detail,
+      cwd: session.thread.cwd,
+      supportedScopes: canApproveForSession ? ["once", "session"] : ["once"],
+      suggestedScope: "once",
+      targets: copilotApprovalTargets(typed),
+    },
     providerRequestId: actionId,
     providerRequestKind: `copilot/${request.kind}/requestPermission`,
     providerPayload: request,
@@ -1415,6 +1433,28 @@ function copilotPendingActionKind(
   if (kind === "shell") return "command";
   if (kind === "write") return "file_change";
   return "permissions";
+}
+
+function copilotApprovalCategory(
+  kind: CopilotSdkPermissionRequest["kind"],
+): NonNullable<AgentPendingAction["approval"]>["category"] {
+  switch (kind) {
+    case "shell":
+      return "command";
+    case "write":
+      return "file_change";
+    case "read":
+      return "filesystem";
+    case "url":
+      return "network";
+    case "mcp":
+    case "custom-tool":
+      return "tool";
+    case "memory":
+      return "memory";
+    case "hook":
+      return "hook";
+  }
 }
 
 function copilotPermissionTitle(kind: CopilotSdkPermissionRequest["kind"]): string {
@@ -1463,6 +1503,149 @@ function copilotPermissionDetail(request: Record<string, any>): string {
   return JSON.stringify(request, null, 2);
 }
 
+function copilotPermissionSummary(request: Record<string, any>): string {
+  if (typeof request.intention === "string" && request.intention.length > 0) {
+    return request.intention;
+  }
+  if (typeof request.toolTitle === "string" && request.toolTitle.length > 0) {
+    return request.toolTitle;
+  }
+  if (typeof request.toolDescription === "string" && request.toolDescription.length > 0) {
+    return request.toolDescription;
+  }
+  if (typeof request.hookMessage === "string" && request.hookMessage.length > 0) {
+    return request.hookMessage;
+  }
+  return copilotPermissionTitle(request.kind);
+}
+
+function copilotApprovalTargets(
+  request: Record<string, any>,
+): NonNullable<AgentPendingAction["approval"]>["targets"] {
+  switch (request.kind) {
+    case "shell":
+      return [
+        {
+          type: "command",
+          command: typeof request.fullCommandText === "string" ? request.fullCommandText : "",
+          identifiers: copilotCommandIdentifiers(request),
+          possiblePaths: stringArray(request.possiblePaths),
+          possibleUrls: copilotPossibleUrls(request),
+          intention: typeof request.intention === "string" ? request.intention : undefined,
+          warning: typeof request.warning === "string" ? request.warning : undefined,
+        },
+      ];
+    case "write":
+      return [
+        {
+          type: "file",
+          path: typeof request.fileName === "string" ? request.fileName : "",
+          access: "write",
+          diff: typeof request.diff === "string" ? request.diff : undefined,
+          intention: typeof request.intention === "string" ? request.intention : undefined,
+        },
+      ];
+    case "read":
+      return [
+        {
+          type: "file",
+          path: typeof request.path === "string" ? request.path : "",
+          access: "read",
+          intention: typeof request.intention === "string" ? request.intention : undefined,
+        },
+      ];
+    case "url":
+      return [
+        {
+          type: "url",
+          url: typeof request.url === "string" ? request.url : "",
+          intention: typeof request.intention === "string" ? request.intention : undefined,
+        },
+      ];
+    case "mcp":
+      return [
+        {
+          type: "tool",
+          name: typeof request.toolName === "string" ? request.toolName : "",
+          title: typeof request.toolTitle === "string" ? request.toolTitle : undefined,
+          serverName: typeof request.serverName === "string" ? request.serverName : undefined,
+          readOnly: typeof request.readOnly === "boolean" ? request.readOnly : undefined,
+          args: request.args,
+        },
+      ];
+    case "custom-tool":
+      return [
+        {
+          type: "tool",
+          name: typeof request.toolName === "string" ? request.toolName : "",
+          description:
+            typeof request.toolDescription === "string" ? request.toolDescription : undefined,
+          args: request.args,
+        },
+      ];
+    case "memory":
+      return [
+        {
+          type: "memory",
+          fact: typeof request.fact === "string" ? request.fact : undefined,
+          subject: typeof request.subject === "string" ? request.subject : undefined,
+          action: typeof request.action === "string" ? request.action : undefined,
+          direction: typeof request.direction === "string" ? request.direction : undefined,
+          reason: typeof request.reason === "string" ? request.reason : undefined,
+          citations: typeof request.citations === "string" ? request.citations : undefined,
+        },
+      ];
+    case "hook":
+      return [
+        {
+          type: "hook",
+          toolName: typeof request.toolName === "string" ? request.toolName : undefined,
+          message: typeof request.hookMessage === "string" ? request.hookMessage : undefined,
+          args: request.toolArgs,
+        },
+      ];
+    default:
+      return [{ type: "unknown", label: String(request.kind ?? "unknown") }];
+  }
+}
+
+function copilotCommandIdentifiers(request: Record<string, any>): string[] {
+  if (!Array.isArray(request.commands)) {
+    return [];
+  }
+  return request.commands
+    .map((command) =>
+      command && typeof command === "object"
+        ? (command as Record<string, unknown>).identifier
+        : null,
+    )
+    .filter((identifier): identifier is string => typeof identifier === "string" && identifier.length > 0);
+}
+
+function copilotPossibleUrls(request: Record<string, any>): string[] {
+  if (!Array.isArray(request.possibleUrls)) {
+    return [];
+  }
+  return request.possibleUrls
+    .map((entry) => {
+      if (typeof entry === "string") {
+        return entry;
+      }
+      if (entry && typeof entry === "object") {
+        const url = (entry as Record<string, unknown>).url;
+        return typeof url === "string" ? url : null;
+      }
+      return null;
+    })
+    .filter((url): url is string => typeof url === "string" && url.length > 0);
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
+    : [];
+}
+
 function canApproveCopilotPermissionForSession(
   request: Record<string, any>,
 ): boolean {
@@ -1473,17 +1656,17 @@ function canApproveCopilotPermissionForSession(
 }
 
 function buildCopilotPermissionResult(
-  decision: string,
+  decision: PendingActionDecisionRequest,
   request: unknown,
 ): CopilotSdkPermissionResult | null {
-  if (decision === "accept") {
+  if (decision.decision === "approve" && decision.scope === "once") {
     return approveOnce();
   }
-  if (decision === "acceptForSession") {
+  if (decision.decision === "approve" && decision.scope === "session") {
     const approval = copilotSessionApproval(request);
     return approval ? { kind: "approve-for-session", approval } : approveOnce();
   }
-  if (decision === "decline" || decision === "cancel") {
+  if (decision.decision === "decline" || decision.decision === "cancel") {
     return rejectPermission();
   }
   return null;
