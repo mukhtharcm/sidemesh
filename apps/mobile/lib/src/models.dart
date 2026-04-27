@@ -1370,6 +1370,44 @@ class SessionStatus {
   );
 }
 
+class RecentSessionsLiveEvent {
+  const RecentSessionsLiveEvent({
+    required this.type,
+    this.sessions,
+    this.session,
+    this.sessionId,
+    this.message,
+  });
+
+  final String type;
+  final List<SessionSummary>? sessions;
+  final SessionSummary? session;
+  final String? sessionId;
+  final String? message;
+
+  factory RecentSessionsLiveEvent.fromJson(Map<String, dynamic> json) =>
+      RecentSessionsLiveEvent(
+        type: _stringValue(json['type']),
+        sessions: json['sessions'] is List<dynamic>
+            ? (json['sessions'] as List<dynamic>)
+                  .whereType<Map<dynamic, dynamic>>()
+                  .map(
+                    (item) =>
+                        SessionSummary.fromJson(item.cast<String, dynamic>()),
+                  )
+                  .toList(growable: false)
+            : null,
+        session: json['session'] is Map<dynamic, dynamic>
+            ? SessionSummary.fromJson(
+                (json['session'] as Map<dynamic, dynamic>)
+                    .cast<String, dynamic>(),
+              )
+            : null,
+        sessionId: json['sessionId'] as String?,
+        message: json['message'] as String?,
+      );
+}
+
 class LiveEvent {
   const LiveEvent({
     required this.type,
