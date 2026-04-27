@@ -78,7 +78,9 @@ export class MultiAgentProvider
     }
     this.kind = defaultEntry.provider.kind;
     this.displayName = defaultEntry.provider.displayName;
-    this.capabilities = defaultEntry.provider.capabilities;
+    this.capabilities = mergeCapabilities(
+      entries.map((entry) => entry.provider.capabilities),
+    );
     for (const entry of this.orderedEntries) {
       entry.provider.on("liveEvent", (event) => {
         this.emit("liveEvent", this.wrapLiveEvent(entry.kind, event));
@@ -556,6 +558,57 @@ export class MultiAgentProvider
   private defaultEntry(): ProviderEntry {
     return this.resolveProviderKind(this.defaultProviderKind);
   }
+}
+
+function mergeCapabilities(
+  capabilitiesList: AgentProviderCapabilities[],
+): AgentProviderCapabilities {
+  const any = (selector: (caps: AgentProviderCapabilities) => boolean) =>
+    capabilitiesList.some(selector);
+  return {
+    sessions: {
+      create: any((caps) => caps.sessions.create),
+      resume: any((caps) => caps.sessions.resume),
+      rename: any((caps) => caps.sessions.rename),
+      archive: any((caps) => caps.sessions.archive),
+      interrupt: any((caps) => caps.sessions.interrupt),
+      history: any((caps) => caps.sessions.history),
+      eventReplay: any((caps) => caps.sessions.eventReplay),
+      recentFallback: any((caps) => caps.sessions.recentFallback),
+    },
+    input: {
+      text: any((caps) => caps.input.text),
+      imageUrl: any((caps) => caps.input.imageUrl),
+      localImage: any((caps) => caps.input.localImage),
+      skills: any((caps) => caps.input.skills),
+    },
+    approvals: {
+      command: any((caps) => caps.approvals.command),
+      tool: any((caps) => caps.approvals.tool),
+      fileChange: any((caps) => caps.approvals.fileChange),
+      permissions: any((caps) => caps.approvals.permissions),
+      approveForSession: any((caps) => caps.approvals.approveForSession),
+    },
+    configuration: {
+      models: any((caps) => caps.configuration.models),
+      profiles: any((caps) => caps.configuration.profiles),
+      skills: any((caps) => caps.configuration.skills),
+      skillManagement: any((caps) => caps.configuration.skillManagement),
+    },
+    runtimeControls: {
+      model: any((caps) => caps.runtimeControls.model),
+      reasoningEffort: any((caps) => caps.runtimeControls.reasoningEffort),
+      fastMode: any((caps) => caps.runtimeControls.fastMode),
+      approvalPolicy: any((caps) => caps.runtimeControls.approvalPolicy),
+      sandboxMode: any((caps) => caps.runtimeControls.sandboxMode),
+      networkAccess: any((caps) => caps.runtimeControls.networkAccess),
+      webSearch: any((caps) => caps.runtimeControls.webSearch),
+    },
+    workspace: {
+      filesystem: any((caps) => caps.workspace.filesystem),
+      remoteGitDiff: any((caps) => caps.workspace.remoteGitDiff),
+    },
+  };
 }
 
 function wrapProviderScopedId(kind: AgentProviderKind, rawId: string): string {

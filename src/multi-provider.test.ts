@@ -122,6 +122,40 @@ describe("MultiAgentProvider", () => {
     assert.match(action.id, /^codex:/);
     assert.match(action.sessionId, /^codex:/);
   });
+
+  it("advertises union capabilities across configured providers", async () => {
+    const codex = new StubProvider("codex", "Codex");
+    codex.capabilities.workspace.filesystem = false;
+    codex.capabilities.configuration.profiles = false;
+    const copilot = new StubProvider("copilot", "GitHub Copilot");
+    copilot.capabilities.workspace.filesystem = true;
+    copilot.capabilities.configuration.profiles = true;
+
+    const provider = new MultiAgentProvider(
+      [
+        {
+          kind: "codex",
+          config: { kind: "codex", bin: "codex" },
+          provider: codex,
+        },
+        {
+          kind: "copilot",
+          config: {
+            kind: "copilot",
+            bin: "copilot",
+            stateDir: null,
+            allowAll: false,
+            configuredModel: null,
+          },
+          provider: copilot,
+        },
+      ],
+      "codex",
+    );
+
+    assert.equal(provider.capabilities.workspace.filesystem, true);
+    assert.equal(provider.capabilities.configuration.profiles, true);
+  });
 });
 
 class StubProvider
