@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { describe, it } from "node:test";
@@ -147,15 +147,18 @@ describe("Copilot provider", () => {
     const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-test-"));
     try {
       const bin = nodePath.join(dir, "fake-copilot");
+      const argsPath = nodePath.join(dir, "args.json");
       await writeFile(
         bin,
         [
           "#!/usr/bin/env node",
+          "const fs = require('node:fs');",
           "const args = process.argv.slice(2);",
           "if (args.includes('--version')) {",
           "  console.log('GitHub Copilot CLI 9.9.9');",
           "  process.exit(0);",
           "}",
+          `fs.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args));`,
           "const prompt = args[args.indexOf('-p') + 1] || '';",
           "process.stdout.write('copilot says: ' + prompt);",
         ].join("\n"),
@@ -183,8 +186,8 @@ describe("Copilot provider", () => {
         cwd: dir,
         input: [{ type: "text", text: "hello", text_elements: [] }],
         overrides: {
-          model: "gpt-5.2",
-          reasoningEffort: "medium",
+          model: null,
+          reasoningEffort: null,
           fastMode: null,
           approvalPolicy: null,
           sandboxMode: null,
@@ -202,6 +205,12 @@ describe("Copilot provider", () => {
       assert.equal(log.messages[1]?.role, "assistant");
       assert.equal(log.messages[1]?.text, "copilot says: hello");
       assert.equal(log.runtime?.modelProvider, "copilot");
+      assert.equal(log.runtime?.model, undefined);
+      assert.equal(log.runtime?.reasoningEffort, undefined);
+
+      const args = JSON.parse(await readFile(argsPath, "utf8")) as string[];
+      assert.equal(args.includes("--model"), false);
+      assert.equal(args.includes("--effort"), false);
 
       const sessions = await provider.listSessionThreads!({
         limit: 10,
@@ -209,6 +218,178 @@ describe("Copilot provider", () => {
       });
       assert.equal(sessions.length, 1);
       assert.equal(sessions[0]?.source, "copilot");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("exposes and forwards only the explicitly configured Copilot model", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-model-test-"),
+    );
+    try {
+      const bin = nodePath.join(dir, "fake-copilot");
+      const argsPath = nodePath.join(dir, "args.json");
+      await writeFile(
+        bin,
+        [
+          "#!/usr/bin/env node",
+          "const fs = require('node:fs');",
+          "const args = process.argv.slice(2);",
+          `fs.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args));`,
+          "const prompt = args[args.indexOf('-p') + 1] || '';",
+          "process.stdout.write('configured: ' + prompt);",
+        ].join("\n"),
+      );
+      await chmod(bin, 0o755);
+
+      const provider = new CopilotAgentProvider({
+        bin,
+        stateDir: nodePath.join(dir, "state"),
+        sessionStateDir: nodePath.join(dir, "native-session-state"),
+        configuredModel: "safe-test-model",
+      });
+      await provider.start();
+
+      assert.equal(provider.capabilities.configuration.models, true);
+      assert.equal(provider.capabilities.runtimeControls.model, true);
+      const models = await provider.listModels!({
+        cwd: dir,
+        profile: null,
+        provider: null,
+      });
+      assert.deepEqual(
+        models.map((model) => ({
+          model: model.model,
+          displayName: model.displayName,
+          source: model.source,
+          isDefault: model.isDefault,
+        })),
+        [
+          {
+            model: "safe-test-model",
+            displayName: "Safe Test Model",
+            source: "env",
+            isDefault: true,
+          },
+        ],
+      );
+
+      const completed = new Promise<void>((resolve) => {
+        provider.on("liveEvent", (event) => {
+          if (event.type === "turn_completed") resolve();
+        });
+      });
+
+      await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "hello", text_elements: [] }],
+        overrides: {
+          model: null,
+          reasoningEffort: null,
+          fastMode: null,
+          approvalPolicy: null,
+          sandboxMode: null,
+          networkAccess: null,
+          webSearch: null,
+          profile: null,
+        },
+      });
+      await completed;
+
+      const args = JSON.parse(await readFile(argsPath, "utf8")) as string[];
+      assert.deepEqual(
+        args.slice(args.indexOf("--model"), args.indexOf("--model") + 2),
+        ["--model", "safe-test-model"],
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not reuse stale persisted Copilot model defaults without config", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-stale-model-test-"),
+    );
+    try {
+      const bin = nodePath.join(dir, "fake-copilot");
+      const stateDir = nodePath.join(dir, "state");
+      const argsPath = nodePath.join(dir, "args.json");
+      const sessionId = "stale-session";
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(
+        nodePath.join(stateDir, "sessions.json"),
+        JSON.stringify({
+          sessions: [
+            {
+              thread: {
+                id: sessionId,
+                name: null,
+                preview: "stale",
+                cwd: dir,
+                createdAt: 1,
+                updatedAt: 1,
+                source: "copilot",
+                path: nodePath.join(dir, "native-session-state", sessionId),
+                status: { type: "idle" },
+                turns: [],
+              },
+              messages: [],
+              turns: [],
+              runtime: {
+                model: "gpt-5.2",
+                modelProvider: "copilot",
+                reasoningEffort: "medium",
+              },
+              nextSeq: 0,
+              copilotSessionId: sessionId,
+            },
+          ],
+        }),
+      );
+      await writeFile(
+        bin,
+        [
+          "#!/usr/bin/env node",
+          "const fs = require('node:fs');",
+          "const args = process.argv.slice(2);",
+          `fs.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args));`,
+          "process.stdout.write('ok');",
+        ].join("\n"),
+      );
+      await chmod(bin, 0o755);
+
+      const provider = new CopilotAgentProvider({
+        bin,
+        stateDir,
+        sessionStateDir: nodePath.join(dir, "native-session-state"),
+      });
+      await provider.start();
+
+      const completed = new Promise<void>((resolve) => {
+        provider.on("liveEvent", (event) => {
+          if (event.type === "turn_completed") resolve();
+        });
+      });
+      await provider.submitInput!({
+        sessionId,
+        input: [{ type: "text", text: "hello", text_elements: [] }],
+        activeTurnId: null,
+        overrides: {
+          model: null,
+          reasoningEffort: null,
+          fastMode: null,
+          approvalPolicy: null,
+          sandboxMode: null,
+          networkAccess: null,
+          webSearch: null,
+          profile: null,
+        },
+      });
+      await completed;
+
+      const args = JSON.parse(await readFile(argsPath, "utf8")) as string[];
+      assert.equal(args.includes("--model"), false);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

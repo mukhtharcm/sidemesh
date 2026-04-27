@@ -24,6 +24,7 @@ export interface CopilotProviderConfig {
   stateDir: string | null;
   sessionStateDir: string | null;
   allowAll: boolean;
+  configuredModel: string | null;
 }
 
 export type FakeCapabilityProfile =
