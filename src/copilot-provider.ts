@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import nodePath from "node:path";
 
@@ -34,6 +34,7 @@ import {
   type CopilotSdkSession,
   type CopilotSdkSessionConfig,
   type CopilotSdkSessionEvent,
+  type CopilotSdkSessionMetadata,
 } from "./copilot-sdk-client.js";
 import type {
   ModelSummary,
@@ -49,7 +50,6 @@ import type {
 export interface CopilotAgentProviderOptions {
   bin?: string;
   stateDir?: string | null;
-  sessionStateDir?: string | null;
   allowAll?: boolean;
   configuredModel?: string | null;
   sdkClientFactory?: CopilotSdkClientFactory;
@@ -69,7 +69,7 @@ interface CopilotSessionState {
 }
 
 interface CopilotStateFile {
-  nativeArchivedSessionIds?: string[];
+  archivedSessionIds?: string[];
   sessions: Array<{
     thread: ThreadRecord;
     messages: SessionMessage[];
@@ -81,18 +81,6 @@ interface CopilotStateFile {
     copilotSessionId?: string | null;
     copilotSessionCreated?: boolean;
   }>;
-}
-
-interface CopilotNativeSessionMetadata {
-  id: string;
-  dir: string;
-  cwd: string;
-  summary: string | null;
-  createdAt: number;
-  updatedAt: number;
-  branch: string | null;
-  repository: string | null;
-  eventsPath: string;
 }
 
 interface ActiveCopilotTurn {
@@ -117,11 +105,6 @@ const DEFAULT_COPILOT_STATE_DIR = nodePath.join(
   homedir(),
   ".sidemesh",
   "copilot-provider",
-);
-const DEFAULT_COPILOT_SESSION_STATE_DIR = nodePath.join(
-  homedir(),
-  ".copilot",
-  "session-state",
 );
 const DEFAULT_SIDEMESH_COPILOT_MODEL = "auto";
 
@@ -179,12 +162,11 @@ export class CopilotAgentProvider
 
   private readonly bin: string;
   private readonly stateDir: string;
-  private readonly sessionStateDir: string;
   private readonly allowAll: boolean;
   private readonly configuredModel: string | null;
   private readonly sdkClientFactory: CopilotSdkClientFactory;
   private readonly sessions = new Map<string, CopilotSessionState>();
-  private readonly nativeArchivedSessionIds = new Set<string>();
+  private readonly archivedSessionIds = new Set<string>();
   private readonly loadedSessionIds = new Set<string>();
   private readonly activeTurns = new Map<string, ActiveCopilotTurn>();
   private readonly pendingPermissions = new Map<string, PendingCopilotPermission>();
@@ -196,9 +178,6 @@ export class CopilotAgentProvider
     this.bin = options.bin?.trim() || "copilot";
     this.stateDir = nodePath.resolve(
       options.stateDir || DEFAULT_COPILOT_STATE_DIR,
-    );
-    this.sessionStateDir = nodePath.resolve(
-      options.sessionStateDir || DEFAULT_COPILOT_SESSION_STATE_DIR,
     );
     this.allowAll = options.allowAll === true;
     this.configuredModel = options.configuredModel?.trim() || null;
@@ -231,20 +210,22 @@ export class CopilotAgentProvider
   public async listSessionThreads(
     options: AgentSessionListOptions,
   ): Promise<ThreadRecord[]> {
-    const native = await this.listNativeSessionMetadata();
-    const nativeIds = new Set(native.map((session) => session.id));
-    const nativeThreads = native
+    const sdkSessions = await this.listSdkSessionMetadata();
+    const sdkIds = new Set(sdkSessions.map((session) => session.sessionId));
+    const sdkThreads = sdkSessions
       .filter((session) =>
         options.archived
-          ? this.nativeArchivedSessionIds.has(session.id)
-          : !this.nativeArchivedSessionIds.has(session.id),
+          ? this.archivedSessionIds.has(session.sessionId)
+          : !this.archivedSessionIds.has(session.sessionId),
       )
-      .map((session) => nativeSessionToThread(session, false));
+      .map((session) =>
+        sdkSessionToThread(session, this.sessions.get(session.sessionId), false),
+      );
     const sidemeshThreads = [...this.sessions.values()]
-      .filter((session) => !nativeIds.has(session.thread.id))
+      .filter((session) => !sdkIds.has(session.thread.id))
       .filter((session) => session.archived === options.archived)
       .map((session) => cloneThread(session, false));
-    return [...nativeThreads, ...sidemeshThreads]
+    return [...sdkThreads, ...sidemeshThreads]
       .sort((left, right) => right.updatedAt - left.updatedAt)
       .slice(0, options.limit)
       .map(cloneThreadRecord);
@@ -253,16 +234,18 @@ export class CopilotAgentProvider
   public async listRecentUnindexedSessionThreads(
     limit: number,
   ): Promise<ThreadRecord[]> {
-    const native = await this.listNativeSessionMetadata();
-    const nativeIds = new Set(native.map((session) => session.id));
-    const nativeThreads = native
-      .filter((session) => !this.nativeArchivedSessionIds.has(session.id))
-      .map((session) => nativeSessionToThread(session, false));
+    const sdkSessions = await this.listSdkSessionMetadata();
+    const sdkIds = new Set(sdkSessions.map((session) => session.sessionId));
+    const sdkThreads = sdkSessions
+      .filter((session) => !this.archivedSessionIds.has(session.sessionId))
+      .map((session) =>
+        sdkSessionToThread(session, this.sessions.get(session.sessionId), false),
+      );
     const sidemeshThreads = [...this.sessions.values()]
-      .filter((session) => !nativeIds.has(session.thread.id))
+      .filter((session) => !sdkIds.has(session.thread.id))
       .filter((session) => !session.archived)
       .map((session) => cloneThread(session, false));
-    return [...nativeThreads, ...sidemeshThreads]
+    return [...sdkThreads, ...sidemeshThreads]
       .sort((left, right) => right.updatedAt - left.updatedAt)
       .slice(0, limit)
       .map(cloneThreadRecord);
@@ -272,9 +255,13 @@ export class CopilotAgentProvider
     threadId: string,
     includeTurns: boolean,
   ): Promise<ThreadRecord> {
-    const native = await this.readNativeSessionMetadata(threadId);
-    if (native) {
-      return nativeSessionToThread(native, includeTurns);
+    const existing = this.sessions.get(threadId);
+    if (existing) {
+      return cloneThread(existing, includeTurns);
+    }
+    const sdkSession = await this.readSdkSessionMetadata(threadId);
+    if (sdkSession) {
+      return sdkSessionToThread(sdkSession, null, includeTurns);
     }
     return cloneThread(this.requireSession(threadId), includeTurns);
   }
@@ -283,25 +270,8 @@ export class CopilotAgentProvider
     thread: ThreadRecord,
     options: AgentSessionLogOptions = {},
   ): Promise<SessionLogSnapshot> {
-    const native = await this.readNativeSessionMetadata(thread.id);
-    if (native) {
-      const nativeLog = await readNativeSessionLog(native, options);
-      const imported = this.sessions.get(thread.id);
-      if (imported && imported.messages.length > nativeLog.totalMessages) {
-        const messages = limitTail(
-          imported.messages,
-          options.messageLimit ?? null,
-        );
-        return {
-          ...nativeLog,
-          messages: messages.map(cloneMessage),
-          totalMessages: imported.messages.length,
-          nextSeq: Math.max(nativeLog.nextSeq, imported.nextSeq),
-        };
-      }
-      return nativeLog;
-    }
-    const session = this.requireSession(thread.id);
+    const session = this.sessions.get(thread.id) ??
+      (await this.loadSdkSessionStateFromHistory(thread.id));
     const messages = limitTail(session.messages, options.messageLimit ?? null);
     const activities = limitTail(
       [...session.activities.values()].sort((left, right) => left.seq - right.seq),
@@ -320,11 +290,9 @@ export class CopilotAgentProvider
   public async readSessionRuntime(
     thread: ThreadRecord,
   ): Promise<SessionRuntimeSummary | null> {
-    const native = await this.readNativeSessionMetadata(thread.id);
-    if (native) {
-      return readNativeRuntime(native);
-    }
-    const runtime = this.requireSession(thread.id).runtime;
+    const session = this.sessions.get(thread.id) ??
+      (await this.loadSdkSessionStateFromHistory(thread.id));
+    const runtime = session.runtime;
     return runtime ? { ...runtime } : null;
   }
 
@@ -336,9 +304,7 @@ export class CopilotAgentProvider
     threadId: string,
     _options?: AgentSessionResumeOptions,
   ): Promise<unknown> {
-    if (!(await this.readNativeSessionMetadata(threadId))) {
-      this.requireSession(threadId);
-    }
+    await this.getWritableSession(threadId);
     this.loadedSessionIds.add(threadId);
     return { resumed: true };
   }
@@ -347,12 +313,7 @@ export class CopilotAgentProvider
     threadId: string,
     name: string,
   ): Promise<unknown> {
-    const native = await this.readNativeSessionMetadata(threadId);
-    if (native) {
-      await writeNativeSummary(native, name);
-      return { renamed: true };
-    }
-    const session = this.requireSession(threadId);
+    const session = await this.getWritableSession(threadId);
     session.thread.name = name;
     this.touch(session);
     await this.persistSoon();
@@ -360,37 +321,28 @@ export class CopilotAgentProvider
   }
 
   public async archiveSession(threadId: string): Promise<unknown> {
-    const native = await this.readNativeSessionMetadata(threadId);
-    if (native) {
-      this.nativeArchivedSessionIds.add(threadId);
-      await this.interruptTurn(
-        threadId,
-        this.activeTurns.get(threadId)?.turnId ?? "",
-      );
-      this.loadedSessionIds.delete(threadId);
-      await this.persistSoon();
-      return { archived: true };
+    this.archivedSessionIds.add(threadId);
+    const session = this.sessions.get(threadId);
+    if (session) {
+      session.archived = true;
+      this.touch(session);
     }
-    const session = this.requireSession(threadId);
-    session.archived = true;
     await this.interruptTurn(
       threadId,
       this.activeTurns.get(threadId)?.turnId ?? "",
     );
     this.loadedSessionIds.delete(threadId);
-    this.touch(session);
     await this.persistSoon();
     return { archived: true };
   }
 
   public async unarchiveSession(threadId: string): Promise<unknown> {
-    if (this.nativeArchivedSessionIds.delete(threadId)) {
-      await this.persistSoon();
-      return { unarchived: true };
+    this.archivedSessionIds.delete(threadId);
+    const session = this.sessions.get(threadId);
+    if (session) {
+      session.archived = false;
+      this.touch(session);
     }
-    const session = this.requireSession(threadId);
-    session.archived = false;
-    this.touch(session);
     await this.persistSoon();
     return { unarchived: true };
   }
@@ -527,7 +479,7 @@ export class CopilotAgentProvider
       createdAt: now,
       updatedAt: now,
       source: "copilot",
-      path: nodePath.join(this.sessionStateDir, id),
+      path: null,
       status: { type: "idle" },
       turns: [],
     };
@@ -1079,22 +1031,7 @@ export class CopilotAgentProvider
   ): Promise<CopilotSessionState> {
     const existing = this.sessions.get(threadId);
     if (existing) return existing;
-    const native = await this.readNativeSessionMetadata(threadId);
-    if (!native) return this.requireSession(threadId);
-    const log = await readNativeSessionLog(native, {});
-    const state: CopilotSessionState = {
-      thread: nativeSessionToThread(native, false),
-      messages: log.messages,
-      activities: new Map(log.activities.map((activity) => [activity.id, activity])),
-      turns: [],
-      runtime: log.runtime,
-      archived: this.nativeArchivedSessionIds.has(threadId),
-      nextSeq: log.nextSeq,
-      copilotSessionId: native.id,
-      copilotSessionCreated: true,
-    };
-    this.sessions.set(threadId, state);
-    return state;
+    return this.loadSdkSessionStateFromHistory(threadId);
   }
 
   private requireTurn(
@@ -1120,8 +1057,8 @@ export class CopilotAgentProvider
     try {
       const raw = await readFile(this.statePath, "utf8");
       const parsed = JSON.parse(raw) as CopilotStateFile;
-      for (const id of parsed.nativeArchivedSessionIds ?? []) {
-        this.nativeArchivedSessionIds.add(id);
+      for (const id of parsed.archivedSessionIds ?? []) {
+        this.archivedSessionIds.add(id);
       }
       for (const item of parsed.sessions ?? []) {
         const state: CopilotSessionState = {
@@ -1155,7 +1092,7 @@ export class CopilotAgentProvider
   private async saveState(): Promise<void> {
     await mkdir(this.stateDir, { recursive: true });
     const payload: CopilotStateFile = {
-      nativeArchivedSessionIds: [...this.nativeArchivedSessionIds],
+      archivedSessionIds: [...this.archivedSessionIds],
       sessions: [...this.sessions.values()].map((session) => ({
         thread: cloneThread(session, true),
         messages: session.messages.map(cloneMessage),
@@ -1175,53 +1112,77 @@ export class CopilotAgentProvider
     return nodePath.join(this.stateDir, "sessions.json");
   }
 
-  private async listNativeSessionMetadata(): Promise<CopilotNativeSessionMetadata[]> {
-    let entries: string[];
+  private async listSdkSessionMetadata(): Promise<CopilotSdkSessionMetadata[]> {
     try {
-      entries = await readdir(this.sessionStateDir);
-    } catch {
+      return (await this.ensureSdkClient()).listSessions?.() ?? [];
+    } catch (error) {
+      this.emit(
+        "stderr",
+        error instanceof Error
+          ? `Copilot SDK session listing failed: ${error.message}`
+          : "Copilot SDK session listing failed.",
+      );
       return [];
     }
-    const sessions = await Promise.all(
-      entries.map((entry) => this.readNativeSessionMetadata(entry)),
-    );
-    return sessions.filter(
-      (session): session is CopilotNativeSessionMetadata => session !== null,
-    );
   }
 
-  private async readNativeSessionMetadata(
+  private async readSdkSessionMetadata(
     sessionId: string,
-  ): Promise<CopilotNativeSessionMetadata | null> {
-    if (!isUuid(sessionId)) return null;
-    const dir = nodePath.join(this.sessionStateDir, sessionId);
-    const workspacePath = nodePath.join(dir, "workspace.yaml");
+  ): Promise<CopilotSdkSessionMetadata | null> {
+    const client = await this.ensureSdkClient();
     try {
-      const [workspaceRaw, dirStat] = await Promise.all([
-        readFile(workspacePath, "utf8"),
-        stat(dir),
-      ]);
-      const workspace = parseSimpleYaml(workspaceRaw);
-      const id = workspace.id || sessionId;
-      const cwd = workspace.cwd || this.sessions.get(id)?.thread.cwd || dir;
-      const createdAt =
-        secondsFromIso(workspace.created_at) ?? dirStat.birthtimeMs / 1000;
-      const updatedAt =
-        secondsFromIso(workspace.updated_at) ?? dirStat.mtimeMs / 1000;
-      return {
-        id,
-        dir,
-        cwd,
-        summary: workspace.summary || null,
-        createdAt,
-        updatedAt,
-        branch: workspace.branch || null,
-        repository: workspace.repository || null,
-        eventsPath: nodePath.join(dir, "events.jsonl"),
-      };
+      const direct = await client.getSessionMetadata?.(sessionId);
+      if (direct) {
+        return direct;
+      }
     } catch {
-      return null;
+      // Fall back to listSessions below for SDK versions without direct lookup.
     }
+    return (await this.listSdkSessionMetadata()).find(
+      (session) => session.sessionId === sessionId,
+    ) ?? null;
+  }
+
+  private async loadSdkSessionStateFromHistory(
+    sessionId: string,
+  ): Promise<CopilotSessionState> {
+    const metadata = await this.readSdkSessionMetadata(sessionId);
+    if (!metadata) {
+      return this.requireSession(sessionId);
+    }
+    const thread = sdkSessionToThread(metadata, null, false);
+    const state: CopilotSessionState = {
+      thread,
+      messages: [],
+      activities: new Map(),
+      turns: [],
+      runtime: null,
+      archived: this.archivedSessionIds.has(sessionId),
+      nextSeq: 0,
+      copilotSessionId: sessionId,
+      copilotSessionCreated: true,
+    };
+    const sdkSession = await (await this.ensureSdkClient()).resumeSession(
+      sessionId,
+      {
+        ...this.buildSdkSessionConfig(state),
+        disableResume: true,
+      },
+    );
+    state.sdkSession = sdkSession;
+    const events = await sdkSession.getMessages?.();
+    if (events) {
+      const parsed = parseSdkSessionEvents(events, thread.cwd);
+      state.messages = parsed.messages;
+      state.activities = new Map(
+        parsed.activities.map((activity) => [activity.id, activity]),
+      );
+      state.runtime = parsed.runtime;
+      state.nextSeq = parsed.nextSeq;
+    }
+    this.sessions.set(sessionId, state);
+    await this.persistSoon();
+    return state;
   }
 }
 
@@ -1525,89 +1486,52 @@ function copilotSessionApproval(request: unknown): CopilotSessionApproval | null
   }
 }
 
-function nativeSessionToThread(
-  session: CopilotNativeSessionMetadata,
+function sdkSessionToThread(
+  session: CopilotSdkSessionMetadata,
+  local: CopilotSessionState | null | undefined,
   includeTurns: boolean,
 ): ThreadRecord {
+  const cwd = session.context?.cwd ?? local?.thread.cwd ?? process.cwd();
   return {
-    id: session.id,
-    name: session.summary,
-    preview: session.summary ?? session.cwd,
-    cwd: session.cwd,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
+    id: session.sessionId,
+    name: local?.thread.name ?? session.summary ?? null,
+    preview: local?.thread.preview ?? session.summary ?? cwd,
+    cwd,
+    createdAt: secondsFromDate(session.startTime, nowSeconds()),
+    updatedAt: secondsFromDate(session.modifiedTime, nowSeconds()),
     source: "copilot",
-    path: session.dir,
-    status: { type: "idle" },
+    path: null,
+    status: local?.thread.status ? { ...local.thread.status } : { type: "idle" },
     gitInfo: {
       sha: null,
-      branch: session.branch,
-      originUrl: session.repository
-        ? `https://github.com/${session.repository}`
+      branch: session.context?.branch ?? null,
+      originUrl: session.context?.repository
+        ? `https://github.com/${session.context.repository}`
         : null,
     },
-    turns: includeTurns ? [] : undefined,
+    turns: includeTurns ? (local?.turns.map(cloneTurn) ?? []) : undefined,
   };
 }
 
-async function readNativeSessionLog(
-  session: CopilotNativeSessionMetadata,
-  options: AgentSessionLogOptions,
-): Promise<SessionLogSnapshot> {
-  const parsed = await parseNativeEvents(session);
-  const messages = limitTail(parsed.messages, options.messageLimit ?? null);
-  const activities = limitTail(parsed.activities, options.activityLimit ?? null);
-  return {
-    messages,
-    activities,
-    runtime: parsed.runtime,
-    totalMessages: parsed.messages.length,
-    totalActivities: parsed.activities.length,
-    nextSeq: parsed.nextSeq,
-  };
-}
-
-async function readNativeRuntime(
-  session: CopilotNativeSessionMetadata,
-): Promise<SessionRuntimeSummary | null> {
-  return (await parseNativeEvents(session)).runtime;
-}
-
-async function parseNativeEvents(session: CopilotNativeSessionMetadata): Promise<{
+function parseSdkSessionEvents(
+  events: CopilotSdkSessionEvent[],
+  cwd: string,
+): {
   messages: SessionMessage[];
   activities: import("./types.js").SessionActivity[];
   runtime: SessionRuntimeSummary | null;
   nextSeq: number;
-}> {
-  let raw = "";
-  try {
-    raw = await readFile(session.eventsPath, "utf8");
-  } catch {
-    return {
-      messages: [],
-      activities: [],
-      runtime: null,
-      nextSeq: 0,
-    };
-  }
-
+} {
   const messages: SessionMessage[] = [];
   const activities = new Map<string, import("./types.js").CommandActivity>();
   let seq = 0;
   let model: string | undefined;
   let updatedAt: number | undefined;
 
-  for (const line of raw.split(/\n/)) {
-    if (!line.trim()) continue;
-    let event: Record<string, any>;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const timestamp = millisFromIso(event.timestamp) ?? Date.now();
+  for (const event of events) {
+    const timestamp = millisFromDateLike(event.timestamp) ?? Date.now();
     updatedAt = timestamp;
-    const data = event.data ?? {};
+    const data = (event.data ?? {}) as Record<string, any>;
 
     if (event.type === "session.model_change" && typeof data.newModel === "string") {
       model = data.newModel;
@@ -1660,7 +1584,7 @@ async function parseNativeEvents(session: CopilotNativeSessionMetadata): Promise
         seq: seq++,
         status: "in_progress",
         command: formatCopilotToolCommand(data.toolName, data.arguments),
-        cwd: session.cwd,
+        cwd,
         output: null,
         exitCode: null,
         durationMs: null,
@@ -1687,7 +1611,7 @@ async function parseNativeEvents(session: CopilotNativeSessionMetadata): Promise
           createdAt: timestamp,
           seq: seq++,
           command: formatCopilotToolCommand(data.toolName, null),
-          cwd: session.cwd,
+          cwd,
           output: null,
           exitCode: null,
           durationMs: null,
@@ -1720,25 +1644,6 @@ async function parseNativeEvents(session: CopilotNativeSessionMetadata): Promise
   };
 }
 
-async function writeNativeSummary(
-  session: CopilotNativeSessionMetadata,
-  summary: string,
-): Promise<void> {
-  const workspacePath = nodePath.join(session.dir, "workspace.yaml");
-  const raw = await readFile(workspacePath, "utf8");
-  const lines = raw.split(/\r?\n/);
-  let wrote = false;
-  const next = lines.map((line) => {
-    if (line.startsWith("summary:")) {
-      wrote = true;
-      return `summary: ${summary}`;
-    }
-    return line;
-  });
-  if (!wrote) next.push(`summary: ${summary}`);
-  await writeFile(workspacePath, next.join("\n"));
-}
-
 function formatCopilotToolCommand(toolName: unknown, args: unknown): string {
   const name = typeof toolName === "string" ? toolName : "tool";
   if (!args || typeof args !== "object") return name;
@@ -1752,39 +1657,15 @@ function extractCopilotToolOutput(result: unknown): string | null {
   return typeof content === "string" ? content : JSON.stringify(result);
 }
 
-function parseSimpleYaml(raw: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const line of raw.split(/\r?\n/)) {
-    const index = line.indexOf(":");
-    if (index <= 0) continue;
-    const key = line.slice(0, index).trim();
-    let value = line.slice(index + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    result[key] = value;
-  }
-  return result;
+function secondsFromDate(value: Date | string | undefined, fallback: number): number {
+  const millis = millisFromDateLike(value);
+  return millis == null ? fallback : millis / 1000;
 }
 
-function secondsFromIso(value: string | undefined): number | null {
-  const millis = millisFromIso(value);
-  return millis == null ? null : millis / 1000;
-}
-
-function millisFromIso(value: string | undefined): number | null {
+function millisFromDateLike(value: Date | string | undefined): number | null {
   if (!value) return null;
-  const millis = Date.parse(value);
+  const millis = value instanceof Date ? value.getTime() : Date.parse(value);
   return Number.isFinite(millis) ? millis : null;
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    value,
-  );
 }
 
 function mergeRuntime(
