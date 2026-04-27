@@ -1589,8 +1589,6 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   workspace: {
     filesystem: true,
-    gitStatus: true,
-    gitDiff: true,
     remoteGitDiff: true,
   },
 };

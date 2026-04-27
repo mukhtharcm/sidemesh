@@ -148,6 +148,7 @@ The app currently supports:
 - command, file-change, terminal-input, and turn-diff activity cards
 - session rename, archive, unarchive, favorite, and unread state
 - workspace file browsing, reading, editing, and live file-change refresh
+- local git status and local diffs, shown according to daemon host capabilities
 
 Current limits:
 

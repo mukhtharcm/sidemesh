@@ -57,6 +57,7 @@ class NodeInfo {
     required this.providerVersion,
     required this.providerConfig,
     required this.providerCapabilities,
+    required this.hostCapabilities,
     required this.supportedProviders,
   });
 
@@ -69,6 +70,7 @@ class NodeInfo {
   final String providerVersion;
   final ProviderConfigSummary providerConfig;
   final ProviderCapabilities providerCapabilities;
+  final ProviderCapabilities hostCapabilities;
   final List<ProviderDefinitionSummary> supportedProviders;
 
   String get providerDisplayName {
@@ -88,6 +90,10 @@ class NodeInfo {
     return '$providerDisplayName $version';
   }
 
+  bool supportsHostCapability(String section, String feature) {
+    return hostCapabilities.supports(section, feature);
+  }
+
   factory NodeInfo.fromJson(Map<String, dynamic> json) => NodeInfo(
     label: _stringValue(json['label']),
     hostname: _stringValue(json['hostname']),
@@ -102,6 +108,7 @@ class NodeInfo {
     providerCapabilities: ProviderCapabilities.fromJson(
       json['providerCapabilities'],
     ),
+    hostCapabilities: ProviderCapabilities.fromJson(json['hostCapabilities']),
     supportedProviders: ProviderDefinitionSummary.listFromJson(
       json['supportedProviders'],
     ),
