@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:sidemesh_mobile/main.dart';
 import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
+import 'package:sidemesh_mobile/src/windowing.dart';
 
 void main() {
   setUp(() {
@@ -12,7 +13,14 @@ void main() {
 
   testWidgets('renders app shell', (tester) async {
     final controller = await ThemeController.load();
-    await tester.pumpWidget(SidemeshApp(themeController: controller));
+    await tester.pumpWidget(
+      SidemeshApp(
+        themeController: controller,
+        launchState: const SidemeshWindowLaunchState(
+          arguments: SidemeshWindowArguments.mainWindow(),
+        ),
+      ),
+    );
     await tester.pump();
 
     expect(find.byType(Scaffold), findsOneWidget);
