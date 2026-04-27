@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { CodexAgentProvider } from "./codex-provider.js";
+import { FakeAgentProvider } from "./fake-provider.js";
 import {
   DEFAULT_AGENT_PROVIDER_KIND,
   createAgentProviderFromConfig,
@@ -15,8 +16,9 @@ import {
 describe("provider registry", () => {
   it("reports Codex as the default supported provider", () => {
     assert.equal(DEFAULT_AGENT_PROVIDER_KIND, "codex");
-    assert.deepEqual(supportedAgentProviderKinds(), ["codex"]);
+    assert.deepEqual(supportedAgentProviderKinds(), ["codex", "fake"]);
     assert.equal(isAgentProviderKind("codex"), true);
+    assert.equal(isAgentProviderKind("fake"), true);
     assert.equal(isAgentProviderKind("copilot"), false);
   });
 
@@ -29,6 +31,16 @@ describe("provider registry", () => {
         commandEnvironmentVariables: [
           "SIDEMESH_CODEX_BIN",
           "SIDEMESH_PROVIDER_COMMAND",
+        ],
+      },
+      {
+        kind: "fake",
+        displayName: "Fake Test Provider",
+        defaultCommand: "builtin",
+        commandEnvironmentVariables: [
+          "SIDEMESH_FAKE_LATENCY_MS",
+          "SIDEMESH_FAKE_SEED",
+          "SIDEMESH_FAKE_WORKSPACE_ROOT",
         ],
       },
     ]);
@@ -72,5 +84,29 @@ describe("provider registry", () => {
     assert.ok(provider instanceof CodexAgentProvider);
     assert.equal(provider.kind, "codex");
     assert.equal(provider.displayName, "Codex");
+  });
+
+  it("loads and constructs the fake test provider", () => {
+    const config = loadAgentProviderConfig("fake", {
+      SIDEMESH_FAKE_LATENCY_MS: "0",
+      SIDEMESH_FAKE_SEED: "0",
+      SIDEMESH_FAKE_WORKSPACE_ROOT: "/tmp/sidemesh-fake",
+    });
+
+    assert.deepEqual(config, {
+      kind: "fake",
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: "/tmp/sidemesh-fake",
+    });
+    assert.deepEqual(summarizeAgentProviderConfig(config), {
+      kind: "fake",
+      command: "builtin",
+    });
+
+    const provider = createAgentProviderFromConfig(config);
+    assert.ok(provider instanceof FakeAgentProvider);
+    assert.equal(provider.kind, "fake");
+    assert.equal(provider.displayName, "Fake Test Provider");
   });
 });
