@@ -1463,6 +1463,7 @@ class _DetailPaneState extends State<_DetailPane> {
                   widget.onOpenSession(active.host, session),
               onArchived: () => widget.onArchived(active.host, active.session),
               topPadding: widget.titlebarInset + 6,
+              desktopMode: true,
             ),
           ),
           Positioned(
