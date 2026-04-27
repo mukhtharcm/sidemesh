@@ -356,6 +356,17 @@ describe("Copilot provider", () => {
       const action = await actionOpened;
       assert.equal(action.kind, "command");
       assert.equal(action.detail, "echo approval");
+      assert.deepEqual(action.approval?.targets, [
+        {
+          type: "command",
+          command: "echo approval",
+          identifiers: ["echo"],
+          possiblePaths: [],
+          possibleUrls: [],
+          intention: "Run test approval command",
+          warning: undefined,
+        },
+      ]);
       assert.equal(provider.respondToPendingAction!(action, "accept"), true);
       await completed;
 

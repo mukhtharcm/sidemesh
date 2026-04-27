@@ -29,6 +29,10 @@ import {
   type AgentSubmitInputResult,
 } from "./agent-provider.js";
 import {
+  normalizePendingActionDecision,
+  type PendingActionDecisionInput,
+} from "./approvals.js";
+import {
   buildActivityFromThreadItem,
   buildFileChangeChanges,
   buildTurnDiffActivity,
@@ -263,7 +267,7 @@ export class CodexAgentProvider
 
   public respondToPendingAction(
     action: AgentPendingAction,
-    decision: string | null,
+    decision: PendingActionDecisionInput,
   ): boolean {
     const result = buildCodexActionResponse(action, decision);
     if (!result) {
@@ -1547,6 +1551,8 @@ function buildCodexPendingAction(
 
   if (method === "item/commandExecution/requestApproval") {
     const command = asString(typed.command) || "Command approval";
+    const cwd = asString(typed.cwd) ?? undefined;
+    const reason = asString(typed.reason) ?? undefined;
     return {
       id: asString(typed.approvalId) || randomFallbackId(),
       sessionId,
@@ -1557,37 +1563,94 @@ function buildCodexPendingAction(
       canApprove: true,
       canApproveForSession: true,
       canDecline: true,
+      cwd,
+      approval: {
+        category: "command",
+        operation: "codex.commandExecution",
+        summary: command,
+        detail: reason,
+        cwd,
+        supportedScopes: ["once", "session"],
+        suggestedScope: "once",
+        targets: [
+          {
+            type: "command",
+            command,
+            cwd,
+            intention: reason,
+          },
+        ],
+      },
       providerRequestId,
       providerRequestKind: method,
     };
   }
 
   if (method === "item/fileChange/requestApproval") {
+    const reason = asString(typed.reason) || "Codex wants to modify files.";
+    const grantRoot = asString(typed.grantRoot);
     return {
       id: randomFallbackId(),
       sessionId,
       kind: "file_change",
       title: "File change approval",
-      detail: asString(typed.reason) || "Codex wants to modify files.",
+      detail: reason,
       requestedAt,
       canApprove: true,
       canApproveForSession: true,
       canDecline: true,
+      approval: {
+        category: "file_change",
+        operation: "codex.fileChange",
+        summary: reason,
+        detail: reason,
+        supportedScopes: ["once", "session"],
+        suggestedScope: "once",
+        targets: [
+          {
+            type: "file",
+            path: grantRoot ?? "workspace",
+            access: "write",
+            intention: reason,
+          },
+        ],
+      },
       providerRequestId,
       providerRequestKind: method,
     };
   }
 
+  const cwd = asString(typed.cwd) ?? undefined;
+  const reason = asString(typed.reason) ?? undefined;
+  const detail = formatPermissionRequestDetail(typed.reason, typed.permissions);
   return {
     id: randomFallbackId(),
     sessionId,
     kind: "permissions",
     title: "Permission request",
-    detail: formatPermissionRequestDetail(typed.reason, typed.permissions),
+    detail,
     requestedAt,
     canApprove: true,
     canApproveForSession: true,
     canDecline: true,
+    cwd,
+    approval: {
+      category: "permissions",
+      operation: "codex.requestPermissions",
+      summary: reason || "Codex requested additional permissions.",
+      detail,
+      cwd,
+      supportedScopes: ["once", "session"],
+      suggestedScope: "once",
+      targets: [
+        {
+          type: "permission_profile",
+          permissions: typed.permissions,
+          cwd,
+          reason,
+        },
+      ],
+    },
     providerRequestId,
     providerRequestKind: method,
     providerPayload: typed.permissions,
@@ -1640,8 +1703,9 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
 
 function buildCodexActionResponse(
   action: AgentPendingAction,
-  decision: string | null,
+  input: PendingActionDecisionInput,
 ): unknown | null {
+  const decision = normalizePendingActionDecision(input);
   if (!decision) {
     return null;
   }
@@ -1650,26 +1714,23 @@ function buildCodexActionResponse(
     action.providerRequestKind === "item/commandExecution/requestApproval" ||
     action.providerRequestKind === "item/fileChange/requestApproval"
   ) {
-    if (decision === "accept" || decision === "acceptForSession" || decision === "decline" || decision === "cancel") {
-      return { decision };
+    if (decision.legacyDecision === "acceptForLocation") {
+      return null;
     }
-    return null;
+    return { decision: decision.legacyDecision };
   }
 
   if (action.providerRequestKind === "item/permissions/requestApproval") {
-    if (decision === "accept") {
+    if (decision.decision === "approve") {
+      if (decision.scope === "location") {
+        return null;
+      }
       return {
-        scope: "turn",
+        scope: decision.scope === "session" ? "session" : "turn",
         permissions: action.providerPayload || {},
       };
     }
-    if (decision === "acceptForSession") {
-      return {
-        scope: "session",
-        permissions: action.providerPayload || {},
-      };
-    }
-    if (decision === "decline" || decision === "cancel") {
+    if (decision.decision === "decline" || decision.decision === "cancel") {
       return { scope: "turn", permissions: {} };
     }
   }

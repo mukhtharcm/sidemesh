@@ -14,6 +14,10 @@ import { hostname } from "node:os";
 import nodePath from "node:path";
 
 import {
+  normalizePendingActionDecision,
+  type PendingActionDecisionInput,
+} from "./approvals.js";
+import {
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
   type AgentFsDirectoryListing,
@@ -406,9 +410,10 @@ export class FakeAgentProvider
 
   public respondToPendingAction(
     action: AgentPendingAction,
-    decision: string | null,
+    decision: PendingActionDecisionInput,
   ): boolean {
-    if (!decision || !isSupportedDecision(decision)) {
+    const normalized = normalizePendingActionDecision(decision);
+    if (!normalized || !isSupportedDecision(normalized.legacyDecision)) {
       return false;
     }
     const pending = this.pendingApprovals.get(action.id);
@@ -416,7 +421,7 @@ export class FakeAgentProvider
       return false;
     }
     this.pendingApprovals.delete(action.id);
-    pending.resolve(decision);
+    pending.resolve(normalized.legacyDecision);
     return true;
   }
 
@@ -953,6 +958,7 @@ export class FakeAgentProvider
       canDecline: true,
       sessionTitle: session.thread.name ?? session.thread.preview,
       cwd: session.thread.cwd,
+      approval: fakeApproval(kind, session.thread.cwd),
       providerRequestId: actionId,
       providerRequestKind: `fake/${kind}/requestApproval`,
       providerPayload: { kind, cwd: session.thread.cwd },
@@ -1386,6 +1392,61 @@ function fakeApprovalDetail(kind: FakeApprovalKind, cwd: string): string {
       return `Apply a fake patch under ${cwd}.`;
     case "permissions":
       return `Grant fake network and workspace-write permissions for ${hostname()}.`;
+  }
+}
+
+function fakeApproval(
+  kind: FakeApprovalKind,
+  cwd: string,
+): NonNullable<AgentPendingAction["approval"]> {
+  const detail = fakeApprovalDetail(kind, cwd);
+  switch (kind) {
+    case "command":
+      return {
+        category: "command",
+        operation: "fake.command",
+        summary: detail,
+        detail,
+        cwd,
+        supportedScopes: ["once", "session"],
+        suggestedScope: "once",
+        targets: [
+          {
+            type: "command",
+            command: "printf 'approval test'",
+            cwd,
+          },
+        ],
+      };
+    case "file_change":
+      return {
+        category: "file_change",
+        operation: "fake.fileChange",
+        summary: detail,
+        detail,
+        cwd,
+        supportedScopes: ["once", "session"],
+        suggestedScope: "once",
+        targets: [{ type: "file", path: cwd, access: "write", intention: detail }],
+      };
+    case "permissions":
+      return {
+        category: "permissions",
+        operation: "fake.permissions",
+        summary: detail,
+        detail,
+        cwd,
+        supportedScopes: ["once", "session"],
+        suggestedScope: "once",
+        targets: [
+          {
+            type: "permission_profile",
+            permissions: { network: true, filesystem: "workspace-write" },
+            cwd,
+            reason: detail,
+          },
+        ],
+      };
   }
 }
 

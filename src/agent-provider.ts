@@ -1,5 +1,6 @@
 import type { EventEmitter } from "node:events";
 
+import type { PendingActionDecisionInput } from "./approvals.js";
 import type {
   CommandActivity,
   FileChangeActivity,
@@ -300,7 +301,10 @@ export interface AgentSessionLifecycleProvider {
 }
 
 export interface AgentApprovalProvider {
-  respondToPendingAction(action: AgentPendingAction, decision: string | null): boolean;
+  respondToPendingAction(
+    action: AgentPendingAction,
+    decision: PendingActionDecisionInput,
+  ): boolean;
 }
 
 export interface AgentWorkspaceProvider {
