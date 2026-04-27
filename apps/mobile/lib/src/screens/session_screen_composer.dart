@@ -11,6 +11,8 @@ class _Composer extends StatelessWidget {
     required this.loadingSkills,
     required this.skillError,
     required this.sending,
+    required this.supportsImageInput,
+    required this.supportsSkillInput,
     required this.onPickImages,
     required this.onPasteImage,
     required this.onNativePaste,
@@ -31,6 +33,8 @@ class _Composer extends StatelessWidget {
   final bool loadingSkills;
   final String? skillError;
   final bool sending;
+  final bool supportsImageInput;
+  final bool supportsSkillInput;
   final VoidCallback onPickImages;
   final Future<bool> Function() onPasteImage;
   final Future<bool> Function() onNativePaste;
@@ -108,13 +112,15 @@ class _Composer extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
-            const SizedBox(width: 8),
-            _ComposerPasteButton(
-              enabled: !sending,
-              onPressed: () => unawaited(onPasteImage()),
-            ),
-            const SizedBox(width: 8),
+            if (supportsImageInput) ...[
+              _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
+              const SizedBox(width: 8),
+              _ComposerPasteButton(
+                enabled: !sending,
+                onPressed: () => unawaited(onPasteImage()),
+              ),
+              const SizedBox(width: 8),
+            ],
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
@@ -126,7 +132,7 @@ class _Composer extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (activeSkillQuery != null) ...[
+                    if (supportsSkillInput && activeSkillQuery != null) ...[
                       _ComposerSkillSuggestionTray(
                         query: activeSkillQuery!,
                         suggestions: skillSuggestions,
@@ -136,7 +142,7 @@ class _Composer extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                     ],
-                    if (skills.isNotEmpty) ...[
+                    if (supportsSkillInput && skills.isNotEmpty) ...[
                       Align(
                         alignment: Alignment.centerLeft,
                         child: Wrap(

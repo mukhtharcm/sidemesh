@@ -19,6 +19,7 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 - [x] Add resilient chat streaming with seq-aware reconnects and a cheap delta replay endpoint.
 - [x] Add per-device unread indicators, favorites, host reachability, and background approval polling.
 - [x] Move host tokens from `SharedPreferences` to platform secure storage.
+- [x] Add provider-capability plumbing so the daemon and app can prepare for non-Codex adapters.
 
 ## Current Wave
 
@@ -65,7 +66,7 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 
 - [ ] Expose Codex apps and plugins through `app/list` and related APIs.
 - [ ] Surface MCP server status and selected MCP tools.
-- [ ] Add a provider abstraction for non-Codex backends once Codex parity is strong enough.
+- [ ] Implement the first non-Codex provider adapter using `docs/provider-adapter-contract.md`.
 - [ ] Investigate GitHub Copilot local sessions via the Copilot SDK.
 - [ ] Investigate OpenClaw Gateway as a provider.
 - [ ] Revisit multi-agent support once Codex parity is strong enough.

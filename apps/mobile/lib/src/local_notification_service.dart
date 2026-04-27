@@ -14,7 +14,7 @@ class LocalNotificationService with WidgetsBindingObserver {
   static const _approvalChannelId = 'sidemesh_approvals';
   static const _approvalChannelName = 'Approvals';
   static const _approvalChannelDescription =
-      'Codex approval requests from Sidemesh hosts';
+      'Agent approval requests from Sidemesh hosts';
   static const _approvalAccent = Color(0xFFD69E2E);
 
   final FlutterLocalNotificationsPlugin _plugin =

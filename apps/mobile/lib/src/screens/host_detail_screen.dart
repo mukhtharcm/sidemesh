@@ -443,11 +443,18 @@ class _NodeCard extends StatelessWidget {
                 mono: true,
               ),
               MeshPill(
-                label: 'codex ${node.codexVersion}',
+                label: node.providerPillLabel,
                 icon: Icons.auto_awesome_rounded,
                 tone: MeshPillTone.accent,
                 mono: true,
               ),
+              if (node.providerConfig.command != null)
+                MeshPill(
+                  label: node.providerConfig.command!,
+                  icon: Icons.terminal_rounded,
+                  tone: MeshPillTone.neutral,
+                  mono: true,
+                ),
             ],
           ),
         ],

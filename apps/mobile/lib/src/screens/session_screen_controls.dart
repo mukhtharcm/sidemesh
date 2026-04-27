@@ -39,7 +39,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   late SessionTurnConfig _turnConfig;
   List<ModelCatalogEntry> _models = const <ModelCatalogEntry>[];
   bool _loadingModels = true;
+  bool _loadingNode = false;
   String? _modelsError;
+  NodeInfo? _nodeInfo;
 
   @override
   void initState() {
@@ -49,7 +51,33 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       widget.host,
       widget.session.id,
     );
+    unawaited(_loadNodeInfo());
     unawaited(_loadModels());
+  }
+
+  String get _providerName => _nodeInfo?.providerDisplayName ?? 'agent';
+
+  bool get _supportsModels => _supports('configuration', 'models');
+
+  bool get _supportsModelOverride => _supports('runtimeControls', 'model');
+
+  bool get _supportsReasoningEffort =>
+      _supports('runtimeControls', 'reasoningEffort');
+
+  bool get _supportsFastMode => _supports('runtimeControls', 'fastMode');
+
+  bool get _supportsApprovalPolicy =>
+      _supports('runtimeControls', 'approvalPolicy');
+
+  bool get _supportsSandboxMode => _supports('runtimeControls', 'sandboxMode');
+
+  bool get _supportsNetworkAccess =>
+      _supports('runtimeControls', 'networkAccess');
+
+  bool _supports(String section, String feature) {
+    final node = _nodeInfo;
+    if (node == null) return true;
+    return node.providerCapabilities.supports(section, feature);
   }
 
   ApprovalPolicy get _effectiveApproval =>
@@ -101,7 +129,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     if (selected != null) {
       return selected.displayName;
     }
-    return _effectiveModelValue ?? 'Use Codex default';
+    return _effectiveModelValue ?? 'Use provider default';
   }
 
   String get _effectiveModelDescription {
@@ -110,7 +138,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       if (provider != null) {
         return 'Loading models from this session\'s $provider provider.';
       }
-      return 'Loading the available Codex models from this host.';
+      return 'Loading the available models from this host.';
     }
     if (_modelsError != null) {
       return _modelsError!;
@@ -168,6 +196,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   }
 
   bool get _selectedModelSupportsFast {
+    if (!_supportsFastMode) return false;
     final selected = _selectedModelEntry;
     if (selected != null) {
       return selected.supportsFastMode;
@@ -184,9 +213,70 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   }
 
   bool get _showFastSection =>
-      _selectedModelSupportsFast || widget.runtimeServiceTier == 'fast';
+      _supportsFastMode &&
+      (_selectedModelSupportsFast || widget.runtimeServiceTier == 'fast');
+
+  Future<void> _loadNodeInfo() async {
+    if (_loadingNode) return;
+    setState(() {
+      _loadingNode = true;
+    });
+
+    try {
+      final node = await widget.api.fetchNode(widget.host);
+      if (!mounted) return;
+      setState(() {
+        _nodeInfo = node;
+        _loadingNode = false;
+        _coerceForProviderCapabilities();
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingNode = false;
+      });
+    }
+  }
+
+  void _coerceForProviderCapabilities() {
+    var nextPolicy = _policy;
+    if (!_supportsApprovalPolicy) {
+      nextPolicy = nextPolicy.copyWith(approval: null);
+    }
+    if (!_supportsSandboxMode) {
+      nextPolicy = nextPolicy.copyWith(sandbox: null);
+    }
+    if (!_supportsNetworkAccess) {
+      nextPolicy = nextPolicy.copyWith(networkAccess: null);
+    }
+
+    var nextConfig = _turnConfig;
+    if (!_supportsModelOverride || !_supportsModels) {
+      nextConfig = nextConfig.copyWith(model: null);
+      _models = const <ModelCatalogEntry>[];
+      _modelsError = null;
+      _loadingModels = false;
+    }
+    if (!_supportsReasoningEffort) {
+      nextConfig = nextConfig.copyWith(reasoningEffort: null);
+    }
+    if (!_supportsFastMode) {
+      nextConfig = nextConfig.copyWith(fastMode: null);
+    }
+
+    _policy = nextPolicy;
+    _turnConfig = nextConfig;
+  }
 
   Future<void> _loadModels() async {
+    if (!_supportsModels || !_supportsModelOverride) {
+      setState(() {
+        _models = const <ModelCatalogEntry>[];
+        _loadingModels = false;
+        _modelsError = null;
+      });
+      return;
+    }
     setState(() {
       _loadingModels = true;
       _modelsError = null;
@@ -202,13 +292,21 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       if (!mounted) {
         return;
       }
+      if (!_supportsModels || !_supportsModelOverride) {
+        setState(() {
+          _models = const <ModelCatalogEntry>[];
+          _loadingModels = false;
+          _modelsError = null;
+        });
+        return;
+      }
       setState(() {
         _models = models;
         _loadingModels = false;
         _modelsError = models.isEmpty
             ? _runtimeModelProvider == null
-                  ? 'Codex did not return any models for this host.'
-                  : 'Codex did not return any models for provider $_runtimeModelProvider.'
+                  ? 'This provider did not return any models for this host.'
+                  : 'No models returned for provider $_runtimeModelProvider.'
             : null;
       });
       _coerceTurnConfigForSelectedModel();
@@ -314,8 +412,20 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   }
 
   Future<void> _save() async {
-    final savedPolicy = _policy;
-    final savedTurnConfig = _normalisedTurnConfig(_turnConfig);
+    final savedPolicy = SessionPolicy(
+      approval: _supportsApprovalPolicy ? _policy.approval : null,
+      sandbox: _supportsSandboxMode ? _policy.sandbox : null,
+      networkAccess: _supportsNetworkAccess ? _policy.networkAccess : null,
+    );
+    final savedTurnConfig = _normalisedTurnConfig(
+      SessionTurnConfig(
+        model: _supportsModelOverride ? _turnConfig.model : null,
+        reasoningEffort: _supportsReasoningEffort
+            ? _turnConfig.reasoningEffort
+            : null,
+        fastMode: _supportsFastMode ? _turnConfig.fastMode : null,
+      ),
+    );
     await widget.policyStore.setPolicy(
       widget.host,
       widget.session.id,
@@ -332,7 +442,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       context,
       savedPolicy.isEmpty && savedTurnConfig.isEmpty
           ? 'Session will use default controls on your next fresh turn.'
-          : 'Applied on your next fresh turn — Codex will remember it.',
+          : 'Applied on your next fresh turn.',
     );
   }
 
@@ -346,14 +456,17 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   void _applyAutopilot() {
     setState(() {
       _policy = _policy.copyWith(
-        approval: ApprovalPolicy.never,
-        sandbox: SandboxMode.dangerFullAccess,
-        networkAccess: true,
+        approval: _supportsApprovalPolicy ? ApprovalPolicy.never : null,
+        sandbox: _supportsSandboxMode ? SandboxMode.dangerFullAccess : null,
+        networkAccess: _supportsNetworkAccess ? true : null,
       );
     });
   }
 
   SessionTurnConfig _factoryTurnConfig() {
+    if (!_supportsModels || !_supportsModelOverride) {
+      return const SessionTurnConfig();
+    }
     final defaultModel = _defaultModelEntry;
     if (defaultModel == null) {
       return const SessionTurnConfig(fastMode: false);
@@ -371,6 +484,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     SessionTurnConfig config, {
     ModelCatalogEntry? selectedModel,
   }) {
+    if (!_supportsModels || !_supportsModelOverride) {
+      return const SessionTurnConfig();
+    }
     final resolvedModel = _trimmedOrNull(config.model);
     final model =
         selectedModel ?? _findModelByName(resolvedModel ?? widget.runtimeModel);
@@ -385,10 +501,12 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     if (runtimeModel != null && nextModel == runtimeModel) {
       nextModel = null;
     }
-    if (model != null && model.isAutoModel) {
+    if (!_supportsReasoningEffort || (model != null && model.isAutoModel)) {
       nextReasoning = null;
     }
-    if (model != null && !model.supportsFastMode && nextFast == true) {
+    if (!_supportsFastMode) {
+      nextFast = null;
+    } else if (model != null && !model.supportsFastMode) {
       nextFast = false;
     }
     if (nextModel == null &&
@@ -434,6 +552,21 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         break;
       }
     }
+    final showModelControls = _supportsModels && _supportsModelOverride;
+    final showReasoningControls = showModelControls && _supportsReasoningEffort;
+    final showAutopilot =
+        _supportsApprovalPolicy &&
+        _supportsSandboxMode &&
+        _supportsNetworkAccess;
+    final showPolicyControls =
+        _supportsApprovalPolicy ||
+        _supportsSandboxMode ||
+        _supportsNetworkAccess;
+    final showAnyControls =
+        showModelControls ||
+        showReasoningControls ||
+        _showFastSection ||
+        showPolicyControls;
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
@@ -460,226 +593,288 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Change how Codex handles the model, thinking effort, Fast mode, approvals, file access and network for this session. Applied on your next fresh turn. If Codex is already responding, these changes wait until the current turn finishes.',
+                'Change how the agent handles the model, thinking effort, Fast mode, approvals, file access and network for this session. Applied on your next fresh turn. If the agent is already responding, these changes wait until the current turn finishes.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colors.textSecondary,
                   height: 1.4,
                 ),
               ),
-              const SizedBox(height: 20),
-              Text(
-                'Model & thinking',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: colors.textSecondary,
-                  letterSpacing: 0.4,
-                ),
-              ),
-              const SizedBox(height: 8),
-              _ModelSelectionCard(
-                title: 'Model',
-                value: _effectiveModelLabel,
-                subtitle: _effectiveModelDescription,
-                loading: _loadingModels,
-                error: _modelsError,
-                currentValue: _turnConfig.model != null
-                    ? widget.runtimeModel
-                    : null,
-                badges: <String>[
-                  ?_runtimeModelProvider,
-                  if (selectedModel?.isAutoModel ?? false) 'auto',
-                  if (selectedModel?.isDefault ?? false) 'default',
-                  if (_turnConfig.model != null) 'next turn',
-                ],
-                onTap: _chooseModel,
-                onRetry: () {
-                  unawaited(_loadModels());
-                },
-              ),
-              const SizedBox(height: 18),
-              Text(
-                'Reasoning effort',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: colors.textSecondary,
-                  letterSpacing: 0.4,
-                ),
-              ),
-              const SizedBox(height: 8),
-              if (_loadingModels && _models.isEmpty)
-                const LinearProgressIndicator(minHeight: 3)
-              else if (_selectedModelIsAuto)
+              if (!showAnyControls) ...[
+                const SizedBox(height: 20),
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: colors.surfaceMuted,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: colors.border),
                   ),
-                  child: Text(
-                    'Auto models choose the thinking effort themselves. Codex will use ${_reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colors.textSecondary,
-                      height: 1.35,
-                    ),
-                  ),
-                )
-              else if (_supportedReasoningOptions.isEmpty)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: colors.surfaceMuted,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: colors.border),
-                  ),
-                  child: Text(
-                    'This model does not expose adjustable thinking effort in Codex.',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colors.textSecondary,
-                      height: 1.35,
-                    ),
-                  ),
-                )
-              else ...[
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: _supportedReasoningOptions.map((option) {
-                    final isDefault =
-                        selectedModel != null &&
-                        option.reasoningEffort ==
-                            selectedModel.defaultReasoningEffort;
-                    final selected =
-                        option.reasoningEffort == effectiveReasoning;
-                    return _ReasoningChoiceChip(
-                      label: _reasoningEffortLabel(option.reasoningEffort),
-                      selected: selected,
-                      isDefault: isDefault,
-                      onTap: () {
-                        setState(() {
-                          _turnConfig = _normalisedTurnConfig(
-                            _turnConfig.copyWith(
-                              reasoningEffort: option.reasoningEffort,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        color: colors.textSecondary,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'No adjustable controls',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
-                          );
+                            const SizedBox(height: 2),
+                            Text(
+                              '$_providerName does not advertise runtime controls for existing sessions.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.textSecondary,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                if (showModelControls) ...[
+                  const SizedBox(height: 20),
+                  Text(
+                    showReasoningControls ? 'Model & thinking' : 'Model',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: colors.textSecondary,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _ModelSelectionCard(
+                    title: 'Model',
+                    value: _effectiveModelLabel,
+                    subtitle: _effectiveModelDescription,
+                    loading: _loadingModels,
+                    error: _modelsError,
+                    currentValue: _turnConfig.model != null
+                        ? widget.runtimeModel
+                        : null,
+                    badges: <String>[
+                      ?_runtimeModelProvider,
+                      if (selectedModel?.isAutoModel ?? false) 'auto',
+                      if (selectedModel?.isDefault ?? false) 'default',
+                      if (_turnConfig.model != null) 'next turn',
+                    ],
+                    onTap: _chooseModel,
+                    onRetry: () {
+                      unawaited(_loadModels());
+                    },
+                  ),
+                ],
+                if (showReasoningControls) ...[
+                  const SizedBox(height: 18),
+                  Text(
+                    'Reasoning effort',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: colors.textSecondary,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_loadingModels && _models.isEmpty)
+                    const LinearProgressIndicator(minHeight: 3)
+                  else if (_selectedModelIsAuto)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: colors.surfaceMuted,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Text(
+                        'Auto models choose the thinking effort themselves. The agent will use ${_reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colors.textSecondary,
+                          height: 1.35,
+                        ),
+                      ),
+                    )
+                  else if (_supportedReasoningOptions.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: colors.surfaceMuted,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Text(
+                        'This model does not expose adjustable thinking effort.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colors.textSecondary,
+                          height: 1.35,
+                        ),
+                      ),
+                    )
+                  else ...[
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _supportedReasoningOptions.map((option) {
+                        final isDefault =
+                            selectedModel != null &&
+                            option.reasoningEffort ==
+                                selectedModel.defaultReasoningEffort;
+                        final selected =
+                            option.reasoningEffort == effectiveReasoning;
+                        return _ReasoningChoiceChip(
+                          label: _reasoningEffortLabel(option.reasoningEffort),
+                          selected: selected,
+                          isDefault: isDefault,
+                          onTap: () {
+                            setState(() {
+                              _turnConfig = _normalisedTurnConfig(
+                                _turnConfig.copyWith(
+                                  reasoningEffort: option.reasoningEffort,
+                                ),
+                              );
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    if (reasoningDescription != null &&
+                        reasoningDescription.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        reasoningDescription.trim(),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ],
+                ],
+                if (_showFastSection) ...[
+                  const SizedBox(height: 18),
+                  Text(
+                    'Speed',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: colors.textSecondary,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _FastModeTile(
+                    value: _effectiveFastMode,
+                    enabled: _selectedModelSupportsFast,
+                    onChanged: (value) {
+                      setState(() {
+                        _turnConfig = _normalisedTurnConfig(
+                          _turnConfig.copyWith(fastMode: value),
+                        );
+                      });
+                    },
+                  ),
+                ],
+                if (showPolicyControls) ...[
+                  const SizedBox(height: 18),
+                  if (showAutopilot) ...[
+                    _PolicyAutopilotCard(
+                      active: _isAutopilot,
+                      onTap: _applyAutopilot,
+                      colors: colors,
+                    ),
+                    const SizedBox(height: 22),
+                  ],
+                  if (_supportsApprovalPolicy) ...[
+                    Text(
+                      'Approval policy',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: colors.textSecondary,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    for (final policy in ApprovalPolicy.values)
+                      _PolicyRadioTile<ApprovalPolicy>(
+                        value: policy,
+                        groupValue: _effectiveApproval,
+                        title: policy.label,
+                        subtitle: policy.description,
+                        fromRuntime:
+                            _policy.approval == null &&
+                            widget.runtimeApproval == policy,
+                        onSelected: (value) {
+                          setState(() {
+                            _policy = _policy.copyWith(approval: value);
+                          });
+                        },
+                      ),
+                  ],
+                  if (_supportsApprovalPolicy && _supportsSandboxMode)
+                    const SizedBox(height: 18),
+                  if (_supportsSandboxMode) ...[
+                    Text(
+                      'Sandbox',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: colors.textSecondary,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    for (final sandbox in SandboxMode.values)
+                      _PolicyRadioTile<SandboxMode>(
+                        value: sandbox,
+                        groupValue: _effectiveSandbox,
+                        title: sandbox.label,
+                        subtitle: sandbox.description,
+                        fromRuntime:
+                            _policy.sandbox == null &&
+                            widget.runtimeSandbox == sandbox,
+                        danger: sandbox == SandboxMode.dangerFullAccess,
+                        onSelected: (value) {
+                          setState(() {
+                            _policy = _policy.copyWith(sandbox: value);
+                          });
+                        },
+                      ),
+                  ],
+                  if ((_supportsApprovalPolicy || _supportsSandboxMode) &&
+                      _supportsNetworkAccess)
+                    const SizedBox(height: 18),
+                  if (_supportsNetworkAccess) ...[
+                    Text(
+                      'Network',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: colors.textSecondary,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _PolicyNetworkTile(
+                      value: _effectiveNetworkOn,
+                      disabled: _networkToggleDisabled,
+                      subtitle: _networkToggleDisabled
+                          ? 'Full access already grants network. Toggle locked.'
+                          : (_effectiveSandbox == SandboxMode.workspaceWrite ||
+                                _effectiveSandbox == SandboxMode.readOnly)
+                          ? 'Allow outbound network for tools like gh, curl, pip. Off by default for read-only / workspace-write.'
+                          : 'Allow outbound network.',
+                      onChanged: (value) {
+                        setState(() {
+                          _policy = _policy.copyWith(networkAccess: value);
                         });
                       },
-                    );
-                  }).toList(),
-                ),
-                if (reasoningDescription != null &&
-                    reasoningDescription.trim().isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    reasoningDescription.trim(),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colors.textSecondary,
-                      height: 1.35,
                     ),
-                  ),
+                  ],
                 ],
               ],
-              if (_showFastSection) ...[
-                const SizedBox(height: 18),
-                Text(
-                  'Speed',
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: colors.textSecondary,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _FastModeTile(
-                  value: _effectiveFastMode,
-                  enabled: _selectedModelSupportsFast,
-                  onChanged: (value) {
-                    setState(() {
-                      _turnConfig = _normalisedTurnConfig(
-                        _turnConfig.copyWith(fastMode: value),
-                      );
-                    });
-                  },
-                ),
-              ],
-              const SizedBox(height: 18),
-              _PolicyAutopilotCard(
-                active: _isAutopilot,
-                onTap: _applyAutopilot,
-                colors: colors,
-              ),
-              const SizedBox(height: 22),
-              Text(
-                'Approval policy',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: colors.textSecondary,
-                  letterSpacing: 0.4,
-                ),
-              ),
-              const SizedBox(height: 8),
-              for (final policy in ApprovalPolicy.values)
-                _PolicyRadioTile<ApprovalPolicy>(
-                  value: policy,
-                  groupValue: _effectiveApproval,
-                  title: policy.label,
-                  subtitle: policy.description,
-                  fromRuntime:
-                      _policy.approval == null &&
-                      widget.runtimeApproval == policy,
-                  onSelected: (value) {
-                    setState(() {
-                      _policy = _policy.copyWith(approval: value);
-                    });
-                  },
-                ),
-              const SizedBox(height: 18),
-              Text(
-                'Sandbox',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: colors.textSecondary,
-                  letterSpacing: 0.4,
-                ),
-              ),
-              const SizedBox(height: 8),
-              for (final sandbox in SandboxMode.values)
-                _PolicyRadioTile<SandboxMode>(
-                  value: sandbox,
-                  groupValue: _effectiveSandbox,
-                  title: sandbox.label,
-                  subtitle: sandbox.description,
-                  fromRuntime:
-                      _policy.sandbox == null &&
-                      widget.runtimeSandbox == sandbox,
-                  danger: sandbox == SandboxMode.dangerFullAccess,
-                  onSelected: (value) {
-                    setState(() {
-                      _policy = _policy.copyWith(sandbox: value);
-                    });
-                  },
-                ),
-              const SizedBox(height: 18),
-              Text(
-                'Network',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: colors.textSecondary,
-                  letterSpacing: 0.4,
-                ),
-              ),
-              const SizedBox(height: 8),
-              _PolicyNetworkTile(
-                value: _effectiveNetworkOn,
-                disabled: _networkToggleDisabled,
-                subtitle: _networkToggleDisabled
-                    ? 'Full access already grants network. Toggle locked.'
-                    : (_effectiveSandbox == SandboxMode.workspaceWrite ||
-                          _effectiveSandbox == SandboxMode.readOnly)
-                    ? 'Allow outbound network for tools like gh, curl, pip. Off by default for read-only / workspace-write.'
-                    : 'Allow outbound network.',
-                onChanged: (value) {
-                  setState(() {
-                    _policy = _policy.copyWith(networkAccess: value);
-                  });
-                },
-              ),
               const SizedBox(height: 22),
               Row(
                 children: [
@@ -910,8 +1105,8 @@ class _FastModeTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   enabled
-                      ? 'Ask Codex for the fast service tier on your next fresh turn.'
-                      : 'This model does not advertise Fast mode in Codex.',
+                      ? 'Ask for the fast service tier on your next fresh turn.'
+                      : 'This model does not advertise Fast mode.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.35,
@@ -1189,7 +1384,7 @@ class _PolicyAutopilotCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Approval = never · Sandbox = full access · Network = on. Codex runs without pausing for approvals and can hit the internet.',
+                    'Approval = never · Sandbox = full access · Network = on. The agent runs without pausing for approvals and can hit the internet.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colors.textSecondary,
                       height: 1.35,

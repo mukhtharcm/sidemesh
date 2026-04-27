@@ -1,9 +1,23 @@
+export type AgentProviderKind = "codex";
+
+export type AgentProviderConfig = CodexProviderConfig;
+
+export interface CodexProviderConfig {
+  kind: "codex";
+  bin: string;
+}
+
+export interface AgentProviderConfigSummary {
+  kind: AgentProviderKind | string;
+  command: string | null;
+}
+
 export interface NodeConfig {
   label: string;
   port: number;
   token: string;
   tokenSource: "env" | "generated";
-  codexBin: string;
+  provider: AgentProviderConfig;
   stateDir: string;
 }
 
@@ -119,12 +133,12 @@ export interface ModelSummary {
   profileName?: string | null;
 }
 
-export interface CodexProfileCatalog {
+export interface ProviderProfileCatalog {
   defaultProfile: string | null;
-  profiles: CodexProfileSummary[];
+  profiles: ProviderProfileSummary[];
 }
 
-export interface CodexProfileSummary {
+export interface ProviderProfileSummary {
   name: string;
   isDefault: boolean;
   model: string | null;
@@ -140,6 +154,9 @@ export interface CodexProfileSummary {
   webSearch: string | null;
   personality: string | null;
 }
+
+export type CodexProfileCatalog = ProviderProfileCatalog;
+export type CodexProfileSummary = ProviderProfileSummary;
 
 export interface SessionMessage {
   id: string;
@@ -348,7 +365,7 @@ export interface PendingActionRecord extends PendingAction {
   requestedPermissions?: unknown;
 }
 
-export interface RolloutLog {
+export interface SessionLogSnapshot {
   messages: SessionMessage[];
   activities: SessionActivity[];
   runtime: SessionRuntimeSummary | null;
