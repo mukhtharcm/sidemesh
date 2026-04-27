@@ -328,6 +328,9 @@ class RecentSessionsStore extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_disposed) {
+      return;
+    }
     _disposed = true;
     _pollTimer?.cancel();
     for (final connection in _liveConnections.values) {
@@ -372,13 +375,25 @@ class _RecentHostLiveConnection {
   void connect() {
     if (_disposed || !host.enabled) return;
     try {
-      _channel = api.openSessionsLive(host);
-      _subscription = _channel!.stream.listen(
+      final channel = api.openSessionsLive(host);
+      _channel = channel;
+      _subscription = channel.stream.listen(
         _handleMessage,
-        onError: (Object error) => _scheduleReconnect(error),
-        onDone: () => _scheduleReconnect(null),
+        onError: (Object error) => _scheduleReconnectIfCurrent(channel, error),
+        onDone: () => _scheduleReconnectIfCurrent(channel, null),
       );
-      _attempt = 0;
+      unawaited(
+        channel.ready.then((_) {
+          if (_disposed || !identical(_channel, channel)) return;
+          _attempt = 0;
+        }).catchError((Object error) {
+          if (_disposed || !identical(_channel, channel) || !host.enabled) {
+            return null;
+          }
+          _scheduleReconnect(error);
+          return null;
+        }),
+      );
     } catch (error) {
       if (!host.enabled) return;
       _scheduleReconnect(error);
@@ -425,6 +440,13 @@ class _RecentHostLiveConnection {
     onOffline(host, error);
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(_backoffDelay(), connect);
+  }
+
+  void _scheduleReconnectIfCurrent(WebSocketChannel channel, Object? error) {
+    if (!identical(_channel, channel)) {
+      return;
+    }
+    _scheduleReconnect(error);
   }
 
   Duration _backoffDelay() {
