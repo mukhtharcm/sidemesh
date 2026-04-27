@@ -17,6 +17,7 @@ class FileViewerScreen extends StatefulWidget {
     required this.host,
     required this.api,
     required this.path,
+    this.agentProvider,
     this.topPadding,
     this.liveStream,
   });
@@ -24,6 +25,7 @@ class FileViewerScreen extends StatefulWidget {
   final HostProfile host;
   final ApiClient api;
   final String path;
+  final String? agentProvider;
   final double? topPadding;
   final Stream<FsChangeEvent>? liveStream;
 
@@ -109,6 +111,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         host: widget.host,
         api: widget.api,
         path: widget.path,
+        agentProvider: widget.agentProvider,
         liveStream: widget.liveStream,
         observable: _observable,
       ),

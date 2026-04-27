@@ -20,6 +20,7 @@ class FileBrowserTree extends StatefulWidget {
     required this.host,
     required this.api,
     required this.root,
+    this.agentProvider,
     this.onOpenFile,
     this.selectedPath,
   });
@@ -27,6 +28,7 @@ class FileBrowserTree extends StatefulWidget {
   final HostProfile host;
   final ApiClient api;
   final String root;
+  final String? agentProvider;
 
   /// Called when the user taps a file. When null, the tree defaults to
   /// pushing a [FileViewerScreen] route.
@@ -48,7 +50,11 @@ class _FileBrowserTreeState extends State<FileBrowserTree> {
   @override
   void initState() {
     super.initState();
-    _live = WorkspaceLiveStore.instance.subscribe(widget.host, widget.api);
+    _live = WorkspaceLiveStore.instance.subscribe(
+      widget.host,
+      widget.api,
+      agentProvider: widget.agentProvider,
+    );
     _sub = _live!.stream.listen((event) {
       if (!mounted) return;
       setState(() {
@@ -84,6 +90,7 @@ class _FileBrowserTreeState extends State<FileBrowserTree> {
           host: widget.host,
           api: widget.api,
           path: path,
+          agentProvider: widget.agentProvider,
           liveStream: _live?.stream,
         ),
       ),
@@ -99,6 +106,7 @@ class _FileBrowserTreeState extends State<FileBrowserTree> {
           host: widget.host,
           api: widget.api,
           path: widget.root,
+          agentProvider: widget.agentProvider,
           depth: 0,
           initiallyExpanded: true,
           changedPaths: _changed,
@@ -119,12 +127,14 @@ class FileBrowserScreen extends StatelessWidget {
     required this.host,
     required this.api,
     required this.root,
+    this.agentProvider,
     this.topPadding,
   });
 
   final HostProfile host;
   final ApiClient api;
   final String root;
+  final String? agentProvider;
   final double? topPadding;
 
   @override
@@ -160,7 +170,12 @@ class FileBrowserScreen extends StatelessWidget {
           ],
         ),
       ),
-      body: FileBrowserTree(host: host, api: api, root: root),
+      body: FileBrowserTree(
+        host: host,
+        api: api,
+        root: root,
+        agentProvider: agentProvider,
+      ),
     );
     if (topPadding == null) return scaffold;
     return Padding(
@@ -175,6 +190,7 @@ class _DirectoryNode extends StatefulWidget {
     required this.host,
     required this.api,
     required this.path,
+    required this.agentProvider,
     required this.depth,
     required this.onOpenFile,
     required this.changedPaths,
@@ -186,6 +202,7 @@ class _DirectoryNode extends StatefulWidget {
   final HostProfile host;
   final ApiClient api;
   final String path;
+  final String? agentProvider;
   final int depth;
   final bool initiallyExpanded;
   final Set<String> changedPaths;
@@ -215,7 +232,11 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
       _error = null;
     });
     try {
-      final listing = await widget.api.listDirectory(widget.host, widget.path);
+      final listing = await widget.api.listDirectory(
+        widget.host,
+        widget.path,
+        agentProvider: widget.agentProvider,
+      );
       if (!mounted) return;
       setState(() {
         _listing = listing;
@@ -281,6 +302,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
                 host: widget.host,
                 api: widget.api,
                 path: entry.path,
+                agentProvider: widget.agentProvider,
                 depth: widget.depth + 1,
                 changedPaths: widget.changedPaths,
                 selectedPath: widget.selectedPath,

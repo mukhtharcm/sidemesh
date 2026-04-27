@@ -337,15 +337,27 @@ export async function startServer(config: NodeConfig): Promise<void> {
     process.stderr.write(line);
   });
 
-  const fsWatchRegistry = new FsWatchRegistry(provider);
+  const fsWatchRegistries = new Map(
+    providerRuntime.providers.map((entry) => [
+      entry.kind,
+      new FsWatchRegistry(entry.provider),
+    ]),
+  );
+
+  async function listSessionsForProvider(
+    kind: string | null | undefined,
+  ): Promise<SessionSummary[]> {
+    const selected = providerEntryForKind(kind);
+    if (!selected) {
+      return [];
+    }
+    const sessions = await loadRecentSessions();
+    return sessions.filter((session) => session.provider === selected.kind);
+  }
 
   provider.on("liveEvent", (event) => {
     switch (event.type) {
       case "fs_changed":
-        fsWatchRegistry.deliver({
-          watchId: event.watchId,
-          changedPaths: event.changedPaths,
-        });
         return;
       case "skills_changed":
         broadcastSkillsChanged(socketsBySession);
@@ -487,6 +499,18 @@ export async function startServer(config: NodeConfig): Promise<void> {
   });
 
   for (const entry of providerRuntime.providers) {
+    entry.provider.on("liveEvent", (event) => {
+      if (event.type !== "fs_changed") {
+        return;
+      }
+      fsWatchRegistries.get(entry.kind)?.deliver({
+        watchId: event.watchId,
+        changedPaths: event.changedPaths,
+      });
+    });
+  }
+
+  for (const entry of providerRuntime.providers) {
     providerVersions.set(
       entry.kind,
       await entry.provider.getVersion().catch(() => "unknown"),
@@ -591,9 +615,14 @@ export async function startServer(config: NodeConfig): Promise<void> {
   );
 
   registerFsRoutes(app, {
-    provider,
-    listSessions: () => loadRecentSessions(),
-    watchRegistry: fsWatchRegistry,
+    defaultProvider: providerEntriesByKind.get(config.defaultProviderKind)?.provider ?? provider,
+    providerForKind: (kind) => {
+      const selected = providerEntryForKind(kind);
+      return selected
+        ? { kind: selected.kind, provider: selected.provider }
+        : null;
+    },
+    listSessionsForProvider,
   });
 
   app.get(
@@ -905,18 +934,24 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.get(
     "/api/skills",
     asyncRoute(async (request, response) => {
+      const query = request.query as Record<string, unknown>;
+      const agentProvider = asString(query.agentProvider) || null;
+      const selectedProvider = providerEntryForKind(agentProvider);
+      if (!selectedProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.configuration.skills,
+          selectedProvider.provider,
+          selectedProvider.provider.capabilities.configuration.skills,
           "skill listing",
           "listSkills",
         )
       ) {
         return;
       }
-      const query = request.query as Record<string, unknown>;
       const cwd = asString(query.cwd);
       if (!cwd) {
         response.status(400).json({ error: "cwd is required" });
@@ -924,18 +959,26 @@ export async function startServer(config: NodeConfig): Promise<void> {
       }
 
       const forceReload = parseQueryBool(query.forceReload);
-      response.json(await provider.listSkills!({ cwd, forceReload }));
+      response.json(
+        await selectedProvider.provider.listSkills!({ cwd, forceReload }),
+      );
     }),
   );
 
   app.post(
     "/api/skills/config/write",
     asyncRoute(async (request, response) => {
+      const requestedProvider = asString(request.body?.agentProvider) || null;
+      const selectedProvider = providerEntryForKind(requestedProvider);
+      if (!selectedProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.configuration.skillManagement,
+          selectedProvider.provider,
+          selectedProvider.provider.capabilities.configuration.skillManagement,
           "skill configuration",
           "writeSkillConfig",
         )
@@ -956,7 +999,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         return;
       }
 
-      const result = await provider.writeSkillConfig!({
+      const result = await selectedProvider.provider.writeSkillConfig!({
         path,
         name,
         enabled,
@@ -1002,20 +1045,26 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.get(
     "/api/profiles",
     asyncRoute(async (request, response) => {
+      const query = request.query as Record<string, unknown>;
+      const agentProvider = asString(query.agentProvider) || null;
+      const selectedProvider = providerEntryForKind(agentProvider);
+      if (!selectedProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.configuration.profiles,
+          selectedProvider.provider,
+          selectedProvider.provider.capabilities.configuration.profiles,
           "profile listing",
           "listProfiles",
         )
       ) {
         return;
       }
-      const query = request.query as Record<string, unknown>;
       const cwd = asString(query.cwd) || null;
-      response.json(await provider.listProfiles!({ cwd }));
+      response.json(await selectedProvider.provider.listProfiles!({ cwd }));
     }),
   );
 
@@ -1431,7 +1480,13 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
 
     if (pathOnly === "/api/fs/live") {
-      if (!provider.capabilities.workspace.filesystem) {
+      const query = new URLSearchParams(queryString || "");
+      const agentProvider = query.get("agentProvider");
+      const selectedProvider = providerEntryForKind(agentProvider);
+      if (
+        !selectedProvider ||
+        !selectedProvider.provider.capabilities.workspace.filesystem
+      ) {
         socket.destroy();
         return;
       }
@@ -1441,10 +1496,14 @@ export async function startServer(config: NodeConfig): Promise<void> {
         } catch {
           /* noop */
         }
-        attachFsLiveSocket(ws, fsWatchRegistry, {
-          provider,
-          listSessions: () => loadRecentSessions(),
-        });
+        attachFsLiveSocket(
+          ws,
+          fsWatchRegistries.get(selectedProvider.kind)!,
+          {
+            provider: selectedProvider.provider,
+            listSessions: () => listSessionsForProvider(selectedProvider.kind),
+          },
+        );
       });
       return;
     }
