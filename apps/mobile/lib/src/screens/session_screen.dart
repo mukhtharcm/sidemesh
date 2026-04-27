@@ -44,6 +44,7 @@ import '../session_turn_config_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../windowing.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/composer_paste_text_action.dart';
 import '../widgets/markdown_content.dart';
@@ -3618,6 +3619,21 @@ class _SessionScreenState extends State<SessionScreen>
     return true;
   }
 
+  Future<void> _openSessionInWindow() async {
+    final session = _session ?? widget.session;
+    final opened = await SidemeshSessionWindowManager.instance
+        .openOrFocusSessionWindow(host: widget.host, session: session);
+    if (!mounted) {
+      return;
+    }
+    showAppSnackBar(
+      context,
+      opened
+          ? 'Opened ${session.title} in a new window.'
+          : 'Session pop-out windows are only available on the macOS desktop app.',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = _session ?? widget.session;
@@ -4032,6 +4048,9 @@ class _SessionScreenState extends State<SessionScreen>
                         );
                       }
                       break;
+                    case 'popout':
+                      unawaited(_openSessionInWindow());
+                      break;
                     case 'rename':
                       _renameSession();
                       break;
@@ -4097,6 +4116,18 @@ class _SessionScreenState extends State<SessionScreen>
                           Icon(Icons.folder_outlined, size: 18),
                           SizedBox(width: 10),
                           Text('Browse files'),
+                        ],
+                      ),
+                    ),
+                  if (widget.topPadding != null &&
+                      SidemeshSessionWindowManager.instance.isSupported)
+                    const PopupMenuItem<String>(
+                      value: 'popout',
+                      child: Row(
+                        children: [
+                          Icon(Icons.open_in_new_rounded, size: 18),
+                          SizedBox(width: 10),
+                          Text('Open in new window'),
                         ],
                       ),
                     ),
