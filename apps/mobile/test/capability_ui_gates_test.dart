@@ -199,12 +199,20 @@ void main() {
             displayName: 'Codex',
             defaultCommand: 'codex',
             commandEnvironmentVariables: ['SIDEMESH_CODEX_BIN'],
+            capabilities: ProviderCapabilities.empty,
+            config: ProviderConfigSummary.empty,
+            version: '',
+            isDefault: true,
           ),
           ProviderDefinitionSummary(
             kind: 'fake',
             displayName: 'Fake Test Provider',
             defaultCommand: 'builtin',
             commandEnvironmentVariables: ['SIDEMESH_FAKE_CAPABILITY_PROFILE'],
+            capabilities: ProviderCapabilities.empty,
+            config: ProviderConfigSummary.empty,
+            version: '',
+            isDefault: false,
           ),
         ],
       ),
@@ -288,6 +296,7 @@ SessionSummary _session(String id) {
     createdAt: now,
     updatedAt: now,
     source: 'fake',
+    provider: null,
     status: 'loaded',
     runtime: null,
     gitInfo: null,
@@ -428,6 +437,7 @@ class _CapabilityFakeApi extends ApiClient {
     HostProfile host, {
     String? cwd,
     String? profile,
+    String? agentProvider,
     String? provider,
   }) async => models;
 

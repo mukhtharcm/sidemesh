@@ -225,7 +225,11 @@ class _SessionScreenState extends State<SessionScreen>
   bool _supportsProviderCapability(String section, String feature) {
     final node = _nodeInfo;
     if (node == null) return true;
-    return node.providerCapabilities.supports(section, feature);
+    return node
+        .capabilitiesForProvider(
+          widget.session.provider ?? widget.session.runtime?.modelProvider,
+        )
+        .supports(section, feature);
   }
 
   bool _supportsHostCapability(String section, String feature) {

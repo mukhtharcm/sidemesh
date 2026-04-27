@@ -275,6 +275,7 @@ SessionSummary _session(String id, {required String title}) {
     createdAt: now.subtract(const Duration(minutes: 5)),
     updatedAt: now,
     source: 'codex',
+    provider: null,
     status: 'active',
     runtime: null,
     gitInfo: null,

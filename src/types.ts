@@ -52,6 +52,8 @@ export interface NodeConfig {
   token: string;
   tokenSource: "env" | "generated";
   provider: AgentProviderConfig;
+  providers: AgentProviderConfig[];
+  defaultProviderKind: AgentProviderKind;
   stateDir: string;
 }
 
@@ -63,6 +65,7 @@ export interface SessionSummary {
   createdAt: number;
   updatedAt: number;
   source: string;
+  provider?: string | null;
   status: string;
   rolloutPath: string | null;
   runtime: SessionRuntimeSummary | null;

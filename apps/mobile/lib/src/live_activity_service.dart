@@ -601,6 +601,7 @@ class PrimaryLiveActivitySession {
       createdAt: updatedAt,
       updatedAt: now,
       source: '',
+      provider: null,
       status: isRunning ? 'running' : 'completed',
       runtime: modelValue == null || modelValue.isEmpty
           ? null

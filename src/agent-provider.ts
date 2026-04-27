@@ -85,6 +85,7 @@ export interface AgentCreateSessionRequest {
   cwd: string;
   input: AgentSessionInputItem[];
   overrides: AgentSessionOverrides;
+  provider?: string | null;
 }
 
 export interface AgentCreateSessionResult {

@@ -59,8 +59,8 @@ import {
   readGitStatus,
   sanitizeGitUrl,
 } from "./git.js";
-import { createAgentProvider } from "./provider-factory.js";
-import { listAgentProviderDefinitionSummaries } from "./provider-registry.js";
+import { createAgentProviderRuntime } from "./provider-factory.js";
+import { isAgentProviderKind } from "./provider-registry.js";
 import { buildSessionResources } from "./resources.js";
 import {
   FsWatchRegistry,
@@ -126,7 +126,8 @@ interface SessionInputDedupeEntry {
 }
 
 export async function startServer(config: NodeConfig): Promise<void> {
-  const provider = createAgentProvider(config);
+  const providerRuntime = createAgentProviderRuntime(config);
+  const provider = providerRuntime.provider;
   await provider.start();
 
   const app = express();
@@ -163,6 +164,10 @@ export async function startServer(config: NodeConfig): Promise<void> {
     });
   }
   let providerVersion = "unknown";
+  const providerVersions = new Map<string, string>();
+  const providerEntriesByKind = new Map(
+    providerRuntime.providers.map((entry) => [entry.kind, entry]),
+  );
 
   function allocSeq(sessionId: string): number {
     const current = sessionSeqCursor.get(sessionId) ?? 0;
@@ -182,6 +187,16 @@ export async function startServer(config: NodeConfig): Promise<void> {
     clientMessageId: string,
   ): string {
     return `${sessionId}:${clientMessageId}`;
+  }
+
+  function providerEntryForKind(kind: string | null | undefined) {
+    if (!kind) {
+      return providerEntriesByKind.get(config.defaultProviderKind) ?? null;
+    }
+    if (!isAgentProviderKind(kind)) {
+      return null;
+    }
+    return providerEntriesByKind.get(kind) ?? null;
   }
 
   function pruneSessionInputDedupe(now = Date.now()): void {
@@ -471,7 +486,15 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
   });
 
-  providerVersion = await provider.getVersion();
+  for (const entry of providerRuntime.providers) {
+    providerVersions.set(
+      entry.kind,
+      await entry.provider.getVersion().catch(() => "unknown"),
+    );
+  }
+  providerVersion =
+    providerVersions.get(config.defaultProviderKind) ??
+    (await provider.getVersion().catch(() => "unknown"));
 
   app.use(cors());
   // Image attachments are sent as data URLs, so message payloads can be
@@ -491,14 +514,19 @@ export async function startServer(config: NodeConfig): Promise<void> {
   });
 
   app.get("/api/node", (_request, response) => {
-    const supportedProviders = listAgentProviderDefinitionSummaries();
+    const supportedProviders = providerRuntime.providers.map((entry) => ({
+      ...entry.definitionSummary,
+      config: entry.configSummary,
+      version: providerVersions.get(entry.kind) ?? "unknown",
+      isDefault: entry.kind === config.defaultProviderKind,
+    }));
     response.json({
       label: config.label,
       hostname: hostname(),
       platform: platform(),
       codexVersion: providerVersion,
-      provider: provider.kind,
-      providerName: provider.displayName,
+      provider: config.defaultProviderKind,
+      providerName: supportedProviders.find((item) => item.isDefault)?.displayName ?? provider.displayName,
       providerVersion,
       providerConfig: summarizeProviderConfig(config.provider),
       providerCapabilities: provider.capabilities,
@@ -511,8 +539,13 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
   app.get("/api/providers", (_request, response) => {
     response.json({
-      currentProvider: provider.kind,
-      providers: listAgentProviderDefinitionSummaries(),
+      currentProvider: config.defaultProviderKind,
+      providers: providerRuntime.providers.map((entry) => ({
+        ...entry.definitionSummary,
+        config: entry.configSummary,
+        version: providerVersions.get(entry.kind) ?? "unknown",
+        isDefault: entry.kind === config.defaultProviderKind,
+      })),
     });
   });
 
@@ -829,18 +862,27 @@ export async function startServer(config: NodeConfig): Promise<void> {
       }
       const session = await readSession(provider, sessionId, false);
       if (kind === "remote") {
+        const sessionProvider =
+          providerEntryForKind(providerKindForThread(session)) ??
+          providerEntryForKind(null);
+        if (!sessionProvider) {
+          response.status(500).json({ error: "provider routing failed" });
+          return;
+        }
         if (
           !requireProviderCapability(
             response,
-            provider,
-            provider.capabilities.workspace.remoteGitDiff,
+            sessionProvider.provider,
+            sessionProvider.provider.capabilities.workspace.remoteGitDiff,
             "remote git diff",
             "readRemoteGitDiff",
           )
         ) {
           return;
         }
-        const result = await provider.readRemoteGitDiff!(session.cwd);
+        const result = await sessionProvider.provider.readRemoteGitDiff!(
+          session.cwd,
+        );
         response.json(
           buildGitDiff("remote", result.diff, normalizeGitSha(result.sha)),
         );
@@ -926,23 +968,29 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.get(
     "/api/models",
     asyncRoute(async (request, response) => {
+      const query = request.query as Record<string, unknown>;
+      const agentProvider = asString(query.agentProvider) || null;
+      const selectedProvider = providerEntryForKind(agentProvider);
+      if (!selectedProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.configuration.models,
+          selectedProvider.provider,
+          selectedProvider.provider.capabilities.configuration.models,
           "model listing",
           "listModels",
         )
       ) {
         return;
       }
-      const query = request.query as Record<string, unknown>;
       const cwd = asString(query.cwd) || null;
       const profile = asString(query.profile) || null;
       const modelProvider = asString(query.provider) || null;
       response.json(
-        await provider.listModels!({
+        await selectedProvider.provider.listModels!({
           cwd,
           profile,
           provider: modelProvider,
@@ -974,11 +1022,17 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.post(
     "/api/sessions/create",
     asyncRoute(async (request, response) => {
+      const requestedProvider = asString(request.body?.provider) || null;
+      const selectedProvider = providerEntryForKind(requestedProvider);
+      if (!selectedProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.create,
+          selectedProvider.provider,
+          selectedProvider.provider.capabilities.sessions.create,
           "session creation",
           "createSession",
         )
@@ -994,7 +1048,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         return;
       }
       const unsupportedOverride = unsupportedOverrideCapability(
-        provider,
+        selectedProvider.provider,
         overrides,
       );
       if (unsupportedOverride) {
@@ -1005,7 +1059,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       const resolvedInput =
         input.length > 0 ? input : buildLegacyTextInput(prompt);
       const unsupportedInput = unsupportedInputCapability(
-        provider,
+        selectedProvider.provider,
         resolvedInput,
       );
       if (unsupportedInput) {
@@ -1016,6 +1070,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         cwd,
         input: resolvedInput,
         overrides,
+        provider: selectedProvider.kind,
       });
       if (started.activeTurnId) {
         activeTurns.set(started.thread.id, {
@@ -1923,6 +1978,7 @@ function mapSession(
   thread: ThreadRecord,
   runtime: SessionRuntimeSummary | null = null,
 ): SessionSummary {
+  const provider = providerKindForThread(thread);
   return {
     id: thread.id,
     title: sanitizeTitle(thread.name || thread.preview),
@@ -1934,11 +1990,28 @@ function mapSession(
       typeof thread.source === "string"
         ? thread.source
         : JSON.stringify(thread.source),
+    provider,
     status: thread.status?.type || "notLoaded",
     rolloutPath: thread.path,
     runtime,
     gitInfo: mapGitInfo(thread.gitInfo),
   };
+}
+
+function providerKindForThread(thread: ThreadRecord): string | null {
+  const source =
+    typeof thread.source === "string" && isAgentProviderKind(thread.source)
+      ? thread.source
+      : null;
+  if (source) {
+    return source;
+  }
+  const separator = thread.id.indexOf(":");
+  if (separator <= 0) {
+    return null;
+  }
+  const prefix = thread.id.slice(0, separator);
+  return isAgentProviderKind(prefix) ? prefix : null;
 }
 
 function mapGitInfo(raw: unknown): GitInfoSummary | null {

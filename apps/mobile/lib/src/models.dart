@@ -94,6 +94,30 @@ class NodeInfo {
     return hostCapabilities.supports(section, feature);
   }
 
+  ProviderDefinitionSummary providerSummary(String? kind) {
+    if ((kind ?? '').isEmpty) {
+      return supportedProviders.firstWhere(
+        (provider) => provider.kind == providerConfig.kind,
+        orElse: () => ProviderDefinitionSummary.empty,
+      );
+    }
+    return supportedProviders.firstWhere(
+      (provider) => provider.kind == kind,
+      orElse: () => ProviderDefinitionSummary.empty,
+    );
+  }
+
+  ProviderCapabilities capabilitiesForProvider(String? kind) {
+    final summary = providerSummary(kind);
+    if (!summary.capabilities.isEmpty) {
+      return summary.capabilities;
+    }
+    if ((kind ?? '').isEmpty || kind == provider) {
+      return providerCapabilities;
+    }
+    return ProviderCapabilities.empty;
+  }
+
   factory NodeInfo.fromJson(Map<String, dynamic> json) => NodeInfo(
     label: _stringValue(json['label']),
     hostname: _stringValue(json['hostname']),
@@ -137,6 +161,10 @@ class ProviderDefinitionSummary {
     required this.displayName,
     required this.defaultCommand,
     required this.commandEnvironmentVariables,
+    required this.capabilities,
+    required this.config,
+    required this.version,
+    required this.isDefault,
   });
 
   static const empty = ProviderDefinitionSummary(
@@ -144,12 +172,20 @@ class ProviderDefinitionSummary {
     displayName: '',
     defaultCommand: '',
     commandEnvironmentVariables: <String>[],
+    capabilities: ProviderCapabilities.empty,
+    config: ProviderConfigSummary.empty,
+    version: '',
+    isDefault: false,
   );
 
   final String kind;
   final String displayName;
   final String defaultCommand;
   final List<String> commandEnvironmentVariables;
+  final ProviderCapabilities capabilities;
+  final ProviderConfigSummary config;
+  final String version;
+  final bool isDefault;
 
   factory ProviderDefinitionSummary.fromJson(Object? json) {
     if (json is! Map) return empty;
@@ -162,6 +198,10 @@ class ProviderDefinitionSummary {
               .map(_stringValue)
               .where((value) => value.isNotEmpty)
               .toList(),
+      capabilities: ProviderCapabilities.fromJson(json['capabilities']),
+      config: ProviderConfigSummary.fromJson(json['config']),
+      version: _stringOrNull(json['version']) ?? '',
+      isDefault: json['isDefault'] == true,
     );
   }
 
@@ -197,6 +237,8 @@ class ProviderCapabilities {
   static const empty = ProviderCapabilities(<String, dynamic>{});
 
   final Map<String, dynamic> values;
+
+  bool get isEmpty => values.isEmpty;
 
   bool supports(String section, String feature) {
     final rawSection = values[section];
@@ -256,6 +298,7 @@ class SessionSummary {
     required this.createdAt,
     required this.updatedAt,
     required this.source,
+    required this.provider,
     required this.status,
     required this.runtime,
     required this.gitInfo,
@@ -268,6 +311,7 @@ class SessionSummary {
   final DateTime createdAt;
   final DateTime updatedAt;
   final String source;
+  final String? provider;
   final String status;
   final SessionRuntimeSummary? runtime;
   final GitInfoSummary? gitInfo;
@@ -284,6 +328,7 @@ class SessionSummary {
     createdAt: _dateValue(json['createdAt']),
     updatedAt: _dateValue(json['updatedAt']),
     source: _stringValue(json['source']),
+    provider: _stringOrNull(json['provider']),
     status: _stringValue(json['status']),
     runtime: json['runtime'] is Map<String, dynamic>
         ? SessionRuntimeSummary.fromJson(
@@ -303,6 +348,7 @@ class SessionSummary {
     'createdAt': createdAt.millisecondsSinceEpoch,
     'updatedAt': updatedAt.millisecondsSinceEpoch,
     'source': source,
+    'provider': provider,
     'status': status,
     'runtime': runtime?.toJson(),
     'gitInfo': gitInfo?.toJson(),

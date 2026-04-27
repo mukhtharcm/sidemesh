@@ -74,11 +74,13 @@ class ApiClient {
     HostProfile host, {
     String? cwd,
     String? profile,
+    String? agentProvider,
     String? provider,
   }) async {
     final queryParameters = <String, String>{
       if ((cwd ?? '').isNotEmpty) 'cwd': cwd!,
       if ((profile ?? '').isNotEmpty) 'profile': profile!,
+      if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
       if ((provider ?? '').isNotEmpty) 'provider': provider!,
     };
     final response = await _get(
@@ -220,6 +222,7 @@ class ApiClient {
     HostProfile host, {
     required String cwd,
     required String prompt,
+    String? provider,
     List<SessionInputItem>? input,
     String? model,
     String? reasoningEffort,
@@ -230,6 +233,9 @@ class ApiClient {
     String? profile,
   }) async {
     final body = <String, dynamic>{'cwd': cwd, 'prompt': prompt};
+    if ((provider ?? '').isNotEmpty) {
+      body['provider'] = provider;
+    }
     if (input != null && input.isNotEmpty) {
       body['input'] = input.map((item) => item.toJson()).toList();
     }

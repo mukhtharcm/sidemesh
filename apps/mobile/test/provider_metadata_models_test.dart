@@ -24,6 +24,9 @@ void main() {
           'kind': 'codex',
           'displayName': 'Codex',
           'defaultCommand': 'codex',
+          'capabilities': {
+            'sessions': {'create': true},
+          },
           'commandEnvironmentVariables': [
             'SIDEMESH_CODEX_BIN',
             'SIDEMESH_PROVIDER_COMMAND',
@@ -52,6 +55,10 @@ void main() {
       'SIDEMESH_CODEX_BIN',
       'SIDEMESH_PROVIDER_COMMAND',
     ]);
+    expect(
+      node.capabilitiesForProvider('codex').supports('sessions', 'create'),
+      isTrue,
+    );
   });
 
   test('NodeInfo stays compatible with older Codex-only daemon payloads', () {

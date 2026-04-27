@@ -368,6 +368,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       createdAt: now,
       updatedAt: now,
       source: 'appServer',
+      provider: null,
       status: 'pendingApproval',
       runtime: null,
       gitInfo: null,
@@ -383,6 +384,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       createdAt: action.requestedAt,
       updatedAt: action.requestedAt,
       source: 'appServer',
+      provider: null,
       status: 'pendingApproval',
       runtime: null,
       gitInfo: null,
@@ -1428,6 +1430,7 @@ class _InboxPaneState extends State<InboxPane> {
       createdAt: send.createdAt,
       updatedAt: send.updatedAt,
       source: 'appServer',
+      provider: null,
       status: send.blocked ? 'blocked' : 'queued',
       runtime: SessionRuntimeSummary(
         model: send.model,
