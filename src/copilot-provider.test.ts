@@ -205,11 +205,14 @@ describe("Copilot provider", () => {
       assert.equal(log.messages[1]?.role, "assistant");
       assert.equal(log.messages[1]?.text, "copilot says: hello");
       assert.equal(log.runtime?.modelProvider, "copilot");
-      assert.equal(log.runtime?.model, undefined);
+      assert.equal(log.runtime?.model, "auto");
       assert.equal(log.runtime?.reasoningEffort, undefined);
 
       const args = JSON.parse(await readFile(argsPath, "utf8")) as string[];
-      assert.equal(args.includes("--model"), false);
+      assert.deepEqual(
+        args.slice(args.indexOf("--model"), args.indexOf("--model") + 2),
+        ["--model", "auto"],
+      );
       assert.equal(args.includes("--effort"), false);
 
       const sessions = await provider.listSessionThreads!({
@@ -236,6 +239,13 @@ describe("Copilot provider", () => {
           "#!/usr/bin/env node",
           "const fs = require('node:fs');",
           "const args = process.argv.slice(2);",
+          "if (args[0] === 'help' && args[1] === 'config') {",
+          "  console.log('  `model`: AI model to use for Copilot CLI.');",
+          "  console.log('    - \"claude-haiku-4.5\"');",
+          "  console.log('    - \"gpt-5.3-codex\"');",
+          "  console.log('  `mouse`: whether to enable mouse support.');",
+          "  process.exit(0);",
+          "}",
           `fs.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args));`,
           "const prompt = args[args.indexOf('-p') + 1] || '';",
           "process.stdout.write('configured: ' + prompt);",
@@ -267,10 +277,28 @@ describe("Copilot provider", () => {
         })),
         [
           {
+            model: "auto",
+            displayName: "Auto",
+            source: "cli-help",
+            isDefault: false,
+          },
+          {
             model: "safe-test-model",
             displayName: "Safe Test Model",
-            source: "env",
+            source: "config",
             isDefault: true,
+          },
+          {
+            model: "claude-haiku-4.5",
+            displayName: "Claude Haiku 4.5",
+            source: "cli-help",
+            isDefault: false,
+          },
+          {
+            model: "gpt-5.3-codex",
+            displayName: "Gpt 5.3 Codex",
+            source: "cli-help",
+            isDefault: false,
           },
         ],
       );
@@ -307,7 +335,7 @@ describe("Copilot provider", () => {
     }
   });
 
-  it("does not reuse stale persisted Copilot model defaults without config", async () => {
+  it("falls back to auto instead of stale persisted Copilot model defaults", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-stale-model-test-"),
     );
@@ -389,7 +417,10 @@ describe("Copilot provider", () => {
       await completed;
 
       const args = JSON.parse(await readFile(argsPath, "utf8")) as string[];
-      assert.equal(args.includes("--model"), false);
+      assert.deepEqual(
+        args.slice(args.indexOf("--model"), args.indexOf("--model") + 2),
+        ["--model", "auto"],
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

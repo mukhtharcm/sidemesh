@@ -144,6 +144,8 @@ into Sidemesh session summaries, and parses `events.jsonl` into chat messages
 and generic tool activity cards. Images, approvals, skills, filesystem, and
 richer native tool translation should be enabled only when the adapter can
 report honest capabilities and translate native events into Sidemesh event
-types. It intentionally does not ship a hardcoded model catalog; model controls
-are advertised only when a host explicitly configures a Copilot model through
-the environment.
+types. It intentionally does not ship a hand-written model catalog; model
+controls are advertised from the installed CLI's local `copilot help config`
+metadata, with explicit host defaults layered on top when configured. The
+Copilot adapter uses `auto` as the Sidemesh default for app-started turns, so a
+costly persistent Copilot CLI setting is not consumed by accident.

@@ -68,12 +68,15 @@ reasoning-effort metadata from native history, streaming assistant text,
 rename/archive overlays, resume, and interruption. It does not yet expose
 images, approvals, skills, or filesystem browsing. Tool execution events from
 native history are shown as generic Copilot tool activity cards. Sidemesh does
-not maintain a hardcoded Copilot model catalog; the model picker is exposed only
-when `SIDEMESH_COPILOT_MODEL`, `COPILOT_MODEL`,
-`COPILOT_PROVIDER_MODEL_ID`, or `COPILOT_PROVIDER_WIRE_MODEL` is configured.
-By default it does not auto-grant Copilot tool permissions; set
-`SIDEMESH_COPILOT_ALLOW_ALL=1` only on hosts where Copilot may run with
-`--allow-all`.
+not maintain a hand-written Copilot model catalog; the model picker is built
+from the installed CLI's `copilot help config` output and includes Copilot's
+`auto` selection. Sidemesh defaults new app-started Copilot turns to `auto` so
+an expensive `~/.copilot/settings.json` model is not used accidentally. Set
+`SIDEMESH_COPILOT_MODEL`, `COPILOT_MODEL`, `COPILOT_PROVIDER_MODEL_ID`, or
+`COPILOT_PROVIDER_WIRE_MODEL` only when you want a host-level default. By
+default it does not auto-grant Copilot tool
+permissions; set `SIDEMESH_COPILOT_ALLOW_ALL=1` only on hosts where Copilot may
+run with `--allow-all`.
 
 For provider-abstraction testing, run the deterministic in-process fake
 provider instead of Codex:
