@@ -120,6 +120,7 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
     "SIDEMESH_COPILOT_BIN",
     "SIDEMESH_PROVIDER_COMMAND",
     "SIDEMESH_COPILOT_STATE_DIR",
+    "SIDEMESH_COPILOT_SESSION_STATE_DIR",
     "SIDEMESH_COPILOT_ALLOW_ALL",
   ],
 
@@ -128,6 +129,7 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
     return new CopilotAgentProvider({
       bin: copilot.bin,
       stateDir: copilot.stateDir,
+      sessionStateDir: copilot.sessionStateDir,
       allowAll: copilot.allowAll,
     });
   },
@@ -140,6 +142,7 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
         env.SIDEMESH_PROVIDER_COMMAND?.trim() ||
         COPILOT_DEFAULT_COMMAND,
       stateDir: env.SIDEMESH_COPILOT_STATE_DIR?.trim() || null,
+      sessionStateDir: env.SIDEMESH_COPILOT_SESSION_STATE_DIR?.trim() || null,
       allowAll: parseBoolean(env.SIDEMESH_COPILOT_ALLOW_ALL, false),
     };
   },
