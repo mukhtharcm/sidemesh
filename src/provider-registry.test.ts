@@ -55,6 +55,10 @@ describe("provider registry", () => {
           "SIDEMESH_COPILOT_STATE_DIR",
           "SIDEMESH_COPILOT_SESSION_STATE_DIR",
           "SIDEMESH_COPILOT_ALLOW_ALL",
+          "SIDEMESH_COPILOT_MODEL",
+          "COPILOT_MODEL",
+          "COPILOT_PROVIDER_MODEL_ID",
+          "COPILOT_PROVIDER_WIRE_MODEL",
         ],
       },
     ]);
@@ -145,6 +149,7 @@ describe("provider registry", () => {
       SIDEMESH_COPILOT_STATE_DIR: "/tmp/sidemesh-copilot",
       SIDEMESH_COPILOT_SESSION_STATE_DIR: "/tmp/copilot-native",
       SIDEMESH_COPILOT_ALLOW_ALL: "true",
+      SIDEMESH_COPILOT_MODEL: "claude-sonnet-4.6",
     });
 
     assert.deepEqual(config, {
@@ -153,6 +158,7 @@ describe("provider registry", () => {
       stateDir: "/tmp/sidemesh-copilot",
       sessionStateDir: "/tmp/copilot-native",
       allowAll: true,
+      configuredModel: "claude-sonnet-4.6",
     });
     assert.deepEqual(summarizeAgentProviderConfig(config), {
       kind: "copilot",
@@ -165,5 +171,24 @@ describe("provider registry", () => {
     assert.equal(provider.displayName, "GitHub Copilot");
     assert.equal(provider.capabilities.input.text, true);
     assert.equal(provider.capabilities.input.localImage, false);
+    assert.equal(provider.capabilities.configuration.models, true);
+    assert.equal(provider.capabilities.runtimeControls.model, true);
+  });
+
+  it("does not expose Copilot model controls without an explicit configured model", () => {
+    const config = loadAgentProviderConfig("copilot", {});
+
+    assert.deepEqual(config, {
+      kind: "copilot",
+      bin: "copilot",
+      stateDir: null,
+      sessionStateDir: null,
+      allowAll: false,
+      configuredModel: null,
+    });
+
+    const provider = createAgentProviderFromConfig(config);
+    assert.equal(provider.capabilities.configuration.models, false);
+    assert.equal(provider.capabilities.runtimeControls.model, false);
   });
 });

@@ -144,4 +144,6 @@ into Sidemesh session summaries, and parses `events.jsonl` into chat messages
 and generic tool activity cards. Images, approvals, skills, filesystem, and
 richer native tool translation should be enabled only when the adapter can
 report honest capabilities and translate native events into Sidemesh event
-types.
+types. It intentionally does not ship a hardcoded model catalog; model controls
+are advertised only when a host explicitly configures a Copilot model through
+the environment.
