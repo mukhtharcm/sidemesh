@@ -57,6 +57,7 @@ class NodeInfo {
     required this.providerVersion,
     required this.providerConfig,
     required this.providerCapabilities,
+    required this.supportedProviders,
   });
 
   final String label;
@@ -68,6 +69,7 @@ class NodeInfo {
   final String providerVersion;
   final ProviderConfigSummary providerConfig;
   final ProviderCapabilities providerCapabilities;
+  final List<ProviderDefinitionSummary> supportedProviders;
 
   String get providerDisplayName {
     if (providerName.isNotEmpty) return providerName;
@@ -100,7 +102,69 @@ class NodeInfo {
     providerCapabilities: ProviderCapabilities.fromJson(
       json['providerCapabilities'],
     ),
+    supportedProviders: ProviderDefinitionSummary.listFromJson(
+      json['supportedProviders'],
+    ),
   );
+}
+
+class ProviderMetadata {
+  const ProviderMetadata({
+    required this.currentProvider,
+    required this.providers,
+  });
+
+  final String currentProvider;
+  final List<ProviderDefinitionSummary> providers;
+
+  factory ProviderMetadata.fromJson(Map<String, dynamic> json) =>
+      ProviderMetadata(
+        currentProvider: _stringValue(json['currentProvider']),
+        providers: ProviderDefinitionSummary.listFromJson(json['providers']),
+      );
+}
+
+class ProviderDefinitionSummary {
+  const ProviderDefinitionSummary({
+    required this.kind,
+    required this.displayName,
+    required this.defaultCommand,
+    required this.commandEnvironmentVariables,
+  });
+
+  static const empty = ProviderDefinitionSummary(
+    kind: '',
+    displayName: '',
+    defaultCommand: '',
+    commandEnvironmentVariables: <String>[],
+  );
+
+  final String kind;
+  final String displayName;
+  final String defaultCommand;
+  final List<String> commandEnvironmentVariables;
+
+  factory ProviderDefinitionSummary.fromJson(Object? json) {
+    if (json is! Map) return empty;
+    return ProviderDefinitionSummary(
+      kind: _stringValue(json['kind']),
+      displayName: _stringValue(json['displayName']),
+      defaultCommand: _stringValue(json['defaultCommand']),
+      commandEnvironmentVariables:
+          (json['commandEnvironmentVariables'] as List<dynamic>? ?? const [])
+              .map(_stringValue)
+              .where((value) => value.isNotEmpty)
+              .toList(),
+    );
+  }
+
+  static List<ProviderDefinitionSummary> listFromJson(Object? json) {
+    if (json is! List) return const [];
+    return json
+        .map(ProviderDefinitionSummary.fromJson)
+        .where((provider) => provider.kind.isNotEmpty)
+        .toList();
+  }
 }
 
 class ProviderConfigSummary {
