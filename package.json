@@ -9,6 +9,7 @@
     "daemon:dev": "tsx watch src/index.ts",
     "test": "npm run typecheck && npm run test:server && npm run test:mobile:provider-metadata && npm run mobile:analyze",
     "test:server": "node --import tsx --test \"src/**/*.test.ts\"",
+    "test:fake-profiles": "node --import tsx --test src/fake-provider-profile-api.test.ts",
     "test:mobile": "cd apps/mobile && flutter test",
     "test:mobile:provider-metadata": "cd apps/mobile && flutter test test/provider_metadata_models_test.dart",
     "typecheck": "tsc --noEmit",

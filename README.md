@@ -78,6 +78,16 @@ Use `SIDEMESH_FAKE_CAPABILITY_PROFILE` to simulate weaker future providers:
 - `minimal`: text chat and history only, with rename/archive/interrupt/replay
   disabled too.
 
+To automate the profile checks without manually adding each fake host in the
+app, run:
+
+```bash
+npm run test:fake-profiles
+```
+
+That starts real local fake daemons for each profile and verifies `/api/node`
+capabilities plus key route gates.
+
 ## Dogfood flow
 
 Run one daemon per machine you want to reach from the phone:
