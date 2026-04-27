@@ -110,6 +110,38 @@ void main() {
     expect(store.entries.map((entry) => entry.session.id), {'session-2'});
   });
 
+  test('swallows websocket handshake failures and keeps HTTP fallback alive', () async {
+    final uncaught = <Object>[];
+
+    await runZonedGuarded(() async {
+      final api = _FakeApiClient()
+        ..liveReady = Future<void>.error(
+          StateError('handshake failed'),
+        )
+        ..sessionsByHostId[host.id] = [
+          _session('session-1', title: 'HTTP survives'),
+        ];
+      final store = RecentSessionsStore(
+        pollInterval: const Duration(hours: 1),
+      );
+      addTearDown(store.dispose);
+
+      store.configure(hosts: const [host], api: api);
+      await _settle();
+      await _settle();
+
+      expect(store.entries, hasLength(1));
+      expect(store.entries.single.session.title, 'HTTP survives');
+
+      store.dispose();
+      await _settle();
+    }, (error, stackTrace) {
+      uncaught.add(error);
+    });
+
+    expect(uncaught, isEmpty);
+  });
+
   test(
     'live disconnect clears confirmation without dropping visible entries',
     () async {
@@ -145,6 +177,7 @@ class _FakeApiClient extends ApiClient {
   final Map<String, _FakeWebSocketChannel> _liveChannels = {};
   bool throwOnOpenSessionsLive = false;
   Duration fetchDelay = Duration.zero;
+  Future<void> liveReady = Future<void>.value();
 
   @override
   Future<List<SessionSummary>> fetchSessions(
@@ -162,17 +195,27 @@ class _FakeApiClient extends ApiClient {
     if (throwOnOpenSessionsLive) {
       throw StateError('live sessions unavailable');
     }
-    return _liveChannels.putIfAbsent(host.id, _FakeWebSocketChannel.new);
+    return _liveChannels.putIfAbsent(
+      host.id,
+      () => _FakeWebSocketChannel(ready: liveReady),
+    );
   }
 
   _FakeWebSocketChannel liveChannelFor(HostProfile host) =>
-      _liveChannels.putIfAbsent(host.id, _FakeWebSocketChannel.new);
+      _liveChannels.putIfAbsent(
+        host.id,
+        () => _FakeWebSocketChannel(ready: liveReady),
+      );
 }
 
 class _FakeWebSocketChannel extends StreamChannelMixin<dynamic>
     implements WebSocketChannel {
+  _FakeWebSocketChannel({Future<void>? ready})
+    : _ready = ready ?? Future<void>.value();
+
   final StreamController<dynamic> _incoming = StreamController<dynamic>();
   final StreamController<dynamic> _outgoing = StreamController<dynamic>();
+  final Future<void> _ready;
 
   @override
   Stream<dynamic> get stream => _incoming.stream;
@@ -190,7 +233,7 @@ class _FakeWebSocketChannel extends StreamChannelMixin<dynamic>
   String? get protocol => null;
 
   @override
-  Future<void> get ready async {}
+  Future<void> get ready => _ready;
 
   void addIncoming(String value) {
     _incoming.add(value);
