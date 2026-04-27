@@ -1,7 +1,19 @@
-import { CodexAgentProvider } from "./codex-provider.js";
-import { CopilotAgentProvider } from "./copilot-provider.js";
-import { FakeAgentProvider } from "./fake-provider.js";
-import type { AgentProvider } from "./agent-provider.js";
+import {
+  CODEX_PROVIDER_CAPABILITIES,
+  CodexAgentProvider,
+} from "./codex-provider.js";
+import {
+  COPILOT_PROVIDER_CAPABILITIES,
+  CopilotAgentProvider,
+} from "./copilot-provider.js";
+import {
+  FAKE_PROVIDER_CAPABILITIES,
+  FakeAgentProvider,
+} from "./fake-provider.js";
+import type {
+  AgentProvider,
+  AgentProviderCapabilities,
+} from "./agent-provider.js";
 import type {
   AgentProviderConfig,
   AgentProviderConfigSummary,
@@ -18,6 +30,7 @@ interface AgentProviderDefinition {
   readonly kind: AgentProviderKind;
   readonly displayName: string;
   readonly defaultCommand: string;
+  readonly capabilities: AgentProviderCapabilities;
   readonly commandEnvironmentVariables: readonly string[];
 
   create(config: AgentProviderConfig): AgentProvider;
@@ -30,6 +43,7 @@ export interface AgentProviderDefinitionSummary {
   displayName: string;
   defaultCommand: string;
   commandEnvironmentVariables: string[];
+  capabilities: AgentProviderCapabilities;
 }
 
 export const DEFAULT_AGENT_PROVIDER_KIND: AgentProviderKind = "codex";
@@ -41,6 +55,7 @@ const CODEX_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "codex",
   displayName: "Codex",
   defaultCommand: CODEX_DEFAULT_COMMAND,
+  capabilities: CODEX_PROVIDER_CAPABILITIES,
   commandEnvironmentVariables: [
     "SIDEMESH_CODEX_BIN",
     "SIDEMESH_PROVIDER_COMMAND",
@@ -74,6 +89,7 @@ const FAKE_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "fake",
   displayName: "Fake Test Provider",
   defaultCommand: FAKE_DEFAULT_COMMAND,
+  capabilities: FAKE_PROVIDER_CAPABILITIES,
   commandEnvironmentVariables: [
     "SIDEMESH_FAKE_LATENCY_MS",
     "SIDEMESH_FAKE_SEED",
@@ -116,6 +132,7 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "copilot",
   displayName: "GitHub Copilot",
   defaultCommand: COPILOT_DEFAULT_COMMAND,
+  capabilities: COPILOT_PROVIDER_CAPABILITIES,
   commandEnvironmentVariables: [
     "SIDEMESH_COPILOT_BIN",
     "SIDEMESH_PROVIDER_COMMAND",
@@ -180,6 +197,7 @@ export function listAgentProviderDefinitionSummaries(): AgentProviderDefinitionS
     displayName: definition.displayName,
     defaultCommand: definition.defaultCommand,
     commandEnvironmentVariables: [...definition.commandEnvironmentVariables],
+    capabilities: definition.capabilities,
   }));
 }
 

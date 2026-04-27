@@ -286,6 +286,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   String? _modelsLoadedForCwd;
   String? _modelsLoadedForProfile;
   String? _profilesLoadedForCwd;
+  String? _selectedProviderKind;
 
   @override
   void initState() {
@@ -343,9 +344,41 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   bool get _fastSupported =>
       _supportsFastMode && (_controlModel?.supportsFastMode ?? false);
 
-  String get _providerName => _nodeInfo?.providerDisplayName ?? 'agent';
+  List<ProviderDefinitionSummary> get _availableProviders {
+    final node = _nodeInfo;
+    if (node == null || node.supportedProviders.isEmpty) {
+      return const <ProviderDefinitionSummary>[];
+    }
+    return node.supportedProviders;
+  }
+
+  String get _selectedProviderKindOrDefault =>
+      _selectedProviderKind ?? _nodeInfo?.provider ?? '';
+
+  ProviderDefinitionSummary get _selectedProviderSummary {
+    final node = _nodeInfo;
+    if (node == null) {
+      return ProviderDefinitionSummary.empty;
+    }
+    return node.providerSummary(_selectedProviderKindOrDefault);
+  }
+
+  String get _providerName {
+    final summary = _selectedProviderSummary;
+    if (summary.displayName.isNotEmpty) {
+      return summary.displayName;
+    }
+    return _nodeInfo?.providerDisplayName ?? 'agent';
+  }
 
   String get _providerPillLabel {
+    final summary = _selectedProviderSummary;
+    if (summary.kind.isNotEmpty) {
+      final version = summary.version.trim();
+      return version.isEmpty
+          ? summary.displayName
+          : '${summary.displayName} $version';
+    }
     final node = _nodeInfo;
     if (node != null) return node.providerPillLabel;
     if (_loadingNode) return 'checking provider';
@@ -374,7 +407,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   bool _supports(String section, String feature) {
     final node = _nodeInfo;
     if (node == null) return true;
-    return node.providerCapabilities.supports(section, feature);
+    return node
+        .capabilitiesForProvider(_selectedProviderKindOrDefault)
+        .supports(section, feature);
   }
 
   String? get _effectiveReasoningEffort {
@@ -513,6 +548,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (!mounted) return;
       setState(() {
         _nodeInfo = node;
+        _selectedProviderKind ??= node.provider;
         _loadingNode = false;
         _nodeError = null;
         _coerceForProviderCapabilities();
@@ -550,6 +586,25 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (!_supportsWebSearch) {
       _webSearch = false;
     }
+  }
+
+  void _selectProvider(String? providerKind) {
+    final normalized = _trimmedOrNull(providerKind);
+    if (_selectedProviderKind == normalized) {
+      return;
+    }
+    _selectedProviderKind = normalized;
+    _selectProfile(null);
+    _selectedModel = null;
+    _models = const <ModelCatalogEntry>[];
+    _profiles = const <ProviderProfileSummary>[];
+    _modelsError = null;
+    _profilesError = null;
+    _defaultProfileName = null;
+    _modelsLoadedForCwd = null;
+    _modelsLoadedForProfile = null;
+    _profilesLoadedForCwd = null;
+    _coerceForProviderCapabilities();
   }
 
   void _handleCwdChanged() {
@@ -620,6 +675,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         widget.host,
         cwd: cwd,
         profile: profile,
+        agentProvider: _selectedProviderKindOrDefault,
       );
       models.sort(_compareModelEntries);
       if (!mounted) return;
@@ -813,6 +869,52 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     unawaited(_loadModels(force: true));
   }
 
+  Future<void> _chooseProvider() async {
+    if (_availableProviders.length <= 1) {
+      return;
+    }
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: context.colors.surface,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final provider in _availableProviders)
+              ListTile(
+                leading: Icon(
+                  provider.kind == _selectedProviderKindOrDefault
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_off_rounded,
+                ),
+                title: Text(provider.displayName),
+                subtitle: Text(
+                  provider.version.trim().isEmpty
+                      ? provider.kind
+                      : '${provider.kind} · ${provider.version}',
+                ),
+                onTap: () => Navigator.of(context).pop(provider.kind),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || result == null) {
+      return;
+    }
+    setState(() {
+      _selectProvider(result);
+    });
+    if (_showAdvanced) {
+      unawaited(_loadModels(force: true));
+      if (_currentCwd != null) {
+        unawaited(_loadProfiles(force: true));
+      }
+    }
+  }
+
   Future<void> _chooseModel() async {
     if (!_supportsModels || !_supportsModelOverride) return;
     if (_loadingModels) return;
@@ -888,6 +990,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         widget.host,
         cwd: cwd,
         prompt: prompt,
+        provider: _selectedProviderKindOrDefault,
         model: _supportsModelOverride ? _selectedModel?.model : null,
         reasoningEffort: _reasoningToSubmit,
         fastMode: _supportsFastMode && _fastMode ? true : null,
@@ -1063,6 +1166,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               prefixIcon: Icon(Icons.folder_open_rounded),
             ),
           ),
+          if (_availableProviders.length > 1) ...[
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: _submitting ? null : _chooseProvider,
+              icon: const Icon(Icons.smart_toy_rounded),
+              label: Text('Provider: $_providerName'),
+            ),
+          ],
           const SizedBox(height: 14),
           TextField(
             controller: _promptController,

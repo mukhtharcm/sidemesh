@@ -55,6 +55,7 @@ SessionSummary _summary(String id) {
     createdAt: now,
     updatedAt: now,
     source: 'codex',
+    provider: null,
     status: 'complete',
     runtime: null,
     gitInfo: null,
