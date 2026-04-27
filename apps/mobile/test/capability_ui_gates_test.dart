@@ -7,6 +7,7 @@ import 'package:sidemesh_mobile/src/api_client.dart';
 import 'package:sidemesh_mobile/src/create_session_defaults_store.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/create_session_sheet.dart';
+import 'package:sidemesh_mobile/src/screens/host_detail_screen.dart';
 import 'package:sidemesh_mobile/src/screens/session_screen.dart';
 import 'package:sidemesh_mobile/src/session_policy_store.dart';
 import 'package:sidemesh_mobile/src/session_turn_config_store.dart';
@@ -187,6 +188,57 @@ void main() {
     expect(find.text('Permissions'), findsOneWidget);
     expect(find.text('Live web search'), findsOneWidget);
   });
+
+  testWidgets('host detail exposes provider contract metadata', (tester) async {
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(
+        _fullCapabilities,
+        supportedProviders: const [
+          ProviderDefinitionSummary(
+            kind: 'codex',
+            displayName: 'Codex',
+            defaultCommand: 'codex',
+            commandEnvironmentVariables: ['SIDEMESH_CODEX_BIN'],
+          ),
+          ProviderDefinitionSummary(
+            kind: 'fake',
+            displayName: 'Fake Test Provider',
+            defaultCommand: 'builtin',
+            commandEnvironmentVariables: ['SIDEMESH_FAKE_CAPABILITY_PROFILE'],
+          ),
+        ],
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      HostDetailScreen(
+        host: _host('host-contract'),
+        api: api,
+        onOpenSession: (_) {},
+      ),
+      size: const Size(900, 1000),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Provider contract'), findsOneWidget);
+    expect(
+      find.text('Fake Test Provider - fake-provider 1.0.0'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Provider contract'));
+    await _pumpFrames(tester);
+
+    expect(find.text('active: fake'), findsOneWidget);
+    expect(find.text('Fake Test Provider active'), findsOneWidget);
+    expect(find.text('Codex'), findsOneWidget);
+    expect(find.text('Provider-owned capabilities'), findsOneWidget);
+    expect(find.text('Runtime controls'), findsOneWidget);
+    expect(find.text('web search'), findsOneWidget);
+    expect(find.text('Host-owned capabilities'), findsOneWidget);
+    expect(find.text('git status'), findsOneWidget);
+  });
 }
 
 Future<void> _pumpFrames(WidgetTester tester) async {
@@ -242,22 +294,33 @@ SessionSummary _session(String id) {
   );
 }
 
-NodeInfo _nodeForCapabilities(Map<String, Object?> capabilities) =>
-    NodeInfo.fromJson({
-      'label': 'fake-profile',
-      'hostname': 'localhost',
-      'platform': 'darwin',
-      'codexVersion': 'fake-provider 1.0.0',
-      'provider': 'fake',
-      'providerName': 'Fake Test Provider',
-      'providerVersion': 'fake-provider 1.0.0',
-      'providerConfig': {'kind': 'fake', 'command': 'builtin'},
-      'providerCapabilities': capabilities,
-      'hostCapabilities': {
-        'workspace': {'gitStatus': false, 'gitDiff': false},
-      },
-      'supportedProviders': const [],
-    });
+NodeInfo _nodeForCapabilities(
+  Map<String, Object?> capabilities, {
+  List<ProviderDefinitionSummary> supportedProviders = const [],
+}) => NodeInfo.fromJson({
+  'label': 'fake-profile',
+  'hostname': 'localhost',
+  'platform': 'darwin',
+  'codexVersion': 'fake-provider 1.0.0',
+  'provider': 'fake',
+  'providerName': 'Fake Test Provider',
+  'providerVersion': 'fake-provider 1.0.0',
+  'providerConfig': {'kind': 'fake', 'command': 'builtin'},
+  'providerCapabilities': capabilities,
+  'hostCapabilities': {
+    'workspace': {'gitStatus': false, 'gitDiff': false},
+  },
+  'supportedProviders': supportedProviders
+      .map(
+        (provider) => {
+          'kind': provider.kind,
+          'displayName': provider.displayName,
+          'defaultCommand': provider.defaultCommand,
+          'commandEnvironmentVariables': provider.commandEnvironmentVariables,
+        },
+      )
+      .toList(growable: false),
+});
 
 const Map<String, Object?> _fullCapabilities = {
   'sessions': {
@@ -353,6 +416,12 @@ class _CapabilityFakeApi extends ApiClient {
 
   @override
   Future<NodeInfo> fetchNode(HostProfile host) async => node;
+
+  @override
+  Future<List<SessionSummary>> fetchSessions(
+    HostProfile host, {
+    int? limit,
+  }) async => const [];
 
   @override
   Future<List<ModelCatalogEntry>> fetchModels(
