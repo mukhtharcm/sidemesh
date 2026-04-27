@@ -48,6 +48,10 @@ import {
   mergeActivity,
   mergeSessionActivities,
 } from "./activity.js";
+import {
+  parsePendingActionDecision,
+  toPublicPendingAction,
+} from "./approvals.js";
 import { summarizeProviderConfig } from "./config.js";
 import {
   buildGitDiff,
@@ -452,14 +456,15 @@ export async function startServer(config: NodeConfig): Promise<void> {
         return;
       case "action_opened":
         pendingActions.set(event.action.id, event.action);
+        const publicAction = toPublicPendingAction(event.action);
         broadcastLive(event.action.sessionId, {
           type: "action_opened",
           sessionId: event.action.sessionId,
-          action: event.action,
+          action: publicAction,
         });
         broadcastApprovalLive({
           type: "action_opened",
-          action: event.action,
+          action: publicAction,
         });
         scheduleRecentSessionUpsert(event.action.sessionId);
         return;
@@ -1309,7 +1314,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
     "/api/actions/:actionId/respond",
     asyncRoute(async (request, response) => {
       const actionId = pathParam(request.params.actionId);
-      const decision = asString(request.body?.decision);
+      const decision = parsePendingActionDecision(
+        request.body?.approvalDecision ?? request.body?.decision,
+      );
       const action = pendingActions.get(actionId);
       if (!action) {
         response.status(404).json({ error: "action not found" });
@@ -1740,7 +1747,7 @@ async function listPendingActions(
   return Promise.all(
     actions.map(async (action) => {
       if (!action.sessionId || action.sessionId === "unknown") {
-        return action;
+        return toPublicPendingAction(action);
       }
 
       let sessionPromise = sessionsById.get(action.sessionId);
@@ -1753,15 +1760,15 @@ async function listPendingActions(
 
       const session = await sessionPromise;
       if (!session) {
-        return action;
+        return toPublicPendingAction(action);
       }
 
       const mapped = mapSession(session);
-      return {
+      return toPublicPendingAction({
         ...action,
         sessionTitle: mapped.title,
         cwd: mapped.cwd,
-      };
+      });
     }),
   );
 }
@@ -2223,7 +2230,7 @@ function findPendingActionForSession(
 ): PendingAction | null {
   for (const action of pendingActions.values()) {
     if (action.sessionId === sessionId) {
-      return action;
+      return toPublicPendingAction(action);
     }
   }
   return null;
