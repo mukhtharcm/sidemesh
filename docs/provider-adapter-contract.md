@@ -138,9 +138,10 @@ dogfooding non-Codex behavior before a real adapter exists. Supported profiles
 are `full`, `chat-only`, `no-files`, `no-model-controls`, `no-approvals`, and
 `minimal`.
 
-The Copilot adapter is the first real non-Codex slice. It intentionally starts
-small: node metadata, create session, submit text input, stream assistant text,
-Sidemesh-owned history, rename/archive/resume, interruption, and model/effort
-pass-through. Images, approvals, skills, filesystem, and native tool activity
-translation should be enabled only when the adapter can report honest
-capabilities and translate native events into Sidemesh event types.
+The Copilot adapter is the first real non-Codex slice. It reads native Copilot
+CLI session directories from `~/.copilot/session-state`, maps `workspace.yaml`
+into Sidemesh session summaries, and parses `events.jsonl` into chat messages
+and generic tool activity cards. Images, approvals, skills, filesystem, and
+richer native tool translation should be enabled only when the adapter can
+report honest capabilities and translate native events into Sidemesh event
+types.

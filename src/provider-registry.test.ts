@@ -53,6 +53,7 @@ describe("provider registry", () => {
           "SIDEMESH_COPILOT_BIN",
           "SIDEMESH_PROVIDER_COMMAND",
           "SIDEMESH_COPILOT_STATE_DIR",
+          "SIDEMESH_COPILOT_SESSION_STATE_DIR",
           "SIDEMESH_COPILOT_ALLOW_ALL",
         ],
       },
@@ -142,6 +143,7 @@ describe("provider registry", () => {
       SIDEMESH_COPILOT_BIN: "copilot-beta",
       SIDEMESH_PROVIDER_COMMAND: "ignored",
       SIDEMESH_COPILOT_STATE_DIR: "/tmp/sidemesh-copilot",
+      SIDEMESH_COPILOT_SESSION_STATE_DIR: "/tmp/copilot-native",
       SIDEMESH_COPILOT_ALLOW_ALL: "true",
     });
 
@@ -149,6 +151,7 @@ describe("provider registry", () => {
       kind: "copilot",
       bin: "copilot-beta",
       stateDir: "/tmp/sidemesh-copilot",
+      sessionStateDir: "/tmp/copilot-native",
       allowAll: true,
     });
     assert.deepEqual(summarizeAgentProviderConfig(config), {

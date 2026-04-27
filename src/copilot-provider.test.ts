@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { describe, it } from "node:test";
@@ -7,6 +7,138 @@ import { describe, it } from "node:test";
 import { CopilotAgentProvider } from "./copilot-provider.js";
 
 describe("Copilot provider", () => {
+  it("imports native Copilot CLI session-state history", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-native-"),
+    );
+    try {
+      const sessionId = "11111111-2222-4333-8444-555555555555";
+      const sessionDir = nodePath.join(dir, "native", sessionId);
+      await mkdir(sessionDir, { recursive: true });
+      await writeFile(
+        nodePath.join(sessionDir, "workspace.yaml"),
+        [
+          `id: ${sessionId}`,
+          `cwd: ${dir}`,
+          "repository: your-org/sidemesh",
+          "branch: main",
+          "summary: Native Copilot Session",
+          "created_at: 2026-04-01T00:00:00.000Z",
+          "updated_at: 2026-04-01T00:05:00.000Z",
+        ].join("\n"),
+      );
+      await writeFile(
+        nodePath.join(sessionDir, "events.jsonl"),
+        [
+          JSON.stringify({
+            type: "session.start",
+            timestamp: "2026-04-01T00:00:00.000Z",
+            data: { sessionId },
+          }),
+          JSON.stringify({
+            type: "session.model_change",
+            timestamp: "2026-04-01T00:00:01.000Z",
+            data: { newModel: "gpt-5.2" },
+          }),
+          JSON.stringify({
+            type: "user.message",
+            id: "user-1",
+            timestamp: "2026-04-01T00:01:00.000Z",
+            data: { content: "hello native" },
+          }),
+          JSON.stringify({
+            type: "assistant.message",
+            id: "assistant-1",
+            timestamp: "2026-04-01T00:01:05.000Z",
+            data: { messageId: "assistant-message-1", content: "hello back" },
+          }),
+          JSON.stringify({
+            type: "tool.execution_start",
+            timestamp: "2026-04-01T00:01:06.000Z",
+            data: {
+              toolCallId: "tool-1",
+              toolName: "view",
+              arguments: { path: "README.md" },
+            },
+          }),
+          JSON.stringify({
+            type: "tool.execution_complete",
+            timestamp: "2026-04-01T00:01:07.000Z",
+            data: {
+              toolCallId: "tool-1",
+              toolName: "view",
+              success: true,
+              result: { content: "README contents" },
+            },
+          }),
+        ].join("\n"),
+      );
+
+      const bin = nodePath.join(dir, "fake-copilot");
+      await writeFile(
+        bin,
+        [
+          "#!/usr/bin/env node",
+          "const args = process.argv.slice(2);",
+          "const prompt = args[args.indexOf('-p') + 1] || '';",
+          "process.stdout.write('resumed: ' + prompt);",
+        ].join("\n"),
+      );
+      await chmod(bin, 0o755);
+
+      const provider = new CopilotAgentProvider({
+        bin,
+        stateDir: nodePath.join(dir, "state"),
+        sessionStateDir: nodePath.join(dir, "native"),
+      });
+      await provider.start();
+
+      const sessions = await provider.listSessionThreads!({
+        limit: 10,
+        archived: false,
+      });
+      assert.equal(sessions.length, 1);
+      assert.equal(sessions[0]?.id, sessionId);
+      assert.equal(sessions[0]?.preview, "Native Copilot Session");
+      assert.equal(sessions[0]?.cwd, dir);
+      assert.equal(sessions[0]?.gitInfo?.branch, "main");
+
+      const log = await provider.readSessionLog!(sessions[0]!);
+      assert.equal(log.messages.length, 2);
+      assert.equal(log.messages[0]?.text, "hello native");
+      assert.equal(log.messages[1]?.text, "hello back");
+      assert.equal(log.activities.length, 1);
+      assert.equal(log.activities[0]?.type, "command");
+      assert.equal(log.runtime?.model, "gpt-5.2");
+
+      const completed = new Promise<void>((resolve) => {
+        provider.on("liveEvent", (event) => {
+          if (event.type === "turn_completed") resolve();
+        });
+      });
+      await provider.submitInput!({
+        sessionId,
+        input: [{ type: "text", text: "continue native", text_elements: [] }],
+        activeTurnId: null,
+        overrides: {
+          model: null,
+          reasoningEffort: null,
+          fastMode: null,
+          approvalPolicy: null,
+          sandboxMode: null,
+          networkAccess: null,
+          webSearch: null,
+          profile: null,
+        },
+      });
+      await completed;
+      const updated = await provider.readSessionLog!(sessions[0]!);
+      assert.equal(updated.messages.at(-1)?.text, "resumed: continue native");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runs a text turn through a Copilot-compatible command", async () => {
     const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-test-"));
     try {
@@ -29,6 +161,7 @@ describe("Copilot provider", () => {
       const provider = new CopilotAgentProvider({
         bin,
         stateDir: nodePath.join(dir, "state"),
+        sessionStateDir: nodePath.join(dir, "native-session-state"),
       });
       await provider.start();
 

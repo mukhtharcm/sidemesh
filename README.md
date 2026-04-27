@@ -37,6 +37,7 @@ SIDEMESH_CODEX_BIN=codex
 SIDEMESH_PROVIDER_COMMAND=codex
 SIDEMESH_COPILOT_BIN=copilot
 SIDEMESH_COPILOT_STATE_DIR=~/.sidemesh/copilot-provider
+SIDEMESH_COPILOT_SESSION_STATE_DIR=~/.copilot/session-state
 SIDEMESH_COPILOT_ALLOW_ALL=0
 SIDEMESH_FAKE_LATENCY_MS=15
 SIDEMESH_FAKE_SEED=1
@@ -58,13 +59,16 @@ SIDEMESH_TOKEN=replace-me \
 npm run daemon
 ```
 
-The Copilot provider is the first real non-Codex adapter. It currently supports
-text sessions, Sidemesh-owned recent/history storage, model and reasoning-effort
-overrides, streaming assistant text, rename/archive/resume, and interruption.
-It does not yet expose images, approvals, skills, filesystem browsing, or tool
-activity cards. By default it does not auto-grant Copilot tool permissions; set
-`SIDEMESH_COPILOT_ALLOW_ALL=1` only on hosts where Copilot may run with
-`--allow-all`.
+The Copilot provider is the first real non-Codex adapter. It reads native
+Copilot CLI history from `~/.copilot/session-state`, so sessions created in the
+Copilot terminal UI can appear in Sidemesh recent sessions/workspaces. It
+currently supports text sessions, native history/transcript import, model and
+reasoning-effort overrides, streaming assistant text, rename/archive overlays,
+resume, and interruption. It does not yet expose images, approvals, skills, or
+filesystem browsing. Tool execution events from native history are shown as
+generic Copilot tool activity cards. By default it does not auto-grant Copilot
+tool permissions; set `SIDEMESH_COPILOT_ALLOW_ALL=1` only on hosts where Copilot
+may run with `--allow-all`.
 
 For provider-abstraction testing, run the deterministic in-process fake
 provider instead of Codex:
