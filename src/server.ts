@@ -62,6 +62,7 @@ import {
 import { createAgentProviderRuntime } from "./provider-factory.js";
 import { isAgentProviderKind } from "./provider-registry.js";
 import { buildSessionResources } from "./resources.js";
+import { MultiAgentProvider } from "./multi-provider.js";
 import {
   FsWatchRegistry,
   attachFsLiveSocket,
@@ -197,6 +198,18 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return null;
     }
     return providerEntriesByKind.get(kind) ?? null;
+  }
+
+  function providerEntryForSessionId(sessionId: string) {
+    if (provider instanceof MultiAgentProvider) {
+      try {
+        const resolved = provider.resolveSessionProvider(sessionId);
+        return providerEntryForKind(resolved.kind);
+      } catch {
+        return null;
+      }
+    }
+    return providerEntryForKind(null);
   }
 
   function pruneSessionInputDedupe(now = Date.now()): void {
@@ -635,25 +648,30 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.get(
     "/api/sessions/:sessionId/log",
     asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.history,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.history,
           "session history",
           "readSessionThread",
         ) ||
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.history,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.history,
           "session log",
           "readSessionLog",
         )
       ) {
         return;
       }
-      const sessionId = pathParam(request.params.sessionId);
       const query = request.query as Record<string, unknown>;
       const messageLimit = asInteger(query.messageLimit);
       const activityLimit = asInteger(query.activityLimit);
@@ -734,25 +752,30 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.get(
     "/api/sessions/:sessionId/events",
     asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.eventReplay,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.eventReplay,
           "session event replay",
           "readSessionThread",
         ) ||
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.eventReplay,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.eventReplay,
           "session event replay",
           "readSessionLog",
         )
       ) {
         return;
       }
-      const sessionId = pathParam(request.params.sessionId);
       const query = request.query as Record<string, unknown>;
       const since = asInteger(query.since) ?? 0;
 
@@ -787,25 +810,30 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.get(
     "/api/sessions/:sessionId/resources",
     asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.history,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.history,
           "session resources",
           "readSessionThread",
         ) ||
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.history,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.history,
           "session resources",
           "readSessionLog",
         )
       ) {
         return;
       }
-      const sessionId = pathParam(request.params.sessionId);
       response.json(
         await readSessionResources(provider, sessionId, liveActivities),
       );
@@ -815,18 +843,23 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.get(
     "/api/sessions/:sessionId/status",
     asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.history,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.history,
           "session status",
           "readSessionThread",
         )
       ) {
         return;
       }
-      const sessionId = pathParam(request.params.sessionId);
       const state = await loadRunState(provider, sessionId, activeTurns);
       response.json({
         sessionId,
@@ -840,11 +873,17 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.get(
     "/api/sessions/:sessionId/git",
     asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.history,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.history,
           "session history",
           "readSessionThread",
         ) ||
@@ -856,7 +895,6 @@ export async function startServer(config: NodeConfig): Promise<void> {
       ) {
         return;
       }
-      const sessionId = pathParam(request.params.sessionId);
       const session = await readSession(provider, sessionId, false);
       response.json(
         await readGitStatus(session.cwd, mapGitInfo(session.gitInfo)),
@@ -868,6 +906,11 @@ export async function startServer(config: NodeConfig): Promise<void> {
     "/api/sessions/:sessionId/git/diff",
     asyncRoute(async (request, response) => {
       const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       const kind = parseGitDiffKind(
         (request.query as Record<string, unknown>).kind,
       );
@@ -881,8 +924,8 @@ export async function startServer(config: NodeConfig): Promise<void> {
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.history,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.history,
           "session history",
           "readSessionThread",
         )
@@ -1140,10 +1183,16 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.post(
     "/api/sessions/:sessionId/input",
     asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
+          sessionProvider.provider,
           true,
           "session input submission",
           "submitInput",
@@ -1151,7 +1200,6 @@ export async function startServer(config: NodeConfig): Promise<void> {
       ) {
         return;
       }
-      const sessionId = pathParam(request.params.sessionId);
       const text = asString(request.body?.text);
       const input = parseInputItems(request.body?.input);
       const clientMessageId = asString(request.body?.clientMessageId);
@@ -1168,7 +1216,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         return;
       }
       const unsupportedInput = unsupportedInputCapability(
-        provider,
+        sessionProvider.provider,
         resolvedInput,
       );
       if (unsupportedInput) {
@@ -1178,7 +1226,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
 
       const turnOverrides = parseTurnOverrides(request.body);
       const unsupportedOverride = unsupportedOverrideCapability(
-        provider,
+        sessionProvider.provider,
         turnOverrides,
       );
       if (unsupportedOverride) {
@@ -1291,18 +1339,23 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.post(
     "/api/sessions/:sessionId/stop",
     asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.interrupt,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.interrupt,
           "session interruption",
           "interruptTurn",
         )
       ) {
         return;
       }
-      const sessionId = pathParam(request.params.sessionId);
       const state = await loadRunState(provider, sessionId, activeTurns);
       if (!state.turnId) {
         response.json({ stopped: false });
@@ -1317,25 +1370,30 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.post(
     "/api/sessions/:sessionId/name",
     asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.rename,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.rename,
           "session renaming",
           "setSessionName",
         ) ||
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.history,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.history,
           "session history",
           "readSessionThread",
         )
       ) {
         return;
       }
-      const sessionId = pathParam(request.params.sessionId);
       const name = asString(request.body?.name);
       if (!name) {
         response.status(400).json({ error: "name is required" });
@@ -1348,8 +1406,8 @@ export async function startServer(config: NodeConfig): Promise<void> {
         if (
           !requireProviderCapability(
             response,
-            provider,
-            provider.capabilities.sessions.resume,
+            sessionProvider.provider,
+            sessionProvider.provider.capabilities.sessions.resume,
             "session resume",
             "resumeSessionThread",
           )
@@ -1371,18 +1429,23 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.post(
     "/api/sessions/:sessionId/archive",
     asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.archive,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.archive,
           "session archiving",
           "archiveSession",
         )
       ) {
         return;
       }
-      const sessionId = pathParam(request.params.sessionId);
       await provider.archiveSession!(sessionId);
       activeTurns.delete(sessionId);
       liveActivities.delete(sessionId);
@@ -1396,18 +1459,23 @@ export async function startServer(config: NodeConfig): Promise<void> {
   app.post(
     "/api/sessions/:sessionId/unarchive",
     asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
       if (
         !requireProviderCapability(
           response,
-          provider,
-          provider.capabilities.sessions.archive,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.archive,
           "session unarchiving",
           "unarchiveSession",
         )
       ) {
         return;
       }
-      const sessionId = pathParam(request.params.sessionId);
       await provider.unarchiveSession!(sessionId);
       response.json({ unarchived: true });
       void broadcastRecentSessionUpsert(sessionId);
