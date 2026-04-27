@@ -2499,6 +2499,7 @@ class _InboxCard extends StatelessWidget {
 String _actionKindLabel(String kind) {
   return switch (kind) {
     'command' => 'command',
+    'tool' => 'tool',
     'file_change' => 'files',
     'permissions' => 'permissions',
     _ => kind,

@@ -45,7 +45,7 @@ describe("fake test provider", () => {
     const input: AgentSessionInputItem[] = [
       {
         type: "text",
-        text: "run tools with approval:command approval:file approval:permissions image",
+        text: "run tools with approval:command approval:tool approval:file approval:permissions image",
         text_elements: [],
       },
       {
@@ -78,7 +78,7 @@ describe("fake test provider", () => {
     assert.equal(created.runtime?.model, "fake-vision");
     assert.equal(created.runtime?.serviceTier, "fast");
 
-    for (const kind of ["command", "file_change", "permissions"] as const) {
+    for (const kind of ["command", "tool", "file_change", "permissions"] as const) {
       const action = await waitFor(
         () => openedAction(events, kind),
         `approval ${kind}`,
@@ -104,7 +104,7 @@ describe("fake test provider", () => {
     assert.ok(log.messages.some((message) => message.text.includes("Fake provider response complete")));
     assert.deepEqual(
       [...new Set(log.activities.map((activity) => activity.type))].sort(),
-      ["command", "file_change", "image_generation", "turn_diff", "web_search"],
+      ["command", "file_change", "image_generation", "tool", "turn_diff", "web_search"],
     );
     assert.ok(log.nextSeq > 0);
 
@@ -285,7 +285,7 @@ describe("fake test provider", () => {
       input: [
         {
           type: "text",
-          text: "tools approval:command approval:file approval:permissions image",
+          text: "tools approval:command approval:tool approval:file approval:permissions image",
           text_elements: [],
         },
       ],
@@ -352,7 +352,7 @@ describe("fake test provider", () => {
     );
     assert.deepEqual(
       [...new Set(noFilesLog.activities.map((activity) => activity.type))].sort(),
-      ["command", "web_search"],
+      ["command", "tool", "web_search"],
     );
 
     const noModelControls = new FakeAgentProvider({
@@ -376,6 +376,7 @@ describe("fake test provider", () => {
       capabilityProfile: "no-approvals",
     });
     assert.equal(noApprovals.capabilities.approvals.command, false);
+    assert.equal(noApprovals.capabilities.approvals.tool, false);
     assert.equal(noApprovals.capabilities.approvals.fileChange, false);
     assert.equal(noApprovals.capabilities.approvals.permissions, false);
     assert.equal(noApprovals.capabilities.runtimeControls.approvalPolicy, false);

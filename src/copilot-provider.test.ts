@@ -88,7 +88,7 @@ describe("Copilot provider", () => {
       assert.equal(log.messages[0]?.text, "hello sdk");
       assert.equal(log.messages[1]?.text, "hello back");
       assert.equal(log.activities.length, 1);
-      assert.equal(log.activities[0]?.type, "command");
+      assert.equal(log.activities[0]?.type, "tool");
       assert.equal(log.runtime?.model, "gpt-5.2");
 
       const completed = waitForTurnCompleted(provider);
@@ -388,7 +388,7 @@ describe("Copilot provider", () => {
     }
   });
 
-  it("stores SDK tool events as command activities", async () => {
+  it("stores SDK tool events as tool activities", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-tools-test-"),
     );
@@ -410,7 +410,7 @@ describe("Copilot provider", () => {
 
       const log = await provider.readSessionLog!(created.thread);
       assert.equal(log.activities.length, 1);
-      assert.equal(log.activities[0]?.type, "command");
+      assert.equal(log.activities[0]?.type, "tool");
       assert.equal(log.activities[0]?.status, "completed");
       assert.match(log.activities[0]?.output ?? "", /tool output/);
     } finally {

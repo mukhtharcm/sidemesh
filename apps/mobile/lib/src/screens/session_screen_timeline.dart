@@ -1237,6 +1237,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     final title = switch (activity.type) {
       'command' =>
         (activity.command ?? '').trim().isEmpty ? 'Command' : activity.command!,
+      'tool' => _toolActivityTitle(activity),
       'file_change' =>
         activity.changes.length == 1
             ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
@@ -1249,6 +1250,9 @@ class _ActivityCardState extends State<_ActivityCard> {
 
     final subtitle = switch (activity.type) {
       'command' => _relativeSessionPath(activity.cwd ?? sessionCwd, sessionCwd),
+      'tool' => (activity.toolName ?? '').trim().isNotEmpty
+          ? activity.toolName!.trim()
+          : null,
       'file_change' => _activityFileSummary(activity.changes, sessionCwd),
       'turn_diff' => 'Aggregated patch snapshot for this turn',
       'web_search' => _webSearchSubtitle(activity),
@@ -1261,6 +1265,7 @@ class _ActivityCardState extends State<_ActivityCard> {
 
     final activityLabel = switch (activity.type) {
       'command' => 'COMMAND',
+      'tool' => 'TOOL',
       'file_change' => 'FILE CHANGE',
       'turn_diff' => 'TURN DIFF',
       'web_search' => 'WEB SEARCH',
@@ -1270,6 +1275,7 @@ class _ActivityCardState extends State<_ActivityCard> {
 
     final activityIcon = switch (activity.type) {
       'command' => Icons.terminal_rounded,
+      'tool' => Icons.extension_rounded,
       'file_change' => Icons.edit_note_rounded,
       'turn_diff' => Icons.difference_rounded,
       'web_search' => Icons.travel_explore_rounded,
@@ -1354,7 +1360,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                                 maxLines: _cardCollapsed ? 1 : 3,
                                 overflow: TextOverflow.ellipsis,
                                 style:
-                                    (activity.isCommand
+                                    (activity.isCommand || activity.isTool
                                             ? monoStyle(
                                                 color: colors.textPrimary,
                                                 fontSize: 13,
@@ -1452,6 +1458,15 @@ class _ActivityCardState extends State<_ActivityCard> {
                         ...activity.commandActions.map(
                           (action) => MeshPill(label: action.label, mono: true),
                         ),
+                      if (activity.isTool &&
+                          (activity.toolName ?? '').trim().isNotEmpty)
+                        MeshPill(label: activity.toolName!.trim(), mono: true),
+                      if (activity.isTool && activity.toolError == true)
+                        const MeshPill(
+                          label: 'tool error',
+                          tone: MeshPillTone.danger,
+                          mono: true,
+                        ),
                       if (activity.isWebSearch)
                         MeshPill(
                           label: _webSearchKindLabel(activity),
@@ -1470,6 +1485,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                   const SizedBox(height: 12),
                   if (activity.isCommand)
                     ..._buildCommandBody(context, activity)
+                  else if (activity.isTool)
+                    ..._buildToolBody(context, activity)
                   else if (activity.isWebSearch) ...[
                     _buildWebSearchBody(context, activity),
                   ] else if (activity.isImageGeneration) ...[
@@ -1554,6 +1571,63 @@ class _ActivityCardState extends State<_ActivityCard> {
     }
 
     return widgets;
+  }
+
+  List<Widget> _buildToolBody(
+    BuildContext context,
+    SessionActivity activity,
+  ) {
+    final widgets = <Widget>[];
+    final output = (activity.output ?? '').trimRight();
+    final args = _formatActivityValue(activity.toolArgs);
+    final result = _formatActivityValue(activity.toolResult);
+
+    if (args.isNotEmpty) {
+      widgets.add(_activityCodeBlock(context, 'Arguments', args, 'json'));
+      widgets.add(const SizedBox(height: 12));
+    }
+
+    if (output.isNotEmpty) {
+      widgets.add(_activityCodeBlock(context, 'Output', output, 'text'));
+      widgets.add(const SizedBox(height: 12));
+    }
+
+    if (result.isNotEmpty) {
+      widgets.add(_activityCodeBlock(context, 'Result', result, 'json'));
+      widgets.add(const SizedBox(height: 12));
+    }
+
+    if (widgets.isEmpty) {
+      widgets.add(_waitingText(context, 'Waiting for tool details.'));
+    } else {
+      widgets.removeLast();
+    }
+
+    return widgets;
+  }
+
+  Widget _activityCodeBlock(
+    BuildContext context,
+    String label,
+    String text,
+    String language,
+  ) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: monoStyle(
+            color: colors.textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ).copyWith(letterSpacing: 0.8),
+        ),
+        const SizedBox(height: 8),
+        SyntaxCodeBlock(text: text, language: language),
+      ],
+    );
   }
 
   Widget _buildWebSearchBody(BuildContext context, SessionActivity activity) {
@@ -1719,6 +1793,24 @@ class _ActivityCardState extends State<_ActivityCard> {
         ],
       ],
     );
+  }
+
+  String _toolActivityTitle(SessionActivity activity) {
+    final title = (activity.toolTitle ?? '').trim();
+    if (title.isNotEmpty) return title;
+    final name = (activity.toolName ?? '').trim();
+    if (name.isNotEmpty) return name;
+    return 'Tool execution';
+  }
+
+  String _formatActivityValue(Object? value) {
+    if (value == null) return '';
+    if (value is String) return value.trimRight();
+    try {
+      return const JsonEncoder.withIndent('  ').convert(value);
+    } catch (_) {
+      return value.toString();
+    }
   }
 
   String _webSearchTitle(SessionActivity activity) {

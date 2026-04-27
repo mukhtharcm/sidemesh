@@ -1072,6 +1072,11 @@ class SessionActivity {
     required this.commandActions,
     required this.terminalStatus,
     required this.terminalInput,
+    required this.toolName,
+    required this.toolTitle,
+    required this.toolArgs,
+    required this.toolResult,
+    required this.toolError,
     required this.changes,
     required this.diff,
     required this.query,
@@ -1098,6 +1103,11 @@ class SessionActivity {
   final List<SessionCommandActionSummary> commandActions;
   final String? terminalStatus;
   final String? terminalInput;
+  final String? toolName;
+  final String? toolTitle;
+  final Object? toolArgs;
+  final Object? toolResult;
+  final bool? toolError;
   final List<SessionActivityChange> changes;
   final String? diff;
   final String? query;
@@ -1108,6 +1118,7 @@ class SessionActivity {
   final String? savedPath;
 
   bool get isCommand => type == 'command';
+  bool get isTool => type == 'tool';
   bool get isFileChange => type == 'file_change';
   bool get isTurnDiff => type == 'turn_diff';
   bool get isWebSearch => type == 'web_search';
@@ -1137,6 +1148,11 @@ class SessionActivity {
             .toList(),
         terminalStatus: _stringOrNull(json['terminalStatus']),
         terminalInput: _stringOrNull(json['terminalInput']),
+        toolName: _stringOrNull(json['toolName']),
+        toolTitle: _stringOrNull(json['title']),
+        toolArgs: json['args'],
+        toolResult: json['result'],
+        toolError: json['isError'] is bool ? json['isError'] as bool : null,
         changes: (json['changes'] as List<dynamic>? ?? [])
             .map(
               (item) =>
@@ -1172,6 +1188,11 @@ class SessionActivity {
     'commandActions': commandActions.map((item) => item.toJson()).toList(),
     'terminalStatus': terminalStatus,
     'terminalInput': terminalInput,
+    'toolName': toolName,
+    'title': toolTitle,
+    'args': toolArgs,
+    'result': toolResult,
+    'isError': toolError,
     'changes': changes.map((item) => item.toJson()).toList(),
     'diff': diff,
     'query': query,

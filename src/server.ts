@@ -396,7 +396,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         return;
       }
       case "activity_output_delta": {
-        const next = updateLiveCommandActivity(
+        const next = updateLiveOutputActivity(
           liveActivities,
           event.sessionId,
           event.activityId,
@@ -1869,7 +1869,7 @@ function materializeLiveActivityDraft(
   return activity;
 }
 
-function updateLiveCommandActivity(
+function updateLiveOutputActivity(
   liveActivities: Map<string, Map<string, SessionActivity>>,
   sessionId: string,
   itemId: string,
@@ -1881,7 +1881,7 @@ function updateLiveCommandActivity(
   }
 
   const existing = sessionActivities.get(itemId);
-  if (!existing || existing.type !== "command") {
+  if (!existing || (existing.type !== "command" && existing.type !== "tool")) {
     return null;
   }
 
