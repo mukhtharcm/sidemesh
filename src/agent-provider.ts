@@ -203,8 +203,6 @@ export interface AgentProviderCapabilities {
   };
   workspace: {
     filesystem: boolean;
-    gitStatus: boolean;
-    gitDiff: boolean;
     remoteGitDiff: boolean;
   };
 }
