@@ -49,8 +49,6 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
   },
   workspace: {
     filesystem: false,
-    gitStatus: false,
-    gitDiff: false,
     remoteGitDiff: false,
   },
 };

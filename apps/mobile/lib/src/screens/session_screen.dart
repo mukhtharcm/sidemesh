@@ -225,6 +225,12 @@ class _SessionScreenState extends State<SessionScreen>
     return node.providerCapabilities.supports(section, feature);
   }
 
+  bool _supportsHostCapability(String section, String feature) {
+    final node = _nodeInfo;
+    if (node == null) return true;
+    return node.supportsHostCapability(section, feature);
+  }
+
   bool get _supportsImageInput =>
       _supportsProviderCapability('input', 'imageUrl');
 
@@ -248,13 +254,13 @@ class _SessionScreenState extends State<SessionScreen>
       _supportsProviderCapability('workspace', 'filesystem');
 
   bool get _supportsGitStatus =>
-      _supportsProviderCapability('workspace', 'gitStatus');
+      _supportsHostCapability('workspace', 'gitStatus');
 
   bool _supportsGitDiffKind(String kind) {
     if (kind == 'remote') {
       return _supportsProviderCapability('workspace', 'remoteGitDiff');
     }
-    return _supportsProviderCapability('workspace', 'gitDiff');
+    return _supportsHostCapability('workspace', 'gitDiff');
   }
 
   // Inspector (desktop pane-3) lifecycle tracking. Resolved in

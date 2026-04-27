@@ -22,6 +22,7 @@ import type {
   ActiveTurnState,
   ApprovalLiveEvent,
   GitInfoSummary,
+  HostCapabilities,
   LiveEvent,
   SessionActivity,
   NodeConfig,
@@ -64,6 +65,12 @@ const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
+const HOST_CAPABILITIES: HostCapabilities = {
+  workspace: {
+    gitStatus: true,
+    gitDiff: true,
+  },
+};
 
 interface SessionRuntimeCacheEntry {
   threadUpdatedAt: number;
@@ -363,6 +370,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       providerVersion,
       providerConfig: summarizeProviderConfig(config.provider),
       providerCapabilities: provider.capabilities,
+      hostCapabilities: HOST_CAPABILITIES,
       supportedProviders,
       startedAt: process.uptime(),
       tokenSource: config.tokenSource,
@@ -580,7 +588,16 @@ export async function startServer(config: NodeConfig): Promise<void> {
   }));
 
   app.get("/api/sessions/:sessionId/git", asyncRoute(async (request, response) => {
-    if (!requireProviderCapability(response, provider, provider.capabilities.workspace.gitStatus, "git status", "readSessionThread")) {
+    if (
+      !requireProviderCapability(
+        response,
+        provider,
+        provider.capabilities.sessions.history,
+        "session history",
+        "readSessionThread",
+      ) ||
+      !requireHostCapability(response, HOST_CAPABILITIES.workspace.gitStatus, "git status")
+    ) {
       return;
     }
     const sessionId = pathParam(request.params.sessionId);
@@ -609,7 +626,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       return;
     }
 
-    if (!requireProviderCapability(response, provider, provider.capabilities.workspace.gitDiff, "git diff")) {
+    if (!requireHostCapability(response, HOST_CAPABILITIES.workspace.gitDiff, "git diff")) {
       return;
     }
     response.json(await readGitDiff(session.cwd, kind));
@@ -1099,6 +1116,20 @@ function requireProviderCapability(
   if (method && !hasProviderMethod(provider, method)) {
     response.status(501).json({
       error: `${provider.displayName} does not implement ${feature}`,
+    });
+    return false;
+  }
+  return true;
+}
+
+function requireHostCapability(
+  response: Response,
+  supported: boolean,
+  feature: string,
+): boolean {
+  if (!supported) {
+    response.status(501).json({
+      error: `Sidemesh host does not support ${feature}`,
     });
     return false;
   }

@@ -11,12 +11,13 @@ void main() {
       'provider': 'codex',
       'providerName': 'Codex',
       'providerVersion': 'codex-cli 0.125.0',
-      'providerConfig': {
-        'kind': 'codex',
-        'command': 'codex',
-      },
+      'providerConfig': {'kind': 'codex', 'command': 'codex'},
       'providerCapabilities': {
         'sessions': {'create': true},
+        'workspace': {'remoteGitDiff': true},
+      },
+      'hostCapabilities': {
+        'workspace': {'gitStatus': true, 'gitDiff': true},
       },
       'supportedProviders': [
         {
@@ -35,6 +36,16 @@ void main() {
     expect(node.providerDisplayName, 'Codex');
     expect(node.providerDisplayVersion, 'codex-cli 0.125.0');
     expect(node.providerCapabilities.supports('sessions', 'create'), isTrue);
+    expect(
+      node.providerCapabilities.supports('workspace', 'gitStatus'),
+      isFalse,
+    );
+    expect(
+      node.providerCapabilities.supports('workspace', 'remoteGitDiff'),
+      isTrue,
+    );
+    expect(node.supportsHostCapability('workspace', 'gitStatus'), isTrue);
+    expect(node.supportsHostCapability('workspace', 'gitDiff'), isTrue);
     expect(node.supportedProviders, hasLength(1));
     expect(node.supportedProviders.single.kind, 'codex');
     expect(node.supportedProviders.single.commandEnvironmentVariables, [
@@ -58,6 +69,8 @@ void main() {
     expect(node.providerDisplayVersion, 'codex-cli 0.124.0');
     expect(node.providerConfig.kind, isEmpty);
     expect(node.providerCapabilities.values, isEmpty);
+    expect(node.hostCapabilities.values, isEmpty);
+    expect(node.supportsHostCapability('workspace', 'gitStatus'), isFalse);
     expect(node.supportedProviders, isEmpty);
   });
 

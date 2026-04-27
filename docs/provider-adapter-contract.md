@@ -62,6 +62,10 @@ Workspace:
 - `readRemoteGitDiff`
 - filesystem methods under `fs*`
 
+Local git status and local working/staged/unstaged diffs are daemon-owned host
+features. Providers only own `readRemoteGitDiff`, because that may require
+agent/provider-specific context.
+
 ## Runtime Events
 
 Providers should emit `liveEvent` events for streaming UI updates:
@@ -83,13 +87,14 @@ types instead of leaking provider-specific wire payloads to the Flutter app.
 ## HTTP Behavior
 
 Server routes check both capability flags and method presence. A provider that
-does not support a route should produce a `501` instead of forcing every adapter
-to implement Codex-only methods.
+does not support a provider-owned route should produce a `501` instead of
+forcing every adapter to implement Codex-only methods. Daemon-owned features
+such as local git status are exposed through `hostCapabilities`.
 
 Compatibility endpoints:
 
-- `/api/node` exposes the active provider, provider version, capabilities, and
-  supported provider metadata.
+- `/api/node` exposes the active provider, provider version,
+  `providerCapabilities`, `hostCapabilities`, and supported provider metadata.
 - `/api/providers` exposes daemon-supported provider definitions for future
   provider-selection UI.
 - `codexVersion` remains as a compatibility alias in `/api/node`; new code

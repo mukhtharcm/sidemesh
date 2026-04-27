@@ -12,6 +12,13 @@ export interface AgentProviderConfigSummary {
   command: string | null;
 }
 
+export interface HostCapabilities {
+  workspace: {
+    gitStatus: boolean;
+    gitDiff: boolean;
+  };
+}
+
 export interface NodeConfig {
   label: string;
   port: number;
