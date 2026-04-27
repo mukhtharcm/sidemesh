@@ -28,6 +28,7 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
   },
   approvals: {
     command: false,
+    tool: false,
     fileChange: false,
     permissions: false,
     approveForSession: false,

@@ -247,6 +247,7 @@ export interface SessionActivityBase {
   id: string;
   type:
     | "command"
+    | "tool"
     | "file_change"
     | "turn_diff"
     | "web_search"
@@ -276,6 +277,16 @@ export interface CommandActivity extends SessionActivityBase {
   terminalInput: string | null;
 }
 
+export interface ToolActivity extends SessionActivityBase {
+  type: "tool";
+  toolName: string;
+  title: string | null;
+  args: unknown;
+  output: string | null;
+  result: unknown;
+  isError: boolean | null;
+}
+
 export interface FileChangeActivity extends SessionActivityBase {
   type: "file_change";
   changes: SessionActivityChange[];
@@ -302,6 +313,7 @@ export interface ImageGenerationActivity extends SessionActivityBase {
 
 export type SessionActivity =
   | CommandActivity
+  | ToolActivity
   | FileChangeActivity
   | TurnDiffActivity
   | WebSearchActivity
@@ -406,7 +418,7 @@ export interface PendingActionApproval {
 export interface PendingAction {
   id: string;
   sessionId: string;
-  kind: "command" | "file_change" | "permissions";
+  kind: "command" | "tool" | "file_change" | "permissions";
   title: string;
   detail: string;
   requestedAt: number;

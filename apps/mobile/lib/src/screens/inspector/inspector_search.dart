@@ -652,6 +652,12 @@ class _SearchResultExpanded extends StatelessWidget {
     if ((activity.command ?? '').isNotEmpty) {
       addLine('command', activity.command!);
     }
+    if ((activity.toolName ?? '').isNotEmpty) {
+      addLine('tool', activity.toolName!);
+    }
+    if ((activity.toolTitle ?? '').isNotEmpty) {
+      addLine('title', activity.toolTitle!);
+    }
     if ((activity.cwd ?? '').isNotEmpty) addLine('cwd', activity.cwd!);
     if ((activity.query ?? '').isNotEmpty) addLine('query', activity.query!);
     if (activity.queries.isNotEmpty) {
@@ -708,6 +714,8 @@ IconData _iconForActivity(String type) {
   switch (type) {
     case 'command':
       return Icons.terminal_rounded;
+    case 'tool':
+      return Icons.extension_rounded;
     case 'file_change':
       return Icons.edit_note_rounded;
     case 'turn_diff':
@@ -726,6 +734,13 @@ String _activityPreviewBody(SessionActivity activity) {
     case 'command':
       final out = (activity.output ?? '').trim();
       return out.isEmpty ? (activity.command ?? '') : out;
+    case 'tool':
+      final out = (activity.output ?? '').trim();
+      if (out.isNotEmpty) return out;
+      return [
+        if ((activity.toolTitle ?? '').isNotEmpty) activity.toolTitle!,
+        if ((activity.toolName ?? '').isNotEmpty) activity.toolName!,
+      ].join('\n');
     case 'file_change':
       return activity.changes.map((c) => c.path).join('\n');
     case 'turn_diff':

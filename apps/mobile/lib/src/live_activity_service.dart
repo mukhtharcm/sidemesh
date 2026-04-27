@@ -435,6 +435,18 @@ class LiveActivityService {
         badge: 'CMD',
       );
     }
+    if (activity.isTool) {
+      final title = _nonEmpty(
+        activity.toolTitle,
+        fallback: _nonEmpty(activity.toolName, fallback: 'Tool running'),
+      );
+      return _LiveActivitySummary(
+        headline: 'Running tool',
+        detail: _shorten(title, 96),
+        status: 'tool',
+        badge: 'TOOL',
+      );
+    }
     if (activity.isWebSearch) {
       return _LiveActivitySummary(
         headline: 'Searching web',

@@ -10,6 +10,7 @@ import type {
   SessionActivity,
   SessionMessage,
   SessionRuntimeSummary,
+  ToolActivity,
   ModelSummary,
   ProviderProfileCatalog,
   SkillCatalogEntry,
@@ -26,6 +27,7 @@ export interface AgentProviderEvents {
 
 export type AgentSessionActivityDraft =
   | Omit<CommandActivity, "createdAt" | "seq">
+  | Omit<ToolActivity, "createdAt" | "seq">
   | Omit<FileChangeActivity, "createdAt" | "seq">
   | Omit<TurnDiffActivity, "createdAt" | "seq">
   | Omit<WebSearchActivity, "createdAt" | "seq">
@@ -183,6 +185,7 @@ export interface AgentProviderCapabilities {
   };
   approvals: {
     command: boolean;
+    tool: boolean;
     fileChange: boolean;
     permissions: boolean;
     approveForSession: boolean;

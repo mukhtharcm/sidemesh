@@ -328,6 +328,7 @@ class LocalNotificationService with WidgetsBindingObserver {
   String _actionKindLabel(String kind) {
     return switch (kind) {
       'command' => 'Command approval',
+      'tool' => 'Tool approval',
       'file_change' => 'File change approval',
       'permissions' => 'Permission request',
       '' => 'Approval request',
