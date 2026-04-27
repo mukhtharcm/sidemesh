@@ -94,4 +94,45 @@ void main() {
     expect(metadata.providers.single.displayName, 'Codex');
     expect(metadata.providers.single.defaultCommand, 'codex');
   });
+
+  test('ModelCatalogEntry uses provider-neutral reasoning metadata', () {
+    final model = ModelCatalogEntry.fromJson({
+      'id': 'fake:auto',
+      'model': 'fake-auto',
+      'displayName': 'Fake Auto',
+      'description': 'Provider-managed reasoning.',
+      'defaultReasoningEffort': 'medium',
+      'supportedReasoningEfforts': [
+        {'reasoningEffort': 'medium', 'description': 'Provider decides.'},
+      ],
+      'reasoningEffortControl': 'provider',
+      'supportsPersonality': true,
+      'additionalSpeedTiers': ['fast'],
+      'inputModalities': ['text'],
+      'isDefault': false,
+      'sortOrder': 1,
+      'source': 'builtin',
+    });
+
+    expect(model.isAutoModel, isTrue);
+    expect(model.supportsFastMode, isTrue);
+    expect(model.sortOrder, 1);
+
+    final legacy = ModelCatalogEntry.fromJson({
+      'id': 'legacy:model',
+      'model': 'legacy-model',
+      'displayName': 'Legacy Model',
+      'description': 'No new metadata.',
+      'defaultReasoningEffort': 'medium',
+      'supportedReasoningEfforts': const [],
+      'supportsPersonality': false,
+      'additionalSpeedTiers': const [],
+      'inputModalities': ['text'],
+      'isDefault': true,
+    });
+
+    expect(legacy.reasoningEffortControl, 'client');
+    expect(legacy.isAutoModel, isFalse);
+    expect(legacy.sortOrder, isNull);
+  });
 }

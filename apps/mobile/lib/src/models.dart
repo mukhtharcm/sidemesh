@@ -649,10 +649,12 @@ class ModelCatalogEntry {
     required this.description,
     required this.defaultReasoningEffort,
     required this.supportedReasoningEfforts,
+    required this.reasoningEffortControl,
     required this.supportsPersonality,
     required this.additionalSpeedTiers,
     required this.inputModalities,
     required this.isDefault,
+    this.sortOrder,
     this.source,
     this.profileName,
   });
@@ -663,15 +665,17 @@ class ModelCatalogEntry {
   final String description;
   final String defaultReasoningEffort;
   final List<ModelReasoningEffortOption> supportedReasoningEfforts;
+  final String reasoningEffortControl;
   final bool supportsPersonality;
   final List<String> additionalSpeedTiers;
   final List<String> inputModalities;
   final bool isDefault;
+  final int? sortOrder;
   final String? source;
   final String? profileName;
 
   bool get supportsFastMode => additionalSpeedTiers.contains('fast');
-  bool get isAutoModel => model.startsWith('codex-auto-');
+  bool get isAutoModel => reasoningEffortControl == 'provider';
   bool get isProfileModel => source == 'profile';
 
   factory ModelCatalogEntry.fromJson(
@@ -690,6 +694,8 @@ class ModelCatalogEntry {
               ),
             )
             .toList(),
+    reasoningEffortControl:
+        _stringOrNull(json['reasoningEffortControl']) ?? 'client',
     supportsPersonality: _boolValue(json['supportsPersonality']),
     additionalSpeedTiers: (json['additionalSpeedTiers'] as List<dynamic>? ?? [])
         .map(_stringValue)
@@ -698,6 +704,7 @@ class ModelCatalogEntry {
         .map(_stringValue)
         .toList(),
     isDefault: _boolValue(json['isDefault']),
+    sortOrder: _intOrNull(json['sortOrder']),
     source: _stringOrNull(json['source']),
     profileName: _stringOrNull(json['profileName']),
   );

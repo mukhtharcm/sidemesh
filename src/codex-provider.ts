@@ -979,10 +979,12 @@ function normalizeCodexProfileModelSummary(
     description: `Declared by Codex profile ${profile.name}${suffix}.`,
     defaultReasoningEffort: profile.reasoningEffort ?? "medium",
     supportedReasoningEfforts: [],
+    reasoningEffortControl: "client",
     supportsPersonality: false,
     additionalSpeedTiers: [],
     inputModalities: ["text", "image"],
     isDefault: false,
+    sortOrder: null,
     source: "profile",
     profileName: profile.name,
   };
@@ -1082,10 +1084,12 @@ function normalizeProviderModelSummary(
     description: `Available from ${options.providerName}${profileSuffix}.`,
     defaultReasoningEffort: options.defaultReasoningEffort ?? "medium",
     supportedReasoningEfforts: [],
+    reasoningEffortControl: "client",
     supportsPersonality: false,
     additionalSpeedTiers: [],
     inputModalities: ["text", "image"],
     isDefault: false,
+    sortOrder: null,
     source: options.profileName ? "profile" : "host",
     profileName: options.profileName,
   };
@@ -1141,6 +1145,10 @@ function normalizeCodexModelSummary(raw: unknown): ModelSummary | null {
     description,
     defaultReasoningEffort,
     supportedReasoningEfforts,
+    reasoningEffortControl: normalizeModelReasoningEffortControl(
+      typed.reasoningEffortControl ?? typed.reasoning_effort_control,
+      model,
+    ),
     supportsPersonality: typed.supportsPersonality === true,
     additionalSpeedTiers: Array.isArray(typed.additionalSpeedTiers)
       ? typed.additionalSpeedTiers.map((entry) => asString(entry)).filter((entry): entry is string => Boolean(entry))
@@ -1149,7 +1157,37 @@ function normalizeCodexModelSummary(raw: unknown): ModelSummary | null {
       ? typed.inputModalities.map((entry) => asString(entry)).filter((entry): entry is string => Boolean(entry))
       : [],
     isDefault: typed.isDefault === true,
+    sortOrder:
+      asOptionalNumber(typed.sortOrder ?? typed.sort_order) ??
+      codexModelSortOrder(model),
   };
+}
+
+function normalizeModelReasoningEffortControl(
+  raw: unknown,
+  model: string,
+): ModelSummary["reasoningEffortControl"] {
+  const value = asString(raw);
+  if (value === "provider" || value === "provider-managed") {
+    return "provider";
+  }
+  if (value === "client" || value === "client-controlled") {
+    return "client";
+  }
+  return model.startsWith("codex-auto-") ? "provider" : "client";
+}
+
+function codexModelSortOrder(model: string): number | null {
+  switch (model) {
+    case "codex-auto-fast":
+      return 0;
+    case "codex-auto-balanced":
+      return 1;
+    case "codex-auto-thorough":
+      return 2;
+    default:
+      return null;
+  }
 }
 
 function normalizeCodexProfileConfig(raw: unknown): CodexProfileConfig {
@@ -1252,6 +1290,13 @@ function readStringKey(
   snakeKey?: string,
 ): string | null {
   return asString(typed[camelKey]) ?? (snakeKey ? asString(typed[snakeKey]) : null);
+}
+
+function asOptionalNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return value;
 }
 
 function buildCodexThreadStartParams(

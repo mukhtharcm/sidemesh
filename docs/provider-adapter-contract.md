@@ -60,6 +60,17 @@ Configuration:
 - `listSkills`
 - `writeSkillConfig`
 
+Model summaries should describe UI behavior without requiring the Flutter app
+to inspect provider-specific model names:
+
+- `reasoningEffortControl: "client"` means the UI may send an explicit
+  reasoning effort override when supported.
+- `reasoningEffortControl: "provider"` means the provider/model owns the
+  reasoning choice, so the UI should present it as auto/provider-managed and
+  avoid sending a reasoning override.
+- `sortOrder` is optional provider-owned display ordering. Lower values sort
+  earlier; missing values fall back to profile models before ordinary models.
+
 Workspace:
 
 - `readRemoteGitDiff`

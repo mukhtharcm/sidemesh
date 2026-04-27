@@ -58,7 +58,9 @@ npm run daemon
 The fake provider supports every advertised Sidemesh capability and exercises
 real app flows without contacting an external agent. Use prompt keywords such
 as `tools`, `approval:command`, `approval:file`, `approval:permissions`,
-`image`, `slow`, and `fail` to trigger deterministic UI states.
+`image`, `slow`, and `fail` to trigger deterministic UI states. Its model
+catalog includes normal, provider-managed auto-reasoning, fast-mode, and image
+models so provider-neutral model UI can be tested without Codex.
 
 ## Dogfood flow
 
