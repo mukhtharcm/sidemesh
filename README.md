@@ -37,7 +37,6 @@ SIDEMESH_CODEX_BIN=codex
 SIDEMESH_PROVIDER_COMMAND=codex
 SIDEMESH_COPILOT_BIN=copilot
 SIDEMESH_COPILOT_STATE_DIR=~/.sidemesh/copilot-provider
-SIDEMESH_COPILOT_SESSION_STATE_DIR=~/.copilot/session-state
 SIDEMESH_COPILOT_ALLOW_ALL=0
 SIDEMESH_COPILOT_MODEL=
 SIDEMESH_FAKE_LATENCY_MS=15
@@ -61,22 +60,18 @@ npm run daemon
 ```
 
 The Copilot provider is the first real non-Codex adapter. It reads native
-Copilot CLI history from `~/.copilot/session-state`, so sessions created in the
-Copilot terminal UI can appear in Sidemesh recent sessions/workspaces. It
-currently supports text sessions, native history/transcript import, model and
-reasoning-effort metadata from native history, streaming assistant text,
-rename/archive overlays, resume, and interruption. It does not yet expose
-images, approvals, skills, or filesystem browsing. Tool execution events from
-native history are shown as generic Copilot tool activity cards. Sidemesh does
-not maintain a hand-written Copilot model catalog; the model picker is built
-from the installed CLI's `copilot help config` output and includes Copilot's
-`auto` selection. Sidemesh defaults new app-started Copilot turns to `auto` so
-an expensive `~/.copilot/settings.json` model is not used accidentally. Set
-`SIDEMESH_COPILOT_MODEL`, `COPILOT_MODEL`, `COPILOT_PROVIDER_MODEL_ID`, or
-`COPILOT_PROVIDER_WIRE_MODEL` only when you want a host-level default. By
-default it does not auto-grant Copilot tool
-permissions; set `SIDEMESH_COPILOT_ALLOW_ALL=1` only on hosts where Copilot may
-run with `--allow-all`.
+Copilot SDK for session discovery, transcript replay, model metadata,
+streaming turns, resume, interruption, tool activity, and permission requests.
+It does not read Copilot's on-disk session files directly. It does not yet
+expose images, skills, or filesystem browsing. Sidemesh does not maintain a
+hand-written Copilot model catalog; the model picker is built from SDK
+`listModels()` metadata and includes Copilot's `auto` selection. Sidemesh
+defaults new app-started Copilot turns to `auto` so an expensive persistent
+Copilot setting is not used accidentally. Set `SIDEMESH_COPILOT_MODEL`,
+`COPILOT_MODEL`, `COPILOT_PROVIDER_MODEL_ID`, or `COPILOT_PROVIDER_WIRE_MODEL`
+only when you want a host-level default. By default it does not auto-grant
+Copilot tool permissions; set `SIDEMESH_COPILOT_ALLOW_ALL=1` only on hosts
+where Sidemesh may approve every Copilot SDK permission request.
 
 For provider-abstraction testing, run the deterministic in-process fake
 provider instead of Codex:

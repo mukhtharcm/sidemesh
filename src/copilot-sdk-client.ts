@@ -9,6 +9,8 @@ import type {
   ResumeSessionConfig,
   SessionConfig,
   SessionEvent,
+  SessionListFilter,
+  SessionMetadata,
 } from "@github/copilot-sdk";
 
 export type CopilotSdkModelInfo = ModelInfo;
@@ -20,11 +22,14 @@ export type CopilotSdkReasoningEffort = "low" | "medium" | "high" | "xhigh";
 export type CopilotSdkSessionConfig = SessionConfig;
 export type CopilotSdkResumeSessionConfig = ResumeSessionConfig;
 export type CopilotSdkSessionEvent = SessionEvent;
+export type CopilotSdkSessionListFilter = SessionListFilter;
+export type CopilotSdkSessionMetadata = SessionMetadata;
 
 export interface CopilotSdkSession {
   readonly sessionId: string;
   send(options: CopilotSdkMessageOptions): Promise<string>;
   abort(): Promise<void>;
+  getMessages?(): Promise<CopilotSdkSessionEvent[]>;
   disconnect?(): Promise<void>;
   setModel?(
     model: string,
@@ -41,6 +46,12 @@ export interface CopilotSdkClient {
   forceStop?(): Promise<void>;
   getStatus?(): Promise<GetStatusResponse>;
   listModels(): Promise<CopilotSdkModelInfo[]>;
+  listSessions?(
+    filter?: CopilotSdkSessionListFilter,
+  ): Promise<CopilotSdkSessionMetadata[]>;
+  getSessionMetadata?(
+    sessionId: string,
+  ): Promise<CopilotSdkSessionMetadata | undefined>;
   createSession(config: CopilotSdkSessionConfig): Promise<CopilotSdkSession>;
   resumeSession(
     sessionId: string,
