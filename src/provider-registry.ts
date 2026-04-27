@@ -1,4 +1,5 @@
 import { CodexAgentProvider } from "./codex-provider.js";
+import { CopilotAgentProvider } from "./copilot-provider.js";
 import { FakeAgentProvider } from "./fake-provider.js";
 import type { AgentProvider } from "./agent-provider.js";
 import type {
@@ -6,6 +7,7 @@ import type {
   AgentProviderConfigSummary,
   AgentProviderKind,
   CodexProviderConfig,
+  CopilotProviderConfig,
   FakeCapabilityProfile,
   FakeProviderConfig,
 } from "./types.js";
@@ -33,6 +35,7 @@ export interface AgentProviderDefinitionSummary {
 export const DEFAULT_AGENT_PROVIDER_KIND: AgentProviderKind = "codex";
 const CODEX_DEFAULT_COMMAND = "codex";
 const FAKE_DEFAULT_COMMAND = "builtin";
+const COPILOT_DEFAULT_COMMAND = "copilot";
 
 const CODEX_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "codex",
@@ -109,9 +112,51 @@ const FAKE_PROVIDER_DEFINITION: AgentProviderDefinition = {
   },
 };
 
+const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
+  kind: "copilot",
+  displayName: "GitHub Copilot",
+  defaultCommand: COPILOT_DEFAULT_COMMAND,
+  commandEnvironmentVariables: [
+    "SIDEMESH_COPILOT_BIN",
+    "SIDEMESH_PROVIDER_COMMAND",
+    "SIDEMESH_COPILOT_STATE_DIR",
+    "SIDEMESH_COPILOT_ALLOW_ALL",
+  ],
+
+  create(config) {
+    const copilot = expectCopilotProviderConfig(config);
+    return new CopilotAgentProvider({
+      bin: copilot.bin,
+      stateDir: copilot.stateDir,
+      allowAll: copilot.allowAll,
+    });
+  },
+
+  loadConfig(env) {
+    return {
+      kind: "copilot",
+      bin:
+        env.SIDEMESH_COPILOT_BIN?.trim() ||
+        env.SIDEMESH_PROVIDER_COMMAND?.trim() ||
+        COPILOT_DEFAULT_COMMAND,
+      stateDir: env.SIDEMESH_COPILOT_STATE_DIR?.trim() || null,
+      allowAll: parseBoolean(env.SIDEMESH_COPILOT_ALLOW_ALL, false),
+    };
+  },
+
+  summarizeConfig(config) {
+    const copilot = expectCopilotProviderConfig(config);
+    return {
+      kind: copilot.kind,
+      command: copilot.bin,
+    };
+  },
+};
+
 const AGENT_PROVIDER_DEFINITIONS = [
   CODEX_PROVIDER_DEFINITION,
   FAKE_PROVIDER_DEFINITION,
+  COPILOT_PROVIDER_DEFINITION,
 ] as const;
 
 export function listAgentProviderDefinitions(): readonly AgentProviderDefinition[] {
@@ -178,12 +223,26 @@ function expectFakeProviderConfig(config: AgentProviderConfig): FakeProviderConf
   return config;
 }
 
+function expectCopilotProviderConfig(config: AgentProviderConfig): CopilotProviderConfig {
+  if (config.kind !== "copilot") {
+    throw new Error(`Expected Copilot provider config, got "${config.kind}"`);
+  }
+  return config;
+}
+
 function parseInteger(value: string | undefined, fallback: number): number {
   if (!value) {
     return fallback;
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
 const FAKE_CAPABILITY_PROFILES = [
