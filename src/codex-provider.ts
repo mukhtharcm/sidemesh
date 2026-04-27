@@ -1553,33 +1553,39 @@ function buildCodexPendingAction(
     const command = asString(typed.command) || "Command approval";
     const cwd = asString(typed.cwd) ?? undefined;
     const reason = asString(typed.reason) ?? undefined;
+    const networkTarget = codexNetworkApprovalTarget(typed.networkApprovalContext);
+    const networkSummary = networkTarget ? approvalTargetSummary(networkTarget) : null;
+    const title = networkTarget ? "Network approval" : "Command approval";
+    const summary = networkSummary ?? command;
     return {
       id: asString(typed.approvalId) || randomFallbackId(),
       sessionId,
       kind: "command",
-      title: "Command approval",
-      detail: command,
+      title,
+      detail: command === "Command approval" && networkSummary ? networkSummary : command,
       requestedAt,
       canApprove: true,
       canApproveForSession: true,
       canDecline: true,
       cwd,
       approval: {
-        category: "command",
-        operation: "codex.commandExecution",
-        summary: command,
+        category: networkTarget ? "network" : "command",
+        operation: networkTarget ? "codex.network" : "codex.commandExecution",
+        summary,
         detail: reason,
         cwd,
         supportedScopes: ["once", "session"],
         suggestedScope: "once",
-        targets: [
-          {
-            type: "command",
-            command,
-            cwd,
-            intention: reason,
-          },
-        ],
+        targets: networkTarget
+          ? [networkTarget]
+          : [
+              {
+                type: "command",
+                command,
+                cwd,
+                intention: reason,
+              },
+            ],
       },
       providerRequestId,
       providerRequestKind: method,
@@ -1659,6 +1665,47 @@ function buildCodexPendingAction(
     providerRequestKind: method,
     providerPayload: typed.permissions,
   };
+}
+
+function codexNetworkApprovalTarget(
+  value: unknown,
+): NonNullable<AgentPendingAction["approval"]>["targets"][number] | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const typed = value as Record<string, unknown>;
+  const host = asString(typed.host);
+  if (!host) {
+    return null;
+  }
+  const protocol = asString(typed.protocol) ?? "network";
+  if (protocol === "http" || protocol === "https") {
+    return { type: "url", url: `${protocol}://${host}` };
+  }
+  return { type: "unknown", label: `${protocol}:${host}` };
+}
+
+function approvalTargetSummary(
+  target: NonNullable<AgentPendingAction["approval"]>["targets"][number],
+): string {
+  switch (target.type) {
+    case "url":
+      return target.url;
+    case "unknown":
+      return target.label;
+    case "command":
+      return target.command;
+    case "file":
+      return target.path;
+    case "tool":
+      return target.title ?? target.name;
+    case "memory":
+      return target.fact ?? target.subject ?? "memory";
+    case "hook":
+      return target.message ?? target.toolName ?? "hook";
+    case "permission_profile":
+      return target.reason ?? "permissions";
+  }
 }
 
 export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {

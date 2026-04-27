@@ -320,8 +320,7 @@ export type PendingActionDecisionKind = "approve" | "decline" | "cancel";
 
 export interface PendingActionDecisionRequest {
   decision: PendingActionDecisionKind;
-  scope: PendingActionApprovalScope;
-  legacyDecision: PendingActionDecisionId;
+  scope?: PendingActionApprovalScope;
 }
 
 export type PendingActionApprovalCategory =
