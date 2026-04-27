@@ -138,14 +138,14 @@ dogfooding non-Codex behavior before a real adapter exists. Supported profiles
 are `full`, `chat-only`, `no-files`, `no-model-controls`, `no-approvals`, and
 `minimal`.
 
-The Copilot adapter is the first real non-Codex slice. It reads native Copilot
-CLI session directories from `~/.copilot/session-state`, maps `workspace.yaml`
-into Sidemesh session summaries, and parses `events.jsonl` into chat messages
-and generic tool activity cards. Images, approvals, skills, filesystem, and
-richer native tool translation should be enabled only when the adapter can
-report honest capabilities and translate native events into Sidemesh event
-types. It intentionally does not ship a hand-written model catalog; model
-controls are advertised from the installed CLI's local `copilot help config`
-metadata, with explicit host defaults layered on top when configured. The
-Copilot adapter uses `auto` as the Sidemesh default for app-started turns, so a
-costly persistent Copilot CLI setting is not consumed by accident.
+The Copilot adapter is the first real non-Codex slice. It uses the GitHub
+Copilot SDK for session discovery, transcript replay, turns, model controls,
+permission requests, and tool execution events. It intentionally does not read
+Copilot's on-disk session files directly and does not ship a hand-written model
+catalog; model controls are advertised from SDK `listModels()` metadata, with
+explicit host defaults layered on top when configured. Images, skills,
+filesystem, and richer native tool translation should be enabled only when the
+adapter can report honest capabilities and translate SDK events into Sidemesh
+event types. The Copilot adapter uses `auto` as the Sidemesh default for
+app-started turns, so a costly persistent Copilot setting is not consumed by
+accident.

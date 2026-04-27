@@ -15,81 +15,60 @@ import {
   type CopilotSdkSession,
   type CopilotSdkSessionConfig,
   type CopilotSdkSessionEvent,
+  type CopilotSdkSessionMetadata,
 } from "./copilot-sdk-client.js";
 import { CopilotAgentProvider } from "./copilot-provider.js";
 
 describe("Copilot provider", () => {
-  it("imports native Copilot session-state history and resumes through the SDK", async () => {
+  it("lists SDK sessions, reads SDK history, and resumes through the SDK", async () => {
     const dir = await mkdtemp(
-      nodePath.join(tmpdir(), "sidemesh-copilot-native-"),
+      nodePath.join(tmpdir(), "sidemesh-copilot-sdk-history-"),
     );
     try {
       const sessionId = "11111111-2222-4333-8444-555555555555";
-      const sessionDir = nodePath.join(dir, "native", sessionId);
-      await mkdir(sessionDir, { recursive: true });
-      await writeFile(
-        nodePath.join(sessionDir, "workspace.yaml"),
-        [
-          `id: ${sessionId}`,
-          `cwd: ${dir}`,
-          "repository: your-org/sidemesh",
-          "branch: main",
-          "summary: Native Copilot Session",
-          "created_at: 2026-04-01T00:00:00.000Z",
-          "updated_at: 2026-04-01T00:05:00.000Z",
-        ].join("\n"),
-      );
-      await writeFile(
-        nodePath.join(sessionDir, "events.jsonl"),
-        [
-          JSON.stringify({
-            type: "session.start",
-            timestamp: "2026-04-01T00:00:00.000Z",
-            data: { sessionId },
-          }),
-          JSON.stringify({
-            type: "session.model_change",
-            timestamp: "2026-04-01T00:00:01.000Z",
-            data: { newModel: "gpt-5.2" },
-          }),
-          JSON.stringify({
-            type: "user.message",
-            id: "user-1",
-            timestamp: "2026-04-01T00:01:00.000Z",
-            data: { content: "hello native" },
-          }),
-          JSON.stringify({
-            type: "assistant.message",
-            id: "assistant-1",
-            timestamp: "2026-04-01T00:01:05.000Z",
-            data: { messageId: "assistant-message-1", content: "hello back" },
-          }),
-          JSON.stringify({
-            type: "tool.execution_start",
-            timestamp: "2026-04-01T00:01:06.000Z",
-            data: {
-              toolCallId: "tool-1",
-              toolName: "view",
-              arguments: { path: "README.md" },
+      const sdk = new FakeCopilotSdkClient({
+        sessions: [
+          {
+            metadata: {
+              sessionId,
+              startTime: new Date("2026-04-01T00:00:00.000Z"),
+              modifiedTime: new Date("2026-04-01T00:05:00.000Z"),
+              summary: "SDK Copilot Session",
+              isRemote: false,
+              context: {
+                cwd: dir,
+                repository: "your-org/sidemesh",
+                branch: "main",
+              },
             },
-          }),
-          JSON.stringify({
-            type: "tool.execution_complete",
-            timestamp: "2026-04-01T00:01:07.000Z",
-            data: {
-              toolCallId: "tool-1",
-              toolName: "view",
-              success: true,
-              result: { content: "README contents" },
-            },
-          }),
-        ].join("\n"),
-      );
-
-      const sdk = new FakeCopilotSdkClient();
+            events: [
+              event("session.model_change", { newModel: "gpt-5.2" }),
+              event("user.message", { content: "hello sdk" }, "user-1"),
+              event(
+                "assistant.message",
+                {
+                  messageId: "assistant-message-1",
+                  content: "hello back",
+                },
+                "assistant-1",
+              ),
+              event("tool.execution_start", {
+                toolCallId: "tool-1",
+                toolName: "view",
+                arguments: { path: "README.md" },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "tool-1",
+                toolName: "view",
+                success: true,
+                result: { content: "README contents" },
+              }),
+            ],
+          },
+        ],
+      });
       const provider = new CopilotAgentProvider({
         stateDir: nodePath.join(dir, "state"),
-        sessionStateDir: nodePath.join(dir, "native"),
         sdkClientFactory: fakeSdkFactory(sdk),
       });
       await provider.start();
@@ -100,13 +79,13 @@ describe("Copilot provider", () => {
       });
       assert.equal(sessions.length, 1);
       assert.equal(sessions[0]?.id, sessionId);
-      assert.equal(sessions[0]?.preview, "Native Copilot Session");
+      assert.equal(sessions[0]?.preview, "SDK Copilot Session");
       assert.equal(sessions[0]?.cwd, dir);
       assert.equal(sessions[0]?.gitInfo?.branch, "main");
 
       const log = await provider.readSessionLog!(sessions[0]!);
       assert.equal(log.messages.length, 2);
-      assert.equal(log.messages[0]?.text, "hello native");
+      assert.equal(log.messages[0]?.text, "hello sdk");
       assert.equal(log.messages[1]?.text, "hello back");
       assert.equal(log.activities.length, 1);
       assert.equal(log.activities[0]?.type, "command");
@@ -115,7 +94,7 @@ describe("Copilot provider", () => {
       const completed = waitForTurnCompleted(provider);
       await provider.submitInput!({
         sessionId,
-        input: [{ type: "text", text: "continue native", text_elements: [] }],
+        input: [{ type: "text", text: "continue sdk", text_elements: [] }],
         activeTurnId: null,
         overrides: emptyOverrides(),
       });
@@ -123,7 +102,7 @@ describe("Copilot provider", () => {
 
       assert.equal(sdk.resumed[0]?.sessionId, sessionId);
       const updated = await provider.readSessionLog!(sessions[0]!);
-      assert.equal(updated.messages.at(-1)?.text, "resumed: continue native");
+      assert.equal(updated.messages.at(-1)?.text, "resumed: continue sdk");
     } finally {
       await settleProviderWrites();
       await rm(dir, { recursive: true, force: true });
@@ -136,7 +115,6 @@ describe("Copilot provider", () => {
       const sdk = new FakeCopilotSdkClient();
       const provider = new CopilotAgentProvider({
         stateDir: nodePath.join(dir, "state"),
-        sessionStateDir: nodePath.join(dir, "native-session-state"),
         sdkClientFactory: fakeSdkFactory(sdk),
       });
       await provider.start();
@@ -202,7 +180,6 @@ describe("Copilot provider", () => {
       });
       const provider = new CopilotAgentProvider({
         stateDir: nodePath.join(dir, "state"),
-        sessionStateDir: nodePath.join(dir, "native-session-state"),
         configuredModel: "safe-test-model",
         sdkClientFactory: fakeSdkFactory(sdk),
       });
@@ -261,7 +238,6 @@ describe("Copilot provider", () => {
       const sdk = new FakeCopilotSdkClient();
       const provider = new CopilotAgentProvider({
         stateDir: nodePath.join(dir, "state"),
-        sessionStateDir: nodePath.join(dir, "native-session-state"),
         configuredModel: "safe-test-model",
         sdkClientFactory: fakeSdkFactory(sdk),
       });
@@ -307,7 +283,7 @@ describe("Copilot provider", () => {
                 createdAt: 1,
                 updatedAt: 1,
                 source: "copilot",
-                path: nodePath.join(dir, "native-session-state", sessionId),
+                path: null,
                 status: { type: "idle" },
                 turns: [],
               },
@@ -330,7 +306,6 @@ describe("Copilot provider", () => {
       const sdk = new FakeCopilotSdkClient();
       const provider = new CopilotAgentProvider({
         stateDir,
-        sessionStateDir: nodePath.join(dir, "native-session-state"),
         sdkClientFactory: fakeSdkFactory(sdk),
       });
       await provider.start();
@@ -360,7 +335,6 @@ describe("Copilot provider", () => {
       const sdk = new FakeCopilotSdkClient();
       const provider = new CopilotAgentProvider({
         stateDir: nodePath.join(dir, "state"),
-        sessionStateDir: nodePath.join(dir, "native-session-state"),
         sdkClientFactory: fakeSdkFactory(sdk),
       });
       await provider.start();
@@ -405,7 +379,6 @@ describe("Copilot provider", () => {
       const sdk = new FakeCopilotSdkClient();
       const provider = new CopilotAgentProvider({
         stateDir: nodePath.join(dir, "state"),
-        sessionStateDir: nodePath.join(dir, "native-session-state"),
         sdkClientFactory: fakeSdkFactory(sdk),
       });
       await provider.start();
@@ -442,9 +415,23 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
   }> = [];
   private readonly sessions = new Map<string, FakeCopilotSdkSession>();
   private readonly models: CopilotSdkModelInfo[];
+  private readonly sessionMetadata = new Map<string, CopilotSdkSessionMetadata>();
+  private readonly sessionEvents = new Map<string, CopilotSdkSessionEvent[]>();
 
-  public constructor(options: { models?: CopilotSdkModelInfo[] } = {}) {
+  public constructor(
+    options: {
+      models?: CopilotSdkModelInfo[];
+      sessions?: Array<{
+        metadata: CopilotSdkSessionMetadata;
+        events: CopilotSdkSessionEvent[];
+      }>;
+    } = {},
+  ) {
     this.models = options.models ?? [];
+    for (const session of options.sessions ?? []) {
+      this.sessionMetadata.set(session.metadata.sessionId, session.metadata);
+      this.sessionEvents.set(session.metadata.sessionId, session.events);
+    }
   }
 
   public async start(): Promise<void> {
@@ -459,6 +446,16 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
     return this.models;
   }
 
+  public async listSessions(): Promise<CopilotSdkSessionMetadata[]> {
+    return [...this.sessionMetadata.values()];
+  }
+
+  public async getSessionMetadata(
+    sessionId: string,
+  ): Promise<CopilotSdkSessionMetadata | undefined> {
+    return this.sessionMetadata.get(sessionId);
+  }
+
   public async createSession(
     config: CopilotSdkSessionConfig,
   ): Promise<CopilotSdkSession> {
@@ -466,7 +463,15 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
       config.sessionId ?? `sdk-session-${this.created.length + 1}`,
       config,
       false,
+      [],
     );
+    this.sessionMetadata.set(session.sessionId, {
+      sessionId: session.sessionId,
+      startTime: new Date(),
+      modifiedTime: new Date(),
+      isRemote: false,
+      context: { cwd: config.workingDirectory ?? process.cwd() },
+    });
     this.created.push({ config, session });
     this.sessions.set(session.sessionId, session);
     return session;
@@ -476,7 +481,12 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
     sessionId: string,
     config: CopilotSdkResumeSessionConfig,
   ): Promise<CopilotSdkSession> {
-    const session = new FakeCopilotSdkSession(sessionId, config, true);
+    const session = new FakeCopilotSdkSession(
+      sessionId,
+      config,
+      true,
+      this.sessionEvents.get(sessionId) ?? [],
+    );
     this.resumed.push({ sessionId, config, session });
     this.sessions.set(sessionId, session);
     return session;
@@ -497,7 +507,12 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
       | CopilotSdkSessionConfig
       | CopilotSdkResumeSessionConfig,
     private readonly resumed: boolean,
+    private readonly historyEvents: CopilotSdkSessionEvent[],
   ) {}
+
+  public async getMessages(): Promise<CopilotSdkSessionEvent[]> {
+    return this.historyEvents;
+  }
 
   public async send(options: CopilotSdkMessageOptions): Promise<string> {
     this.sent.push(options);
@@ -677,9 +692,13 @@ async function settleProviderWrites(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 20));
 }
 
-function event(type: string, data: unknown): CopilotSdkSessionEvent {
+function event(
+  type: string,
+  data: unknown,
+  id = `${type}-${Math.random().toString(16).slice(2)}`,
+): CopilotSdkSessionEvent {
   return {
-    id: `${type}-${Math.random().toString(16).slice(2)}`,
+    id,
     parentId: null,
     timestamp: new Date().toISOString(),
     type,

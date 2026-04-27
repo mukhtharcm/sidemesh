@@ -53,7 +53,6 @@ describe("provider registry", () => {
           "SIDEMESH_COPILOT_BIN",
           "SIDEMESH_PROVIDER_COMMAND",
           "SIDEMESH_COPILOT_STATE_DIR",
-          "SIDEMESH_COPILOT_SESSION_STATE_DIR",
           "SIDEMESH_COPILOT_ALLOW_ALL",
           "SIDEMESH_COPILOT_MODEL",
           "COPILOT_MODEL",
@@ -147,7 +146,6 @@ describe("provider registry", () => {
       SIDEMESH_COPILOT_BIN: "copilot-beta",
       SIDEMESH_PROVIDER_COMMAND: "ignored",
       SIDEMESH_COPILOT_STATE_DIR: "/tmp/sidemesh-copilot",
-      SIDEMESH_COPILOT_SESSION_STATE_DIR: "/tmp/copilot-native",
       SIDEMESH_COPILOT_ALLOW_ALL: "true",
       SIDEMESH_COPILOT_MODEL: "claude-sonnet-4.6",
     });
@@ -156,7 +154,6 @@ describe("provider registry", () => {
       kind: "copilot",
       bin: "copilot-beta",
       stateDir: "/tmp/sidemesh-copilot",
-      sessionStateDir: "/tmp/copilot-native",
       allowAll: true,
       configuredModel: "claude-sonnet-4.6",
     });
@@ -182,7 +179,6 @@ describe("provider registry", () => {
       kind: "copilot",
       bin: "copilot",
       stateDir: null,
-      sessionStateDir: null,
       allowAll: false,
       configuredModel: null,
     });
