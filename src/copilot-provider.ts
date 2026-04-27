@@ -21,6 +21,7 @@ import {
   type AgentSubmitInputResult,
 } from "./agent-provider.js";
 import {
+  type NormalizedPendingActionDecision,
   normalizePendingActionDecision,
   type PendingActionDecisionInput,
 } from "./approvals.js";
@@ -46,7 +47,6 @@ import type {
   SessionMessage,
   SessionMessageAttachment,
   SessionRuntimeSummary,
-  PendingActionDecisionRequest,
   ThreadRecord,
   TurnRecord,
 } from "./types.js";
@@ -1527,11 +1527,15 @@ function copilotApprovalTargets(
   request: Record<string, any>,
 ): NonNullable<AgentPendingAction["approval"]>["targets"] {
   switch (request.kind) {
-    case "shell":
+    case "shell": {
+      const command = typeof request.fullCommandText === "string" ? request.fullCommandText : "";
+      if (!command) {
+        return unknownApprovalTarget("Copilot shell request");
+      }
       return [
         {
           type: "command",
-          command: typeof request.fullCommandText === "string" ? request.fullCommandText : "",
+          command,
           identifiers: copilotCommandIdentifiers(request),
           possiblePaths: stringArray(request.possiblePaths),
           possibleUrls: copilotPossibleUrls(request),
@@ -1539,54 +1543,80 @@ function copilotApprovalTargets(
           warning: typeof request.warning === "string" ? request.warning : undefined,
         },
       ];
-    case "write":
+    }
+    case "write": {
+      const path = typeof request.fileName === "string" ? request.fileName : "";
+      if (!path) {
+        return unknownApprovalTarget("Copilot file write request");
+      }
       return [
         {
           type: "file",
-          path: typeof request.fileName === "string" ? request.fileName : "",
+          path,
           access: "write",
           diff: typeof request.diff === "string" ? request.diff : undefined,
           intention: typeof request.intention === "string" ? request.intention : undefined,
         },
       ];
-    case "read":
+    }
+    case "read": {
+      const path = typeof request.path === "string" ? request.path : "";
+      if (!path) {
+        return unknownApprovalTarget("Copilot file read request");
+      }
       return [
         {
           type: "file",
-          path: typeof request.path === "string" ? request.path : "",
+          path,
           access: "read",
           intention: typeof request.intention === "string" ? request.intention : undefined,
         },
       ];
-    case "url":
+    }
+    case "url": {
+      const url = typeof request.url === "string" ? request.url : "";
+      if (!url) {
+        return unknownApprovalTarget("Copilot network request");
+      }
       return [
         {
           type: "url",
-          url: typeof request.url === "string" ? request.url : "",
+          url,
           intention: typeof request.intention === "string" ? request.intention : undefined,
         },
       ];
-    case "mcp":
+    }
+    case "mcp": {
+      const name = typeof request.toolName === "string" ? request.toolName : "";
+      if (!name) {
+        return unknownApprovalTarget("Copilot MCP tool request");
+      }
       return [
         {
           type: "tool",
-          name: typeof request.toolName === "string" ? request.toolName : "",
+          name,
           title: typeof request.toolTitle === "string" ? request.toolTitle : undefined,
           serverName: typeof request.serverName === "string" ? request.serverName : undefined,
           readOnly: typeof request.readOnly === "boolean" ? request.readOnly : undefined,
           args: request.args,
         },
       ];
-    case "custom-tool":
+    }
+    case "custom-tool": {
+      const name = typeof request.toolName === "string" ? request.toolName : "";
+      if (!name) {
+        return unknownApprovalTarget("Copilot custom tool request");
+      }
       return [
         {
           type: "tool",
-          name: typeof request.toolName === "string" ? request.toolName : "",
+          name,
           description:
             typeof request.toolDescription === "string" ? request.toolDescription : undefined,
           args: request.args,
         },
       ];
+    }
     case "memory":
       return [
         {
@@ -1609,8 +1639,14 @@ function copilotApprovalTargets(
         },
       ];
     default:
-      return [{ type: "unknown", label: String(request.kind ?? "unknown") }];
+      return unknownApprovalTarget(String(request.kind ?? "unknown"));
   }
+}
+
+function unknownApprovalTarget(
+  label: string,
+): NonNullable<AgentPendingAction["approval"]>["targets"] {
+  return [{ type: "unknown", label }];
 }
 
 function copilotCommandIdentifiers(request: Record<string, any>): string[] {
@@ -1656,11 +1692,17 @@ function canApproveCopilotPermissionForSession(
   if (request.kind === "shell" || request.kind === "write") {
     return request.canOfferSessionApproval === true;
   }
-  return ["read", "mcp", "custom-tool", "memory"].includes(request.kind);
+  if (request.kind === "mcp") {
+    return typeof request.serverName === "string" && request.serverName.length > 0;
+  }
+  if (request.kind === "custom-tool") {
+    return typeof request.toolName === "string" && request.toolName.length > 0;
+  }
+  return ["read", "memory"].includes(request.kind);
 }
 
 function buildCopilotPermissionResult(
-  decision: PendingActionDecisionRequest,
+  decision: NormalizedPendingActionDecision,
   request: unknown,
 ): CopilotSdkPermissionResult | null {
   if (decision.decision === "approve" && decision.scope === "once") {
@@ -1699,17 +1741,23 @@ function copilotSessionApproval(request: unknown): CopilotSessionApproval | null
     case "write":
       return { kind: "write" };
     case "mcp":
+      if (typeof typed.serverName !== "string" || typed.serverName.length === 0) {
+        return null;
+      }
       return {
         kind: "mcp",
-        serverName: String(typed.serverName ?? ""),
+        serverName: typed.serverName,
         toolName: typeof typed.toolName === "string" ? typed.toolName : null,
       };
     case "memory":
       return { kind: "memory" };
     case "custom-tool":
+      if (typeof typed.toolName !== "string" || typed.toolName.length === 0) {
+        return null;
+      }
       return {
         kind: "custom-tool",
-        toolName: String(typed.toolName ?? ""),
+        toolName: typed.toolName,
       };
     default:
       return null;

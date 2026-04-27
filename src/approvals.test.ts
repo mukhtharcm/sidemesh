@@ -42,6 +42,11 @@ describe("provider-neutral approvals", () => {
       scope: "once",
       legacyDecision: "cancel",
     });
+    assert.deepEqual(parsePendingActionDecision({ decision: "decline", scope: "session" }), {
+      decision: "decline",
+      scope: "once",
+      legacyDecision: "decline",
+    });
     assert.equal(parsePendingActionDecision({ decision: "approve", scope: "forever" }), null);
   });
 
@@ -63,6 +68,17 @@ describe("provider-neutral approvals", () => {
     );
     assert.deepEqual(
       parsePendingActionResponseBody({ decision: "approve", scope: "session" }),
+      {
+        decision: "approve",
+        scope: "session",
+        legacyDecision: "acceptForSession",
+      },
+    );
+    assert.deepEqual(
+      parsePendingActionResponseBody({
+        approvalDecision: null,
+        decision: "acceptForSession",
+      }),
       {
         decision: "approve",
         scope: "session",
