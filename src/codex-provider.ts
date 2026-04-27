@@ -1727,6 +1727,7 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   approvals: {
     command: true,
+    tool: false,
     fileChange: true,
     permissions: true,
     approveForSession: true,

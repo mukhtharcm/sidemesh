@@ -131,6 +131,7 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   approvals: {
     command: true,
+    tool: true,
     fileChange: true,
     permissions: true,
     approveForSession: true,
@@ -745,24 +746,15 @@ export class CopilotAgentProvider
     if (event.type === "tool.execution_start") {
       this.upsertAndEmitActivity(session, active?.turnId ?? null, {
         id: event.data.toolCallId,
-        type: "command",
+        type: "tool",
         turnId: active?.turnId ?? null,
         status: "in_progress",
-        command: formatCopilotToolCommand(
-          event.data.toolName,
-          event.data.arguments,
-        ),
-        cwd: session.thread.cwd,
+        toolName: copilotToolName(event.data.toolName),
+        title: formatCopilotToolCommand(event.data.toolName, event.data.arguments),
+        args: event.data.arguments ?? null,
         output: null,
-        exitCode: null,
-        durationMs: null,
-        source: "copilot",
-        processId: null,
-        commandActions: [
-          { kind: "unknown", label: event.data.toolName ?? "tool" },
-        ],
-        terminalStatus: null,
-        terminalInput: null,
+        result: null,
+        isError: null,
       });
       return;
     }
@@ -789,27 +781,23 @@ export class CopilotAgentProvider
 
     if (event.type === "tool.execution_complete") {
       const existing = session.activities.get(event.data.toolCallId);
+      const existingTool = existing?.type === "tool" ? existing : null;
+      const output =
+        extractCopilotToolOutput(event.data.result ?? event.data.error) ??
+        (existing?.type === "tool" || existing?.type === "command"
+          ? existing.output
+          : null);
       this.upsertAndEmitActivity(session, active?.turnId ?? null, {
         id: event.data.toolCallId,
-        type: "command",
+        type: "tool",
         turnId: active?.turnId ?? null,
         status: event.data.success ? "completed" : "failed",
-        command:
-          existing?.type === "command"
-            ? existing.command
-            : formatCopilotToolCommand("tool", null),
-        cwd: session.thread.cwd,
-        output: extractCopilotToolOutput(event.data.result ?? event.data.error),
-        exitCode: event.data.success ? 0 : 1,
-        durationMs: null,
-        source: "copilot",
-        processId: null,
-        commandActions:
-          existing?.type === "command"
-            ? existing.commandActions
-            : [{ kind: "unknown", label: "tool" }],
-        terminalStatus: null,
-        terminalInput: null,
+        toolName: existingTool?.toolName ?? "tool",
+        title: existingTool?.title ?? "tool",
+        args: existingTool?.args ?? null,
+        output,
+        result: event.data.result ?? event.data.error ?? null,
+        isError: event.data.success ? false : true,
       });
     }
   }
@@ -934,7 +922,7 @@ export class CopilotAgentProvider
     delta: string,
   ): void {
     const existing = session.activities.get(activityId);
-    if (existing?.type === "command") {
+    if (existing?.type === "command" || existing?.type === "tool") {
       session.activities.set(activityId, {
         ...existing,
         output: `${existing.output ?? ""}${delta}`,
@@ -1801,7 +1789,7 @@ function parseSdkSessionEvents(
   nextSeq: number;
 } {
   const messages: SessionMessage[] = [];
-  const activities = new Map<string, import("./types.js").CommandActivity>();
+  const activities = new Map<string, import("./types.js").SessionActivity>();
   let seq = 0;
   let model: string | undefined;
   let updatedAt: number | undefined;
@@ -1856,21 +1844,17 @@ function parseSdkSessionEvents(
     ) {
       activities.set(data.toolCallId, {
         id: data.toolCallId,
-        type: "command",
+        type: "tool",
         turnId: null,
         createdAt: timestamp,
         seq: seq++,
         status: "in_progress",
-        command: formatCopilotToolCommand(data.toolName, data.arguments),
-        cwd,
+        toolName: copilotToolName(data.toolName),
+        title: formatCopilotToolCommand(data.toolName, data.arguments),
+        args: data.arguments ?? null,
         output: null,
-        exitCode: null,
-        durationMs: null,
-        source: "copilot",
-        processId: null,
-        commandActions: [{ kind: "unknown", label: data.toolName ?? "tool" }],
-        terminalStatus: null,
-        terminalInput: null,
+        result: null,
+        isError: null,
       });
       continue;
     }
@@ -1881,27 +1865,25 @@ function parseSdkSessionEvents(
     ) {
       if (typeof data.model === "string") model = data.model;
       const existing = activities.get(data.toolCallId);
+      const existingTool = existing?.type === "tool" ? existing : null;
+      const output =
+        extractCopilotToolOutput(data.result ?? data.error) ??
+        (existing?.type === "tool" || existing?.type === "command"
+          ? existing.output
+          : null);
       activities.set(data.toolCallId, {
-        ...(existing ?? {
-          id: data.toolCallId,
-          type: "command",
-          turnId: null,
-          createdAt: timestamp,
-          seq: seq++,
-          command: formatCopilotToolCommand(data.toolName, null),
-          cwd,
-          output: null,
-          exitCode: null,
-          durationMs: null,
-          source: "copilot",
-          processId: null,
-          commandActions: [{ kind: "unknown", label: data.toolName ?? "tool" }],
-          terminalStatus: null,
-          terminalInput: null,
-        }),
+        id: data.toolCallId,
+        type: "tool",
+        turnId: existingTool?.turnId ?? null,
+        createdAt: existingTool?.createdAt ?? timestamp,
+        seq: existingTool?.seq ?? seq++,
         status: data.success === false ? "failed" : "completed",
-        output: extractCopilotToolOutput(data.result),
-        exitCode: data.success === false ? 1 : 0,
+        toolName: existingTool?.toolName ?? copilotToolName(data.toolName),
+        title: existingTool?.title ?? formatCopilotToolCommand(data.toolName, null),
+        args: existingTool?.args ?? data.arguments ?? null,
+        output,
+        result: data.result ?? data.error ?? null,
+        isError: data.success === false,
       });
     }
   }
@@ -1923,9 +1905,13 @@ function parseSdkSessionEvents(
 }
 
 function formatCopilotToolCommand(toolName: unknown, args: unknown): string {
-  const name = typeof toolName === "string" ? toolName : "tool";
+  const name = copilotToolName(toolName);
   if (!args || typeof args !== "object") return name;
   return `${name} ${JSON.stringify(args)}`;
+}
+
+function copilotToolName(value: unknown): string {
+  return typeof value === "string" && value.length > 0 ? value : "tool";
 }
 
 function extractCopilotToolOutput(result: unknown): string | null {

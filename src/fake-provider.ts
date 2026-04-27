@@ -84,7 +84,7 @@ interface FakeWatch {
   path: string;
 }
 
-type FakeApprovalKind = "command" | "file_change" | "permissions";
+type FakeApprovalKind = "command" | "tool" | "file_change" | "permissions";
 type FakeTurnStatus = "completed" | "failed" | "interrupted";
 
 const DEFAULT_FAKE_WORKSPACE = nodePath.resolve(process.cwd());
@@ -108,6 +108,7 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   approvals: {
     command: true,
+    tool: true,
     fileChange: true,
     permissions: true,
     approveForSession: true,
@@ -199,6 +200,7 @@ function disableInputAttachments(capabilities: AgentProviderCapabilities): void 
 
 function disableApprovals(capabilities: AgentProviderCapabilities): void {
   capabilities.approvals.command = false;
+  capabilities.approvals.tool = false;
   capabilities.approvals.fileChange = false;
   capabilities.approvals.permissions = false;
   capabilities.approvals.approveForSession = false;
@@ -685,7 +687,7 @@ export class FakeAgentProvider
       text: [
         "This is a deterministic fake provider session.",
         "",
-        "Try prompts containing `tools`, `approval:command`, `approval:file`,",
+        "Try prompts containing `tools`, `approval:command`, `approval:tool`, `approval:file`,",
         "`approval:permissions`, `image`, `slow`, or `fail` to exercise UI states.",
       ].join("\n"),
       attachments: [],
@@ -844,6 +846,33 @@ export class FakeAgentProvider
     session: FakeSessionState,
     turnId: string,
   ): Promise<void> {
+    const toolId = `fake-tool-${turnId}`;
+    this.upsertAndEmitActivity(session, turnId, {
+      id: toolId,
+      type: "tool",
+      turnId,
+      status: "in_progress",
+      toolName: "fake_inspect",
+      title: "Inspect fake workspace",
+      args: { path: session.thread.cwd, depth: 1 },
+      output: "Inspecting fake workspace...\n",
+      result: null,
+      isError: null,
+    });
+    await sleep(this.latencyMs);
+    this.upsertAndEmitActivity(session, turnId, {
+      id: toolId,
+      type: "tool",
+      turnId,
+      status: "completed",
+      toolName: "fake_inspect",
+      title: "Inspect fake workspace",
+      args: { path: session.thread.cwd, depth: 1 },
+      output: "Inspecting fake workspace...\nFound fake-provider.md\n",
+      result: { files: ["fake-provider.md"], provider: "fake" },
+      isError: false,
+    });
+
     if (this.capabilityProfile !== "chat-only" && this.capabilityProfile !== "minimal") {
       const commandId = `fake-command-${turnId}`;
       this.upsertAndEmitActivity(session, turnId, {
@@ -1234,6 +1263,8 @@ export class FakeAgentProvider
     switch (kind) {
       case "command":
         return this.capabilities.approvals.command;
+      case "tool":
+        return this.capabilities.approvals.tool;
       case "file_change":
         return this.capabilities.approvals.fileChange;
       case "permissions":
@@ -1349,6 +1380,9 @@ function requestedApprovalKinds(text: string): FakeApprovalKind[] {
   if (lower.includes("approval:command") || lower.includes("approval command")) {
     kinds.push("command");
   }
+  if (lower.includes("approval:tool") || lower.includes("approval tool")) {
+    kinds.push("tool");
+  }
   if (lower.includes("approval:file") || lower.includes("approval file")) {
     kinds.push("file_change");
   }
@@ -1377,6 +1411,8 @@ function fakeApprovalTitle(kind: FakeApprovalKind): string {
   switch (kind) {
     case "command":
       return "Fake command approval";
+    case "tool":
+      return "Fake tool approval";
     case "file_change":
       return "Fake file change approval";
     case "permissions":
@@ -1388,6 +1424,8 @@ function fakeApprovalDetail(kind: FakeApprovalKind, cwd: string): string {
   switch (kind) {
     case "command":
       return `Run fake command in ${cwd}: printf 'approval test'`;
+    case "tool":
+      return `Allow fake_inspect tool to inspect ${cwd}.`;
     case "file_change":
       return `Apply a fake patch under ${cwd}.`;
     case "permissions":
@@ -1415,6 +1453,24 @@ function fakeApproval(
             type: "command",
             command: "printf 'approval test'",
             cwd,
+          },
+        ],
+      };
+    case "tool":
+      return {
+        category: "tool",
+        operation: "fake.tool",
+        summary: detail,
+        detail,
+        cwd,
+        supportedScopes: ["once", "session"],
+        suggestedScope: "once",
+        targets: [
+          {
+            type: "tool",
+            name: "fake_inspect",
+            title: "Inspect fake workspace",
+            args: { path: cwd, depth: 1 },
           },
         ],
       };

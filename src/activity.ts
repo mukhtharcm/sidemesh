@@ -7,6 +7,7 @@ import type {
   SessionActivity,
   SessionCommandActionSummary,
   SessionActivityChange,
+  ToolActivity,
   ThreadItemRecord,
   ThreadRecord,
   TurnDiffActivity,
@@ -133,6 +134,23 @@ export function buildActivityFromThreadItem(
     };
   }
 
+  if (item.type === "toolExecution") {
+    return {
+      id: item.id,
+      type: "tool",
+      turnId: context.turnId,
+      createdAt: context.createdAt,
+      seq: context.seq,
+      status: normalizeStatus(item.status),
+      toolName: asString(item.toolName) || asString(item.name) || "tool",
+      title: asString(item.title),
+      args: item.args ?? item.arguments ?? null,
+      output: truncateNullableText(asString(item.output), MAX_COMMAND_OUTPUT_CHARS),
+      result: item.result ?? null,
+      isError: typeof item.isError === "boolean" ? item.isError : null,
+    };
+  }
+
   if (item.type === "webSearch") {
     return buildWebSearchActivity(item, context);
   }
@@ -194,6 +212,20 @@ export function mergeActivity(
     };
   }
 
+  if (incoming.type === "tool") {
+    const existingTool = existing as ToolActivity;
+    return {
+      ...incoming,
+      createdAt: existing.createdAt,
+      seq: existing.seq,
+      title: incoming.title ?? existingTool.title,
+      args: incoming.args ?? existingTool.args,
+      output: incoming.output ?? existingTool.output,
+      result: incoming.result ?? existingTool.result,
+      isError: incoming.isError ?? existingTool.isError,
+    };
+  }
+
   if (incoming.type === "web_search") {
     const existingSearch = existing as WebSearchActivity;
     return {
@@ -246,9 +278,9 @@ export function mergeSessionActivities(
 }
 
 export function appendCommandActivityOutput(
-  activity: CommandActivity | undefined,
+  activity: CommandActivity | ToolActivity | undefined,
   delta: string,
-): CommandActivity | null {
+): CommandActivity | ToolActivity | null {
   if (!activity || !delta) {
     return null;
   }
@@ -583,6 +615,7 @@ function pickTurnTimestamp(
 function isActivityThreadItem(item: ThreadItemRecord): boolean {
   return (
     item.type === "commandExecution" ||
+    item.type === "toolExecution" ||
     item.type === "fileChange" ||
     item.type === "webSearch" ||
     item.type === "imageGeneration"

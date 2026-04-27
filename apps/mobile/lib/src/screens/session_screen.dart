@@ -3530,6 +3530,10 @@ class _SessionScreenState extends State<SessionScreen>
       activity.type,
       activity.status,
       activity.command ?? '',
+      activity.toolName ?? '',
+      activity.toolTitle ?? '',
+      jsonEncode(activity.toolArgs),
+      jsonEncode(activity.toolResult),
       activity.cwd ?? '',
       activity.query ?? '',
       activity.queries.join(' '),
@@ -3547,6 +3551,11 @@ class _SessionScreenState extends State<SessionScreen>
       case 'command':
         final cmd = (activity.command ?? '').trim();
         return cmd.isEmpty ? 'Command' : cmd;
+      case 'tool':
+        final title = (activity.toolTitle ?? '').trim();
+        if (title.isNotEmpty) return title;
+        final name = (activity.toolName ?? '').trim();
+        return name.isEmpty ? 'Tool execution' : name;
       case 'file_change':
         if (activity.changes.length == 1) {
           return activity.changes.first.path;
