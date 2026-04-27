@@ -52,19 +52,161 @@ class NodeInfo {
     required this.hostname,
     required this.platform,
     required this.codexVersion,
+    required this.provider,
+    required this.providerName,
+    required this.providerVersion,
+    required this.providerConfig,
+    required this.providerCapabilities,
+    required this.supportedProviders,
   });
 
   final String label;
   final String hostname;
   final String platform;
   final String codexVersion;
+  final String provider;
+  final String providerName;
+  final String providerVersion;
+  final ProviderConfigSummary providerConfig;
+  final ProviderCapabilities providerCapabilities;
+  final List<ProviderDefinitionSummary> supportedProviders;
+
+  String get providerDisplayName {
+    if (providerName.isNotEmpty) return providerName;
+    if (provider.isNotEmpty) return provider;
+    return 'Codex';
+  }
+
+  String get providerDisplayVersion {
+    if (providerVersion.isNotEmpty) return providerVersion;
+    return codexVersion;
+  }
+
+  String get providerPillLabel {
+    final version = providerDisplayVersion;
+    if (version.isEmpty) return providerDisplayName;
+    return '$providerDisplayName $version';
+  }
 
   factory NodeInfo.fromJson(Map<String, dynamic> json) => NodeInfo(
     label: _stringValue(json['label']),
     hostname: _stringValue(json['hostname']),
     platform: _stringValue(json['platform']),
     codexVersion: _stringValue(json['codexVersion']),
+    provider: _stringOrNull(json['provider']) ?? 'codex',
+    providerName: _stringOrNull(json['providerName']) ?? 'Codex',
+    providerVersion:
+        _stringOrNull(json['providerVersion']) ??
+        _stringValue(json['codexVersion']),
+    providerConfig: ProviderConfigSummary.fromJson(json['providerConfig']),
+    providerCapabilities: ProviderCapabilities.fromJson(
+      json['providerCapabilities'],
+    ),
+    supportedProviders: ProviderDefinitionSummary.listFromJson(
+      json['supportedProviders'],
+    ),
   );
+}
+
+class ProviderMetadata {
+  const ProviderMetadata({
+    required this.currentProvider,
+    required this.providers,
+  });
+
+  final String currentProvider;
+  final List<ProviderDefinitionSummary> providers;
+
+  factory ProviderMetadata.fromJson(Map<String, dynamic> json) =>
+      ProviderMetadata(
+        currentProvider: _stringValue(json['currentProvider']),
+        providers: ProviderDefinitionSummary.listFromJson(json['providers']),
+      );
+}
+
+class ProviderDefinitionSummary {
+  const ProviderDefinitionSummary({
+    required this.kind,
+    required this.displayName,
+    required this.defaultCommand,
+    required this.commandEnvironmentVariables,
+  });
+
+  static const empty = ProviderDefinitionSummary(
+    kind: '',
+    displayName: '',
+    defaultCommand: '',
+    commandEnvironmentVariables: <String>[],
+  );
+
+  final String kind;
+  final String displayName;
+  final String defaultCommand;
+  final List<String> commandEnvironmentVariables;
+
+  factory ProviderDefinitionSummary.fromJson(Object? json) {
+    if (json is! Map) return empty;
+    return ProviderDefinitionSummary(
+      kind: _stringValue(json['kind']),
+      displayName: _stringValue(json['displayName']),
+      defaultCommand: _stringValue(json['defaultCommand']),
+      commandEnvironmentVariables:
+          (json['commandEnvironmentVariables'] as List<dynamic>? ?? const [])
+              .map(_stringValue)
+              .where((value) => value.isNotEmpty)
+              .toList(),
+    );
+  }
+
+  static List<ProviderDefinitionSummary> listFromJson(Object? json) {
+    if (json is! List) return const [];
+    return json
+        .map(ProviderDefinitionSummary.fromJson)
+        .where((provider) => provider.kind.isNotEmpty)
+        .toList();
+  }
+}
+
+class ProviderConfigSummary {
+  const ProviderConfigSummary({required this.kind, required this.command});
+
+  static const empty = ProviderConfigSummary(kind: '', command: null);
+
+  final String kind;
+  final String? command;
+
+  factory ProviderConfigSummary.fromJson(Object? json) {
+    if (json is! Map) return empty;
+    return ProviderConfigSummary(
+      kind: _stringValue(json['kind']),
+      command: _stringOrNull(json['command']),
+    );
+  }
+}
+
+class ProviderCapabilities {
+  const ProviderCapabilities(this.values);
+
+  static const empty = ProviderCapabilities(<String, dynamic>{});
+
+  final Map<String, dynamic> values;
+
+  bool supports(String section, String feature) {
+    final rawSection = values[section];
+    if (rawSection is! Map) return false;
+    return rawSection[feature] == true;
+  }
+
+  factory ProviderCapabilities.fromJson(Object? json) {
+    if (json is! Map) return empty;
+    return ProviderCapabilities(
+      Map<String, dynamic>.fromEntries(
+        json.entries.map(
+          (entry) => MapEntry(entry.key.toString(), entry.value),
+        ),
+      ),
+    );
+  }
 }
 
 class GitInfoSummary {
@@ -570,27 +712,27 @@ class ModelReasoningEffortOption {
       );
 }
 
-class CodexProfileCatalog {
-  const CodexProfileCatalog({
+class ProviderProfileCatalog {
+  const ProviderProfileCatalog({
     required this.defaultProfile,
     required this.profiles,
   });
 
   final String? defaultProfile;
-  final List<CodexProfileSummary> profiles;
+  final List<ProviderProfileSummary> profiles;
 
-  factory CodexProfileCatalog.fromJson(Map<String, dynamic> json) =>
-      CodexProfileCatalog(
+  factory ProviderProfileCatalog.fromJson(Map<String, dynamic> json) =>
+      ProviderProfileCatalog(
         defaultProfile: _stringOrNull(json['defaultProfile']),
         profiles: (json['profiles'] as List<dynamic>? ?? [])
             .whereType<Map<String, dynamic>>()
-            .map(CodexProfileSummary.fromJson)
+            .map(ProviderProfileSummary.fromJson)
             .toList(),
       );
 }
 
-class CodexProfileSummary {
-  const CodexProfileSummary({
+class ProviderProfileSummary {
+  const ProviderProfileSummary({
     required this.name,
     required this.isDefault,
     this.model,
@@ -622,8 +764,8 @@ class CodexProfileSummary {
   final String? webSearch;
   final String? personality;
 
-  factory CodexProfileSummary.fromJson(Map<String, dynamic> json) =>
-      CodexProfileSummary(
+  factory ProviderProfileSummary.fromJson(Map<String, dynamic> json) =>
+      ProviderProfileSummary(
         name: _stringValue(json['name']),
         isDefault: _boolValue(json['isDefault']),
         model: _stringOrNull(json['model']),
