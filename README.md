@@ -35,12 +35,30 @@ SIDEMESH_TOKEN=your-shared-token
 SIDEMESH_PROVIDER=codex
 SIDEMESH_CODEX_BIN=codex
 SIDEMESH_PROVIDER_COMMAND=codex
+SIDEMESH_FAKE_LATENCY_MS=15
+SIDEMESH_FAKE_SEED=1
+SIDEMESH_FAKE_WORKSPACE_ROOT=/tmp/sidemesh-fake
 SIDEMESH_STATE_DIR=~/.sidemesh
 ```
 
 `SIDEMESH_PROVIDER` defaults to `codex`. `SIDEMESH_PROVIDER_COMMAND` is a
 provider-neutral command override; for Codex, `SIDEMESH_CODEX_BIN` remains
 supported and takes precedence.
+
+For provider-abstraction testing, run the deterministic in-process fake
+provider instead of Codex:
+
+```bash
+SIDEMESH_PROVIDER=fake \
+SIDEMESH_LABEL=fake-node \
+SIDEMESH_TOKEN=replace-me \
+npm run daemon
+```
+
+The fake provider supports every advertised Sidemesh capability and exercises
+real app flows without contacting an external agent. Use prompt keywords such
+as `tools`, `approval:command`, `approval:file`, `approval:permissions`,
+`image`, `slow`, and `fail` to trigger deterministic UI states.
 
 ## Dogfood flow
 
@@ -154,8 +172,9 @@ Current limits:
 
 - host tokens are stored in platform secure storage, but pairing/revocation is not implemented yet
 - the iOS and Android builds allow plain `http://` traffic so Tailscale and private LAN nodes work immediately
-- Codex is the only implemented provider for now; Copilot/OpenClaw/Pi-style
-  providers still need their own adapters
+- Codex is the only production provider for now; the fake provider is a
+  deterministic test adapter, while Copilot/OpenClaw/Pi-style providers still
+  need their own adapters
 - provider registration is centralized in `src/provider-registry.ts`; future
   adapters should start there instead of adding new config/factory switches
 - the provider adapter contract is documented in

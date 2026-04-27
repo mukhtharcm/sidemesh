@@ -1,10 +1,12 @@
 import { CodexAgentProvider } from "./codex-provider.js";
+import { FakeAgentProvider } from "./fake-provider.js";
 import type { AgentProvider } from "./agent-provider.js";
 import type {
   AgentProviderConfig,
   AgentProviderConfigSummary,
   AgentProviderKind,
   CodexProviderConfig,
+  FakeProviderConfig,
 } from "./types.js";
 
 type ProviderEnvironment = Record<string, string | undefined>;
@@ -29,6 +31,7 @@ export interface AgentProviderDefinitionSummary {
 
 export const DEFAULT_AGENT_PROVIDER_KIND: AgentProviderKind = "codex";
 const CODEX_DEFAULT_COMMAND = "codex";
+const FAKE_DEFAULT_COMMAND = "builtin";
 
 const CODEX_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "codex",
@@ -63,7 +66,47 @@ const CODEX_PROVIDER_DEFINITION: AgentProviderDefinition = {
   },
 };
 
-const AGENT_PROVIDER_DEFINITIONS = [CODEX_PROVIDER_DEFINITION] as const;
+const FAKE_PROVIDER_DEFINITION: AgentProviderDefinition = {
+  kind: "fake",
+  displayName: "Fake Test Provider",
+  defaultCommand: FAKE_DEFAULT_COMMAND,
+  commandEnvironmentVariables: [
+    "SIDEMESH_FAKE_LATENCY_MS",
+    "SIDEMESH_FAKE_SEED",
+    "SIDEMESH_FAKE_WORKSPACE_ROOT",
+  ],
+
+  create(config) {
+    const fake = expectFakeProviderConfig(config);
+    return new FakeAgentProvider({
+      latencyMs: fake.latencyMs,
+      seedSessions: fake.seedSessions,
+      workspaceRoot: fake.workspaceRoot,
+    });
+  },
+
+  loadConfig(env) {
+    return {
+      kind: "fake",
+      latencyMs: parseInteger(env.SIDEMESH_FAKE_LATENCY_MS, 15),
+      seedSessions: env.SIDEMESH_FAKE_SEED?.trim() !== "0",
+      workspaceRoot: env.SIDEMESH_FAKE_WORKSPACE_ROOT?.trim() || null,
+    };
+  },
+
+  summarizeConfig(config) {
+    const fake = expectFakeProviderConfig(config);
+    return {
+      kind: fake.kind,
+      command: FAKE_DEFAULT_COMMAND,
+    };
+  },
+};
+
+const AGENT_PROVIDER_DEFINITIONS = [
+  CODEX_PROVIDER_DEFINITION,
+  FAKE_PROVIDER_DEFINITION,
+] as const;
 
 export function listAgentProviderDefinitions(): readonly AgentProviderDefinition[] {
   return AGENT_PROVIDER_DEFINITIONS;
@@ -120,4 +163,19 @@ function expectCodexProviderConfig(config: AgentProviderConfig): CodexProviderCo
     throw new Error(`Expected Codex provider config, got "${config.kind}"`);
   }
   return config;
+}
+
+function expectFakeProviderConfig(config: AgentProviderConfig): FakeProviderConfig {
+  if (config.kind !== "fake") {
+    throw new Error(`Expected fake provider config, got "${config.kind}"`);
+  }
+  return config;
+}
+
+function parseInteger(value: string | undefined, fallback: number): number {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
