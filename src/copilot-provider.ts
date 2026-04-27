@@ -476,6 +476,7 @@ export class CopilotAgentProvider
     this.activeTurns.set(sessionId, { turnId, child });
 
     const chunks: string[] = [];
+    const stderrChunks: string[] = [];
     child.stdout.on("data", (chunk: Buffer) => {
       const delta = chunk.toString("utf8");
       chunks.push(delta);
@@ -488,7 +489,9 @@ export class CopilotAgentProvider
       });
     });
     child.stderr.on("data", (chunk: Buffer) => {
-      this.emit("stderr", chunk.toString("utf8"));
+      const delta = chunk.toString("utf8");
+      stderrChunks.push(delta);
+      this.emit("stderr", delta);
     });
 
     const exitCode = await waitForChild(child);
@@ -499,6 +502,7 @@ export class CopilotAgentProvider
     this.activeTurns.delete(sessionId);
 
     const output = chunks.join("").trim();
+    const stderr = stderrChunks.join("").trim();
     const turn = this.requireTurn(current, turnId);
     if (output.length > 0) {
       this.appendAssistantMessage(
@@ -519,7 +523,9 @@ export class CopilotAgentProvider
         },
       });
     } else if (exitCode !== 0) {
-      const text = `Copilot exited with code ${exitCode}.`;
+      const text = stderr
+        ? `Copilot exited with code ${exitCode}.\n\n${stderr}`
+        : `Copilot exited with code ${exitCode}.`;
       this.appendAssistantMessage(current, turnId, text, "final_answer");
       this.emit("liveEvent", {
         type: "assistant_message_completed",
@@ -549,10 +555,13 @@ export class CopilotAgentProvider
       "on",
       "--no-color",
       "--no-ask-user",
-      "--name",
-      session.thread.name ?? session.thread.preview,
-      `--resume=${session.copilotSessionId ?? session.thread.id}`,
     ];
+    const resumeId = session.copilotSessionId ?? session.thread.id;
+    if (resumeId) {
+      args.push(`--resume=${resumeId}`);
+    } else {
+      args.push("--name", session.thread.name ?? session.thread.preview);
+    }
     if (session.runtime?.model) {
       args.push("--model", session.runtime.model);
     }
