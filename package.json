@@ -2,7 +2,7 @@
   "name": "sidemesh",
   "version": "0.1.0",
   "private": true,
-  "description": "Fleet-first Codex session node and Flutter client.",
+  "description": "Fleet-first coding-agent session node and Flutter client.",
   "type": "module",
   "scripts": {
     "daemon": "tsx src/index.ts",

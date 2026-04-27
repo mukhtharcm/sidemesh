@@ -1,6 +1,9 @@
-export type AgentProviderKind = "codex" | "fake";
+export type AgentProviderKind = "codex" | "fake" | "copilot";
 
-export type AgentProviderConfig = CodexProviderConfig | FakeProviderConfig;
+export type AgentProviderConfig =
+  | CodexProviderConfig
+  | FakeProviderConfig
+  | CopilotProviderConfig;
 
 export interface CodexProviderConfig {
   kind: "codex";
@@ -13,6 +16,13 @@ export interface FakeProviderConfig {
   seedSessions: boolean;
   workspaceRoot: string | null;
   capabilityProfile: FakeCapabilityProfile;
+}
+
+export interface CopilotProviderConfig {
+  kind: "copilot";
+  bin: string;
+  stateDir: string | null;
+  allowAll: boolean;
 }
 
 export type FakeCapabilityProfile =

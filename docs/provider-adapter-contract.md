@@ -1,8 +1,8 @@
 # Provider Adapter Contract
 
-Sidemesh currently ships with a production Codex adapter and an in-process fake
-test adapter. The daemon is structured so future agents can be added behind the
-same host/session API.
+Sidemesh currently ships with a production Codex adapter, a text-first GitHub
+Copilot CLI adapter, and an in-process fake test adapter. The daemon is
+structured so future agents can be added behind the same host/session API.
 
 ## Entry Points
 
@@ -138,6 +138,9 @@ dogfooding non-Codex behavior before a real adapter exists. Supported profiles
 are `full`, `chat-only`, `no-files`, `no-model-controls`, `no-approvals`, and
 `minimal`.
 
-The first real non-Codex provider should still start small: node metadata,
-create session, submit text input, stream assistant text, and list recent
-sessions if the agent has a durable session concept.
+The Copilot adapter is the first real non-Codex slice. It intentionally starts
+small: node metadata, create session, submit text input, stream assistant text,
+Sidemesh-owned history, rename/archive/resume, interruption, and model/effort
+pass-through. Images, approvals, skills, filesystem, and native tool activity
+translation should be enabled only when the adapter can report honest
+capabilities and translate native events into Sidemesh event types.

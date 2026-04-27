@@ -1,9 +1,9 @@
 # Sidemesh
 
 Sidemesh is a fleet-first mobile control plane for agent sessions. The daemon
-currently ships with a Codex provider, while the server/client boundaries are
-structured around provider capabilities so other coding agents can be added
-behind the same API later.
+ships with provider adapters for Codex, GitHub Copilot CLI, and a deterministic
+fake test provider, while the server/client boundaries are structured around
+provider capabilities so more coding agents can be added behind the same API.
 
 This repo contains:
 
@@ -35,6 +35,9 @@ SIDEMESH_TOKEN=your-shared-token
 SIDEMESH_PROVIDER=codex
 SIDEMESH_CODEX_BIN=codex
 SIDEMESH_PROVIDER_COMMAND=codex
+SIDEMESH_COPILOT_BIN=copilot
+SIDEMESH_COPILOT_STATE_DIR=~/.sidemesh/copilot-provider
+SIDEMESH_COPILOT_ALLOW_ALL=0
 SIDEMESH_FAKE_LATENCY_MS=15
 SIDEMESH_FAKE_SEED=1
 SIDEMESH_FAKE_WORKSPACE_ROOT=/tmp/sidemesh-fake
@@ -43,8 +46,25 @@ SIDEMESH_STATE_DIR=~/.sidemesh
 ```
 
 `SIDEMESH_PROVIDER` defaults to `codex`. `SIDEMESH_PROVIDER_COMMAND` is a
-provider-neutral command override; for Codex, `SIDEMESH_CODEX_BIN` remains
-supported and takes precedence.
+provider-neutral command override; provider-specific command variables such as
+`SIDEMESH_CODEX_BIN` and `SIDEMESH_COPILOT_BIN` take precedence.
+
+To run against GitHub Copilot CLI instead of Codex:
+
+```bash
+SIDEMESH_PROVIDER=copilot \
+SIDEMESH_LABEL=copilot-node \
+SIDEMESH_TOKEN=replace-me \
+npm run daemon
+```
+
+The Copilot provider is the first real non-Codex adapter. It currently supports
+text sessions, Sidemesh-owned recent/history storage, model and reasoning-effort
+overrides, streaming assistant text, rename/archive/resume, and interruption.
+It does not yet expose images, approvals, skills, filesystem browsing, or tool
+activity cards. By default it does not auto-grant Copilot tool permissions; set
+`SIDEMESH_COPILOT_ALLOW_ALL=1` only on hosts where Copilot may run with
+`--allow-all`.
 
 For provider-abstraction testing, run the deterministic in-process fake
 provider instead of Codex:
@@ -200,9 +220,9 @@ Current limits:
 
 - host tokens are stored in platform secure storage, but pairing/revocation is not implemented yet
 - the iOS and Android builds allow plain `http://` traffic so Tailscale and private LAN nodes work immediately
-- Codex is the only production provider for now; the fake provider is a
-  deterministic test adapter, while Copilot/OpenClaw/Pi-style providers still
-  need their own adapters
+- Codex remains the fullest production provider; the Copilot adapter is an
+  early text-first provider, and the fake provider is the deterministic contract
+  test adapter
 - provider registration is centralized in `src/provider-registry.ts`; future
   adapters should start there instead of adding new config/factory switches
 - the provider adapter contract is documented in
