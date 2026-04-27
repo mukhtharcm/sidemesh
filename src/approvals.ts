@@ -6,8 +6,15 @@ import type {
   PendingActionDecisionRequest,
 } from "./types.js";
 
+export interface NormalizedPendingActionDecision {
+  decision: PendingActionDecisionKind;
+  scope: PendingActionApprovalScope;
+  legacyDecision: PendingActionDecisionId;
+}
+
 export type PendingActionDecisionInput =
   | PendingActionDecisionRequest
+  | NormalizedPendingActionDecision
   | PendingActionDecisionId
   | null
   | undefined;
@@ -22,7 +29,7 @@ const LEGACY_DECISIONS = new Set<PendingActionDecisionId>([
 
 export function parsePendingActionDecision(
   value: unknown,
-): PendingActionDecisionRequest | null {
+): NormalizedPendingActionDecision | null {
   if (typeof value === "string") {
     return decisionFromLegacy(value);
   }
@@ -39,20 +46,21 @@ export function parsePendingActionDecision(
   if (typed.scope !== undefined && !isApprovalScope(typed.scope)) {
     return null;
   }
-  const scope = isApprovalScope(typed.scope) ? typed.scope : "once";
+  const requestedScope = isApprovalScope(typed.scope) ? typed.scope : "once";
+  const scope = decision === "approve" ? requestedScope : "once";
   const legacyDecision = legacyDecisionFor(decision, scope);
   return { decision, scope, legacyDecision };
 }
 
 export function parsePendingActionResponseBody(
   value: unknown,
-): PendingActionDecisionRequest | null {
+): NormalizedPendingActionDecision | null {
   if (!value || typeof value !== "object") {
     return null;
   }
 
   const typed = value as Record<string, unknown>;
-  if ("approvalDecision" in typed) {
+  if (typed.approvalDecision !== undefined && typed.approvalDecision !== null) {
     return parsePendingActionDecision(typed.approvalDecision);
   }
   if (isDecisionKind(typed.decision)) {
@@ -63,7 +71,7 @@ export function parsePendingActionResponseBody(
 
 export function normalizePendingActionDecision(
   value: PendingActionDecisionInput,
-): PendingActionDecisionRequest | null {
+): NormalizedPendingActionDecision | null {
   return parsePendingActionDecision(value);
 }
 
@@ -105,7 +113,7 @@ export function toPublicPendingAction(action: PendingAction): PendingAction {
   };
 }
 
-function decisionFromLegacy(value: string): PendingActionDecisionRequest | null {
+function decisionFromLegacy(value: string): NormalizedPendingActionDecision | null {
   if (!isLegacyDecision(value)) {
     return null;
   }
