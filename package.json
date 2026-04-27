@@ -4,6 +4,9 @@
   "private": true,
   "description": "Fleet-first coding-agent session node and Flutter client.",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "daemon": "tsx src/index.ts",
     "daemon:dev": "tsx watch src/index.ts",

@@ -1,4 +1,3 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -192,19 +191,19 @@ export class CopilotAgentProvider
 
   public async getVersion(): Promise<string> {
     try {
-      const status = await this.sdkClient?.getStatus?.();
+      const status = await (await this.ensureSdkClient()).getStatus?.();
       if (status?.version) {
         return `GitHub Copilot SDK ${status.version}`;
       }
-    } catch {
-      // Fall back to the binary version if the SDK status RPC is unavailable.
+    } catch (error) {
+      this.emit(
+        "stderr",
+        error instanceof Error
+          ? `Copilot SDK status failed: ${error.message}`
+          : "Copilot SDK status failed.",
+      );
     }
-    const output = await runProcess(this.bin, ["--version"], process.cwd());
-    return output
-      .trim()
-      .split(/\r?\n/)
-      .find((line) => line.trim().length > 0)
-      ?.trim() || "unknown";
+    return "unknown";
   }
 
   public async listSessionThreads(
@@ -549,19 +548,16 @@ export class CopilotAgentProvider
       await completed;
     } catch (error) {
       const current = this.sessions.get(sessionId);
-      if (!current || this.activeTurns.get(sessionId)?.turnId !== turnId) {
+      if (!current) {
         return;
       }
       const text =
         error instanceof Error ? error.message : "Copilot SDK turn failed.";
-      this.appendAndEmitAssistantMessage(
+      this.failTurn(
         current,
         turnId,
         `Copilot SDK error: ${text}`,
-        "final_answer",
-        `copilot-assistant-error-${turnId}`,
       );
-      this.completeActiveTurn(sessionId, "failed");
       await this.persistSoon();
     }
   }
@@ -608,10 +604,14 @@ export class CopilotAgentProvider
   private buildSdkSessionConfig(
     session: CopilotSessionState,
   ): Omit<CopilotSdkSessionConfig, "sessionId"> {
+    const sdkModel = modelForSdk(session.runtime?.model);
     return {
       clientName: "sidemesh",
-      model: modelForSdk(session.runtime?.model),
-      reasoningEffort: reasoningEffortForSdk(session.runtime?.reasoningEffort),
+      model: sdkModel,
+      reasoningEffort: reasoningEffortForSdk(
+        session.runtime?.reasoningEffort,
+        sdkModel,
+      ),
       workingDirectory: session.thread.cwd || process.cwd(),
       streaming: true,
       includeSubAgentStreamingEvents: true,
@@ -631,7 +631,10 @@ export class CopilotAgentProvider
       return;
     }
     await sdkSession.setModel(model, {
-      reasoningEffort: reasoningEffortForSdk(session.runtime?.reasoningEffort),
+      reasoningEffort: reasoningEffortForSdk(
+        session.runtime?.reasoningEffort,
+        model,
+      ),
     });
   }
 
@@ -835,6 +838,39 @@ export class CopilotAgentProvider
       this.finishTurn(session, turn, status);
     }
     active.resolve(status);
+    void this.persistSoon();
+  }
+
+  private failTurn(
+    session: CopilotSessionState,
+    turnId: string,
+    text: string,
+  ): void {
+    const active = this.activeTurns.get(session.thread.id);
+    if (active?.turnId === turnId) {
+      this.appendAndEmitAssistantMessage(
+        session,
+        turnId,
+        text,
+        "final_answer",
+        `copilot-assistant-error-${turnId}`,
+      );
+      this.completeActiveTurn(session.thread.id, "failed");
+      return;
+    }
+
+    const turn = session.turns.find((candidate) => candidate.id === turnId);
+    if (turn?.status !== "inProgress") {
+      return;
+    }
+    this.appendAndEmitAssistantMessage(
+      session,
+      turnId,
+      text,
+      "final_answer",
+      `copilot-assistant-error-${turnId}`,
+    );
+    this.finishTurn(session, turn, "failed");
     void this.persistSoon();
   }
 
@@ -1199,31 +1235,34 @@ function copilotModel(
   model: string,
   options: { isDefault: boolean; sortOrder: number; source: string },
 ): ModelSummary {
+  const auto = model === DEFAULT_SIDEMESH_COPILOT_MODEL;
   return {
     id: `copilot:${model}`,
     model,
     displayName: displayNameFromModel(model),
     description: copilotModelDescription(model),
     defaultReasoningEffort: "medium",
-    supportedReasoningEfforts: [
-      {
-        reasoningEffort: "low",
-        description: "Lower Copilot reasoning effort.",
-      },
-      {
-        reasoningEffort: "medium",
-        description: "Default Copilot reasoning effort.",
-      },
-      {
-        reasoningEffort: "high",
-        description: "Higher Copilot reasoning effort.",
-      },
-      {
-        reasoningEffort: "xhigh",
-        description: "Extra-high Copilot reasoning effort.",
-      },
-    ],
-    reasoningEffortControl: "client",
+    supportedReasoningEfforts: auto
+      ? []
+      : [
+          {
+            reasoningEffort: "low",
+            description: "Lower Copilot reasoning effort.",
+          },
+          {
+            reasoningEffort: "medium",
+            description: "Default Copilot reasoning effort.",
+          },
+          {
+            reasoningEffort: "high",
+            description: "Higher Copilot reasoning effort.",
+          },
+          {
+            reasoningEffort: "xhigh",
+            description: "Extra-high Copilot reasoning effort.",
+          },
+        ],
+    reasoningEffortControl: auto ? "provider" : "client",
     supportsPersonality: false,
     additionalSpeedTiers: [],
     inputModalities: ["text"],
@@ -1306,7 +1345,11 @@ function modelForSdk(model: string | null | undefined): string | undefined {
 
 function reasoningEffortForSdk(
   effort: string | null | undefined,
+  model: string | undefined,
 ): CopilotSdkReasoningEffort | undefined {
+  if (!model) {
+    return undefined;
+  }
   if (
     effort === "low" ||
     effort === "medium" ||
@@ -1807,31 +1850,4 @@ function limitTail<T>(items: T[], limit: number | null): T[] {
 
 function nowSeconds(): number {
   return Date.now() / 1000;
-}
-
-function waitForChild(
-  child: ChildProcessWithoutNullStreams,
-): Promise<number | null> {
-  return new Promise((resolve) => {
-    child.on("error", () => resolve(1));
-    child.on("close", (code) => resolve(code));
-  });
-}
-
-async function runProcess(
-  command: string,
-  args: string[],
-  cwd: string,
-): Promise<string> {
-  const child = spawn(command, args, {
-    cwd,
-    env: { ...process.env, NO_COLOR: "1" },
-  });
-  const chunks: string[] = [];
-  child.stdout.on("data", (chunk: Buffer) =>
-    chunks.push(chunk.toString("utf8")),
-  );
-  child.stderr.resume();
-  await waitForChild(child);
-  return chunks.join("");
 }
