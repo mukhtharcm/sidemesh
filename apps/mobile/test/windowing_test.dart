@@ -1,8 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/models.dart';
+import 'package:sidemesh_mobile/src/screen_awake_controller.dart';
+import 'package:sidemesh_mobile/src/screen_awake_settings_store.dart';
 import 'package:sidemesh_mobile/src/windowing.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   const host = HostProfile(
     id: 'host-1',
     label: 'MacBook',
@@ -22,6 +28,10 @@ void main() {
     runtime: null,
     gitInfo: null,
   );
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
 
   test('session window arguments round-trip through json', () {
     final arguments = SidemeshWindowArguments.sessionWindow(
@@ -110,6 +120,101 @@ void main() {
     );
     expect(platform.createdWindows.single.showCalls, 1);
   });
+
+  test(
+    'screen awake coordinator claims relay channel and applies locally',
+    () async {
+      final store = ScreenAwakeSettingsStore.forTesting();
+      final binding = _FakeScreenAwakeBinding();
+      final controller = ScreenAwakeController(
+        settingsStore: store,
+        binding: binding,
+      );
+      final relayChannel = _FakeRelayChannel();
+      final coordinator = WindowScreenAwakeCoordinator(
+        controller: controller,
+        relayChannel: relayChannel,
+        supportsRelayOverride: true,
+      );
+      addTearDown(controller.stop);
+
+      await store.setKeepScreenAwakeWhileAgentRuns(true);
+      await coordinator.start();
+      coordinator.setSourceActive('window:a', true);
+      await controller.waitForIdle();
+
+      expect(coordinator.isCoordinator, isTrue);
+      expect(relayChannel.registerCalls, 1);
+      expect(binding.calls, <bool>[true]);
+    },
+  );
+
+  test('screen awake coordinator relays to an existing coordinator', () async {
+    final store = ScreenAwakeSettingsStore.forTesting();
+    final binding = _FakeScreenAwakeBinding();
+    final controller = ScreenAwakeController(
+      settingsStore: store,
+      binding: binding,
+    );
+    final relayChannel = _FakeRelayChannel(
+      registerError: WindowChannelException(
+        'CHANNEL_LIMIT_REACHED',
+        'already registered',
+      ),
+      registerErrorCount: 1,
+    );
+    final coordinator = WindowScreenAwakeCoordinator(
+      controller: controller,
+      relayChannel: relayChannel,
+      supportsRelayOverride: true,
+    );
+    addTearDown(controller.stop);
+
+    await coordinator.start();
+    coordinator.setSourceActive('window:b', true);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(coordinator.isCoordinator, isFalse);
+    expect(relayChannel.invocations, hasLength(1));
+    expect(relayChannel.invocations.single.method, 'setSourceActive');
+    expect(binding.calls, isEmpty);
+  });
+
+  test(
+    'screen awake coordinator falls back to local coordination when relay disappears',
+    () async {
+      final store = ScreenAwakeSettingsStore.forTesting();
+      final binding = _FakeScreenAwakeBinding();
+      final controller = ScreenAwakeController(
+        settingsStore: store,
+        binding: binding,
+      );
+      final relayChannel = _FakeRelayChannel(
+        registerError: WindowChannelException(
+          'CHANNEL_LIMIT_REACHED',
+          'already registered',
+        ),
+        registerErrorCount: 1,
+        invokeError: WindowChannelException('CHANNEL_UNREGISTERED', 'missing'),
+      );
+      final coordinator = WindowScreenAwakeCoordinator(
+        controller: controller,
+        relayChannel: relayChannel,
+        supportsRelayOverride: true,
+      );
+      addTearDown(controller.stop);
+
+      await store.setKeepScreenAwakeWhileAgentRuns(true);
+      await coordinator.start();
+      coordinator.setSourceActive('window:c', true);
+      await Future<void>.delayed(Duration.zero);
+      await controller.waitForIdle();
+
+      expect(coordinator.isCoordinator, isTrue);
+      expect(relayChannel.registerCalls, 2);
+      expect(binding.calls, <bool>[true]);
+    },
+  );
 }
 
 class _FakeWindowPlatform implements SidemeshWindowPlatform {
@@ -146,5 +251,56 @@ class _FakeWindowHandle implements SidemeshWindowHandle {
   @override
   Future<void> show() async {
     showCalls += 1;
+  }
+}
+
+class _FakeRelayChannel implements SidemeshWindowRelayChannel {
+  _FakeRelayChannel({
+    this.registerError,
+    this.registerErrorCount = 0,
+    this.invokeError,
+  });
+
+  final WindowChannelException? registerError;
+  int registerErrorCount;
+  final WindowChannelException? invokeError;
+
+  int registerCalls = 0;
+  MethodCallHandler? handler;
+  final List<_RelayInvocation> invocations = <_RelayInvocation>[];
+
+  @override
+  Future<T?> invokeMethod<T>(String method, [dynamic arguments]) async {
+    invocations.add(_RelayInvocation(method, arguments));
+    if (invokeError != null) {
+      throw invokeError!;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> setMethodCallHandler(MethodCallHandler? nextHandler) async {
+    registerCalls += 1;
+    if (registerError != null && registerErrorCount > 0) {
+      registerErrorCount -= 1;
+      throw registerError!;
+    }
+    handler = nextHandler;
+  }
+}
+
+class _RelayInvocation {
+  const _RelayInvocation(this.method, this.arguments);
+
+  final String method;
+  final dynamic arguments;
+}
+
+class _FakeScreenAwakeBinding implements ScreenAwakeBinding {
+  final List<bool> calls = <bool>[];
+
+  @override
+  Future<void> setEnabled(bool enabled) async {
+    calls.add(enabled);
   }
 }
