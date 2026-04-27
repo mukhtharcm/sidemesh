@@ -1,0 +1,129 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../api_client.dart';
+import '../host_store.dart';
+import '../models.dart';
+import '../theme/app_colors.dart';
+import '../widgets/mesh_widgets.dart';
+import '../windowing.dart';
+import 'session_screen.dart';
+
+class SessionWindowScreen extends StatefulWidget {
+  const SessionWindowScreen({super.key, required this.arguments});
+
+  final SidemeshWindowArguments arguments;
+
+  @override
+  State<SessionWindowScreen> createState() => _SessionWindowScreenState();
+}
+
+class _SessionWindowScreenState extends State<SessionWindowScreen> {
+  final HostStore _hostStore = HostStore();
+  final ApiClient _api = ApiClient();
+
+  HostProfile? _host;
+  String? _error;
+  bool _loading = true;
+
+  SessionSummary get _session => widget.arguments.session!;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadHost());
+  }
+
+  Future<void> _loadHost() async {
+    final hostId = widget.arguments.hostId;
+    if ((hostId ?? '').isEmpty) {
+      setState(() {
+        _error = 'This session window is missing its host reference.';
+        _loading = false;
+      });
+      return;
+    }
+    try {
+      final hosts = await _hostStore.loadHosts();
+      HostProfile? match;
+      for (final host in hosts) {
+        if (host.id == hostId) {
+          match = host;
+          break;
+        }
+      }
+      if (!mounted) return;
+      if (match == null) {
+        setState(() {
+          _error =
+              'The host for this session is no longer available in this app install.';
+          _loading = false;
+        });
+        return;
+      }
+      if (!match.enabled) {
+        setState(() {
+          _error =
+              'The host for this session is disabled. Re-enable it in the main window to continue.';
+          _loading = false;
+        });
+        return;
+      }
+      setState(() {
+        _host = match;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Failed to load the host for this session: $error';
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _openSession(HostProfile host, SessionSummary session) async {
+    final opened = await SidemeshSessionWindowManager.instance
+        .openOrFocusSessionWindow(host: host, session: session);
+    if (opened || !mounted) {
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SessionScreen(
+          host: host,
+          session: session,
+          api: _api,
+          onOpenSession: (next) => unawaited(_openSession(host, next)),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (_loading) {
+      return Scaffold(backgroundColor: colors.canvas, body: const MeshLoader());
+    }
+    final host = _host;
+    if (host == null) {
+      return Scaffold(
+        backgroundColor: colors.canvas,
+        appBar: AppBar(title: Text(_session.title)),
+        body: MeshEmptyState(
+          icon: Icons.desktop_mac_outlined,
+          title: 'Session unavailable',
+          body: _error ?? 'This session window could not be restored.',
+        ),
+      );
+    }
+    return SessionScreen(
+      host: host,
+      session: _session,
+      api: _api,
+      onOpenSession: (session) => unawaited(_openSession(host, session)),
+    );
+  }
+}
