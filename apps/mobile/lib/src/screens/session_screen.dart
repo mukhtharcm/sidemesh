@@ -146,6 +146,7 @@ class _SessionScreenState extends State<SessionScreen>
       const <_ComposerSkillMention>[];
   List<PendingSessionSend> _pendingSends = const <PendingSessionSend>[];
   List<SkillSummary> _skills = const <SkillSummary>[];
+  NodeInfo? _nodeInfo;
   _ActiveComposerSkillQuery? _activeSkillQuery;
   SessionLogHistorySummary? _history;
   PendingAction? _pendingAction;
@@ -157,6 +158,7 @@ class _SessionScreenState extends State<SessionScreen>
   bool _sending = false;
   bool _awaitingAssistantReply = false;
   bool _loadingSkills = false;
+  bool _loadingNodeInfo = false;
   bool _showingCachedSnapshot = false;
   bool _snapshotRefreshing = false;
   String _searchQuery = '';
@@ -186,6 +188,7 @@ class _SessionScreenState extends State<SessionScreen>
   final List<LiveEvent> _pendingLiveEvents = <LiveEvent>[];
   int? _snapshotInFlightRequestId;
   int _skillsRequestId = 0;
+  int _nodeInfoRequestId = 0;
 
   // Memoized timeline entries so rebuilds that don't change list inputs skip
   // the list+sort work.
@@ -213,6 +216,44 @@ class _SessionScreenState extends State<SessionScreen>
   int _gitStatusRequestId = 0;
 
   bool get _snapshotInFlight => _snapshotInFlightRequestId != null;
+
+  bool _supportsProviderCapability(String section, String feature) {
+    final node = _nodeInfo;
+    if (node == null) return true;
+    return node.providerCapabilities.supports(section, feature);
+  }
+
+  bool get _supportsImageInput =>
+      _supportsProviderCapability('input', 'imageUrl');
+
+  bool get _supportsSkillInput =>
+      _supportsProviderCapability('input', 'skills') &&
+      _supportsProviderCapability('configuration', 'skills');
+
+  bool get _supportsSessionResources =>
+      _supportsProviderCapability('sessions', 'history');
+
+  bool get _supportsSessionInterrupt =>
+      _supportsProviderCapability('sessions', 'interrupt');
+
+  bool get _supportsSessionRename =>
+      _supportsProviderCapability('sessions', 'rename');
+
+  bool get _supportsSessionArchive =>
+      _supportsProviderCapability('sessions', 'archive');
+
+  bool get _supportsFilesystem =>
+      _supportsProviderCapability('workspace', 'filesystem');
+
+  bool get _supportsGitStatus =>
+      _supportsProviderCapability('workspace', 'gitStatus');
+
+  bool _supportsGitDiffKind(String kind) {
+    if (kind == 'remote') {
+      return _supportsProviderCapability('workspace', 'remoteGitDiff');
+    }
+    return _supportsProviderCapability('workspace', 'gitDiff');
+  }
 
   // Inspector (desktop pane-3) lifecycle tracking. Resolved in
   // [didChangeDependencies] so we can addListener/removeListener around
@@ -254,9 +295,88 @@ class _SessionScreenState extends State<SessionScreen>
     unawaited(_loadPendingSends());
     unawaited(_loadCachedSnapshot());
     _loadSnapshot();
-    _loadSkills(forceReload: true);
-    unawaited(_loadGitStatus(silent: true));
+    unawaited(_loadNodeInfo());
     _connectLive();
+  }
+
+  Future<void> _loadNodeInfo() async {
+    if (_loadingNodeInfo) return;
+    final requestId = ++_nodeInfoRequestId;
+    setState(() {
+      _loadingNodeInfo = true;
+    });
+
+    try {
+      final node = await widget.api.fetchNode(widget.host);
+      if (!mounted || requestId != _nodeInfoRequestId) {
+        return;
+      }
+      setState(() {
+        _nodeInfo = node;
+        _loadingNodeInfo = false;
+        _coerceDraftsForProviderCapabilities();
+      });
+      _closeUnsupportedInspectorSurface();
+      _loadProviderBackedSessionData(forceSkills: true);
+    } catch (_) {
+      if (!mounted || requestId != _nodeInfoRequestId) {
+        return;
+      }
+      setState(() {
+        _loadingNodeInfo = false;
+      });
+      // Older or temporarily failing hosts should keep the previous Codex-first
+      // behavior instead of disabling affordances because /api/node failed.
+      _loadProviderBackedSessionData(forceSkills: true);
+    }
+  }
+
+  void _loadProviderBackedSessionData({bool forceSkills = false}) {
+    if (_supportsSkillInput) {
+      unawaited(_loadSkills(forceReload: forceSkills));
+    }
+    if (_supportsGitStatus) {
+      unawaited(_loadGitStatus(silent: true));
+    }
+  }
+
+  void _coerceDraftsForProviderCapabilities() {
+    if (!_supportsImageInput) {
+      _draftAttachments = const <_ComposerImageAttachment>[];
+    }
+    if (!_supportsSkillInput) {
+      _draftSkillMentions = const <_ComposerSkillMention>[];
+      _activeSkillQuery = null;
+      _skills = const <SkillSummary>[];
+      _skillsError = null;
+      _loadingSkills = false;
+      _skillsRequestId++;
+    }
+    if (!_supportsGitStatus) {
+      _gitStatus = null;
+      _gitStatusError = null;
+      _gitStatusLoading = false;
+      _gitStatusRequestId++;
+    }
+  }
+
+  void _closeUnsupportedInspectorSurface() {
+    final controller = _inspectorController;
+    final current = controller?.current;
+    if (controller == null ||
+        current == null ||
+        current.ownerKey != _inspectorOwnerKey()) {
+      return;
+    }
+    final unsupportedResources =
+        current.kind == InspectorSurfaceKind.resources &&
+        !_supportsSessionResources;
+    final unsupportedFiles =
+        current.kind == InspectorSurfaceKind.fileBrowser &&
+        !_supportsFilesystem;
+    if (unsupportedResources || unsupportedFiles) {
+      controller.closeForOwner(current.ownerKey);
+    }
   }
 
   void _applyInitialComposerSeed() {
@@ -401,6 +521,7 @@ class _SessionScreenState extends State<SessionScreen>
         );
         break;
       case InspectorSurfaceKind.resources:
+        if (!_supportsSessionResources) return;
         controller.show(
           buildInspectorResourcesSurface(
             ownerKey: ownerKey,
@@ -412,6 +533,7 @@ class _SessionScreenState extends State<SessionScreen>
         );
         break;
       case InspectorSurfaceKind.fileBrowser:
+        if (!_supportsFilesystem) return;
         final session = _session ?? widget.session;
         controller.show(
           buildInspectorWorkspaceBrowserSurface(
@@ -641,6 +763,13 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _openResourcesPanel() {
+    if (!_supportsSessionResources) {
+      showAppSnackBar(
+        context,
+        'This provider does not expose session resources.',
+      );
+      return;
+    }
     final width = MediaQuery.of(context).size.width;
     final scope = InspectorScope.maybeOf(context);
     final session = _session ?? widget.session;
@@ -699,6 +828,20 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _loadSkills({bool forceReload = false}) async {
+    if (!_supportsSkillInput) {
+      if (mounted) {
+        setState(() {
+          _skills = const <SkillSummary>[];
+          _skillsError = null;
+          _loadingSkills = false;
+        });
+      } else {
+        _skills = const <SkillSummary>[];
+        _skillsError = null;
+        _loadingSkills = false;
+      }
+      return;
+    }
     final requestId = ++_skillsRequestId;
     if (mounted) {
       setState(() {
@@ -738,6 +881,20 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _loadGitStatus({bool silent = false}) async {
+    if (!_supportsGitStatus) {
+      if (mounted) {
+        setState(() {
+          _gitStatus = null;
+          _gitStatusLoading = false;
+          _gitStatusError = null;
+        });
+      } else {
+        _gitStatus = null;
+        _gitStatusLoading = false;
+        _gitStatusError = null;
+      }
+      return;
+    }
     final requestId = ++_gitStatusRequestId;
     if (!silent && mounted) {
       setState(() {
@@ -771,10 +928,16 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _handleComposerChanged() {
-    final nextQuery = _extractActiveSkillQuery(_composerController.value);
-    final nextDraftSkillMentions = _draftSkillMentions
-        .where((item) => _composerController.text.contains(item.tokenText))
-        .toList(growable: false);
+    final nextQuery = _supportsSkillInput
+        ? _extractActiveSkillQuery(_composerController.value)
+        : null;
+    final nextDraftSkillMentions = _supportsSkillInput
+        ? _draftSkillMentions
+              .where(
+                (item) => _composerController.text.contains(item.tokenText),
+              )
+              .toList(growable: false)
+        : const <_ComposerSkillMention>[];
     final queryChanged =
         nextQuery?.start != _activeSkillQuery?.start ||
         nextQuery?.end != _activeSkillQuery?.end ||
@@ -846,6 +1009,9 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   List<SkillSummary> get _skillSuggestions {
+    if (!_supportsSkillInput) {
+      return const <SkillSummary>[];
+    }
     final active = _activeSkillQuery;
     if (active == null) {
       return const <SkillSummary>[];
@@ -1601,6 +1767,13 @@ class _SessionScreenState extends State<SessionScreen>
     if (_sending) {
       return;
     }
+    if (!_supportsImageInput) {
+      showAppSnackBar(
+        context,
+        'This provider does not support image attachments.',
+      );
+      return;
+    }
 
     try {
       final picked = await FilePicker.pickFiles(
@@ -1710,6 +1883,15 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<bool> _pasteComposerImage({bool showEmptyFeedback = true}) async {
     if (_sending) {
+      return false;
+    }
+    if (!_supportsImageInput) {
+      if (showEmptyFeedback) {
+        showAppSnackBar(
+          context,
+          'This provider does not support image attachments.',
+        );
+      }
       return false;
     }
 
@@ -1986,10 +2168,12 @@ class _SessionScreenState extends State<SessionScreen>
     List<_ComposerSkillMention> skills,
   ) {
     return <SessionInputItem>[
-      ...attachments.map((item) => SessionInputItem.image(item.dataUrl)),
-      ...skills.map(
-        (item) => SessionInputItem.skill(item.skill.name, item.skill.path),
-      ),
+      if (_supportsImageInput)
+        ...attachments.map((item) => SessionInputItem.image(item.dataUrl)),
+      if (_supportsSkillInput)
+        ...skills.map(
+          (item) => SessionInputItem.skill(item.skill.name, item.skill.path),
+        ),
       if (text.isNotEmpty) SessionInputItem.text(text),
     ];
   }
@@ -1997,6 +2181,9 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionMessageAttachment> _buildDraftMessageAttachments(
     List<_ComposerImageAttachment> attachments,
   ) {
+    if (!_supportsImageInput) {
+      return const <SessionMessageAttachment>[];
+    }
     return attachments
         .map(
           (item) => SessionMessageAttachment(type: 'image', url: item.dataUrl),
@@ -2005,6 +2192,9 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _insertSkillMention(SkillSummary skill) {
+    if (!_supportsSkillInput) {
+      return;
+    }
     final active =
         _activeSkillQuery ??
         _extractActiveSkillQuery(_composerController.value);
@@ -2417,6 +2607,9 @@ class _SessionScreenState extends State<SessionScreen>
       draftAttachments,
       draftSkillMentions,
     );
+    if (inputItems.isEmpty) {
+      return;
+    }
     final policy = _policyStore.policyFor(widget.host, widget.session.id);
     final turnConfig = _turnConfigStore.configFor(
       widget.host,
@@ -2606,6 +2799,10 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _stopSession() async {
+    if (!_supportsSessionInterrupt) {
+      showAppSnackBar(context, 'This provider does not support interruption.');
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -2661,6 +2858,10 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _renameSession() async {
+    if (!_supportsSessionRename) {
+      showAppSnackBar(context, 'This provider does not support renaming.');
+      return;
+    }
     final current = (_session ?? widget.session).title;
     final controller = TextEditingController(text: current);
     final newName = await showDialog<String>(
@@ -2712,6 +2913,10 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _archiveSession() async {
+    if (!_supportsSessionArchive) {
+      showAppSnackBar(context, 'This provider does not support archiving.');
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -2865,6 +3070,10 @@ class _SessionScreenState extends State<SessionScreen>
     SessionSummary session, {
     bool forceRefresh = false,
   }) async {
+    if (!_supportsGitStatus) {
+      showAppSnackBar(context, 'This provider does not expose git status.');
+      return;
+    }
     if (forceRefresh || _gitStatus == null) {
       await _loadGitStatus();
     }
@@ -2892,6 +3101,10 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _showGitDiffSheet(String kind) async {
+    if (!_supportsGitDiffKind(kind)) {
+      showAppSnackBar(context, 'This provider does not expose this git diff.');
+      return;
+    }
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
@@ -2911,6 +3124,9 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _showSessionDetailsSheet(SessionSummary session) async {
     final colors = context.colors;
+    final gitLabel = _supportsGitStatus
+        ? _gitHeaderLabel(session, _gitStatus)
+        : null;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: colors.surface,
@@ -2933,11 +3149,8 @@ class _SessionScreenState extends State<SessionScreen>
               _DetailRow(label: 'Working dir', value: session.cwd),
               _DetailRow(label: 'Status', value: _running ? 'Running' : 'Idle'),
               _DetailRow(label: 'Source', value: session.source),
-              if (_gitHeaderLabel(session, _gitStatus) != null) ...[
-                _DetailRow(
-                  label: 'Git',
-                  value: _gitHeaderLabel(session, _gitStatus)!,
-                ),
+              if (gitLabel != null) ...[
+                _DetailRow(label: 'Git', value: gitLabel),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
@@ -3049,6 +3262,13 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _openWorkspaceFile(String path) {
+    if (!_supportsFilesystem) {
+      showAppSnackBar(
+        context,
+        'This provider does not expose workspace files.',
+      );
+      return;
+    }
     final scope = InspectorScope.maybeOf(context);
     if (widget.topPadding != null && scope != null) {
       final session = _session ?? widget.session;
@@ -3409,6 +3629,7 @@ class _SessionScreenState extends State<SessionScreen>
                 host: widget.host,
                 session: session,
                 gitStatus: _gitStatus,
+                showGit: _supportsGitStatus,
                 running: _running,
                 favorite: favorite,
                 pinnedCount: pinnedMessages.length,
@@ -3581,6 +3802,8 @@ class _SessionScreenState extends State<SessionScreen>
           loadingSkills: _loadingSkills,
           skillError: _skillsError,
           sending: _sending,
+          supportsImageInput: _supportsImageInput,
+          supportsSkillInput: _supportsSkillInput,
           onPickImages: _pickComposerImages,
           onPasteImage: () => _pasteComposerImage(),
           onNativePaste: () => _pasteComposerImage(showEmptyFeedback: false),
@@ -3610,6 +3833,7 @@ class _SessionScreenState extends State<SessionScreen>
                   host: widget.host,
                   session: session,
                   gitStatus: _gitStatus,
+                  showGit: _supportsGitStatus,
                   running: _running,
                   pinnedCount: pinnedMessages.length,
                   pinnedActive: pinnedActive,
@@ -3632,7 +3856,7 @@ class _SessionScreenState extends State<SessionScreen>
           ],
         ),
         actions: [
-          if (_running)
+          if (_running && _supportsSessionInterrupt)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: TextButton.icon(
@@ -3659,7 +3883,8 @@ class _SessionScreenState extends State<SessionScreen>
               onTap: _startSessionFromCurrent,
             ),
           ),
-          if (_gitHeaderLabel(session, _gitStatus) != null &&
+          if (_supportsGitStatus &&
+              _gitHeaderLabel(session, _gitStatus) != null &&
               (_gitStatus?.dirty ?? false))
             Padding(
               padding: const EdgeInsets.only(right: 10),
@@ -3683,7 +3908,7 @@ class _SessionScreenState extends State<SessionScreen>
               onTap: _toggleSearchPanel,
             ),
           ),
-          if (!isCompact)
+          if (!isCompact && _supportsSessionResources)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -3730,7 +3955,9 @@ class _SessionScreenState extends State<SessionScreen>
             listenable: _favorites,
             builder: (context, _) {
               final favorite = _favorites.isFavorite(widget.host, session.id);
-              final gitAvailable = _gitHeaderLabel(session, _gitStatus) != null;
+              final gitAvailable =
+                  _supportsGitStatus &&
+                  _gitHeaderLabel(session, _gitStatus) != null;
               final gitDirty = _gitStatus?.dirty ?? false;
               // Hide the 'Git details' menu item when it's already a visible
               // icon (dirty state). Keep it hidden entirely if there is no
@@ -3745,7 +3972,9 @@ class _SessionScreenState extends State<SessionScreen>
                       _toggleSearchPanel();
                       break;
                     case 'resources':
-                      _openResourcesPanel();
+                      if (_supportsSessionResources) {
+                        _openResourcesPanel();
+                      }
                       break;
                     case 'favorite':
                       _toggleFavorite();
@@ -3757,6 +3986,9 @@ class _SessionScreenState extends State<SessionScreen>
                       _showGitSheet(session);
                       break;
                     case 'browse':
+                      if (!_supportsFilesystem) {
+                        break;
+                      }
                       final isDesktop = widget.topPadding != null;
                       final scope = InspectorScope.maybeOf(context);
                       if (isDesktop && scope != null) {
@@ -3796,16 +4028,17 @@ class _SessionScreenState extends State<SessionScreen>
                   }
                 },
                 itemBuilder: (context) => [
-                  const PopupMenuItem<String>(
-                    value: 'resources',
-                    child: Row(
-                      children: [
-                        Icon(Icons.perm_media_outlined, size: 18),
-                        SizedBox(width: 10),
-                        Text('Resources'),
-                      ],
+                  if (_supportsSessionResources)
+                    const PopupMenuItem<String>(
+                      value: 'resources',
+                      child: Row(
+                        children: [
+                          Icon(Icons.perm_media_outlined, size: 18),
+                          SizedBox(width: 10),
+                          Text('Resources'),
+                        ],
+                      ),
                     ),
-                  ),
                   PopupMenuItem<String>(
                     value: 'favorite',
                     child: Row(
@@ -3843,37 +4076,41 @@ class _SessionScreenState extends State<SessionScreen>
                         ],
                       ),
                     ),
-                  const PopupMenuItem<String>(
-                    value: 'browse',
-                    child: Row(
-                      children: [
-                        Icon(Icons.folder_outlined, size: 18),
-                        SizedBox(width: 10),
-                        Text('Browse files'),
-                      ],
+                  if (_supportsFilesystem)
+                    const PopupMenuItem<String>(
+                      value: 'browse',
+                      child: Row(
+                        children: [
+                          Icon(Icons.folder_outlined, size: 18),
+                          SizedBox(width: 10),
+                          Text('Browse files'),
+                        ],
+                      ),
                     ),
-                  ),
-                  const PopupMenuDivider(),
-                  const PopupMenuItem<String>(
-                    value: 'rename',
-                    child: Row(
-                      children: [
-                        Icon(Icons.drive_file_rename_outline, size: 18),
-                        SizedBox(width: 10),
-                        Text('Rename'),
-                      ],
+                  if (_supportsSessionRename || _supportsSessionArchive)
+                    const PopupMenuDivider(),
+                  if (_supportsSessionRename)
+                    const PopupMenuItem<String>(
+                      value: 'rename',
+                      child: Row(
+                        children: [
+                          Icon(Icons.drive_file_rename_outline, size: 18),
+                          SizedBox(width: 10),
+                          Text('Rename'),
+                        ],
+                      ),
                     ),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'archive',
-                    child: Row(
-                      children: [
-                        Icon(Icons.archive_outlined, size: 18),
-                        SizedBox(width: 10),
-                        Text('Archive'),
-                      ],
+                  if (_supportsSessionArchive)
+                    const PopupMenuItem<String>(
+                      value: 'archive',
+                      child: Row(
+                        children: [
+                          Icon(Icons.archive_outlined, size: 18),
+                          SizedBox(width: 10),
+                          Text('Archive'),
+                        ],
+                      ),
                     ),
-                  ),
                 ],
               );
             },
