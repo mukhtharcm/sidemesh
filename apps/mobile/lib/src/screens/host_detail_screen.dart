@@ -227,6 +227,8 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                 ),
                 children: [
                   _NodeCard(host: widget.host, node: data.node),
+                  const SizedBox(height: 10),
+                  _ProviderContractCard(node: data.node),
                   const SizedBox(height: 18),
                   _SectionHeader(
                     icon: Icons.folder_open_rounded,
@@ -463,6 +465,265 @@ class _NodeCard extends StatelessWidget {
   }
 }
 
+class _ProviderContractCard extends StatelessWidget {
+  const _ProviderContractCard({required this.node});
+
+  final NodeInfo node;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final providerGroups = _capabilityGroups(node.providerCapabilities);
+    final hostGroups = _capabilityGroups(node.hostCapabilities);
+    final supportedProviders = node.supportedProviders;
+
+    return MeshCard(
+      tone: MeshCardTone.muted,
+      padding: EdgeInsets.zero,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.fromLTRB(16, 10, 14, 10),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          leading: Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: colors.infoMuted,
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(color: colors.info.withValues(alpha: 0.35)),
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.hub_rounded, color: colors.info, size: 18),
+          ),
+          title: Text(
+            'Provider contract',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          subtitle: Text(
+            '${node.providerDisplayName} - ${node.providerDisplayVersion}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: monoStyle(color: colors.textSecondary, fontSize: 11),
+          ),
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  MeshPill(
+                    label: 'active: ${node.provider}',
+                    icon: Icons.radio_button_checked_rounded,
+                    tone: MeshPillTone.accent,
+                    mono: true,
+                  ),
+                  if (node.providerConfig.command != null)
+                    MeshPill(
+                      label: 'command: ${node.providerConfig.command}',
+                      icon: Icons.terminal_rounded,
+                      tone: MeshPillTone.neutral,
+                      mono: true,
+                    ),
+                  MeshPill(
+                    label: '${supportedProviders.length} supported',
+                    icon: Icons.extension_rounded,
+                    tone: supportedProviders.isEmpty
+                        ? MeshPillTone.warning
+                        : MeshPillTone.info,
+                    mono: true,
+                  ),
+                ],
+              ),
+            ),
+            if (supportedProviders.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              _ProviderDefinitionList(
+                currentProvider: node.provider,
+                providers: supportedProviders,
+              ),
+            ],
+            const SizedBox(height: 14),
+            _CapabilityMatrix(
+              title: 'Provider-owned capabilities',
+              emptyText: 'This daemon did not report provider capabilities.',
+              groups: providerGroups,
+            ),
+            const SizedBox(height: 12),
+            _CapabilityMatrix(
+              title: 'Host-owned capabilities',
+              emptyText: 'This daemon did not report host capabilities.',
+              groups: hostGroups,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProviderDefinitionList extends StatelessWidget {
+  const _ProviderDefinitionList({
+    required this.currentProvider,
+    required this.providers,
+  });
+
+  final String currentProvider;
+  final List<ProviderDefinitionSummary> providers;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Daemon-supported providers',
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: colors.textSecondary,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: providers
+              .map((provider) {
+                final active = provider.kind == currentProvider;
+                return MeshPill(
+                  label: active
+                      ? '${provider.displayName} active'
+                      : provider.displayName,
+                  icon: active
+                      ? Icons.check_circle_rounded
+                      : Icons.circle_outlined,
+                  tone: active ? MeshPillTone.success : MeshPillTone.neutral,
+                  mono: true,
+                );
+              })
+              .toList(growable: false),
+        ),
+      ],
+    );
+  }
+}
+
+class _CapabilityMatrix extends StatelessWidget {
+  const _CapabilityMatrix({
+    required this.title,
+    required this.emptyText,
+    required this.groups,
+  });
+
+  final String title;
+  final String emptyText;
+  final List<_CapabilityGroup> groups;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: colors.textSecondary,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (groups.isEmpty)
+          Text(
+            emptyText,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
+          )
+        else
+          Column(
+            children: groups
+                .map(
+                  (group) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _CapabilityGroupRow(group: group),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+      ],
+    );
+  }
+}
+
+class _CapabilityGroupRow extends StatelessWidget {
+  const _CapabilityGroupRow({required this.group});
+
+  final _CapabilityGroup group;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final allEnabled = group.enabledCount == group.totalCount;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(group.icon, size: 16, color: colors.accent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  group.title,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+                ),
+              ),
+              MeshPill(
+                label: '${group.enabledCount}/${group.totalCount}',
+                tone: allEnabled ? MeshPillTone.success : MeshPillTone.warning,
+                mono: true,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: group.features
+                .map((feature) {
+                  return MeshPill(
+                    label: feature.label,
+                    icon: feature.enabled
+                        ? Icons.check_rounded
+                        : Icons.remove_rounded,
+                    tone: feature.enabled
+                        ? MeshPillTone.success
+                        : MeshPillTone.neutral,
+                    bold: false,
+                    mono: true,
+                  );
+                })
+                .toList(growable: false),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
     required this.icon,
@@ -498,6 +759,127 @@ class _SectionHeader extends StatelessWidget {
       ),
     );
   }
+}
+
+class _CapabilityGroup {
+  const _CapabilityGroup({
+    required this.key,
+    required this.title,
+    required this.icon,
+    required this.features,
+  });
+
+  final String key;
+  final String title;
+  final IconData icon;
+  final List<_CapabilityFeature> features;
+
+  int get totalCount => features.length;
+  int get enabledCount => features.where((feature) => feature.enabled).length;
+}
+
+class _CapabilityFeature {
+  const _CapabilityFeature({required this.label, required this.enabled});
+
+  final String label;
+  final bool enabled;
+}
+
+List<_CapabilityGroup> _capabilityGroups(ProviderCapabilities capabilities) {
+  final groups = <_CapabilityGroup>[];
+  for (final entry in capabilities.values.entries) {
+    final rawFeatures = entry.value;
+    if (rawFeatures is! Map) continue;
+    final features = rawFeatures.entries
+        .map(
+          (feature) => _CapabilityFeature(
+            label: _capabilityFeatureLabel(feature.key.toString()),
+            enabled: feature.value == true,
+          ),
+        )
+        .toList(growable: false);
+    if (features.isEmpty) continue;
+    groups.add(
+      _CapabilityGroup(
+        key: entry.key,
+        title: _capabilitySectionTitle(entry.key),
+        icon: _capabilitySectionIcon(entry.key),
+        features: features,
+      ),
+    );
+  }
+  groups.sort(
+    (left, right) => _capabilitySectionOrder(
+      left.key,
+    ).compareTo(_capabilitySectionOrder(right.key)),
+  );
+  return groups;
+}
+
+int _capabilitySectionOrder(String key) {
+  return switch (key) {
+    'sessions' => 0,
+    'input' => 1,
+    'approvals' => 2,
+    'configuration' => 3,
+    'runtimeControls' => 4,
+    'workspace' => 5,
+    _ => 99,
+  };
+}
+
+String _capabilitySectionTitle(String key) {
+  return switch (key) {
+    'sessions' => 'Sessions',
+    'input' => 'Input',
+    'approvals' => 'Approvals',
+    'configuration' => 'Configuration',
+    'runtimeControls' => 'Runtime controls',
+    'workspace' => 'Workspace',
+    _ => _humanizeCamelCase(key),
+  };
+}
+
+IconData _capabilitySectionIcon(String key) {
+  return switch (key) {
+    'sessions' => Icons.forum_rounded,
+    'input' => Icons.input_rounded,
+    'approvals' => Icons.verified_user_rounded,
+    'configuration' => Icons.tune_rounded,
+    'runtimeControls' => Icons.speed_rounded,
+    'workspace' => Icons.folder_special_rounded,
+    _ => Icons.extension_rounded,
+  };
+}
+
+String _capabilityFeatureLabel(String key) {
+  return switch (key) {
+    'imageUrl' => 'image URL',
+    'localImage' => 'local image',
+    'eventReplay' => 'event replay',
+    'recentFallback' => 'recent fallback',
+    'skillManagement' => 'skill management',
+    'reasoningEffort' => 'reasoning',
+    'fastMode' => 'fast mode',
+    'approvalPolicy' => 'approval policy',
+    'sandboxMode' => 'sandbox',
+    'networkAccess' => 'network',
+    'webSearch' => 'web search',
+    'remoteGitDiff' => 'remote git diff',
+    'gitStatus' => 'git status',
+    'gitDiff' => 'git diff',
+    'approveForSession' => 'approve for session',
+    _ => _humanizeCamelCase(key),
+  };
+}
+
+String _humanizeCamelCase(String value) {
+  if (value.isEmpty) return value;
+  final withSpaces = value.replaceAllMapped(
+    RegExp(r'(?<=[a-z0-9])([A-Z])'),
+    (match) => ' ${match.group(1)!.toLowerCase()}',
+  );
+  return withSpaces.replaceAll('_', ' ');
 }
 
 class _WorkspaceCard extends StatelessWidget {
