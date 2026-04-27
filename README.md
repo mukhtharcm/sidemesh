@@ -16,6 +16,7 @@ This repo contains:
 From this directory:
 
 ```bash
+node --version # requires Node.js 20+
 npm install
 npm run mobile:get
 npm run daemon

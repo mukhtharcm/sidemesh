@@ -141,6 +141,7 @@ describe("Copilot provider", () => {
 
       assert.equal(sdk.created.length, 1);
       assert.equal(sdk.created[0]?.config.model, undefined);
+      assert.equal(sdk.created[0]?.config.reasoningEffort, undefined);
       assert.equal(sdk.created[0]?.config.enableConfigDiscovery, true);
       assert.equal(sdk.created[0]?.session.sent[0]?.prompt, "hello");
 
@@ -196,6 +197,7 @@ describe("Copilot provider", () => {
           source: model.source,
           isDefault: model.isDefault,
           inputModalities: model.inputModalities,
+          reasoningEffortControl: model.reasoningEffortControl,
         })),
         [
           {
@@ -203,24 +205,28 @@ describe("Copilot provider", () => {
             source: "sdk",
             isDefault: false,
             inputModalities: ["text"],
+            reasoningEffortControl: "provider",
           },
           {
             model: "safe-test-model",
             source: "config",
             isDefault: true,
             inputModalities: ["text"],
+            reasoningEffortControl: "client",
           },
           {
             model: "claude-haiku-4.5",
             source: "sdk",
             isDefault: false,
             inputModalities: ["text"],
+            reasoningEffortControl: "client",
           },
           {
             model: "vision-model",
             source: "sdk",
             isDefault: false,
             inputModalities: ["text", "image"],
+            reasoningEffortControl: "provider",
           },
         ],
       );
@@ -401,6 +407,71 @@ describe("Copilot provider", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("does not send reasoning effort when Copilot auto model is selected", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-auto-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "hello", text_elements: [] }],
+        overrides: {
+          ...emptyOverrides(),
+          model: "auto",
+          reasoningEffort: "medium",
+        },
+      });
+      await completed;
+
+      assert.equal(sdk.created[0]?.config.model, undefined);
+      assert.equal(sdk.created[0]?.config.reasoningEffort, undefined);
+      assert.equal(sdk.created[0]?.session.selectedModels.length, 0);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("finishes the turn when SDK session creation fails", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-create-failure-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient({
+        createSessionError: new Error("SDK unavailable"),
+      });
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "hello", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const thread = await provider.readSessionThread!(created.thread.id, true);
+      const log = await provider.readSessionLog!(thread);
+      assert.equal(thread.turns?.[0]?.status, "failed");
+      assert.match(log.messages.at(-1)?.text ?? "", /SDK unavailable/);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 class FakeCopilotSdkClient implements CopilotSdkClient {
@@ -415,12 +486,14 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
   }> = [];
   private readonly sessions = new Map<string, FakeCopilotSdkSession>();
   private readonly models: CopilotSdkModelInfo[];
+  private readonly createSessionError: Error | null;
   private readonly sessionMetadata = new Map<string, CopilotSdkSessionMetadata>();
   private readonly sessionEvents = new Map<string, CopilotSdkSessionEvent[]>();
 
   public constructor(
     options: {
       models?: CopilotSdkModelInfo[];
+      createSessionError?: Error;
       sessions?: Array<{
         metadata: CopilotSdkSessionMetadata;
         events: CopilotSdkSessionEvent[];
@@ -428,6 +501,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
     } = {},
   ) {
     this.models = options.models ?? [];
+    this.createSessionError = options.createSessionError ?? null;
     for (const session of options.sessions ?? []) {
       this.sessionMetadata.set(session.metadata.sessionId, session.metadata);
       this.sessionEvents.set(session.metadata.sessionId, session.events);
@@ -459,6 +533,9 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
   public async createSession(
     config: CopilotSdkSessionConfig,
   ): Promise<CopilotSdkSession> {
+    if (this.createSessionError) {
+      throw this.createSessionError;
+    }
     const session = new FakeCopilotSdkSession(
       config.sessionId ?? `sdk-session-${this.created.length + 1}`,
       config,
