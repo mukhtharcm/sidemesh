@@ -133,6 +133,11 @@ repeatable app states:
 - `slow`: delayed streaming.
 - `fail`: failed turn completion.
 
+`SIDEMESH_FAKE_CAPABILITY_PROFILE` narrows the advertised capability set for
+dogfooding non-Codex behavior before a real adapter exists. Supported profiles
+are `full`, `chat-only`, `no-files`, `no-model-controls`, `no-approvals`, and
+`minimal`.
+
 The first real non-Codex provider should still start small: node metadata,
 create session, submit text input, stream assistant text, and list recent
 sessions if the agent has a durable session concept.

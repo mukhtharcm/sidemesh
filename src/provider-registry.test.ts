@@ -41,6 +41,7 @@ describe("provider registry", () => {
           "SIDEMESH_FAKE_LATENCY_MS",
           "SIDEMESH_FAKE_SEED",
           "SIDEMESH_FAKE_WORKSPACE_ROOT",
+          "SIDEMESH_FAKE_CAPABILITY_PROFILE",
         ],
       },
     ]);
@@ -91,6 +92,7 @@ describe("provider registry", () => {
       SIDEMESH_FAKE_LATENCY_MS: "0",
       SIDEMESH_FAKE_SEED: "0",
       SIDEMESH_FAKE_WORKSPACE_ROOT: "/tmp/sidemesh-fake",
+      SIDEMESH_FAKE_CAPABILITY_PROFILE: "chat-only",
     });
 
     assert.deepEqual(config, {
@@ -98,6 +100,7 @@ describe("provider registry", () => {
       latencyMs: 0,
       seedSessions: false,
       workspaceRoot: "/tmp/sidemesh-fake",
+      capabilityProfile: "chat-only",
     });
     assert.deepEqual(summarizeAgentProviderConfig(config), {
       kind: "fake",
@@ -108,5 +111,17 @@ describe("provider registry", () => {
     assert.ok(provider instanceof FakeAgentProvider);
     assert.equal(provider.kind, "fake");
     assert.equal(provider.displayName, "Fake Test Provider");
+    assert.equal(provider.capabilities.input.text, true);
+    assert.equal(provider.capabilities.input.imageUrl, false);
+  });
+
+  it("rejects unknown fake capability profiles", () => {
+    assert.throws(
+      () =>
+        loadAgentProviderConfig("fake", {
+          SIDEMESH_FAKE_CAPABILITY_PROFILE: "not-real",
+        }),
+      /Unsupported SIDEMESH_FAKE_CAPABILITY_PROFILE/,
+    );
   });
 });
