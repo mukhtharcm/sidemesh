@@ -5,14 +5,30 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
 
-/// Approval policies supported by Codex's ACP. Mirrors the values accepted
+/// Approval policies supported by Sidemesh providers. Mirrors the values accepted
 /// by the sidemesh server in `parseApprovalPolicy`.
 enum ApprovalPolicy {
-  /// Prompt for any untrusted command (Codex default).
-  untrusted('untrusted', 'Ask when untrusted', 'Codex prompts before risky actions (default).'),
-  onFailure('on-failure', 'Ask only on failure', 'Let Codex retry; only ask when the sandbox blocks.'),
-  onRequest('on-request', 'Ask when requested', 'Codex runs freely; only pauses when it explicitly asks for approval.'),
-  never('never', 'Never ask', 'Autopilot. Codex never prompts; requires a permissive sandbox.');
+  /// Prompt for any untrusted command.
+  untrusted(
+    'untrusted',
+    'Ask when untrusted',
+    'The agent prompts before risky actions.',
+  ),
+  onFailure(
+    'on-failure',
+    'Ask only on failure',
+    'Let the agent retry; only ask when the sandbox blocks.',
+  ),
+  onRequest(
+    'on-request',
+    'Ask when requested',
+    'The agent runs freely; only pauses when it explicitly asks for approval.',
+  ),
+  never(
+    'never',
+    'Never ask',
+    'Autopilot. The agent never prompts; requires a permissive sandbox.',
+  );
 
   const ApprovalPolicy(this.wire, this.label, this.description);
 
@@ -29,18 +45,23 @@ enum ApprovalPolicy {
   }
 }
 
-/// Sandbox modes supported by Codex. Mirrors `parseSandboxMode` on the server.
+/// Sandbox modes supported by Sidemesh providers. Mirrors `parseSandboxMode` on
+/// the server.
 enum SandboxMode {
-  readOnly('read-only', 'Read-only', 'Codex can read but not modify files or run commands.'),
+  readOnly(
+    'read-only',
+    'Read-only',
+    'The agent can read but not modify files or run commands.',
+  ),
   workspaceWrite(
     'workspace-write',
     'Workspace write',
-    'Codex can edit files inside the session workspace and run tooling there.',
+    'The agent can edit files inside the session workspace and run tooling there.',
   ),
   dangerFullAccess(
     'danger-full-access',
     'Full access (danger)',
-    'No sandbox. Codex can run anything on this machine — use with care.',
+    'No sandbox. The agent can run anything on this machine - use with care.',
   );
 
   const SandboxMode(this.wire, this.label, this.description);
@@ -60,8 +81,8 @@ enum SandboxMode {
 
 /// Local per-session overrides the user has pinned for approval/sandbox.
 /// These are cached per `${hostId}:${sessionId}` and attached to every
-/// outgoing `/input` message; Codex persists them on the thread via
-/// `Op::OverrideTurnContext` the first time they arrive with a turn.
+/// outgoing `/input` message. Providers decide how to apply them to the next
+/// turn.
 @immutable
 class SessionPolicy {
   const SessionPolicy({this.approval, this.sandbox, this.networkAccess});
@@ -109,10 +130,10 @@ class SessionPolicy {
   );
 
   static SessionPolicy get factoryDefaults => const SessionPolicy(
-        approval: ApprovalPolicy.untrusted,
-        sandbox: SandboxMode.workspaceWrite,
-        networkAccess: false,
-      );
+    approval: ApprovalPolicy.untrusted,
+    sandbox: SandboxMode.workspaceWrite,
+    networkAccess: false,
+  );
 
   /// True when the live runtime reports a loosened, non-default state
   /// (never-ask, danger sandbox, or network enabled). Used to mark the
@@ -196,7 +217,9 @@ class SessionPolicyStore extends ChangeNotifier {
       await prefs.remove(_prefsKey);
       return;
     }
-    final serialised = _policies.map((key, value) => MapEntry(key, value.toJson()));
+    final serialised = _policies.map(
+      (key, value) => MapEntry(key, value.toJson()),
+    );
     await prefs.setString(_prefsKey, jsonEncode(serialised));
   }
 

@@ -54,6 +54,7 @@ class _SessionHeader extends StatelessWidget {
     required this.host,
     required this.session,
     required this.gitStatus,
+    required this.showGit,
     required this.running,
     required this.favorite,
     required this.pinnedCount,
@@ -66,6 +67,7 @@ class _SessionHeader extends StatelessWidget {
   final HostProfile host;
   final SessionSummary session;
   final SessionGitStatus? gitStatus;
+  final bool showGit;
   final bool running;
   final bool favorite;
   final int pinnedCount;
@@ -77,6 +79,7 @@ class _SessionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final gitLabel = showGit ? _gitHeaderLabel(session, gitStatus) : null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
       child: MeshCard(
@@ -132,16 +135,15 @@ class _SessionHeader extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: monoStyle(color: colors.textSecondary, fontSize: 11),
                   ),
-                  if (_gitHeaderLabel(session, gitStatus) != null ||
-                      pinnedCount > 0) ...[
+                  if (gitLabel != null || pinnedCount > 0) ...[
                     const SizedBox(height: 7),
                     Wrap(
                       spacing: 6,
                       runSpacing: 6,
                       children: [
-                        if (_gitHeaderLabel(session, gitStatus) != null)
+                        if (gitLabel != null)
                           _GitSummaryPill(
-                            label: _gitHeaderLabel(session, gitStatus)!,
+                            label: gitLabel,
                             dirty: gitStatus?.dirty ?? false,
                             onTap: onGitDetails,
                           ),
@@ -292,6 +294,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
     required this.host,
     required this.session,
     required this.gitStatus,
+    required this.showGit,
     required this.running,
     required this.pinnedCount,
     required this.pinnedActive,
@@ -303,6 +306,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
   final HostProfile host;
   final SessionSummary session;
   final SessionGitStatus? gitStatus;
+  final bool showGit;
   final bool running;
   final int pinnedCount;
   final bool pinnedActive;
@@ -322,7 +326,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final folder = _shortFolder(session.cwd);
-    final gitLabel = _gitHeaderLabel(session, gitStatus);
+    final gitLabel = showGit ? _gitHeaderLabel(session, gitStatus) : null;
     return Material(
       color: Colors.transparent,
       child: InkWell(
