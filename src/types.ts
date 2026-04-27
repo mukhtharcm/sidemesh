@@ -1,10 +1,17 @@
-export type AgentProviderKind = "codex";
+export type AgentProviderKind = "codex" | "fake";
 
-export type AgentProviderConfig = CodexProviderConfig;
+export type AgentProviderConfig = CodexProviderConfig | FakeProviderConfig;
 
 export interface CodexProviderConfig {
   kind: "codex";
   bin: string;
+}
+
+export interface FakeProviderConfig {
+  kind: "fake";
+  latencyMs: number;
+  seedSessions: boolean;
+  workspaceRoot: string | null;
 }
 
 export interface AgentProviderConfigSummary {

@@ -1,7 +1,8 @@
 # Provider Adapter Contract
 
-Sidemesh currently ships with a Codex adapter, but the daemon is structured so
-future agents can be added behind the same host/session API.
+Sidemesh currently ships with a production Codex adapter and an in-process fake
+test adapter. The daemon is structured so future agents can be added behind the
+same host/session API.
 
 ## Entry Points
 
@@ -10,6 +11,8 @@ future agents can be added behind the same host/session API.
 - Implement the provider contract in `src/agent-provider.ts`.
 - Keep provider-specific protocol translation inside the adapter file, like
   `src/codex-provider.ts`.
+- Use `src/fake-provider.ts` as the deterministic contract harness when adding
+  or testing provider-neutral app behavior.
 
 ## Required Core
 
@@ -109,6 +112,16 @@ Compatibility endpoints:
 4. Set unsupported capabilities to `false` first, then enable them one by one.
 5. Add client UI only after the provider capability map is accurate.
 
-The first non-Codex provider should start small: node metadata, create session,
-submit text input, stream assistant text, and list recent sessions if the agent
-has a durable session concept.
+The fake provider can be run with `SIDEMESH_PROVIDER=fake npm run daemon`. It
+supports all current capability groups and uses prompt keywords to trigger
+repeatable app states:
+
+- `tools`: command output, terminal input, file change, turn diff, and web search.
+- `approval:command`, `approval:file`, `approval:permissions`: pending actions.
+- `image`: image generation activity.
+- `slow`: delayed streaming.
+- `fail`: failed turn completion.
+
+The first real non-Codex provider should still start small: node metadata,
+create session, submit text input, stream assistant text, and list recent
+sessions if the agent has a durable session concept.
