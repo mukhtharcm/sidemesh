@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   parsePendingActionDecision,
+  parsePendingActionResponseBody,
   toPublicPendingAction,
 } from "./approvals.js";
 import type { AgentPendingAction } from "./agent-provider.js";
@@ -44,8 +45,35 @@ describe("provider-neutral approvals", () => {
     assert.equal(parsePendingActionDecision({ decision: "approve", scope: "forever" }), null);
   });
 
+  it("normalizes legacy and structured response bodies", () => {
+    assert.deepEqual(parsePendingActionResponseBody({ decision: "accept" }), {
+      decision: "approve",
+      scope: "once",
+      legacyDecision: "accept",
+    });
+    assert.deepEqual(
+      parsePendingActionResponseBody({
+        approvalDecision: { decision: "approve", scope: "session" },
+      }),
+      {
+        decision: "approve",
+        scope: "session",
+        legacyDecision: "acceptForSession",
+      },
+    );
+    assert.deepEqual(
+      parsePendingActionResponseBody({ decision: "approve", scope: "session" }),
+      {
+        decision: "approve",
+        scope: "session",
+        legacyDecision: "acceptForSession",
+      },
+    );
+    assert.equal(parsePendingActionResponseBody({ decision: "approve", scope: "forever" }), null);
+  });
+
   it("strips provider-private fields from public pending actions", () => {
-    const action: AgentPendingAction = {
+    const action = {
       id: "action-1",
       sessionId: "session-1",
       kind: "command",
@@ -55,6 +83,7 @@ describe("provider-neutral approvals", () => {
       canApprove: true,
       canApproveForSession: true,
       canDecline: true,
+      providerSecretFutureField: "must not leak",
       providerRequestId: 42,
       providerRequestKind: "provider/request",
       providerPayload: { secret: true },
@@ -65,7 +94,7 @@ describe("provider-neutral approvals", () => {
         supportedScopes: ["once", "session"],
         targets: [{ type: "command", command: "npm test" }],
       },
-    };
+    } as AgentPendingAction & { providerSecretFutureField: string };
 
     assert.deepEqual(toPublicPendingAction(action), {
       id: "action-1",

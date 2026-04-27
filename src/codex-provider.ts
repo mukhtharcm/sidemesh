@@ -1589,6 +1589,17 @@ function buildCodexPendingAction(
   if (method === "item/fileChange/requestApproval") {
     const reason = asString(typed.reason) || "Codex wants to modify files.";
     const grantRoot = asString(typed.grantRoot);
+    const targets: NonNullable<AgentPendingAction["approval"]>["targets"] =
+      grantRoot
+        ? [
+            {
+              type: "file",
+              path: grantRoot,
+              access: "write",
+              intention: reason,
+            },
+          ]
+        : [{ type: "unknown", label: "Codex file change" }];
     return {
       id: randomFallbackId(),
       sessionId,
@@ -1606,14 +1617,7 @@ function buildCodexPendingAction(
         detail: reason,
         supportedScopes: ["once", "session"],
         suggestedScope: "once",
-        targets: [
-          {
-            type: "file",
-            path: grantRoot ?? "workspace",
-            access: "write",
-            intention: reason,
-          },
-        ],
+        targets,
       },
       providerRequestId,
       providerRequestKind: method,

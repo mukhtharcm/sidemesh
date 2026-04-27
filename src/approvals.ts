@@ -44,6 +44,23 @@ export function parsePendingActionDecision(
   return { decision, scope, legacyDecision };
 }
 
+export function parsePendingActionResponseBody(
+  value: unknown,
+): PendingActionDecisionRequest | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const typed = value as Record<string, unknown>;
+  if ("approvalDecision" in typed) {
+    return parsePendingActionDecision(typed.approvalDecision);
+  }
+  if (isDecisionKind(typed.decision)) {
+    return parsePendingActionDecision(typed);
+  }
+  return parsePendingActionDecision(typed.decision);
+}
+
 export function normalizePendingActionDecision(
   value: PendingActionDecisionInput,
 ): PendingActionDecisionRequest | null {
@@ -70,17 +87,22 @@ export function legacyDecisionFor(
 }
 
 export function toPublicPendingAction(action: PendingAction): PendingAction {
-  const {
-    providerRequestId: _providerRequestId,
-    providerRequestKind: _providerRequestKind,
-    providerPayload: _providerPayload,
-    ...publicAction
-  } = action as PendingAction & {
-    providerRequestId?: unknown;
-    providerRequestKind?: unknown;
-    providerPayload?: unknown;
+  return {
+    id: action.id,
+    sessionId: action.sessionId,
+    kind: action.kind,
+    title: action.title,
+    detail: action.detail,
+    requestedAt: action.requestedAt,
+    canApprove: action.canApprove,
+    canApproveForSession: action.canApproveForSession,
+    canDecline: action.canDecline,
+    ...(action.sessionTitle === undefined
+      ? {}
+      : { sessionTitle: action.sessionTitle }),
+    ...(action.cwd === undefined ? {} : { cwd: action.cwd }),
+    ...(action.approval === undefined ? {} : { approval: action.approval }),
   };
-  return publicAction;
 }
 
 function decisionFromLegacy(value: string): PendingActionDecisionRequest | null {
