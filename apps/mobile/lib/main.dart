@@ -12,6 +12,8 @@ import 'src/screens/home_screen.dart';
 import 'src/background_sync_service.dart';
 import 'src/create_session_defaults_store.dart';
 import 'src/local_notification_service.dart';
+import 'src/screen_awake_controller.dart';
+import 'src/screen_awake_settings_store.dart';
 import 'src/session_send_outbox_worker.dart';
 import 'src/theme/app_theme.dart';
 import 'src/theme/theme_controller.dart';
@@ -39,6 +41,8 @@ Future<void> main() async {
   await BackgroundSyncService.instance.initialize();
   SessionSendOutboxWorker.instance.start();
   await CreateSessionDefaultsStore.instance.ensureLoaded();
+  await ScreenAwakeSettingsStore.instance.ensureLoaded();
+  await ScreenAwakeController.instance.start();
   final themeController = await ThemeController.load();
   runApp(SidemeshApp(themeController: themeController));
 }

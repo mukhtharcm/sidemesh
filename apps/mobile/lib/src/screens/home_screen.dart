@@ -11,6 +11,7 @@ import '../live_activity_service.dart';
 import '../local_notification_service.dart';
 import '../models.dart';
 import '../pending_send_recovery.dart';
+import '../screen_awake_controller.dart';
 import '../session_favorites_store.dart';
 import '../session_cache_store.dart';
 import '../session_overrides_store.dart';
@@ -420,6 +421,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                           api: _api,
                           query: _query,
                           hasSavedHosts: _hosts.isNotEmpty,
+                          screenAwakeSourceKey: 'mobile-recent-sessions',
                           onOpenSession: _openSession,
                           onActiveCountChanged: (count) {
                             if (!mounted) return;
@@ -744,6 +746,8 @@ class RecentPane extends StatefulWidget {
     this.padding,
     this.dense = false,
     this.hasSavedHosts = false,
+    this.screenAwakeSourceKey,
+    this.screenAwakeController,
   });
 
   final List<HostProfile> hosts;
@@ -755,6 +759,8 @@ class RecentPane extends StatefulWidget {
   final EdgeInsets? padding;
   final bool dense;
   final bool hasSavedHosts;
+  final String? screenAwakeSourceKey;
+  final ScreenAwakeController? screenAwakeController;
 
   @override
   State<RecentPane> createState() => _RecentPaneState();
@@ -786,6 +792,7 @@ class _RecentPaneState extends State<RecentPane> {
   // resolves rather than blocking on Future.wait(all).
   List<RemoteSessionEntry> _entries = const [];
   Set<String> _pendingHostIds = <String>{};
+  Set<String> _screenAwakeConfirmedHostIds = <String>{};
   List<String> _failedHostLabels = const [];
   int _loadGen = 0;
   bool _initialLoadStarted = false;
@@ -803,6 +810,7 @@ class _RecentPaneState extends State<RecentPane> {
 
   @override
   void dispose() {
+    _clearScreenAwakeSource(widget.screenAwakeSourceKey);
     _refreshTimer?.cancel();
     super.dispose();
   }
@@ -810,6 +818,10 @@ class _RecentPaneState extends State<RecentPane> {
   @override
   void didUpdateWidget(covariant RecentPane oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.screenAwakeSourceKey != widget.screenAwakeSourceKey) {
+      _clearScreenAwakeSource(oldWidget.screenAwakeSourceKey);
+      _syncScreenAwakeSource(_screenAwakeActiveEntryCount() > 0);
+    }
     if (!_sameHostList(oldWidget.hosts, widget.hosts)) {
       _kickoffLoad();
       _syncRefreshTimer();
@@ -828,6 +840,8 @@ class _RecentPaneState extends State<RecentPane> {
   void _kickoffLoad() {
     final gen = ++_loadGen;
     _initialLoadStarted = true;
+    _screenAwakeConfirmedHostIds = <String>{};
+    _syncScreenAwakeSource(false);
     setState(() {
       _entries = const [];
       _pendingHostIds = widget.hosts.map((h) => h.id).toSet();
@@ -838,6 +852,7 @@ class _RecentPaneState extends State<RecentPane> {
       _loadHost(host, gen);
     }
     if (widget.hosts.isEmpty) {
+      _syncScreenAwakeSource(false);
       // Emit zero active so the nav badge clears immediately.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -870,15 +885,18 @@ class _RecentPaneState extends State<RecentPane> {
     if (!mounted || gen != _loadGen) return;
     final merged = <RemoteSessionEntry>[];
     final handled = <String>{};
+    final confirmedHostIds = <String>{};
     for (var i = 0; i < hosts.length; i++) {
       final host = hosts[i];
       final fresh = fetches[i];
       if (fresh == null) {
-        // Fetch failed — keep whatever we had for this host.
+        // Fetch failed — keep whatever we had for this host visually, but do
+        // not let stale active status hold the screen awake.
         merged.addAll(_entries.where((e) => e.host.id == host.id));
         handled.add(host.id);
         continue;
       }
+      confirmedHostIds.add(host.id);
       for (final session in fresh.take(20)) {
         merged.add(RemoteSessionEntry(host: host, session: session));
       }
@@ -891,6 +909,7 @@ class _RecentPaneState extends State<RecentPane> {
         merged.add(entry);
       }
     }
+    _screenAwakeConfirmedHostIds = confirmedHostIds;
     setState(() {
       _entries = merged;
     });
@@ -926,6 +945,7 @@ class _RecentPaneState extends State<RecentPane> {
           .take(20)
           .map((session) => RemoteSessionEntry(host: host, session: session))
           .toList();
+      _screenAwakeConfirmedHostIds = {..._screenAwakeConfirmedHostIds, host.id};
       setState(() {
         _entries = [
           ..._entries.where((entry) => entry.host.id != host.id),
@@ -937,6 +957,8 @@ class _RecentPaneState extends State<RecentPane> {
     } catch (error) {
       if (!mounted || gen != _loadGen) return;
       _statuses.markOffline(host.id, error: friendlyError(error));
+      _screenAwakeConfirmedHostIds = {..._screenAwakeConfirmedHostIds}
+        ..remove(host.id);
       setState(() {
         _failedHostLabels = [..._failedHostLabels, host.label];
         _pendingHostIds = {..._pendingHostIds}..remove(host.id);
@@ -946,11 +968,39 @@ class _RecentPaneState extends State<RecentPane> {
   }
 
   void _emitActiveCount() {
-    final count = _entries.where((e) => e.session.isActive).length;
+    final count = _activeEntryCount();
+    _syncScreenAwakeSource(_screenAwakeActiveEntryCount() > 0);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       widget.onActiveCountChanged(count);
     });
+  }
+
+  int _activeEntryCount() {
+    return _entries.where((e) => e.session.isActive).length;
+  }
+
+  int _screenAwakeActiveEntryCount() {
+    return _entries
+        .where(
+          (entry) =>
+              entry.session.isActive &&
+              _screenAwakeConfirmedHostIds.contains(entry.host.id),
+        )
+        .length;
+  }
+
+  void _syncScreenAwakeSource(bool active) {
+    final key = widget.screenAwakeSourceKey;
+    if (key == null) return;
+    (widget.screenAwakeController ?? ScreenAwakeController.instance)
+        .setSourceActive(key, active);
+  }
+
+  void _clearScreenAwakeSource(String? key) {
+    if (key == null) return;
+    (widget.screenAwakeController ?? ScreenAwakeController.instance)
+        .clearSource(key);
   }
 
   List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
