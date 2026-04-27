@@ -49,7 +49,7 @@ import {
   mergeSessionActivities,
 } from "./activity.js";
 import {
-  parsePendingActionDecision,
+  parsePendingActionResponseBody,
   toPublicPendingAction,
 } from "./approvals.js";
 import { summarizeProviderConfig } from "./config.js";
@@ -1314,9 +1314,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     "/api/actions/:actionId/respond",
     asyncRoute(async (request, response) => {
       const actionId = pathParam(request.params.actionId);
-      const decision = parsePendingActionDecision(
-        request.body?.approvalDecision ?? request.body?.decision,
-      );
+      const decision = parsePendingActionResponseBody(request.body);
       const action = pendingActions.get(actionId);
       if (!action) {
         response.status(404).json({ error: "action not found" });

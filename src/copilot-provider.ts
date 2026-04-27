@@ -1413,7 +1413,7 @@ function buildCopilotPendingAction(
     cwd: session.thread.cwd,
     approval: {
       category: copilotApprovalCategory(request.kind),
-      operation: `copilot.${request.kind}`,
+      operation: `copilot.${String(request.kind ?? "unknown")}`,
       summary: copilotPermissionSummary(typed),
       detail,
       cwd: session.thread.cwd,
@@ -1428,7 +1428,7 @@ function buildCopilotPendingAction(
 }
 
 function copilotPendingActionKind(
-  kind: CopilotSdkPermissionRequest["kind"],
+  kind: unknown,
 ): AgentPendingAction["kind"] {
   if (kind === "shell") return "command";
   if (kind === "write") return "file_change";
@@ -1436,7 +1436,7 @@ function copilotPendingActionKind(
 }
 
 function copilotApprovalCategory(
-  kind: CopilotSdkPermissionRequest["kind"],
+  kind: unknown,
 ): NonNullable<AgentPendingAction["approval"]>["category"] {
   switch (kind) {
     case "shell":
@@ -1454,10 +1454,12 @@ function copilotApprovalCategory(
       return "memory";
     case "hook":
       return "hook";
+    default:
+      return "permissions";
   }
 }
 
-function copilotPermissionTitle(kind: CopilotSdkPermissionRequest["kind"]): string {
+function copilotPermissionTitle(kind: unknown): string {
   switch (kind) {
     case "shell":
       return "Command approval";
@@ -1475,6 +1477,8 @@ function copilotPermissionTitle(kind: CopilotSdkPermissionRequest["kind"]): stri
       return "Memory approval";
     case "hook":
       return "Hook approval";
+    default:
+      return "Permission request";
   }
 }
 
