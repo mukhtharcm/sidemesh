@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'models.dart';
+import 'screen_awake_controller.dart';
 
 bool get supportsSessionPopoutWindows =>
     !kIsWeb &&
@@ -158,6 +161,160 @@ class DesktopMultiWindowPlatform implements SidemeshWindowPlatform {
         .map(DesktopMultiWindowHandle.new)
         .toList(growable: false);
   }
+}
+
+abstract class SidemeshWindowRelayChannel {
+  Future<void> setMethodCallHandler(MethodCallHandler? handler);
+  Future<T?> invokeMethod<T>(String method, [dynamic arguments]);
+}
+
+class DesktopMultiWindowRelayChannel implements SidemeshWindowRelayChannel {
+  DesktopMultiWindowRelayChannel(String name)
+    : _channel = WindowMethodChannel(name, mode: ChannelMode.unidirectional);
+
+  final WindowMethodChannel _channel;
+
+  @override
+  Future<T?> invokeMethod<T>(String method, [dynamic arguments]) {
+    return _channel.invokeMethod<T>(method, arguments);
+  }
+
+  @override
+  Future<void> setMethodCallHandler(MethodCallHandler? handler) {
+    return _channel.setMethodCallHandler(handler);
+  }
+}
+
+class WindowScreenAwakeCoordinator {
+  WindowScreenAwakeCoordinator({
+    ScreenAwakeController? controller,
+    SidemeshWindowRelayChannel? relayChannel,
+    bool? supportsRelayOverride,
+  }) : _controller = controller ?? ScreenAwakeController.instance,
+       _relayChannel =
+           relayChannel ??
+           DesktopMultiWindowRelayChannel(_screenAwakeRelayChannelName),
+       _supportsRelayOverride = supportsRelayOverride;
+
+  static const String _screenAwakeRelayChannelName =
+      'sidemesh/window_screen_awake';
+
+  static final WindowScreenAwakeCoordinator instance =
+      WindowScreenAwakeCoordinator();
+
+  final ScreenAwakeController _controller;
+  final SidemeshWindowRelayChannel _relayChannel;
+  final bool? _supportsRelayOverride;
+
+  bool _isCoordinator = false;
+  bool _localControllerStarted = false;
+  Future<void>? _claimFuture;
+
+  bool get _supportsRelay =>
+      _supportsRelayOverride ?? supportsSessionPopoutWindows;
+
+  Future<void> start() async {
+    if (!_supportsRelay) {
+      await _startLocalController();
+      _isCoordinator = true;
+      return;
+    }
+    await _tryClaimCoordinator();
+  }
+
+  void setSourceActive(String key, bool active) {
+    unawaited(_setSourceActive(key, active));
+  }
+
+  void clearSource(String key) {
+    unawaited(_clearSource(key));
+  }
+
+  Future<void> _setSourceActive(String key, bool active) async {
+    if (_isCoordinator || !_supportsRelay) {
+      _controller.setSourceActive(key, active);
+      return;
+    }
+    try {
+      await _relayChannel.invokeMethod<void>(
+        'setSourceActive',
+        <String, Object>{'key': key, 'active': active},
+      );
+    } on WindowChannelException {
+      await _tryClaimCoordinator();
+      if (_isCoordinator) {
+        _controller.setSourceActive(key, active);
+      }
+    }
+  }
+
+  Future<void> _clearSource(String key) async {
+    if (_isCoordinator || !_supportsRelay) {
+      _controller.clearSource(key);
+      return;
+    }
+    try {
+      await _relayChannel.invokeMethod<void>('clearSource', <String, Object>{
+        'key': key,
+      });
+    } on WindowChannelException {
+      await _tryClaimCoordinator();
+      if (_isCoordinator) {
+        _controller.clearSource(key);
+      }
+    }
+  }
+
+  Future<void> _tryClaimCoordinator() {
+    return _claimFuture ??= _claimCoordinator().whenComplete(() {
+      _claimFuture = null;
+    });
+  }
+
+  Future<void> _claimCoordinator() async {
+    if (_isCoordinator) {
+      return;
+    }
+    try {
+      await _relayChannel.setMethodCallHandler(_handleRelayCall);
+      _isCoordinator = true;
+      await _startLocalController();
+    } on WindowChannelException {
+      _isCoordinator = false;
+    }
+  }
+
+  Future<dynamic> _handleRelayCall(MethodCall call) async {
+    final arguments = call.arguments;
+    final payload = arguments is Map
+        ? Map<String, dynamic>.from(arguments)
+        : const <String, dynamic>{};
+    final key = payload['key'] as String?;
+    if ((key ?? '').isEmpty) {
+      return null;
+    }
+    switch (call.method) {
+      case 'setSourceActive':
+        _controller.setSourceActive(key!, payload['active'] == true);
+        return null;
+      case 'clearSource':
+        _controller.clearSource(key!);
+        return null;
+      default:
+        throw MissingPluginException('Unknown relay method ${call.method}');
+    }
+  }
+
+  Future<void> _startLocalController() async {
+    if (_localControllerStarted) {
+      return;
+    }
+    _localControllerStarted = true;
+    await _controller.start();
+  }
+
+  @visibleForTesting
+  bool get isCoordinator => _isCoordinator;
 }
 
 class SidemeshSessionWindowManager {

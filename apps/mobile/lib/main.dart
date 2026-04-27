@@ -13,7 +13,6 @@ import 'src/screens/session_window_screen.dart';
 import 'src/background_sync_service.dart';
 import 'src/create_session_defaults_store.dart';
 import 'src/local_notification_service.dart';
-import 'src/screen_awake_controller.dart';
 import 'src/screen_awake_settings_store.dart';
 import 'src/session_send_outbox_worker.dart';
 import 'src/theme/app_theme.dart';
@@ -43,12 +42,12 @@ Future<void> main(List<String> args) async {
     }
   }
   await CreateSessionDefaultsStore.instance.ensureLoaded();
+  await ScreenAwakeSettingsStore.instance.ensureLoaded();
+  await WindowScreenAwakeCoordinator.instance.start();
   if (launchState.shouldStartGlobalServices) {
     await LocalNotificationService.instance.initialize();
     await BackgroundSyncService.instance.initialize();
     SessionSendOutboxWorker.instance.start();
-    await ScreenAwakeSettingsStore.instance.ensureLoaded();
-    await ScreenAwakeController.instance.start();
   }
   final themeController = await ThemeController.load();
   runApp(
@@ -90,6 +89,7 @@ class SidemeshApp extends StatelessWidget {
                   : const SidemeshHomeScreen(),
             SidemeshWindowKind.session => SessionWindowScreen(
               arguments: launchState.arguments,
+              windowId: launchState.windowId,
             ),
           };
           return AnnotatedRegion<SystemUiOverlayStyle>(

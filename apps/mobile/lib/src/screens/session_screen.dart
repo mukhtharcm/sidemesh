@@ -19,7 +19,6 @@ import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
 import '../models.dart';
 import '../pending_send_recovery.dart';
-import '../screen_awake_controller.dart';
 import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_screen.dart';
@@ -67,6 +66,8 @@ class SessionScreen extends StatefulWidget {
     this.onArchived,
     this.initialComposerSeed,
     this.topPadding,
+    this.desktopMode = false,
+    this.screenAwakeSourceKey,
   });
 
   final HostProfile host;
@@ -78,6 +79,8 @@ class SessionScreen extends StatefulWidget {
   // Extra top padding for embedded desktop use (to avoid overlapping the
   // transparent macOS titlebar). When null, SafeArea handles insets.
   final double? topPadding;
+  final bool desktopMode;
+  final String? screenAwakeSourceKey;
 
   @override
   State<SessionScreen> createState() => _SessionScreenState();
@@ -281,10 +284,11 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   String get _screenAwakeSourceKey =>
+      widget.screenAwakeSourceKey ??
       'session:${widget.host.id}:${widget.session.id}';
 
   void _syncScreenAwakeSource() {
-    ScreenAwakeController.instance.setSourceActive(
+    WindowScreenAwakeCoordinator.instance.setSourceActive(
       _screenAwakeSourceKey,
       _running,
     );
@@ -607,7 +611,7 @@ class _SessionScreenState extends State<SessionScreen>
   @override
   void dispose() {
     _disposed = true;
-    ScreenAwakeController.instance.clearSource(_screenAwakeSourceKey);
+    WindowScreenAwakeCoordinator.instance.clearSource(_screenAwakeSourceKey);
     _inspectorController?.removeListener(_onInspectorChanged);
     _inspectorController = null;
     // Stamp the most recent session state as seen before we unmount so
@@ -1131,8 +1135,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   bool get _isMacDesktop =>
-      widget.topPadding != null &&
-      defaultTargetPlatform == TargetPlatform.macOS;
+      widget.desktopMode && defaultTargetPlatform == TargetPlatform.macOS;
 
   void _queueComposerFocusRestore() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -3200,7 +3203,7 @@ class _SessionScreenState extends State<SessionScreen>
     await _turnConfigStore.ensureLoaded();
     if (!mounted) return;
     final runtime = session.runtime;
-    final isDesktop = widget.topPadding != null;
+    final isDesktop = widget.desktopMode;
     final sheet = SessionControlsSheet(
       api: widget.api,
       host: widget.host,
@@ -3271,6 +3274,7 @@ class _SessionScreenState extends State<SessionScreen>
           onOpenSession: widget.onOpenSession,
           onArchived: widget.onArchived,
           topPadding: widget.topPadding,
+          desktopMode: widget.desktopMode,
         ),
       ),
     );
@@ -3290,7 +3294,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     final scope = InspectorScope.maybeOf(context);
-    if (widget.topPadding != null && scope != null) {
+    if (widget.desktopMode && scope != null) {
       final session = _session ?? widget.session;
       scope.show(
         buildInspectorWorkspaceBrowserSurface(
@@ -3847,7 +3851,7 @@ class _SessionScreenState extends State<SessionScreen>
           onRemoveSkill: _removeDraftSkillMention,
           onSend: _sendInput,
           onDismiss: _dismissKeyboard,
-          submitOnEnter: widget.topPadding != null,
+          submitOnEnter: widget.desktopMode,
         ),
       ],
     );
@@ -4024,7 +4028,7 @@ class _SessionScreenState extends State<SessionScreen>
                       if (!_supportsFilesystem) {
                         break;
                       }
-                      final isDesktop = widget.topPadding != null;
+                      final isDesktop = widget.desktopMode;
                       final scope = InspectorScope.maybeOf(context);
                       if (isDesktop && scope != null) {
                         scope.show(
@@ -4168,13 +4172,13 @@ class _SessionScreenState extends State<SessionScreen>
           const SizedBox(width: 4),
         ],
       ),
-      body: widget.topPadding == null
-          ? GestureDetector(
+      body: widget.desktopMode
+          ? layoutBody
+          : GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: _dismissKeyboard,
               child: layoutBody,
-            )
-          : layoutBody,
+            ),
     );
     if (widget.topPadding == null) {
       return scaffold;

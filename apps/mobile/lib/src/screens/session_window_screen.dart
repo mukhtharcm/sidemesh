@@ -11,9 +11,14 @@ import '../windowing.dart';
 import 'session_screen.dart';
 
 class SessionWindowScreen extends StatefulWidget {
-  const SessionWindowScreen({super.key, required this.arguments});
+  const SessionWindowScreen({
+    super.key,
+    required this.arguments,
+    this.windowId,
+  });
 
   final SidemeshWindowArguments arguments;
+  final String? windowId;
 
   @override
   State<SessionWindowScreen> createState() => _SessionWindowScreenState();
@@ -26,8 +31,12 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
   HostProfile? _host;
   String? _error;
   bool _loading = true;
+  bool _archived = false;
 
   SessionSummary get _session => widget.arguments.session!;
+
+  String get _screenAwakeSourceKey =>
+      'window:${widget.windowId ?? 'session'}:${_session.id}';
 
   @override
   void initState() {
@@ -95,10 +104,23 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
           host: host,
           session: session,
           api: _api,
+          onArchived: _handleArchived,
           onOpenSession: (next) => unawaited(_openSession(host, next)),
+          desktopMode: true,
+          screenAwakeSourceKey: _screenAwakeSourceKey,
         ),
       ),
     );
+  }
+
+  void _handleArchived() {
+    if (!mounted) {
+      return;
+    }
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    setState(() {
+      _archived = true;
+    });
   }
 
   @override
@@ -106,6 +128,17 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
     final colors = context.colors;
     if (_loading) {
       return Scaffold(backgroundColor: colors.canvas, body: const MeshLoader());
+    }
+    if (_archived) {
+      return Scaffold(
+        backgroundColor: colors.canvas,
+        appBar: AppBar(title: Text(_session.title)),
+        body: const MeshEmptyState(
+          icon: Icons.archive_outlined,
+          title: 'Session archived',
+          body: 'This session was archived. You can close this window.',
+        ),
+      );
     }
     final host = _host;
     if (host == null) {
@@ -123,7 +156,10 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
       host: host,
       session: _session,
       api: _api,
+      onArchived: _handleArchived,
       onOpenSession: (session) => unawaited(_openSession(host, session)),
+      desktopMode: true,
+      screenAwakeSourceKey: _screenAwakeSourceKey,
     );
   }
 }
