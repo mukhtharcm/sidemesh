@@ -122,6 +122,10 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
     "SIDEMESH_COPILOT_STATE_DIR",
     "SIDEMESH_COPILOT_SESSION_STATE_DIR",
     "SIDEMESH_COPILOT_ALLOW_ALL",
+    "SIDEMESH_COPILOT_MODEL",
+    "COPILOT_MODEL",
+    "COPILOT_PROVIDER_MODEL_ID",
+    "COPILOT_PROVIDER_WIRE_MODEL",
   ],
 
   create(config) {
@@ -131,6 +135,7 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
       stateDir: copilot.stateDir,
       sessionStateDir: copilot.sessionStateDir,
       allowAll: copilot.allowAll,
+      configuredModel: copilot.configuredModel,
     });
   },
 
@@ -144,6 +149,12 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
       stateDir: env.SIDEMESH_COPILOT_STATE_DIR?.trim() || null,
       sessionStateDir: env.SIDEMESH_COPILOT_SESSION_STATE_DIR?.trim() || null,
       allowAll: parseBoolean(env.SIDEMESH_COPILOT_ALLOW_ALL, false),
+      configuredModel:
+        env.SIDEMESH_COPILOT_MODEL?.trim() ||
+        env.COPILOT_MODEL?.trim() ||
+        env.COPILOT_PROVIDER_MODEL_ID?.trim() ||
+        env.COPILOT_PROVIDER_WIRE_MODEL?.trim() ||
+        null,
     };
   },
 

@@ -34,6 +34,7 @@ export interface CopilotAgentProviderOptions {
   stateDir?: string | null;
   sessionStateDir?: string | null;
   allowAll?: boolean;
+  configuredModel?: string | null;
 }
 
 interface CopilotSessionState {
@@ -82,7 +83,7 @@ const DEFAULT_COPILOT_SESSION_STATE_DIR = nodePath.join(
   "session-state",
 );
 
-export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
+const BASE_COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   sessions: {
     create: true,
     resume: true,
@@ -106,13 +107,13 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     approveForSession: false,
   },
   configuration: {
-    models: true,
+    models: false,
     profiles: false,
     skills: false,
     skillManagement: false,
   },
   runtimeControls: {
-    model: true,
+    model: false,
     reasoningEffort: true,
     fastMode: false,
     approvalPolicy: false,
@@ -132,12 +133,13 @@ export class CopilotAgentProvider
 {
   public readonly kind = "copilot";
   public readonly displayName = "GitHub Copilot";
-  public readonly capabilities = COPILOT_PROVIDER_CAPABILITIES;
+  public readonly capabilities: AgentProviderCapabilities;
 
   private readonly bin: string;
   private readonly stateDir: string;
   private readonly sessionStateDir: string;
   private readonly allowAll: boolean;
+  private readonly configuredModel: string | null;
   private readonly sessions = new Map<string, CopilotSessionState>();
   private readonly nativeArchivedSessionIds = new Set<string>();
   private readonly loadedSessionIds = new Set<string>();
@@ -157,6 +159,8 @@ export class CopilotAgentProvider
       options.sessionStateDir || DEFAULT_COPILOT_SESSION_STATE_DIR,
     );
     this.allowAll = options.allowAll === true;
+    this.configuredModel = options.configuredModel?.trim() || null;
+    this.capabilities = copilotCapabilities(this.configuredModel !== null);
   }
 
   public async start(): Promise<void> {
@@ -356,7 +360,11 @@ export class CopilotAgentProvider
     request: AgentSubmitInputRequest,
   ): Promise<AgentSubmitInputResult> {
     const session = await this.getWritableSession(request.sessionId);
-    session.runtime = mergeRuntime(session.runtime, request.overrides);
+    session.runtime = mergeRuntime(
+      session.runtime,
+      request.overrides,
+      this.configuredModel,
+    );
 
     if (this.activeTurns.has(session.thread.id)) {
       // Copilot's non-interactive prompt mode cannot accept steering input
@@ -397,12 +405,7 @@ export class CopilotAgentProvider
   public async listModels(
     _options: AgentModelListOptions,
   ): Promise<ModelSummary[]> {
-    return [
-      copilotModel("gpt-5.2", "GPT-5.2", true, 0),
-      copilotModel("gpt-5.1", "GPT-5.1", false, 1),
-      copilotModel("claude-sonnet-4-5", "Claude Sonnet 4.5", false, 2),
-      copilotModel("sonnet", "Claude Sonnet", false, 3),
-    ];
+    return this.configuredModel ? [copilotModel(this.configuredModel)] : [];
   }
 
   private createSessionState(
@@ -427,7 +430,7 @@ export class CopilotAgentProvider
       thread,
       messages: [],
       turns: [],
-      runtime: mergeRuntime(null, request.overrides),
+      runtime: mergeRuntime(null, request.overrides, this.configuredModel),
       archived: false,
       nextSeq: 0,
       copilotSessionId: id,
@@ -707,7 +710,7 @@ export class CopilotAgentProvider
           thread: item.thread,
           messages: item.messages ?? [],
           turns: item.turns ?? [],
-          runtime: item.runtime ?? null,
+          runtime: normalizeStoredRuntime(item.runtime ?? null, this.configuredModel),
           archived: item.archived === true,
           nextSeq: item.nextSeq ?? item.messages?.length ?? 0,
           copilotSessionId: item.copilotSessionId ?? null,
@@ -797,17 +800,39 @@ export class CopilotAgentProvider
   }
 }
 
-function copilotModel(
-  model: string,
-  displayName: string,
-  isDefault: boolean,
-  sortOrder: number,
-): ModelSummary {
+function copilotCapabilities(hasConfiguredModel: boolean): AgentProviderCapabilities {
+  return {
+    ...BASE_COPILOT_PROVIDER_CAPABILITIES,
+    sessions: { ...BASE_COPILOT_PROVIDER_CAPABILITIES.sessions },
+    input: { ...BASE_COPILOT_PROVIDER_CAPABILITIES.input },
+    approvals: { ...BASE_COPILOT_PROVIDER_CAPABILITIES.approvals },
+    configuration: {
+      ...BASE_COPILOT_PROVIDER_CAPABILITIES.configuration,
+      models: hasConfiguredModel,
+    },
+    runtimeControls: {
+      ...BASE_COPILOT_PROVIDER_CAPABILITIES.runtimeControls,
+      model: hasConfiguredModel,
+    },
+    workspace: { ...BASE_COPILOT_PROVIDER_CAPABILITIES.workspace },
+  };
+}
+
+function displayNameFromModel(model: string): string {
+  return model
+    .split(/[-_:\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function copilotModel(model: string): ModelSummary {
   return {
     id: `copilot:${model}`,
     model,
-    displayName,
-    description: "GitHub Copilot CLI model override.",
+    displayName: displayNameFromModel(model),
+    description:
+      "GitHub Copilot CLI model configured through the host environment.",
     defaultReasoningEffort: "medium",
     supportedReasoningEfforts: [
       {
@@ -831,9 +856,9 @@ function copilotModel(
     supportsPersonality: false,
     additionalSpeedTiers: [],
     inputModalities: ["text"],
-    isDefault,
-    sortOrder,
-    source: "builtin",
+    isDefault: true,
+    sortOrder: 0,
+    source: "env",
   };
 }
 
@@ -1105,14 +1130,36 @@ function mergeRuntime(
     model: string | null;
     reasoningEffort: string | null;
   },
+  configuredModel: string | null,
 ): SessionRuntimeSummary {
+  const model = configuredModel;
+  const reasoningEffort =
+    overrides.reasoningEffort ?? runtime?.reasoningEffort ?? null;
   return {
     ...(runtime ?? {}),
-    model: overrides.model ?? runtime?.model ?? "gpt-5.2",
     modelProvider: "copilot",
-    reasoningEffort:
-      overrides.reasoningEffort ?? runtime?.reasoningEffort ?? "medium",
+    ...(model ? { model } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     updatedAt: Date.now(),
+  };
+}
+
+function normalizeStoredRuntime(
+  runtime: SessionRuntimeSummary | null,
+  configuredModel: string | null,
+): SessionRuntimeSummary | null {
+  if (!runtime) return null;
+  if (configuredModel) {
+    return {
+      ...runtime,
+      model: configuredModel,
+      modelProvider: "copilot",
+    };
+  }
+  const { model: _model, ...rest } = runtime;
+  return {
+    ...rest,
+    modelProvider: "copilot",
   };
 }
 
