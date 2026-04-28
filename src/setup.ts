@@ -277,7 +277,18 @@ async function promptText(options: {
   fallbackToDefaultOnEmpty?: boolean;
   validate?: (value: string) => string | Error | undefined;
 }): Promise<string> {
-  const value = await text(options);
+  const value = await text({
+    ...options,
+    validate: options.validate
+      ? (rawValue) =>
+          options.validate!(
+            normalizePromptTextValue(String(rawValue), {
+              defaultValue: options.defaultValue,
+              fallbackToDefaultOnEmpty: options.fallbackToDefaultOnEmpty,
+            }),
+          )
+      : undefined,
+  });
   if (isCancel(value)) {
     throw new Error("Setup cancelled.");
   }
