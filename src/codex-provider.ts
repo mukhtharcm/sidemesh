@@ -1740,6 +1740,7 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   runtimeControls: {
     model: true,
+    mode: false,
     reasoningEffort: true,
     fastMode: true,
     approvalPolicy: true,
