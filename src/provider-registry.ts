@@ -32,6 +32,7 @@ interface AgentProviderDefinition {
   readonly defaultCommand: string;
   readonly capabilities: AgentProviderCapabilities;
   readonly commandEnvironmentVariables: readonly string[];
+  readonly supportedApprovalPolicies: readonly string[];
 
   create(config: AgentProviderConfig): AgentProvider;
   loadConfig(env: ProviderEnvironment): AgentProviderConfig;
@@ -44,6 +45,7 @@ export interface AgentProviderDefinitionSummary {
   defaultCommand: string;
   commandEnvironmentVariables: string[];
   capabilities: AgentProviderCapabilities;
+  supportedApprovalPolicies: string[];
 }
 
 export const DEFAULT_AGENT_PROVIDER_KIND: AgentProviderKind = "codex";
@@ -60,6 +62,7 @@ const CODEX_PROVIDER_DEFINITION: AgentProviderDefinition = {
     "SIDEMESH_CODEX_BIN",
     "SIDEMESH_PROVIDER_COMMAND",
   ],
+  supportedApprovalPolicies: ["untrusted", "on-failure", "on-request", "never"],
 
   create(config) {
     const codex = expectCodexProviderConfig(config);
@@ -96,6 +99,7 @@ const FAKE_PROVIDER_DEFINITION: AgentProviderDefinition = {
     "SIDEMESH_FAKE_WORKSPACE_ROOT",
     "SIDEMESH_FAKE_CAPABILITY_PROFILE",
   ],
+  supportedApprovalPolicies: ["untrusted", "on-failure", "on-request", "never"],
 
   create(config) {
     const fake = expectFakeProviderConfig(config);
@@ -143,6 +147,7 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
     "COPILOT_PROVIDER_MODEL_ID",
     "COPILOT_PROVIDER_WIRE_MODEL",
   ],
+  supportedApprovalPolicies: ["on-request", "never"],
 
   create(config) {
     const copilot = expectCopilotProviderConfig(config);
@@ -198,6 +203,7 @@ export function listAgentProviderDefinitionSummaries(): AgentProviderDefinitionS
     defaultCommand: definition.defaultCommand,
     commandEnvironmentVariables: [...definition.commandEnvironmentVariables],
     capabilities: definition.capabilities,
+    supportedApprovalPolicies: [...definition.supportedApprovalPolicies],
   }));
 }
 
@@ -206,7 +212,9 @@ export function supportedAgentProviderKinds(): AgentProviderKind[] {
 }
 
 export function isAgentProviderKind(value: string): value is AgentProviderKind {
-  return AGENT_PROVIDER_DEFINITIONS.some((definition) => definition.kind === value);
+  return AGENT_PROVIDER_DEFINITIONS.some(
+    (definition) => definition.kind === value,
+  );
 }
 
 export function loadAgentProviderConfig(
@@ -228,8 +236,12 @@ export function summarizeAgentProviderConfig(
   return getAgentProviderDefinition(config.kind).summarizeConfig(config);
 }
 
-function getAgentProviderDefinition(kind: AgentProviderKind): AgentProviderDefinition {
-  const definition = AGENT_PROVIDER_DEFINITIONS.find((candidate) => candidate.kind === kind);
+function getAgentProviderDefinition(
+  kind: AgentProviderKind,
+): AgentProviderDefinition {
+  const definition = AGENT_PROVIDER_DEFINITIONS.find(
+    (candidate) => candidate.kind === kind,
+  );
   if (!definition) {
     throw new Error(
       `Unsupported Sidemesh agent provider "${kind}". Supported providers: ${supportedAgentProviderKinds().join(", ")}`,
@@ -238,21 +250,27 @@ function getAgentProviderDefinition(kind: AgentProviderKind): AgentProviderDefin
   return definition;
 }
 
-function expectCodexProviderConfig(config: AgentProviderConfig): CodexProviderConfig {
+function expectCodexProviderConfig(
+  config: AgentProviderConfig,
+): CodexProviderConfig {
   if (config.kind !== "codex") {
     throw new Error(`Expected Codex provider config, got "${config.kind}"`);
   }
   return config;
 }
 
-function expectFakeProviderConfig(config: AgentProviderConfig): FakeProviderConfig {
+function expectFakeProviderConfig(
+  config: AgentProviderConfig,
+): FakeProviderConfig {
   if (config.kind !== "fake") {
     throw new Error(`Expected fake provider config, got "${config.kind}"`);
   }
   return config;
 }
 
-function expectCopilotProviderConfig(config: AgentProviderConfig): CopilotProviderConfig {
+function expectCopilotProviderConfig(
+  config: AgentProviderConfig,
+): CopilotProviderConfig {
   if (config.kind !== "copilot") {
     throw new Error(`Expected Copilot provider config, got "${config.kind}"`);
   }

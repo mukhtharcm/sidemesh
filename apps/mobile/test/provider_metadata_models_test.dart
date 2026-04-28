@@ -24,6 +24,12 @@ void main() {
           'kind': 'codex',
           'displayName': 'Codex',
           'defaultCommand': 'codex',
+          'supportedApprovalPolicies': [
+            'untrusted',
+            'on-failure',
+            'on-request',
+            'never',
+          ],
           'capabilities': {
             'sessions': {'create': true},
           },
@@ -55,6 +61,12 @@ void main() {
     expect(node.supportedProviders.single.commandEnvironmentVariables, [
       'SIDEMESH_CODEX_BIN',
       'SIDEMESH_PROVIDER_COMMAND',
+    ]);
+    expect(node.supportedProviders.single.supportedApprovalPolicies, [
+      'untrusted',
+      'on-failure',
+      'on-request',
+      'never',
     ]);
     expect(
       node.capabilitiesForProvider('codex').supports('sessions', 'create'),
@@ -91,6 +103,7 @@ void main() {
           'displayName': 'Codex',
           'defaultCommand': 'codex',
           'commandEnvironmentVariables': ['SIDEMESH_CODEX_BIN'],
+          'supportedApprovalPolicies': ['on-request', 'never'],
         },
         {'displayName': 'Missing kind'},
       ],

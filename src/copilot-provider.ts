@@ -121,6 +121,7 @@ const COPILOT_SESSION_MODES = [
   "plan",
   "autopilot",
 ] as const satisfies readonly CopilotSdkSessionMode[];
+const COPILOT_APPROVAL_POLICIES = ["on-request", "never"] as const;
 
 export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   sessions: {
@@ -157,7 +158,7 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     mode: true,
     reasoningEffort: true,
     fastMode: false,
-    approvalPolicy: false,
+    approvalPolicy: true,
     sandboxMode: false,
     networkAccess: false,
     webSearch: false,
@@ -185,7 +186,10 @@ export class CopilotAgentProvider
   private readonly archivedSessionIds = new Set<string>();
   private readonly loadedSessionIds = new Set<string>();
   private readonly activeTurns = new Map<string, ActiveCopilotTurn>();
-  private readonly pendingPermissions = new Map<string, PendingCopilotPermission>();
+  private readonly pendingPermissions = new Map<
+    string,
+    PendingCopilotPermission
+  >();
   private sdkClient: CopilotSdkClient | null = null;
   private saveChain: Promise<void> = Promise.resolve();
 
@@ -235,7 +239,11 @@ export class CopilotAgentProvider
           : !this.archivedSessionIds.has(session.sessionId),
       )
       .map((session) =>
-        sdkSessionToThread(session, this.sessions.get(session.sessionId), false),
+        sdkSessionToThread(
+          session,
+          this.sessions.get(session.sessionId),
+          false,
+        ),
       );
     const sidemeshThreads = [...this.sessions.values()]
       .filter((session) => !sdkIds.has(session.thread.id))
@@ -255,7 +263,11 @@ export class CopilotAgentProvider
     const sdkThreads = sdkSessions
       .filter((session) => !this.archivedSessionIds.has(session.sessionId))
       .map((session) =>
-        sdkSessionToThread(session, this.sessions.get(session.sessionId), false),
+        sdkSessionToThread(
+          session,
+          this.sessions.get(session.sessionId),
+          false,
+        ),
       );
     const sidemeshThreads = [...this.sessions.values()]
       .filter((session) => !sdkIds.has(session.thread.id))
@@ -286,11 +298,14 @@ export class CopilotAgentProvider
     thread: ThreadRecord,
     options: AgentSessionLogOptions = {},
   ): Promise<SessionLogSnapshot> {
-    const session = this.sessions.get(thread.id) ??
+    const session =
+      this.sessions.get(thread.id) ??
       (await this.loadSdkSessionStateFromHistory(thread.id));
     const messages = limitTail(session.messages, options.messageLimit ?? null);
     const activities = limitTail(
-      [...session.activities.values()].sort((left, right) => left.seq - right.seq),
+      [...session.activities.values()].sort(
+        (left, right) => left.seq - right.seq,
+      ),
       options.activityLimit ?? null,
     );
     return {
@@ -306,7 +321,8 @@ export class CopilotAgentProvider
   public async readSessionRuntime(
     thread: ThreadRecord,
   ): Promise<SessionRuntimeSummary | null> {
-    const session = this.sessions.get(thread.id) ??
+    const session =
+      this.sessions.get(thread.id) ??
       (await this.loadSdkSessionStateFromHistory(thread.id));
     const runtime = session.runtime;
     return runtime ? { ...runtime } : null;
@@ -387,6 +403,7 @@ export class CopilotAgentProvider
       session.runtime,
       request.overrides,
       this.configuredModel,
+      this.allowAll,
     );
 
     if (this.activeTurns.has(session.thread.id)) {
@@ -488,7 +505,9 @@ export class CopilotAgentProvider
     if (options.forceReload) {
       await this.reloadSkillsForWorkspace(options.cwd);
     }
-    const discovered = await (await this.ensureSdkClient()).rpc?.skills.discover({
+    const discovered = await (
+      await this.ensureSdkClient()
+    ).rpc?.skills.discover({
       projectPaths: [options.cwd],
     });
     return {
@@ -514,7 +533,9 @@ export class CopilotAgentProvider
       throw new Error("Unable to resolve Copilot skill to update.");
     }
     const disabledSkills = new Set(
-      discovered.skills.filter((skill) => skill.enabled === false).map((skill) => skill.name),
+      discovered.skills
+        .filter((skill) => skill.enabled === false)
+        .map((skill) => skill.name),
     );
     if (request.enabled) {
       disabledSkills.delete(skillName);
@@ -522,7 +543,9 @@ export class CopilotAgentProvider
       disabledSkills.add(skillName);
     }
     await rpc.config.setDisabledSkills({
-      disabledSkills: [...disabledSkills].sort((left, right) => left.localeCompare(right)),
+      disabledSkills: [...disabledSkills].sort((left, right) =>
+        left.localeCompare(right),
+      ),
     });
     await this.reloadSkillsForLoadedSessions();
     this.emit("liveEvent", { type: "skills_changed" });
@@ -535,7 +558,9 @@ export class CopilotAgentProvider
   }
 
   private async reloadSkillsForWorkspace(cwd: string): Promise<void> {
-    const sessions = [...this.sessions.values()].filter((session) => session.thread.cwd === cwd);
+    const sessions = [...this.sessions.values()].filter(
+      (session) => session.thread.cwd === cwd,
+    );
     await Promise.all(
       sessions.map(async (session) => {
         const sdkSession = await this.ensureSdkSession(session);
@@ -578,7 +603,12 @@ export class CopilotAgentProvider
       messages: [],
       activities: new Map(),
       turns: [],
-      runtime: mergeRuntime(null, request.overrides, this.configuredModel),
+      runtime: mergeRuntime(
+        null,
+        request.overrides,
+        this.configuredModel,
+        this.allowAll,
+      ),
       archived: false,
       nextSeq: 0,
       copilotSessionId: id,
@@ -644,11 +674,7 @@ export class CopilotAgentProvider
       }
       const text =
         error instanceof Error ? error.message : "Copilot SDK turn failed.";
-      this.failTurn(
-        current,
-        turnId,
-        `Copilot SDK error: ${text}`,
-      );
+      this.failTurn(current, turnId, `Copilot SDK error: ${text}`);
       await this.persistSoon();
     }
   }
@@ -677,10 +703,13 @@ export class CopilotAgentProvider
     const client = await this.ensureSdkClient();
     const config = this.buildSdkSessionConfig(session);
     const sdkSession = session.copilotSessionCreated
-      ? await client.resumeSession(session.copilotSessionId ?? session.thread.id, {
-          ...config,
-          disableResume: true,
-        })
+      ? await client.resumeSession(
+          session.copilotSessionId ?? session.thread.id,
+          {
+            ...config,
+            disableResume: true,
+          },
+        )
       : await client.createSession({
           ...config,
           sessionId: session.copilotSessionId ?? session.thread.id,
@@ -747,7 +776,10 @@ export class CopilotAgentProvider
     }
   }
 
-  private handleSdkEvent(sessionId: string, event: CopilotSdkSessionEvent): void {
+  private handleSdkEvent(
+    sessionId: string,
+    event: CopilotSdkSessionEvent,
+  ): void {
     const session = this.sessions.get(sessionId);
     if (!session) {
       return;
@@ -785,7 +817,8 @@ export class CopilotAgentProvider
         return;
       }
       const delta = event.data.deltaContent;
-      const messageId = event.data.messageId || `copilot-assistant-${active.turnId}`;
+      const messageId =
+        event.data.messageId || `copilot-assistant-${active.turnId}`;
       active.assistantBuffers.set(
         messageId,
         `${active.assistantBuffers.get(messageId) ?? ""}${delta}`,
@@ -853,7 +886,10 @@ export class CopilotAgentProvider
         turnId: active?.turnId ?? null,
         status: "in_progress",
         toolName: copilotToolName(event.data.toolName),
-        title: formatCopilotToolCommand(event.data.toolName, event.data.arguments),
+        title: formatCopilotToolCommand(
+          event.data.toolName,
+          event.data.arguments,
+        ),
         args: event.data.arguments ?? null,
         output: null,
         result: null,
@@ -930,7 +966,9 @@ export class CopilotAgentProvider
     }
 
     this.activeTurns.delete(sessionId);
-    const turn = session.turns.find((candidate) => candidate.id === active.turnId);
+    const turn = session.turns.find(
+      (candidate) => candidate.id === active.turnId,
+    );
     if (turn?.status === "inProgress") {
       this.finishTurn(session, turn, status);
     }
@@ -1046,7 +1084,10 @@ export class CopilotAgentProvider
     sessionId: string,
     request: CopilotSdkPermissionRequest,
   ): Promise<CopilotSdkPermissionResult> {
-    if (this.allowAll) {
+    if (
+      approvalPolicyForSession(this.sessions.get(sessionId), this.allowAll) ===
+      "never"
+    ) {
       return approveOnce();
     }
 
@@ -1271,9 +1312,11 @@ export class CopilotAgentProvider
     } catch {
       // Fall back to listSessions below for SDK versions without direct lookup.
     }
-    return (await this.listSdkSessionMetadata()).find(
-      (session) => session.sessionId === sessionId,
-    ) ?? null;
+    return (
+      (await this.listSdkSessionMetadata()).find(
+        (session) => session.sessionId === sessionId,
+      ) ?? null
+    );
   }
 
   private async loadSdkSessionStateFromHistory(
@@ -1295,13 +1338,12 @@ export class CopilotAgentProvider
       copilotSessionId: sessionId,
       copilotSessionCreated: true,
     };
-    const sdkSession = await (await this.ensureSdkClient()).resumeSession(
-      sessionId,
-      {
-        ...this.buildSdkSessionConfig(state),
-        disableResume: true,
-      },
-    );
+    const sdkSession = await (
+      await this.ensureSdkClient()
+    ).resumeSession(sessionId, {
+      ...this.buildSdkSessionConfig(state),
+      disableResume: true,
+    });
     state.sdkSession = sdkSession;
     const events = await sdkSession.getMessages?.();
     if (events) {
@@ -1458,7 +1500,9 @@ function reasoningEffortForSdk(
   return undefined;
 }
 
-function assistantPhase(phase: string | undefined): "commentary" | "final_answer" {
+function assistantPhase(
+  phase: string | undefined,
+): "commentary" | "final_answer" {
   return phase === "thinking" || phase === "reasoning"
     ? "commentary"
     : "final_answer";
@@ -1466,7 +1510,9 @@ function assistantPhase(phase: string | undefined): "commentary" | "final_answer
 
 async function sdkAttachments(
   input: AgentSessionInputItem[],
-): Promise<import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]> {
+): Promise<
+  import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
+> {
   const attachments: NonNullable<
     import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
   > = [];
@@ -1488,9 +1534,11 @@ async function sdkAttachments(
 
 async function sdkAttachmentForImage(
   url: string,
-): Promise<NonNullable<
-  import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
->[number]> {
+): Promise<
+  NonNullable<
+    import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
+  >[number]
+> {
   const inline = inlineImageAttachment(url);
   if (inline) {
     return inline;
@@ -1500,9 +1548,11 @@ async function sdkAttachmentForImage(
 
 function inlineImageAttachment(
   url: string,
-): NonNullable<
-  import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
->[number] | null {
+):
+  | NonNullable<
+      import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
+    >[number]
+  | null {
   const trimmed = url.trim();
   const match = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/i.exec(trimmed);
   if (!match) {
@@ -1523,9 +1573,11 @@ function inlineImageAttachment(
 
 async function fetchImageAttachment(
   url: string,
-): Promise<NonNullable<
-  import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
->[number]> {
+): Promise<
+  NonNullable<
+    import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
+  >[number]
+> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -1533,7 +1585,9 @@ async function fetchImageAttachment(
     throw new Error(`Unsupported Copilot image URL: ${url}`);
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(`Unsupported Copilot image URL protocol: ${parsed.protocol}`);
+    throw new Error(
+      `Unsupported Copilot image URL protocol: ${parsed.protocol}`,
+    );
   }
   const response = await fetch(parsed);
   if (!response.ok) {
@@ -1620,9 +1674,7 @@ function buildCopilotPendingAction(
   };
 }
 
-function copilotPendingActionKind(
-  kind: unknown,
-): AgentPendingAction["kind"] {
+function copilotPendingActionKind(kind: unknown): AgentPendingAction["kind"] {
   if (kind === "shell") return "command";
   if (kind === "write") return "file_change";
   return "permissions";
@@ -1679,7 +1731,10 @@ function copilotPermissionDetail(request: Record<string, any>): string {
   if (typeof request.fullCommandText === "string") {
     return request.fullCommandText;
   }
-  if (typeof request.diff === "string" && typeof request.fileName === "string") {
+  if (
+    typeof request.diff === "string" &&
+    typeof request.fileName === "string"
+  ) {
     return `${request.intention ?? "Copilot wants to edit a file."}\n\n${request.fileName}\n\n${request.diff}`;
   }
   if (typeof request.path === "string") {
@@ -1707,10 +1762,16 @@ function copilotPermissionSummary(request: Record<string, any>): string {
   if (typeof request.toolTitle === "string" && request.toolTitle.length > 0) {
     return request.toolTitle;
   }
-  if (typeof request.toolDescription === "string" && request.toolDescription.length > 0) {
+  if (
+    typeof request.toolDescription === "string" &&
+    request.toolDescription.length > 0
+  ) {
     return request.toolDescription;
   }
-  if (typeof request.hookMessage === "string" && request.hookMessage.length > 0) {
+  if (
+    typeof request.hookMessage === "string" &&
+    request.hookMessage.length > 0
+  ) {
     return request.hookMessage;
   }
   return copilotPermissionTitle(request.kind);
@@ -1721,7 +1782,10 @@ function copilotApprovalTargets(
 ): NonNullable<AgentPendingAction["approval"]>["targets"] {
   switch (request.kind) {
     case "shell": {
-      const command = typeof request.fullCommandText === "string" ? request.fullCommandText : "";
+      const command =
+        typeof request.fullCommandText === "string"
+          ? request.fullCommandText
+          : "";
       if (!command) {
         return unknownApprovalTarget("Copilot shell request");
       }
@@ -1732,8 +1796,12 @@ function copilotApprovalTargets(
           identifiers: copilotCommandIdentifiers(request),
           possiblePaths: stringArray(request.possiblePaths),
           possibleUrls: copilotPossibleUrls(request),
-          intention: typeof request.intention === "string" ? request.intention : undefined,
-          warning: typeof request.warning === "string" ? request.warning : undefined,
+          intention:
+            typeof request.intention === "string"
+              ? request.intention
+              : undefined,
+          warning:
+            typeof request.warning === "string" ? request.warning : undefined,
         },
       ];
     }
@@ -1748,7 +1816,10 @@ function copilotApprovalTargets(
           path,
           access: "write",
           diff: typeof request.diff === "string" ? request.diff : undefined,
-          intention: typeof request.intention === "string" ? request.intention : undefined,
+          intention:
+            typeof request.intention === "string"
+              ? request.intention
+              : undefined,
         },
       ];
     }
@@ -1762,7 +1833,10 @@ function copilotApprovalTargets(
           type: "file",
           path,
           access: "read",
-          intention: typeof request.intention === "string" ? request.intention : undefined,
+          intention:
+            typeof request.intention === "string"
+              ? request.intention
+              : undefined,
         },
       ];
     }
@@ -1775,7 +1849,10 @@ function copilotApprovalTargets(
         {
           type: "url",
           url,
-          intention: typeof request.intention === "string" ? request.intention : undefined,
+          intention:
+            typeof request.intention === "string"
+              ? request.intention
+              : undefined,
         },
       ];
     }
@@ -1788,9 +1865,18 @@ function copilotApprovalTargets(
         {
           type: "tool",
           name,
-          title: typeof request.toolTitle === "string" ? request.toolTitle : undefined,
-          serverName: typeof request.serverName === "string" ? request.serverName : undefined,
-          readOnly: typeof request.readOnly === "boolean" ? request.readOnly : undefined,
+          title:
+            typeof request.toolTitle === "string"
+              ? request.toolTitle
+              : undefined,
+          serverName:
+            typeof request.serverName === "string"
+              ? request.serverName
+              : undefined,
+          readOnly:
+            typeof request.readOnly === "boolean"
+              ? request.readOnly
+              : undefined,
           args: request.args,
         },
       ];
@@ -1805,7 +1891,9 @@ function copilotApprovalTargets(
           type: "tool",
           name,
           description:
-            typeof request.toolDescription === "string" ? request.toolDescription : undefined,
+            typeof request.toolDescription === "string"
+              ? request.toolDescription
+              : undefined,
           args: request.args,
         },
       ];
@@ -1815,19 +1903,32 @@ function copilotApprovalTargets(
         {
           type: "memory",
           fact: typeof request.fact === "string" ? request.fact : undefined,
-          subject: typeof request.subject === "string" ? request.subject : undefined,
-          action: typeof request.action === "string" ? request.action : undefined,
-          direction: typeof request.direction === "string" ? request.direction : undefined,
-          reason: typeof request.reason === "string" ? request.reason : undefined,
-          citations: typeof request.citations === "string" ? request.citations : undefined,
+          subject:
+            typeof request.subject === "string" ? request.subject : undefined,
+          action:
+            typeof request.action === "string" ? request.action : undefined,
+          direction:
+            typeof request.direction === "string"
+              ? request.direction
+              : undefined,
+          reason:
+            typeof request.reason === "string" ? request.reason : undefined,
+          citations:
+            typeof request.citations === "string"
+              ? request.citations
+              : undefined,
         },
       ];
     case "hook":
       return [
         {
           type: "hook",
-          toolName: typeof request.toolName === "string" ? request.toolName : undefined,
-          message: typeof request.hookMessage === "string" ? request.hookMessage : undefined,
+          toolName:
+            typeof request.toolName === "string" ? request.toolName : undefined,
+          message:
+            typeof request.hookMessage === "string"
+              ? request.hookMessage
+              : undefined,
           args: request.toolArgs,
         },
       ];
@@ -1852,7 +1953,10 @@ function copilotCommandIdentifiers(request: Record<string, any>): string[] {
         ? (command as Record<string, unknown>).identifier
         : null,
     )
-    .filter((identifier): identifier is string => typeof identifier === "string" && identifier.length > 0);
+    .filter(
+      (identifier): identifier is string =>
+        typeof identifier === "string" && identifier.length > 0,
+    );
 }
 
 function copilotPossibleUrls(request: Record<string, any>): string[] {
@@ -1875,7 +1979,9 @@ function copilotPossibleUrls(request: Record<string, any>): string[] {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
+    ? value.filter(
+        (item): item is string => typeof item === "string" && item.length > 0,
+      )
     : [];
 }
 
@@ -1886,7 +1992,9 @@ function canApproveCopilotPermissionForSession(
     return request.canOfferSessionApproval === true;
   }
   if (request.kind === "mcp") {
-    return typeof request.serverName === "string" && request.serverName.length > 0;
+    return (
+      typeof request.serverName === "string" && request.serverName.length > 0
+    );
   }
   if (request.kind === "custom-tool") {
     return typeof request.toolName === "string" && request.toolName.length > 0;
@@ -1911,7 +2019,9 @@ function buildCopilotPermissionResult(
   return null;
 }
 
-function copilotSessionApproval(request: unknown): CopilotSessionApproval | null {
+function copilotSessionApproval(
+  request: unknown,
+): CopilotSessionApproval | null {
   if (!request || typeof request !== "object") {
     return null;
   }
@@ -1921,8 +2031,9 @@ function copilotSessionApproval(request: unknown): CopilotSessionApproval | null
       const commandIdentifiers = Array.isArray(typed.commands)
         ? typed.commands
             .map((command: Record<string, unknown>) => command.identifier)
-            .filter((identifier: unknown): identifier is string =>
-              typeof identifier === "string" && identifier.length > 0,
+            .filter(
+              (identifier: unknown): identifier is string =>
+                typeof identifier === "string" && identifier.length > 0,
             )
         : [];
       return commandIdentifiers.length > 0
@@ -1934,7 +2045,10 @@ function copilotSessionApproval(request: unknown): CopilotSessionApproval | null
     case "write":
       return { kind: "write" };
     case "mcp":
-      if (typeof typed.serverName !== "string" || typed.serverName.length === 0) {
+      if (
+        typeof typed.serverName !== "string" ||
+        typed.serverName.length === 0
+      ) {
         return null;
       }
       return {
@@ -1972,7 +2086,9 @@ function sdkSessionToThread(
     updatedAt: secondsFromDate(session.modifiedTime, nowSeconds()),
     source: "copilot",
     path: null,
-    status: local?.thread.status ? { ...local.thread.status } : { type: "idle" },
+    status: local?.thread.status
+      ? { ...local.thread.status }
+      : { type: "idle" },
     gitInfo: {
       sha: null,
       branch: session.context?.branch ?? null,
@@ -2005,7 +2121,10 @@ function parseSdkSessionEvents(
     updatedAt = timestamp;
     const data = (event.data ?? {}) as Record<string, any>;
 
-    if (event.type === "session.model_change" && typeof data.newModel === "string") {
+    if (
+      event.type === "session.model_change" &&
+      typeof data.newModel === "string"
+    ) {
       model = data.newModel;
       continue;
     }
@@ -2027,7 +2146,10 @@ function parseSdkSessionEvents(
       continue;
     }
 
-    if (event.type === "assistant.message" && typeof data.content === "string") {
+    if (
+      event.type === "assistant.message" &&
+      typeof data.content === "string"
+    ) {
       if (typeof data.model === "string") model = data.model;
       const text = data.content.trim();
       if (text.length > 0) {
@@ -2090,7 +2212,8 @@ function parseSdkSessionEvents(
         seq: existingTool?.seq ?? seq++,
         status: data.success === false ? "failed" : "completed",
         toolName: existingTool?.toolName ?? copilotToolName(data.toolName),
-        title: existingTool?.title ?? formatCopilotToolCommand(data.toolName, null),
+        title:
+          existingTool?.title ?? formatCopilotToolCommand(data.toolName, null),
         args: existingTool?.args ?? data.arguments ?? null,
         output,
         result: data.result ?? data.error ?? null,
@@ -2116,7 +2239,9 @@ function parseSdkSessionEvents(
 
   return {
     messages,
-    activities: [...activities.values()].sort((left, right) => left.seq - right.seq),
+    activities: [...activities.values()].sort(
+      (left, right) => left.seq - right.seq,
+    ),
     runtime,
     nextSeq: seq,
   };
@@ -2139,7 +2264,10 @@ function extractCopilotToolOutput(result: unknown): string | null {
   return typeof content === "string" ? content : JSON.stringify(result);
 }
 
-function secondsFromDate(value: Date | string | undefined, fallback: number): number {
+function secondsFromDate(
+  value: Date | string | undefined,
+  fallback: number,
+): number {
   const millis = millisFromDateLike(value);
   return millis == null ? fallback : millis / 1000;
 }
@@ -2156,8 +2284,10 @@ function mergeRuntime(
     model: string | null;
     mode: string | null;
     reasoningEffort: string | null;
+    approvalPolicy?: string | null;
   },
   configuredModel: string | null,
+  allowAll = false,
 ): SessionRuntimeSummary {
   const model =
     overrides.model ??
@@ -2166,13 +2296,19 @@ function mergeRuntime(
     DEFAULT_SIDEMESH_COPILOT_MODEL;
   const reasoningEffort =
     overrides.reasoningEffort ?? runtime?.reasoningEffort ?? null;
-  const mode = normalizeCopilotSessionMode(overrides.mode) ?? runtime?.mode ?? null;
+  const approvalPolicy =
+    normalizeCopilotApprovalPolicy(overrides.approvalPolicy) ??
+    normalizeCopilotApprovalPolicy(runtime?.approvalPolicy) ??
+    (allowAll ? "never" : "on-request");
+  const mode =
+    normalizeCopilotSessionMode(overrides.mode) ?? runtime?.mode ?? null;
   return {
     ...(runtime ?? {}),
     modelProvider: "copilot",
     ...(model ? { model } : {}),
     ...(mode ? { mode } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
+    ...(approvalPolicy ? { approvalPolicy } : {}),
     updatedAt: Date.now(),
   };
 }
@@ -2182,19 +2318,35 @@ function normalizeStoredRuntime(
 ): SessionRuntimeSummary | null {
   if (!runtime) return null;
   const normalizedMode = normalizeCopilotSessionMode(runtime.mode);
+  const normalizedApprovalPolicy = normalizeCopilotApprovalPolicy(
+    runtime.approvalPolicy,
+  );
   if (runtime.model === "gpt-5.2" && runtime.modelProvider === "copilot") {
-    const { model: _model, mode: _mode, ...rest } = runtime;
+    const {
+      model: _model,
+      mode: _mode,
+      approvalPolicy: _approvalPolicy,
+      ...rest
+    } = runtime;
     return {
       ...rest,
       modelProvider: "copilot",
       ...(normalizedMode ? { mode: normalizedMode } : {}),
+      ...(normalizedApprovalPolicy
+        ? { approvalPolicy: normalizedApprovalPolicy }
+        : {}),
     };
   }
-  const { mode: _mode, ...rest } = runtime;
+  const { mode: _mode, approvalPolicy: _approvalPolicy, ...rest } = runtime;
   return {
     ...rest,
     modelProvider: "copilot",
     ...(normalizedMode ? { mode: normalizedMode } : {}),
+    ...(normalizedApprovalPolicy
+      ? {
+          approvalPolicy: normalizedApprovalPolicy,
+        }
+      : {}),
   };
 }
 
@@ -2207,6 +2359,27 @@ function normalizeCopilotSessionMode(
   return COPILOT_SESSION_MODES.includes(value as CopilotSdkSessionMode)
     ? (value as CopilotSdkSessionMode)
     : null;
+}
+
+function normalizeCopilotApprovalPolicy(
+  value: unknown,
+): "on-request" | "never" | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return COPILOT_APPROVAL_POLICIES.includes(value as "on-request" | "never")
+    ? (value as "on-request" | "never")
+    : null;
+}
+
+function approvalPolicyForSession(
+  session: CopilotSessionState | undefined,
+  allowAll: boolean,
+): "on-request" | "never" {
+  return (
+    normalizeCopilotApprovalPolicy(session?.runtime?.approvalPolicy) ??
+    (allowAll ? "never" : "on-request")
+  );
 }
 
 function normalizeCopilotSkill(
@@ -2316,7 +2489,9 @@ function inputDisplayText(input: AgentSessionInputItem[]): string {
 }
 
 function countImageInput(input: AgentSessionInputItem[]): number {
-  return input.filter((item) => item.type === "image" || item.type === "localImage").length;
+  return input.filter(
+    (item) => item.type === "image" || item.type === "localImage",
+  ).length;
 }
 
 function hasImageInput(input: AgentSessionInputItem[]): boolean {
