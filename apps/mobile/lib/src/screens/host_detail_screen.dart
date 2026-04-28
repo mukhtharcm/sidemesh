@@ -465,17 +465,48 @@ class _NodeCard extends StatelessWidget {
   }
 }
 
-class _ProviderContractCard extends StatelessWidget {
+class _ProviderContractCard extends StatefulWidget {
   const _ProviderContractCard({required this.node});
 
   final NodeInfo node;
 
   @override
+  State<_ProviderContractCard> createState() => _ProviderContractCardState();
+}
+
+class _ProviderContractCardState extends State<_ProviderContractCard> {
+  late String _selectedProviderKind = _initialProviderKind(widget.node);
+
+  @override
+  void didUpdateWidget(covariant _ProviderContractCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.node == widget.node) {
+      return;
+    }
+    final supportedKinds = widget.node.supportedProviders
+        .map((provider) => provider.kind)
+        .toSet();
+    if (
+        _selectedProviderKind.isEmpty ||
+        !supportedKinds.contains(_selectedProviderKind)) {
+      _selectedProviderKind = _initialProviderKind(widget.node);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final node = widget.node;
     final colors = context.colors;
-    final providerGroups = _capabilityGroups(node.providerCapabilities);
+    final selectedSummary = _selectedProviderSummary(node, _selectedProviderKind);
+    final providerGroups = _capabilityGroups(
+      node.capabilitiesForProvider(_selectedProviderKind),
+    );
     final hostGroups = _capabilityGroups(node.hostCapabilities);
     final supportedProviders = node.supportedProviders;
+    final selectedDisplayName = _providerDisplayName(node, selectedSummary);
+    final selectedVersion = _providerDisplayVersion(node, selectedSummary);
+    final selectedCommand = _providerCommand(node, selectedSummary);
+    final isViewingActiveProvider = _selectedProviderKind == node.provider;
 
     return MeshCard(
       tone: MeshCardTone.muted,
@@ -503,7 +534,7 @@ class _ProviderContractCard extends StatelessWidget {
             ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
           ),
           subtitle: Text(
-            '${node.providerDisplayName} - ${node.providerDisplayVersion}',
+            '$selectedDisplayName - $selectedVersion',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: monoStyle(color: colors.textSecondary, fontSize: 11),
@@ -518,12 +549,21 @@ class _ProviderContractCard extends StatelessWidget {
                   MeshPill(
                     label: 'active: ${node.provider}',
                     icon: Icons.radio_button_checked_rounded,
-                    tone: MeshPillTone.accent,
+                    tone: isViewingActiveProvider
+                        ? MeshPillTone.success
+                        : MeshPillTone.neutral,
                     mono: true,
                   ),
-                  if (node.providerConfig.command != null)
+                  if (!isViewingActiveProvider)
                     MeshPill(
-                      label: 'command: ${node.providerConfig.command}',
+                      label: 'viewing: $_selectedProviderKind',
+                      icon: Icons.visibility_rounded,
+                      tone: MeshPillTone.accent,
+                      mono: true,
+                    ),
+                  if (selectedCommand != null)
+                    MeshPill(
+                      label: 'command: $selectedCommand',
                       icon: Icons.terminal_rounded,
                       tone: MeshPillTone.neutral,
                       mono: true,
@@ -543,13 +583,20 @@ class _ProviderContractCard extends StatelessWidget {
               const SizedBox(height: 14),
               _ProviderDefinitionList(
                 currentProvider: node.provider,
+                selectedProvider: _selectedProviderKind,
                 providers: supportedProviders,
+                onSelect: (provider) {
+                  setState(() {
+                    _selectedProviderKind = provider.kind;
+                  });
+                },
               ),
             ],
             const SizedBox(height: 14),
             _CapabilityMatrix(
               title: 'Provider-owned capabilities',
-              emptyText: 'This daemon did not report provider capabilities.',
+              emptyText:
+                  'This provider did not report any provider-owned capabilities.',
               groups: providerGroups,
             ),
             const SizedBox(height: 12),
@@ -563,16 +610,79 @@ class _ProviderContractCard extends StatelessWidget {
       ),
     );
   }
+
+  static String _initialProviderKind(NodeInfo node) {
+    if (node.supportedProviders.any((provider) => provider.kind == node.provider)) {
+      return node.provider;
+    }
+    if (node.supportedProviders.isNotEmpty) {
+      return node.supportedProviders.first.kind;
+    }
+    return node.provider;
+  }
+
+  static ProviderDefinitionSummary _selectedProviderSummary(
+    NodeInfo node,
+    String selectedProviderKind,
+  ) {
+    return node.providerSummary(selectedProviderKind);
+  }
+
+  static String _providerDisplayName(
+    NodeInfo node,
+    ProviderDefinitionSummary summary,
+  ) {
+    if (summary.displayName.isNotEmpty) {
+      return summary.displayName;
+    }
+    if (summary.kind == node.provider || summary.kind.isEmpty) {
+      return node.providerDisplayName;
+    }
+    return summary.kind;
+  }
+
+  static String _providerDisplayVersion(
+    NodeInfo node,
+    ProviderDefinitionSummary summary,
+  ) {
+    if (summary.version.isNotEmpty) {
+      return summary.version;
+    }
+    if (summary.kind == node.provider || summary.kind.isEmpty) {
+      return node.providerDisplayVersion;
+    }
+    return 'version unknown';
+  }
+
+  static String? _providerCommand(
+    NodeInfo node,
+    ProviderDefinitionSummary summary,
+  ) {
+    if (summary.config.command != null) {
+      return summary.config.command;
+    }
+    if (summary.defaultCommand.isNotEmpty) {
+      return summary.defaultCommand;
+    }
+    if (summary.kind == node.provider || summary.kind.isEmpty) {
+      return node.providerConfig.command;
+    }
+    return null;
+  }
 }
 
 class _ProviderDefinitionList extends StatelessWidget {
   const _ProviderDefinitionList({
     required this.currentProvider,
+    required this.selectedProvider,
     required this.providers,
+    required this.onSelect,
   });
 
   final String currentProvider;
+  final String selectedProvider;
   final List<ProviderDefinitionSummary> providers;
+  final ValueChanged<ProviderDefinitionSummary> onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -587,6 +697,13 @@ class _ProviderDefinitionList extends StatelessWidget {
             fontWeight: FontWeight.w800,
           ),
         ),
+        const SizedBox(height: 4),
+        Text(
+          'Tap a provider to inspect its contract.',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
+        ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -594,20 +711,63 @@ class _ProviderDefinitionList extends StatelessWidget {
           children: providers
               .map((provider) {
                 final active = provider.kind == currentProvider;
-                return MeshPill(
+                final selected = provider.kind == selectedProvider;
+                return _ProviderSelectPill(
                   label: active
                       ? '${provider.displayName} active'
                       : provider.displayName,
                   icon: active
                       ? Icons.check_circle_rounded
                       : Icons.circle_outlined,
-                  tone: active ? MeshPillTone.success : MeshPillTone.neutral,
-                  mono: true,
+                  tone: selected
+                      ? (active
+                            ? MeshPillTone.success
+                            : MeshPillTone.accent)
+                      : MeshPillTone.neutral,
+                  selected: selected,
+                  onTap: () => onSelect(provider),
                 );
               })
               .toList(growable: false),
         ),
       ],
+    );
+  }
+}
+
+class _ProviderSelectPill extends StatelessWidget {
+  const _ProviderSelectPill({
+    required this.label,
+    required this.icon,
+    required this.tone,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final MeshPillTone tone;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedScale(
+          duration: const Duration(milliseconds: 140),
+          scale: selected ? 1.0 : 0.985,
+          child: MeshPill(
+            label: label,
+            icon: icon,
+            tone: tone,
+            mono: true,
+          ),
+        ),
+      ),
     );
   }
 }
