@@ -19,17 +19,24 @@ import type {
   AgentProviderKind,
   NodeConfig,
 } from "./types.js";
-import { listAgentProviderDefinitionSummaries } from "./provider-registry.js";
+import { listSetupAgentProviderDefinitionSummaries } from "./provider-registry.js";
 
 export interface SetupOptions {
   configPath?: string | null;
+  includeDevProviders?: boolean;
 }
 
 export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> {
   const persisted = await readResolvedPersistedConfig({
     configPath: options.configPath,
   });
-  const definitions = listAgentProviderDefinitionSummaries();
+  const definitions = listSetupAgentProviderDefinitionSummaries({
+    includeDev: options.includeDevProviders,
+    includeKinds:
+      persisted.value?.providers.map(
+        (provider) => provider.kind as AgentProviderKind,
+      ) ?? [],
+  });
   const existing = persisted.value;
 
   intro("Sidemesh setup");

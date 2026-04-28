@@ -7,7 +7,7 @@ provider capabilities so more coding agents can be added behind the same API.
 
 This repo contains:
 
-- a Node daemon that owns one local agent provider process
+- a Node daemon that can expose one or more local agent providers
 - a Flutter client that can store multiple hosts and connect to each one manually
 - a mobile/desktop control surface for chat, approvals, session policy, workspace files, and live activity
 
@@ -38,6 +38,10 @@ npm run status          # resolved config + local daemon health
 npm run pair            # host URL + token for the mobile app
 npm run daemon          # start the server
 ```
+
+`npm run setup` shows public providers by default. If you need the deterministic
+fake provider for local contract testing, run `npm run setup -- --dev` or use
+the raw environment-variable flow shown below.
 
 Or directly:
 
@@ -155,6 +159,9 @@ npm run doctor
 npm run daemon
 npm run pair
 ```
+
+Run `npm run pair` from a second terminal after the daemon is up, since
+`npm run daemon` is a long-running process.
 
 If you prefer raw env vars, this still works:
 
