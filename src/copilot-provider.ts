@@ -60,6 +60,7 @@ import type {
   SessionMessage,
   SessionMessageAttachment,
   SessionRuntimeSummary,
+  ToolActivity,
   ThreadRecord,
   TurnRecord,
 } from "./types.js";
@@ -868,6 +869,16 @@ export class CopilotAgentProvider
         mode,
         updatedAt: Date.now(),
       };
+      this.upsertAndEmitActivity(
+        session,
+        active?.turnId ?? null,
+        buildCopilotModeChangeActivity({
+          activityId: copilotModeActivityId(event),
+          turnId: active?.turnId ?? null,
+          newMode: mode,
+          previousMode: event.data.previousMode,
+        }),
+      );
       void this.persistSoon();
       return;
     }
@@ -954,6 +965,11 @@ export class CopilotAgentProvider
         output: null,
         result: null,
         isError: null,
+        ...inferCopilotToolSemantics(
+          event.data.toolName,
+          event.data.arguments,
+          null,
+        ),
       });
       return;
     }
@@ -979,6 +995,7 @@ export class CopilotAgentProvider
     }
 
     if (event.type === "tool.execution_complete") {
+      const completeData = event.data as unknown as Record<string, unknown>;
       const existing = session.activities.get(event.data.toolCallId);
       const existingTool = existing?.type === "tool" ? existing : null;
       const output =
@@ -991,12 +1008,25 @@ export class CopilotAgentProvider
         type: "tool",
         turnId: active?.turnId ?? null,
         status: event.data.success ? "completed" : "failed",
-        toolName: existingTool?.toolName ?? "tool",
-        title: existingTool?.title ?? "tool",
-        args: existingTool?.args ?? null,
+        toolName: existingTool?.toolName ?? copilotToolName(completeData.toolName),
+        title:
+          existingTool?.title ??
+          formatCopilotToolCommand(
+            completeData.toolName,
+            completeData.arguments ?? event.data.result ?? event.data.error,
+          ),
+        args: existingTool?.args ?? completeData.arguments ?? null,
         output,
         result: event.data.result ?? event.data.error ?? null,
         isError: event.data.success ? false : true,
+        ...mergeCopilotToolSemantics(
+          existingTool,
+          inferCopilotToolSemantics(
+            completeData.toolName,
+            existingTool?.args ?? completeData.arguments,
+            event.data.result ?? event.data.error ?? null,
+          ),
+        ),
       });
     }
   }
@@ -2452,7 +2482,21 @@ function parseSdkSessionEvents(
     }
 
     if (event.type === "session.mode_changed") {
-      mode = normalizeCopilotSessionMode(data.newMode) ?? mode;
+      const nextMode = normalizeCopilotSessionMode(data.newMode);
+      if (nextMode) {
+        mode = nextMode;
+        const activity = buildCopilotModeChangeActivity({
+          activityId: copilotModeActivityId(event, seq),
+          turnId: null,
+          newMode: nextMode,
+          previousMode: data.previousMode,
+        });
+        activities.set(activity.id, {
+          ...activity,
+          createdAt: timestamp,
+          seq: seq++,
+        });
+      }
       continue;
     }
 
@@ -2510,6 +2554,7 @@ function parseSdkSessionEvents(
         output: null,
         result: null,
         isError: null,
+        ...inferCopilotToolSemantics(data.toolName, data.arguments, null),
       });
       continue;
     }
@@ -2540,6 +2585,14 @@ function parseSdkSessionEvents(
         output,
         result: data.result ?? data.error ?? null,
         isError: data.success === false,
+        ...mergeCopilotToolSemantics(
+          existingTool,
+          inferCopilotToolSemantics(
+            data.toolName,
+            existingTool?.args ?? data.arguments,
+            data.result ?? data.error ?? null,
+          ),
+        ),
       });
     }
   }
@@ -2584,6 +2637,326 @@ function extractCopilotToolOutput(result: unknown): string | null {
   const data = result as Record<string, unknown>;
   const content = data.detailedContent ?? data.content ?? data.message;
   return typeof content === "string" ? content : JSON.stringify(result);
+}
+
+type CopilotToolSemanticFields = Pick<
+  ToolActivity,
+  | "toolCategory"
+  | "toolAction"
+  | "toolTarget"
+  | "toolTargets"
+  | "toolUrl"
+  | "toolQuery"
+  | "toolMode"
+>;
+
+function copilotModeActivityId(
+  event: CopilotSdkSessionEvent,
+  fallbackSeq?: number,
+): string {
+  if (typeof event.id === "string" && event.id.trim().length > 0) {
+    return `copilot-mode:${event.id.trim()}`;
+  }
+  if (typeof fallbackSeq === "number") {
+    return `copilot-mode:${fallbackSeq}`;
+  }
+  const stamp = millisFromDateLike(event.timestamp) ?? Date.now();
+  return `copilot-mode:${stamp}`;
+}
+
+function buildCopilotModeChangeActivity(options: {
+  activityId: string;
+  turnId: string | null;
+  newMode: CopilotSdkSessionMode;
+  previousMode: unknown;
+}): AgentSessionActivityDraft {
+  const previousMode = normalizeCopilotSessionMode(options.previousMode);
+  return {
+    id: options.activityId,
+    type: "tool",
+    turnId: options.turnId,
+    status: "completed",
+    toolName: "session.mode",
+    title: `Switched to ${formatCopilotModeLabel(options.newMode)} mode`,
+    args: {
+      previousMode,
+      newMode: options.newMode,
+    },
+    output: null,
+    result: {
+      mode: options.newMode,
+    },
+    isError: false,
+    toolCategory: "session",
+    toolAction: "mode_change",
+    toolTarget: options.newMode,
+    toolTargets: [],
+    toolUrl: null,
+    toolQuery: null,
+    toolMode: options.newMode,
+  };
+}
+
+function inferCopilotToolSemantics(
+  toolName: unknown,
+  args: unknown,
+  result: unknown,
+): CopilotToolSemanticFields {
+  const normalizedName = copilotToolName(toolName).toLowerCase();
+  const typedArgs = asRecord(args);
+  const typedResult = asRecord(result);
+  const targets = collectToolTargets(typedArgs, typedResult);
+  const primaryTarget = targets[0] ?? null;
+  const url = readFirstString(
+    typedArgs,
+    ["url", "uri", "href", "targetUrl"],
+    typedResult,
+  );
+  const query = readFirstString(
+    typedArgs,
+    ["query", "pattern", "text", "needle"],
+    typedResult,
+  );
+  const command = readFirstString(
+    typedArgs,
+    ["command", "cmd", "fullCommandText", "shellCommand"],
+    typedResult,
+  );
+
+  if (
+    normalizedName === "view" ||
+    normalizedName === "read" ||
+    normalizedName === "open" ||
+    normalizedName === "cat" ||
+    normalizedName === "read_file"
+  ) {
+    return {
+      toolCategory: "filesystem",
+      toolAction: "read",
+      toolTarget: primaryTarget,
+      toolTargets: targets,
+      toolUrl: null,
+      toolQuery: null,
+      toolMode: null,
+    };
+  }
+
+  if (
+    normalizedName === "glob" ||
+    normalizedName === "ls" ||
+    normalizedName === "list" ||
+    normalizedName === "dir" ||
+    normalizedName === "find"
+  ) {
+    return {
+      toolCategory: "filesystem",
+      toolAction: "list",
+      toolTarget: primaryTarget,
+      toolTargets: targets,
+      toolUrl: null,
+      toolQuery: query,
+      toolMode: null,
+    };
+  }
+
+  if (
+    normalizedName === "grep" ||
+    normalizedName === "search" ||
+    normalizedName === "rg" ||
+    normalizedName === "find_in_files"
+  ) {
+    return {
+      toolCategory: "filesystem",
+      toolAction: "search",
+      toolTarget: primaryTarget,
+      toolTargets: targets,
+      toolUrl: null,
+      toolQuery: query,
+      toolMode: null,
+    };
+  }
+
+  if (
+    normalizedName === "edit" ||
+    normalizedName === "write" ||
+    normalizedName === "replace" ||
+    normalizedName === "create" ||
+    normalizedName === "delete" ||
+    normalizedName === "move" ||
+    normalizedName === "rename" ||
+    normalizedName === "apply_patch"
+  ) {
+    return {
+      toolCategory: "filesystem",
+      toolAction: "write",
+      toolTarget: primaryTarget,
+      toolTargets: targets,
+      toolUrl: null,
+      toolQuery: null,
+      toolMode: null,
+    };
+  }
+
+  if (
+    normalizedName === "fetch" ||
+    normalizedName === "open_url" ||
+    normalizedName === "openurl" ||
+    normalizedName === "request" ||
+    normalizedName === "browse"
+  ) {
+    return {
+      toolCategory: "network",
+      toolAction: "fetch",
+      toolTarget: url ?? primaryTarget,
+      toolTargets: targets,
+      toolUrl: url,
+      toolQuery: null,
+      toolMode: null,
+    };
+  }
+
+  if (normalizedName === "web_search" || normalizedName === "search_web") {
+    return {
+      toolCategory: "network",
+      toolAction: "search",
+      toolTarget: query ?? primaryTarget,
+      toolTargets: targets,
+      toolUrl: url,
+      toolQuery: query,
+      toolMode: null,
+    };
+  }
+
+  if (
+    normalizedName === "run" ||
+    normalizedName === "shell" ||
+    normalizedName === "bash" ||
+    normalizedName === "terminal" ||
+    normalizedName === "exec" ||
+    normalizedName === "command"
+  ) {
+    return {
+      toolCategory: "command",
+      toolAction: "invoke",
+      toolTarget: command ?? primaryTarget,
+      toolTargets: targets,
+      toolUrl: null,
+      toolQuery: null,
+      toolMode: null,
+    };
+  }
+
+  return {
+    toolCategory: "unknown",
+    toolAction: "invoke",
+    toolTarget: primaryTarget,
+    toolTargets: targets,
+    toolUrl: url,
+    toolQuery: query,
+    toolMode: null,
+  };
+}
+
+function mergeCopilotToolSemantics(
+  existing: ToolActivity | null,
+  inferred: CopilotToolSemanticFields,
+): CopilotToolSemanticFields {
+  const inferredCategory =
+    inferred.toolCategory === "unknown" && existing?.toolCategory
+      ? existing.toolCategory
+      : inferred.toolCategory;
+  const inferredAction =
+    inferred.toolCategory === "unknown" &&
+    inferred.toolAction === "invoke" &&
+    existing?.toolAction
+      ? existing.toolAction
+      : inferred.toolAction;
+  return {
+    toolCategory: inferredCategory ?? existing?.toolCategory ?? null,
+    toolAction: inferredAction ?? existing?.toolAction ?? null,
+    toolTarget: inferred.toolTarget ?? existing?.toolTarget ?? null,
+    toolTargets:
+      inferred.toolTargets.length > 0
+        ? inferred.toolTargets
+        : existing?.toolTargets ?? [],
+    toolUrl: inferred.toolUrl ?? existing?.toolUrl ?? null,
+    toolQuery: inferred.toolQuery ?? existing?.toolQuery ?? null,
+    toolMode: inferred.toolMode ?? existing?.toolMode ?? null,
+  };
+}
+
+function formatCopilotModeLabel(mode: CopilotSdkSessionMode): string {
+  switch (mode) {
+    case "interactive":
+      return "interactive";
+    case "plan":
+      return "plan";
+    case "autopilot":
+      return "autopilot";
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function collectToolTargets(
+  args: Record<string, unknown> | null,
+  result: Record<string, unknown> | null,
+): string[] {
+  const values = new Set<string>();
+  for (const source of [args, result]) {
+    if (!source) {
+      continue;
+    }
+    for (const key of [
+      "path",
+      "paths",
+      "file",
+      "fileName",
+      "filename",
+      "targetPath",
+      "cwd",
+      "directory",
+      "dir",
+    ]) {
+      const raw = source[key];
+      if (typeof raw === "string" && raw.trim().length > 0) {
+        values.add(raw.trim());
+        continue;
+      }
+      if (Array.isArray(raw)) {
+        for (const entry of raw) {
+          if (typeof entry === "string" && entry.trim().length > 0) {
+            values.add(entry.trim());
+          }
+        }
+      }
+    }
+  }
+  return [...values];
+}
+
+function readFirstString(
+  first: Record<string, unknown> | null,
+  keys: string[],
+  second?: Record<string, unknown> | null,
+): string | null {
+  for (const source of [first, second ?? null]) {
+    if (!source) {
+      continue;
+    }
+    for (const key of keys) {
+      const value = source[key];
+      if (typeof value === "string" && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+  }
+  return null;
 }
 
 function secondsFromDate(

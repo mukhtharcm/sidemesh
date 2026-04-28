@@ -440,15 +440,13 @@ class LiveActivityService {
       );
     }
     if (activity.isTool) {
-      final title = _nonEmpty(
-        activity.toolTitle,
-        fallback: _nonEmpty(activity.toolName, fallback: 'Tool running'),
-      );
+      final title = _toolActivityDetail(activity, sessionCwd);
+      final toolHeadline = _toolActivityHeadline(activity);
       return _LiveActivitySummary(
-        headline: 'Running tool',
+        headline: toolHeadline,
         detail: _shorten(title, 96),
         status: 'tool',
-        badge: 'TOOL',
+        badge: _toolActivityBadge(activity),
       );
     }
     if (activity.isWebSearch) {
@@ -511,6 +509,67 @@ class LiveActivityService {
     final targetUrl = _nonEmpty(activity.targetUrl);
     if (targetUrl.isNotEmpty) return _shorten(targetUrl, 96);
     return 'Live web search is running.';
+  }
+
+  String _toolActivityHeadline(SessionActivity activity) {
+    if (activity.toolAction == 'mode_change') {
+      return 'Changing mode';
+    }
+    if (activity.toolCategory == 'filesystem') {
+      return switch (activity.toolAction) {
+        'read' => 'Reading file',
+        'write' => 'Editing file',
+        'list' => 'Listing files',
+        'search' => 'Searching files',
+        _ => 'Using filesystem tool',
+      };
+    }
+    if (activity.toolCategory == 'network') {
+      return activity.toolAction == 'search' ? 'Searching web' : 'Fetching page';
+    }
+    if (activity.toolCategory == 'command') {
+      return 'Running command tool';
+    }
+    return 'Running tool';
+  }
+
+  String _toolActivityBadge(SessionActivity activity) {
+    if (activity.toolAction == 'mode_change') {
+      return 'MODE';
+    }
+    if (activity.toolCategory == 'filesystem') {
+      return 'FILE';
+    }
+    if (activity.toolCategory == 'network') {
+      return 'WEB';
+    }
+    if (activity.toolCategory == 'command') {
+      return 'CMD';
+    }
+    return 'TOOL';
+  }
+
+  String _toolActivityDetail(SessionActivity activity, String sessionCwd) {
+    final mode = _nonEmpty(activity.toolMode);
+    if (mode.isNotEmpty) {
+      return 'Switched to $mode mode';
+    }
+    final query = _nonEmpty(activity.toolQuery);
+    if (query.isNotEmpty) {
+      return query;
+    }
+    final url = _nonEmpty(activity.toolUrl);
+    if (url.isNotEmpty) {
+      return _shorten(url, 96);
+    }
+    final target = _nonEmpty(activity.toolTarget);
+    if (target.isNotEmpty) {
+      return _relativePath(target, sessionCwd);
+    }
+    return _nonEmpty(
+      activity.toolTitle,
+      fallback: _nonEmpty(activity.toolName, fallback: 'Tool running'),
+    );
   }
 
   bool _isTerminalActivity(SessionActivity activity) {
