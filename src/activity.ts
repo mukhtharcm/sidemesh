@@ -148,6 +148,13 @@ export function buildActivityFromThreadItem(
       output: truncateNullableText(asString(item.output), MAX_COMMAND_OUTPUT_CHARS),
       result: item.result ?? null,
       isError: typeof item.isError === "boolean" ? item.isError : null,
+      toolCategory: normalizeToolCategory(item.toolCategory),
+      toolAction: normalizeToolAction(item.toolAction),
+      toolTarget: asString(item.toolTarget),
+      toolTargets: asStringArray(item.toolTargets),
+      toolUrl: asString(item.toolUrl),
+      toolQuery: asString(item.toolQuery),
+      toolMode: asString(item.toolMode),
     };
   }
 
@@ -223,6 +230,16 @@ export function mergeActivity(
       output: incoming.output ?? existingTool.output,
       result: incoming.result ?? existingTool.result,
       isError: incoming.isError ?? existingTool.isError,
+      toolCategory: incoming.toolCategory ?? existingTool.toolCategory,
+      toolAction: incoming.toolAction ?? existingTool.toolAction,
+      toolTarget: incoming.toolTarget ?? existingTool.toolTarget,
+      toolTargets:
+        incoming.toolTargets.length > 0
+          ? incoming.toolTargets
+          : existingTool.toolTargets,
+      toolUrl: incoming.toolUrl ?? existingTool.toolUrl,
+      toolQuery: incoming.toolQuery ?? existingTool.toolQuery,
+      toolMode: incoming.toolMode ?? existingTool.toolMode,
     };
   }
 
@@ -702,6 +719,37 @@ function normalizeChangeKind(value: unknown): SessionActivityChange["kind"] | nu
     return value;
   }
   return null;
+}
+
+function normalizeToolCategory(value: unknown): ToolActivity["toolCategory"] {
+  switch (value) {
+    case "filesystem":
+    case "network":
+    case "command":
+    case "session":
+    case "memory":
+    case "task":
+    case "unknown":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function normalizeToolAction(value: unknown): ToolActivity["toolAction"] {
+  switch (value) {
+    case "read":
+    case "write":
+    case "search":
+    case "list":
+    case "fetch":
+    case "mode_change":
+    case "invoke":
+    case "unknown":
+      return value;
+    default:
+      return null;
+  }
 }
 
 function normalizeCommandSource(value: unknown): string | null {

@@ -870,6 +870,13 @@ export class FakeAgentProvider
       output: "Inspecting fake workspace...\n",
       result: null,
       isError: null,
+      toolCategory: "filesystem",
+      toolAction: "read",
+      toolTarget: session.thread.cwd,
+      toolTargets: [session.thread.cwd],
+      toolUrl: null,
+      toolQuery: null,
+      toolMode: null,
     });
     await sleep(this.latencyMs);
     this.upsertAndEmitActivity(session, turnId, {
@@ -883,6 +890,13 @@ export class FakeAgentProvider
       output: "Inspecting fake workspace...\nFound fake-provider.md\n",
       result: { files: ["fake-provider.md"], provider: "fake" },
       isError: false,
+      toolCategory: "filesystem",
+      toolAction: "read",
+      toolTarget: session.thread.cwd,
+      toolTargets: [session.thread.cwd],
+      toolUrl: null,
+      toolQuery: null,
+      toolMode: null,
     });
 
     if (this.capabilityProfile !== "chat-only" && this.capabilityProfile !== "minimal") {

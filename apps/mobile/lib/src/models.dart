@@ -1146,6 +1146,13 @@ class SessionActivity {
     required this.toolArgs,
     required this.toolResult,
     required this.toolError,
+    required this.toolCategory,
+    required this.toolAction,
+    required this.toolTarget,
+    required this.toolTargets,
+    required this.toolUrl,
+    required this.toolQuery,
+    required this.toolMode,
     required this.changes,
     required this.diff,
     required this.query,
@@ -1177,6 +1184,13 @@ class SessionActivity {
   final Object? toolArgs;
   final Object? toolResult;
   final bool? toolError;
+  final String? toolCategory;
+  final String? toolAction;
+  final String? toolTarget;
+  final List<String> toolTargets;
+  final String? toolUrl;
+  final String? toolQuery;
+  final String? toolMode;
   final List<SessionActivityChange> changes;
   final String? diff;
   final String? query;
@@ -1222,6 +1236,16 @@ class SessionActivity {
         toolArgs: json['args'],
         toolResult: json['result'],
         toolError: json['isError'] is bool ? json['isError'] as bool : null,
+        toolCategory: _stringOrNull(json['toolCategory']),
+        toolAction: _stringOrNull(json['toolAction']),
+        toolTarget: _stringOrNull(json['toolTarget']),
+        toolTargets: (json['toolTargets'] as List<dynamic>? ?? const <dynamic>[])
+            .map((item) => _stringValue(item))
+            .where((item) => item.isNotEmpty)
+            .toList(),
+        toolUrl: _stringOrNull(json['toolUrl']),
+        toolQuery: _stringOrNull(json['toolQuery']),
+        toolMode: _stringOrNull(json['toolMode']),
         changes: (json['changes'] as List<dynamic>? ?? [])
             .map(
               (item) =>
@@ -1262,6 +1286,13 @@ class SessionActivity {
     'args': toolArgs,
     'result': toolResult,
     'isError': toolError,
+    'toolCategory': toolCategory,
+    'toolAction': toolAction,
+    'toolTarget': toolTarget,
+    'toolTargets': toolTargets,
+    'toolUrl': toolUrl,
+    'toolQuery': toolQuery,
+    'toolMode': toolMode,
     'changes': changes.map((item) => item.toJson()).toList(),
     'diff': diff,
     'query': query,
