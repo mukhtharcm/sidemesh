@@ -266,6 +266,11 @@ export type AgentProviderLiveEvent =
       stdin: string;
     }
   | {
+      type: "runtime_updated";
+      sessionId: string;
+      runtime: SessionRuntimeSummary | null;
+    }
+  | {
       type: "turn_completed";
       sessionId: string;
       turnId: string;

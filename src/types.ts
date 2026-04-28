@@ -541,6 +541,7 @@ export interface LiveEvent {
     | "assistant_message_completed"
     | "turn_completed"
     | "activity_updated"
+    | "runtime_updated"
     | "action_opened"
     | "action_resolved"
     | "skills_changed"
@@ -557,6 +558,7 @@ export interface LiveEvent {
   message?: string;
   messageItem?: SessionMessage;
   activity?: SessionActivity;
+  runtime?: SessionRuntimeSummary;
 }
 
 export interface ApprovalLiveEvent {
@@ -647,5 +649,57 @@ export interface SessionRuntimeSummary {
   networkAccess?: boolean;
   summaryMode?: string;
   personality?: string;
+  telemetry?: SessionTelemetrySummary;
   updatedAt?: number;
+}
+
+export interface SessionTelemetrySummary {
+  contextWindow?: SessionContextWindowSummary;
+  lastUsage?: SessionLastUsageSummary;
+  compaction?: SessionCompactionSummary;
+}
+
+export interface SessionContextWindowSummary {
+  currentTokens: number;
+  tokenLimit: number;
+  messagesLength: number;
+  conversationTokens?: number;
+  systemTokens?: number;
+  toolDefinitionsTokens?: number;
+  updatedAt: number;
+}
+
+export interface SessionLastUsageSummary {
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  durationMs?: number;
+  ttftMs?: number;
+  interTokenLatencyMs?: number;
+  cost?: number;
+  reasoningEffort?: string;
+  totalNanoAiu?: number;
+  updatedAt: number;
+}
+
+export interface SessionCompactionSummary {
+  status: "running" | "completed" | "failed";
+  startedAt?: number;
+  completedAt?: number;
+  preCompactionTokens?: number;
+  postCompactionTokens?: number;
+  tokensRemoved?: number;
+  messagesRemoved?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  durationMs?: number;
+  model?: string;
+  totalNanoAiu?: number;
+  error?: string;
+  updatedAt: number;
 }

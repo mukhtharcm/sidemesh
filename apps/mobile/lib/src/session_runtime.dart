@@ -36,6 +36,17 @@ List<String> buildRuntimeHighlights(SessionRuntimeSummary? runtime) {
   if (runtime.networkAccess != null) {
     labels.add(runtime.networkAccess! ? 'network on' : 'network off');
   }
+  final context = runtime.telemetry?.contextWindow;
+  if (context != null && context.tokenLimit > 0) {
+    final percent = ((context.currentTokens / context.tokenLimit) * 100)
+        .clamp(0, 999)
+        .round();
+    labels.add('ctx $percent%');
+  }
+  final compaction = runtime.telemetry?.compaction;
+  if (compaction?.status == 'running') {
+    labels.add('compacting');
+  }
   return labels;
 }
 

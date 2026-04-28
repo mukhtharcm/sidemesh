@@ -328,6 +328,33 @@ class SessionSummary {
   /// active threads as `active`.
   bool get isActive => status == 'active' || status == 'running';
 
+  SessionSummary copyWith({
+    String? title,
+    String? preview,
+    String? cwd,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    String? source,
+    String? provider,
+    String? status,
+    SessionRuntimeSummary? runtime,
+    bool clearRuntime = false,
+    GitInfoSummary? gitInfo,
+    bool clearGitInfo = false,
+  }) => SessionSummary(
+    id: id,
+    title: title ?? this.title,
+    preview: preview ?? this.preview,
+    cwd: cwd ?? this.cwd,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    source: source ?? this.source,
+    provider: provider ?? this.provider,
+    status: status ?? this.status,
+    runtime: clearRuntime ? null : (runtime ?? this.runtime),
+    gitInfo: clearGitInfo ? null : (gitInfo ?? this.gitInfo),
+  );
+
   factory SessionSummary.fromJson(Map<String, dynamic> json) => SessionSummary(
     id: _stringValue(json['id']),
     title: _stringValue(json['title']),
@@ -375,6 +402,7 @@ class SessionRuntimeSummary {
     this.networkAccess,
     this.summaryMode,
     this.personality,
+    this.telemetry,
     this.updatedAt,
   });
 
@@ -388,7 +416,37 @@ class SessionRuntimeSummary {
   final bool? networkAccess;
   final String? summaryMode;
   final String? personality;
+  final SessionTelemetrySummary? telemetry;
   final DateTime? updatedAt;
+
+  SessionRuntimeSummary copyWith({
+    String? model,
+    String? modelProvider,
+    String? mode,
+    String? serviceTier,
+    String? reasoningEffort,
+    String? approvalPolicy,
+    String? sandboxMode,
+    bool? networkAccess,
+    String? summaryMode,
+    String? personality,
+    SessionTelemetrySummary? telemetry,
+    bool clearTelemetry = false,
+    DateTime? updatedAt,
+  }) => SessionRuntimeSummary(
+    model: model ?? this.model,
+    modelProvider: modelProvider ?? this.modelProvider,
+    mode: mode ?? this.mode,
+    serviceTier: serviceTier ?? this.serviceTier,
+    reasoningEffort: reasoningEffort ?? this.reasoningEffort,
+    approvalPolicy: approvalPolicy ?? this.approvalPolicy,
+    sandboxMode: sandboxMode ?? this.sandboxMode,
+    networkAccess: networkAccess ?? this.networkAccess,
+    summaryMode: summaryMode ?? this.summaryMode,
+    personality: personality ?? this.personality,
+    telemetry: clearTelemetry ? null : (telemetry ?? this.telemetry),
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
 
   factory SessionRuntimeSummary.fromJson(Map<String, dynamic> json) =>
       SessionRuntimeSummary(
@@ -402,6 +460,11 @@ class SessionRuntimeSummary {
         networkAccess: json['networkAccess'] as bool?,
         summaryMode: json['summaryMode'] as String?,
         personality: json['personality'] as String?,
+        telemetry: json['telemetry'] is Map<String, dynamic>
+            ? SessionTelemetrySummary.fromJson(
+                json['telemetry'] as Map<String, dynamic>,
+              )
+            : null,
         updatedAt: json['updatedAt'] == null
             ? null
             : _dateValue(json['updatedAt']),
@@ -418,7 +481,235 @@ class SessionRuntimeSummary {
     'networkAccess': networkAccess,
     'summaryMode': summaryMode,
     'personality': personality,
+    'telemetry': telemetry?.toJson(),
     'updatedAt': updatedAt?.millisecondsSinceEpoch,
+  };
+}
+
+class SessionTelemetrySummary {
+  const SessionTelemetrySummary({
+    this.contextWindow,
+    this.lastUsage,
+    this.compaction,
+  });
+
+  final SessionContextWindowSummary? contextWindow;
+  final SessionLastUsageSummary? lastUsage;
+  final SessionCompactionSummary? compaction;
+
+  factory SessionTelemetrySummary.fromJson(Map<String, dynamic> json) =>
+      SessionTelemetrySummary(
+        contextWindow: json['contextWindow'] is Map<String, dynamic>
+            ? SessionContextWindowSummary.fromJson(
+                json['contextWindow'] as Map<String, dynamic>,
+              )
+            : null,
+        lastUsage: json['lastUsage'] is Map<String, dynamic>
+            ? SessionLastUsageSummary.fromJson(
+                json['lastUsage'] as Map<String, dynamic>,
+              )
+            : null,
+        compaction: json['compaction'] is Map<String, dynamic>
+            ? SessionCompactionSummary.fromJson(
+                json['compaction'] as Map<String, dynamic>,
+              )
+            : null,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'contextWindow': contextWindow?.toJson(),
+    'lastUsage': lastUsage?.toJson(),
+    'compaction': compaction?.toJson(),
+  };
+}
+
+class SessionContextWindowSummary {
+  const SessionContextWindowSummary({
+    required this.currentTokens,
+    required this.tokenLimit,
+    required this.messagesLength,
+    required this.updatedAt,
+    this.conversationTokens,
+    this.systemTokens,
+    this.toolDefinitionsTokens,
+  });
+
+  final int currentTokens;
+  final int tokenLimit;
+  final int messagesLength;
+  final DateTime updatedAt;
+  final int? conversationTokens;
+  final int? systemTokens;
+  final int? toolDefinitionsTokens;
+
+  double? get usageFraction =>
+      tokenLimit <= 0 ? null : currentTokens / tokenLimit;
+
+  factory SessionContextWindowSummary.fromJson(Map<String, dynamic> json) =>
+      SessionContextWindowSummary(
+        currentTokens: _intValue(json['currentTokens']),
+        tokenLimit: _intValue(json['tokenLimit']),
+        messagesLength: _intValue(json['messagesLength']),
+        updatedAt: _dateValue(json['updatedAt']),
+        conversationTokens: _intOrNull(json['conversationTokens']),
+        systemTokens: _intOrNull(json['systemTokens']),
+        toolDefinitionsTokens: _intOrNull(json['toolDefinitionsTokens']),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'currentTokens': currentTokens,
+    'tokenLimit': tokenLimit,
+    'messagesLength': messagesLength,
+    'updatedAt': updatedAt.millisecondsSinceEpoch,
+    'conversationTokens': conversationTokens,
+    'systemTokens': systemTokens,
+    'toolDefinitionsTokens': toolDefinitionsTokens,
+  };
+}
+
+class SessionLastUsageSummary {
+  const SessionLastUsageSummary({
+    required this.updatedAt,
+    this.model,
+    this.inputTokens,
+    this.outputTokens,
+    this.reasoningTokens,
+    this.cacheReadTokens,
+    this.cacheWriteTokens,
+    this.durationMs,
+    this.ttftMs,
+    this.interTokenLatencyMs,
+    this.cost,
+    this.reasoningEffort,
+    this.totalNanoAiu,
+  });
+
+  final DateTime updatedAt;
+  final String? model;
+  final int? inputTokens;
+  final int? outputTokens;
+  final int? reasoningTokens;
+  final int? cacheReadTokens;
+  final int? cacheWriteTokens;
+  final int? durationMs;
+  final int? ttftMs;
+  final int? interTokenLatencyMs;
+  final num? cost;
+  final String? reasoningEffort;
+  final int? totalNanoAiu;
+
+  factory SessionLastUsageSummary.fromJson(Map<String, dynamic> json) =>
+      SessionLastUsageSummary(
+        updatedAt: _dateValue(json['updatedAt']),
+        model: _stringOrNull(json['model']),
+        inputTokens: _intOrNull(json['inputTokens']),
+        outputTokens: _intOrNull(json['outputTokens']),
+        reasoningTokens: _intOrNull(json['reasoningTokens']),
+        cacheReadTokens: _intOrNull(json['cacheReadTokens']),
+        cacheWriteTokens: _intOrNull(json['cacheWriteTokens']),
+        durationMs: _intOrNull(json['durationMs']),
+        ttftMs: _intOrNull(json['ttftMs']),
+        interTokenLatencyMs: _intOrNull(json['interTokenLatencyMs']),
+        cost: json['cost'] as num?,
+        reasoningEffort: _stringOrNull(json['reasoningEffort']),
+        totalNanoAiu: _intOrNull(json['totalNanoAiu']),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'updatedAt': updatedAt.millisecondsSinceEpoch,
+    'model': model,
+    'inputTokens': inputTokens,
+    'outputTokens': outputTokens,
+    'reasoningTokens': reasoningTokens,
+    'cacheReadTokens': cacheReadTokens,
+    'cacheWriteTokens': cacheWriteTokens,
+    'durationMs': durationMs,
+    'ttftMs': ttftMs,
+    'interTokenLatencyMs': interTokenLatencyMs,
+    'cost': cost,
+    'reasoningEffort': reasoningEffort,
+    'totalNanoAiu': totalNanoAiu,
+  };
+}
+
+class SessionCompactionSummary {
+  const SessionCompactionSummary({
+    required this.status,
+    required this.updatedAt,
+    this.startedAt,
+    this.completedAt,
+    this.preCompactionTokens,
+    this.postCompactionTokens,
+    this.tokensRemoved,
+    this.messagesRemoved,
+    this.inputTokens,
+    this.outputTokens,
+    this.cacheReadTokens,
+    this.cacheWriteTokens,
+    this.durationMs,
+    this.model,
+    this.totalNanoAiu,
+    this.error,
+  });
+
+  final String status;
+  final DateTime updatedAt;
+  final DateTime? startedAt;
+  final DateTime? completedAt;
+  final int? preCompactionTokens;
+  final int? postCompactionTokens;
+  final int? tokensRemoved;
+  final int? messagesRemoved;
+  final int? inputTokens;
+  final int? outputTokens;
+  final int? cacheReadTokens;
+  final int? cacheWriteTokens;
+  final int? durationMs;
+  final String? model;
+  final int? totalNanoAiu;
+  final String? error;
+
+  factory SessionCompactionSummary.fromJson(Map<String, dynamic> json) =>
+      SessionCompactionSummary(
+        status: _stringValue(json['status']),
+        updatedAt: _dateValue(json['updatedAt']),
+        startedAt: json['startedAt'] == null
+            ? null
+            : _dateValue(json['startedAt']),
+        completedAt: json['completedAt'] == null
+            ? null
+            : _dateValue(json['completedAt']),
+        preCompactionTokens: _intOrNull(json['preCompactionTokens']),
+        postCompactionTokens: _intOrNull(json['postCompactionTokens']),
+        tokensRemoved: _intOrNull(json['tokensRemoved']),
+        messagesRemoved: _intOrNull(json['messagesRemoved']),
+        inputTokens: _intOrNull(json['inputTokens']),
+        outputTokens: _intOrNull(json['outputTokens']),
+        cacheReadTokens: _intOrNull(json['cacheReadTokens']),
+        cacheWriteTokens: _intOrNull(json['cacheWriteTokens']),
+        durationMs: _intOrNull(json['durationMs']),
+        model: _stringOrNull(json['model']),
+        totalNanoAiu: _intOrNull(json['totalNanoAiu']),
+        error: _stringOrNull(json['error']),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'status': status,
+    'updatedAt': updatedAt.millisecondsSinceEpoch,
+    'startedAt': startedAt?.millisecondsSinceEpoch,
+    'completedAt': completedAt?.millisecondsSinceEpoch,
+    'preCompactionTokens': preCompactionTokens,
+    'postCompactionTokens': postCompactionTokens,
+    'tokensRemoved': tokensRemoved,
+    'messagesRemoved': messagesRemoved,
+    'inputTokens': inputTokens,
+    'outputTokens': outputTokens,
+    'cacheReadTokens': cacheReadTokens,
+    'cacheWriteTokens': cacheWriteTokens,
+    'durationMs': durationMs,
+    'model': model,
+    'totalNanoAiu': totalNanoAiu,
+    'error': error,
   };
 }
 
@@ -1207,62 +1498,63 @@ class SessionActivity {
   bool get isWebSearch => type == 'web_search';
   bool get isImageGeneration => type == 'image_generation';
 
-  factory SessionActivity.fromJson(Map<String, dynamic> json) =>
-      SessionActivity(
-        id: _stringValue(json['id']),
-        type: _stringValue(json['type']),
-        createdAt: _dateValue(json['createdAt']),
-        seq: _intOrNull(json['seq']) ?? 0,
-        status: _stringValue(json['status']),
-        turnId: _stringOrNull(json['turnId']),
-        command: _stringOrNull(json['command']),
-        cwd: _stringOrNull(json['cwd']),
-        output: _stringOrNull(json['output']),
-        exitCode: _intOrNull(json['exitCode']),
-        durationMs: _intOrNull(json['durationMs']),
-        source: _stringOrNull(json['source']),
-        processId: _stringOrNull(json['processId']),
-        commandActions: (json['commandActions'] as List<dynamic>? ?? [])
-            .map(
-              (item) => SessionCommandActionSummary.fromJson(
-                item as Map<String, dynamic>,
-              ),
-            )
-            .toList(),
-        terminalStatus: _stringOrNull(json['terminalStatus']),
-        terminalInput: _stringOrNull(json['terminalInput']),
-        toolName: _stringOrNull(json['toolName']),
-        toolTitle: _stringOrNull(json['title']),
-        toolArgs: json['args'],
-        toolResult: json['result'],
-        toolError: json['isError'] is bool ? json['isError'] as bool : null,
-        toolCategory: _stringOrNull(json['toolCategory']),
-        toolAction: _stringOrNull(json['toolAction']),
-        toolTarget: _stringOrNull(json['toolTarget']),
-        toolTargets: (json['toolTargets'] as List<dynamic>? ?? const <dynamic>[])
-            .map((item) => _stringValue(item))
-            .where((item) => item.isNotEmpty)
-            .toList(),
-        toolUrl: _stringOrNull(json['toolUrl']),
-        toolQuery: _stringOrNull(json['toolQuery']),
-        toolMode: _stringOrNull(json['toolMode']),
-        changes: (json['changes'] as List<dynamic>? ?? [])
-            .map(
-              (item) =>
-                  SessionActivityChange.fromJson(item as Map<String, dynamic>),
-            )
-            .toList(),
-        diff: _stringOrNull(json['diff']),
-        query: _stringOrNull(json['query']),
-        queries: (json['queries'] as List<dynamic>? ?? const <dynamic>[])
-            .map((item) => _stringValue(item))
-            .where((item) => item.isNotEmpty)
-            .toList(),
-        targetUrl: _stringOrNull(json['targetUrl']),
-        pattern: _stringOrNull(json['pattern']),
-        revisedPrompt: _stringOrNull(json['revisedPrompt']),
-        savedPath: _stringOrNull(json['savedPath']),
-      );
+  factory SessionActivity.fromJson(
+    Map<String, dynamic> json,
+  ) => SessionActivity(
+    id: _stringValue(json['id']),
+    type: _stringValue(json['type']),
+    createdAt: _dateValue(json['createdAt']),
+    seq: _intOrNull(json['seq']) ?? 0,
+    status: _stringValue(json['status']),
+    turnId: _stringOrNull(json['turnId']),
+    command: _stringOrNull(json['command']),
+    cwd: _stringOrNull(json['cwd']),
+    output: _stringOrNull(json['output']),
+    exitCode: _intOrNull(json['exitCode']),
+    durationMs: _intOrNull(json['durationMs']),
+    source: _stringOrNull(json['source']),
+    processId: _stringOrNull(json['processId']),
+    commandActions: (json['commandActions'] as List<dynamic>? ?? [])
+        .map(
+          (item) => SessionCommandActionSummary.fromJson(
+            item as Map<String, dynamic>,
+          ),
+        )
+        .toList(),
+    terminalStatus: _stringOrNull(json['terminalStatus']),
+    terminalInput: _stringOrNull(json['terminalInput']),
+    toolName: _stringOrNull(json['toolName']),
+    toolTitle: _stringOrNull(json['title']),
+    toolArgs: json['args'],
+    toolResult: json['result'],
+    toolError: json['isError'] is bool ? json['isError'] as bool : null,
+    toolCategory: _stringOrNull(json['toolCategory']),
+    toolAction: _stringOrNull(json['toolAction']),
+    toolTarget: _stringOrNull(json['toolTarget']),
+    toolTargets: (json['toolTargets'] as List<dynamic>? ?? const <dynamic>[])
+        .map((item) => _stringValue(item))
+        .where((item) => item.isNotEmpty)
+        .toList(),
+    toolUrl: _stringOrNull(json['toolUrl']),
+    toolQuery: _stringOrNull(json['toolQuery']),
+    toolMode: _stringOrNull(json['toolMode']),
+    changes: (json['changes'] as List<dynamic>? ?? [])
+        .map(
+          (item) =>
+              SessionActivityChange.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(),
+    diff: _stringOrNull(json['diff']),
+    query: _stringOrNull(json['query']),
+    queries: (json['queries'] as List<dynamic>? ?? const <dynamic>[])
+        .map((item) => _stringValue(item))
+        .where((item) => item.isNotEmpty)
+        .toList(),
+    targetUrl: _stringOrNull(json['targetUrl']),
+    pattern: _stringOrNull(json['pattern']),
+    revisedPrompt: _stringOrNull(json['revisedPrompt']),
+    savedPath: _stringOrNull(json['savedPath']),
+  );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -1824,6 +2116,7 @@ class LiveEvent {
     this.message,
     this.messageItem,
     this.activity,
+    this.runtime,
   });
 
   final String type;
@@ -1839,6 +2132,7 @@ class LiveEvent {
   final String? message;
   final SessionMessage? messageItem;
   final SessionActivity? activity;
+  final SessionRuntimeSummary? runtime;
 
   factory LiveEvent.fromJson(Map<String, dynamic> json) => LiveEvent(
     type: _stringValue(json['type']),
@@ -1860,6 +2154,11 @@ class LiveEvent {
     activity: json['activity'] == null
         ? null
         : SessionActivity.fromJson(json['activity'] as Map<String, dynamic>),
+    runtime: json['runtime'] == null
+        ? null
+        : SessionRuntimeSummary.fromJson(
+            json['runtime'] as Map<String, dynamic>,
+          ),
   );
 }
 

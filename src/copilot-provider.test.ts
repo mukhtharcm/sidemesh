@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { describe, it } from "node:test";
 
-import type { AgentPendingAction } from "./agent-provider.js";
+import type { AgentPendingAction, AgentProviderLiveEvent } from "./agent-provider.js";
 import {
   type CopilotSdkClient,
   type CopilotSdkClientFactory,
@@ -45,6 +45,14 @@ describe("Copilot provider", () => {
             events: [
               event("session.model_change", { newModel: "gpt-5.2" }),
               event("session.mode_changed", { newMode: "autopilot" }),
+              event("session.usage_info", {
+                currentTokens: 3200,
+                tokenLimit: 128000,
+                messagesLength: 12,
+                conversationTokens: 2800,
+                systemTokens: 240,
+                toolDefinitionsTokens: 160,
+              }),
               event("user.message", { content: "hello sdk" }, "user-1"),
               event(
                 "assistant.message",
@@ -64,6 +72,40 @@ describe("Copilot provider", () => {
                 toolName: "view",
                 success: true,
                 result: { content: "README contents" },
+              }),
+              event("assistant.usage", {
+                model: "gpt-5.2",
+                inputTokens: 333,
+                outputTokens: 44,
+                reasoningTokens: 12,
+                duration: 912,
+                reasoningEffort: "medium",
+                copilotUsage: {
+                  totalNanoAiu: 77,
+                  tokenDetails: [],
+                },
+              }),
+              event("session.compaction_start", {
+                conversationTokens: 2800,
+                systemTokens: 240,
+                toolDefinitionsTokens: 160,
+              }),
+              event("session.compaction_complete", {
+                success: true,
+                preCompactionTokens: 3200,
+                postCompactionTokens: 1800,
+                tokensRemoved: 1400,
+                messagesRemoved: 4,
+                compactionTokensUsed: {
+                  model: "gpt-5.2",
+                  duration: 650,
+                  inputTokens: 120,
+                  outputTokens: 30,
+                  copilotUsage: {
+                    totalNanoAiu: 11,
+                    tokenDetails: [],
+                  },
+                },
               }),
             ],
           },
@@ -99,6 +141,9 @@ describe("Copilot provider", () => {
       assert.equal(log.activities[1]?.toolTarget, "README.md");
       assert.equal(log.runtime?.model, "gpt-5.2");
       assert.equal(log.runtime?.mode, "autopilot");
+      assert.equal(log.runtime?.telemetry?.contextWindow?.currentTokens, 3200);
+      assert.equal(log.runtime?.telemetry?.lastUsage?.inputTokens, 333);
+      assert.equal(log.runtime?.telemetry?.compaction?.tokensRemoved, 1400);
 
       const completed = waitForTurnCompleted(provider);
       await provider.submitInput!({
@@ -147,8 +192,8 @@ describe("Copilot provider", () => {
       assert.equal(log.messages[1]?.role, "assistant");
       assert.equal(log.messages[1]?.text, "copilot says: hello");
       assert.equal(log.runtime?.modelProvider, "copilot");
-      assert.equal(log.runtime?.model, "auto");
-      assert.equal(log.runtime?.reasoningEffort, undefined);
+      assert.equal(log.runtime?.model, "gpt-5.2");
+      assert.equal(log.runtime?.reasoningEffort, "medium");
 
       assert.equal(sdk.created.length, 1);
       assert.equal(sdk.created[0]?.config.model, undefined);
@@ -162,6 +207,44 @@ describe("Copilot provider", () => {
       });
       assert.equal(sessions.length, 1);
       assert.equal(sessions[0]?.source, "copilot");
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("emits runtime updates for usage telemetry during live turns", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-runtime-telemetry-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const runtimeUpdates: AgentProviderLiveEvent[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "runtime_updated") {
+          runtimeUpdates.push(liveEvent);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "hello telemetry", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      assert.ok(runtimeUpdates.length >= 2);
+      const runtime = await provider.readSessionRuntime!(created.thread);
+      assert.equal(runtime?.telemetry?.contextWindow?.tokenLimit, 128000);
+      assert.equal(runtime?.telemetry?.lastUsage?.outputTokens, 27);
+      assert.equal(runtime?.telemetry?.lastUsage?.totalNanoAiu, 42);
     } finally {
       await settleProviderWrites();
       await rm(dir, { recursive: true, force: true });
@@ -1305,6 +1388,44 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         return;
       }
       const messageId = `assistant-${sendIndex}`;
+      this.emit(
+        event("session.usage_info", {
+          currentTokens: 4096,
+          tokenLimit: 128000,
+          messagesLength: sendIndex * 2,
+          conversationTokens: 3600,
+          systemTokens: 320,
+          toolDefinitionsTokens: 176,
+        }),
+      );
+      if (options.prompt.includes("compact")) {
+        this.emit(
+          event("session.compaction_start", {
+            conversationTokens: 3600,
+            systemTokens: 320,
+            toolDefinitionsTokens: 176,
+          }),
+        );
+        this.emit(
+          event("session.compaction_complete", {
+            success: true,
+            preCompactionTokens: 4096,
+            postCompactionTokens: 2200,
+            tokensRemoved: 1896,
+            messagesRemoved: 6,
+            compactionTokensUsed: {
+              model: this.selectedModels.at(-1)?.model ?? "gpt-5.2",
+              duration: 740,
+              inputTokens: 140,
+              outputTokens: 31,
+              copilotUsage: {
+                totalNanoAiu: 15,
+                tokenDetails: [],
+              },
+            },
+          }),
+        );
+      }
       if (options.prompt.includes("tool")) {
         this.emit(
           event("tool.execution_start", {
@@ -1350,6 +1471,27 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         event("assistant.message", {
           messageId,
           content: text,
+        }),
+      );
+      this.emit(
+        event("assistant.usage", {
+          model: this.selectedModels.at(-1)?.model ?? "gpt-5.2",
+          inputTokens: 214,
+          outputTokens: 27,
+          reasoningTokens: 9,
+          cacheReadTokens: 16,
+          cacheWriteTokens: 8,
+          duration: 880,
+          ttftMs: 120,
+          interTokenLatencyMs: 32,
+          reasoningEffort:
+            this.selectedModels.at(-1)?.reasoningEffort ??
+            this.config.reasoningEffort ??
+            "medium",
+          copilotUsage: {
+            totalNanoAiu: 42,
+            tokenDetails: [],
+          },
         }),
       );
       this.emit(event("assistant.turn_end", { turnId: "sdk-turn-1" }));

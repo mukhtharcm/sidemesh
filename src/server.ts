@@ -467,6 +467,23 @@ export async function startServer(config: NodeConfig): Promise<void> {
         }
         return;
       }
+      case "runtime_updated": {
+        runtimeCache.set(event.sessionId, {
+          threadUpdatedAt: Date.now() / 1000,
+          runtime: event.runtime,
+        });
+        const cachedLog = logCache.get(event.sessionId);
+        if (cachedLog) {
+          cachedLog.runtime = event.runtime;
+        }
+        broadcastLive(event.sessionId, {
+          type: "runtime_updated",
+          sessionId: event.sessionId,
+          runtime: event.runtime ?? undefined,
+        });
+        scheduleRecentSessionUpsert(event.sessionId, 0);
+        return;
+      }
       case "turn_completed":
         // Broadcast the completion first so any concurrent snapshot reader
         // sees both the provider-flushed history AND the live state still in
