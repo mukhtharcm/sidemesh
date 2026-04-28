@@ -121,6 +121,7 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   runtimeControls: {
     model: true,
+    mode: false,
     reasoningEffort: true,
     fastMode: true,
     approvalPolicy: true,
@@ -156,6 +157,7 @@ function capabilitiesForFakeProfile(
       capabilities.configuration.models = false;
       capabilities.configuration.profiles = false;
       capabilities.runtimeControls.model = false;
+      capabilities.runtimeControls.mode = false;
       capabilities.runtimeControls.reasoningEffort = false;
       capabilities.runtimeControls.fastMode = false;
       return capabilities;
@@ -215,6 +217,7 @@ function disableConfiguration(capabilities: AgentProviderCapabilities): void {
 
 function disableRuntimeControls(capabilities: AgentProviderCapabilities): void {
   capabilities.runtimeControls.model = false;
+  capabilities.runtimeControls.mode = false;
   capabilities.runtimeControls.reasoningEffort = false;
   capabilities.runtimeControls.fastMode = false;
   capabilities.runtimeControls.approvalPolicy = false;
@@ -673,6 +676,7 @@ export class FakeAgentProvider
       preview: "Fake provider walkthrough",
       runtime: buildRuntime({
         model: "fake-balanced",
+        mode: null,
         reasoningEffort: "medium",
         fastMode: false,
         approvalPolicy: "on-request",
@@ -1302,6 +1306,7 @@ function mergeRuntime(
   return {
     ...(runtime ?? buildRuntime({
       model: null,
+      mode: null,
       reasoningEffort: null,
       fastMode: null,
       approvalPolicy: null,

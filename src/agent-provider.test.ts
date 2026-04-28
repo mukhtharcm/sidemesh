@@ -41,6 +41,7 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
   },
   runtimeControls: {
     model: false,
+    mode: false,
     reasoningEffort: false,
     fastMode: false,
     approvalPolicy: false,

@@ -15,6 +15,7 @@ import {
   type CopilotSdkSession,
   type CopilotSdkSessionConfig,
   type CopilotSdkSessionEvent,
+  type CopilotSdkSessionMode,
   type CopilotSdkSessionMetadata,
 } from "./copilot-sdk-client.js";
 import { CopilotAgentProvider } from "./copilot-provider.js";
@@ -43,6 +44,7 @@ describe("Copilot provider", () => {
             },
             events: [
               event("session.model_change", { newModel: "gpt-5.2" }),
+              event("session.mode_changed", { newMode: "autopilot" }),
               event("user.message", { content: "hello sdk" }, "user-1"),
               event(
                 "assistant.message",
@@ -90,6 +92,7 @@ describe("Copilot provider", () => {
       assert.equal(log.activities.length, 1);
       assert.equal(log.activities[0]?.type, "tool");
       assert.equal(log.runtime?.model, "gpt-5.2");
+      assert.equal(log.runtime?.mode, "autopilot");
 
       const completed = waitForTurnCompleted(provider);
       await provider.submitInput!({
@@ -470,6 +473,38 @@ describe("Copilot provider", () => {
         sdk.created[0]?.session.selectedModels[0]?.model,
         "safe-test-model",
       );
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("applies Copilot session mode overrides through the SDK", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-mode-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "hello", text_elements: [] }],
+        overrides: {
+          ...emptyOverrides(),
+          mode: "plan",
+        },
+      });
+      await completed;
+
+      assert.deepEqual(sdk.created[0]?.session.selectedModes, ["plan"]);
+      const log = await provider.readSessionLog!(created.thread);
+      assert.equal(log.runtime?.mode, "plan");
     } finally {
       await settleProviderWrites();
       await rm(dir, { recursive: true, force: true });
@@ -869,6 +904,19 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
 class FakeCopilotSdkSession implements CopilotSdkSession {
   public readonly sent: CopilotSdkMessageOptions[] = [];
   public readonly rpc = {
+    mode: {
+      get: async (): Promise<CopilotSdkSessionMode> => this.currentMode,
+      set: async ({
+        mode,
+      }: {
+        mode: CopilotSdkSessionMode;
+      }): Promise<void> => {
+        const previousMode = this.currentMode;
+        this.currentMode = mode;
+        this.selectedModes.push(mode);
+        this.emit(event("session.mode_changed", { previousMode, newMode: mode }));
+      },
+    },
     skills: {
       list: async (): Promise<{
         skills: Array<{
@@ -907,8 +955,10 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
     model: string;
     reasoningEffort: string | undefined;
   }> = [];
+  public readonly selectedModes: CopilotSdkSessionMode[] = [];
   public aborted = false;
   public skillReloadCount = 0;
+  private currentMode: CopilotSdkSessionMode = "interactive";
 
   public constructor(
     private readonly client: FakeCopilotSdkClient,
@@ -1066,6 +1116,7 @@ function sdkModel(
 function emptyOverrides() {
   return {
     model: null,
+    mode: null,
     reasoningEffort: null,
     fastMode: null,
     approvalPolicy: null,

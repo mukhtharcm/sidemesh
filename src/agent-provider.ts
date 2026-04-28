@@ -72,6 +72,7 @@ export type AgentSessionInputItem =
 
 export interface AgentSessionOverrides {
   model: string | null;
+  mode: string | null;
   reasoningEffort: string | null;
   fastMode: boolean | null;
   approvalPolicy: string | null;
@@ -199,6 +200,7 @@ export interface AgentProviderCapabilities {
   };
   runtimeControls: {
     model: boolean;
+    mode: boolean;
     reasoningEffort: boolean;
     fastMode: boolean;
     approvalPolicy: boolean;
