@@ -415,6 +415,25 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         .supports(section, feature);
   }
 
+  ProviderDefinitionSummary get _activeProviderSummary {
+    final node = _nodeInfo;
+    if (node == null) {
+      return ProviderDefinitionSummary.empty;
+    }
+    return node.providerSummary(_selectedProviderKindOrDefault);
+  }
+
+  List<ApprovalPolicy> get _approvalOptions {
+    final supported = _activeProviderSummary.supportedApprovalPolicies;
+    if (supported.isEmpty) {
+      return ApprovalPolicy.values;
+    }
+    final options = ApprovalPolicy.values
+        .where((policy) => supported.contains(policy.wire))
+        .toList(growable: false);
+    return options.isEmpty ? ApprovalPolicy.values : options;
+  }
+
   String? get _effectiveReasoningEffort {
     final model = _controlModel;
     if (model == null) return _reasoningEffort;
@@ -593,6 +612,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     }
     if (!_supportsFastMode) {
       _fastMode = false;
+    }
+    if (!_supportsApprovalPolicy) {
+      _approval = ApprovalPolicy.onRequest;
+    } else if (!_approvalOptions.contains(_approval)) {
+      _approval = _approvalOptions.first;
     }
     if (!_supportsWebSearch) {
       _webSearch = false;
@@ -978,7 +1002,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   void _applyAutopilot() {
     setState(() {
-      if (_supportsApprovalPolicy) {
+      if (_supportsApprovalPolicy &&
+          _approvalOptions.contains(ApprovalPolicy.never)) {
         _approval = ApprovalPolicy.never;
       }
       if (_supportsSandboxMode) {
@@ -1410,18 +1435,23 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             _CompactControlGroup(
               icon: Icons.verified_user_rounded,
               title: 'Permissions',
-              trailing: TextButton.icon(
-                onPressed: _applyAutopilot,
-                icon: const Icon(Icons.auto_awesome_rounded, size: 16),
-                label: const Text('Autopilot'),
-              ),
+              trailing:
+                  _supportsApprovalPolicy &&
+                      _approvalOptions.contains(ApprovalPolicy.never) &&
+                      _supportsSandboxMode
+                  ? TextButton.icon(
+                      onPressed: _applyAutopilot,
+                      icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                      label: const Text('Autopilot'),
+                    )
+                  : null,
               children: [
                 if (_supportsApprovalPolicy) ...[
                   _MiniChoiceWrap<ApprovalPolicy>(
                     icon: Icons.verified_user_rounded,
                     label: 'Approval',
                     value: _approval,
-                    options: ApprovalPolicy.values,
+                    options: _approvalOptions,
                     optionLabel: (policy) => policy.label,
                     onChanged: (value) => setState(() => _approval = value),
                   ),

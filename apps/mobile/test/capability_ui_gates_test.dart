@@ -194,6 +194,55 @@ void main() {
     expect(find.text('Live web search'), findsOneWidget);
   });
 
+  testWidgets('Copilot approval controls only show supported policies', (
+    tester,
+  ) async {
+    await CreateSessionDefaultsStore.instance.ensureLoaded();
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(
+        _copilotApprovalCapabilities,
+        providerKind: 'copilot',
+        providerName: 'GitHub Copilot',
+        providerVersion: 'GitHub Copilot SDK 9.9.9',
+        providerCommand: 'copilot',
+        supportedProviders: const [
+          ProviderDefinitionSummary(
+            kind: 'copilot',
+            displayName: 'GitHub Copilot',
+            defaultCommand: 'copilot',
+            commandEnvironmentVariables: ['SIDEMESH_COPILOT_BIN'],
+            supportedApprovalPolicies: ['on-request', 'never'],
+            capabilities: ProviderCapabilities(_copilotApprovalCapabilities),
+            config: ProviderConfigSummary(kind: 'copilot', command: 'copilot'),
+            version: 'GitHub Copilot SDK 9.9.9',
+            isDefault: true,
+          ),
+        ],
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      CreateSessionSheet(
+        host: _host('create-copilot'),
+        api: api,
+        initialCwd: '/repo',
+        presentation: CreateSessionPresentation.dialog,
+      ),
+      size: const Size(1600, 1100),
+    );
+    await _pumpFrames(tester);
+
+    await tester.tap(find.text('Tune launch'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Ask when requested'), findsWidgets);
+    expect(find.text('Never ask'), findsWidgets);
+    expect(find.text('Ask when untrusted'), findsNothing);
+    expect(find.text('Ask only on failure'), findsNothing);
+    expect(find.widgetWithText(TextButton, 'Autopilot'), findsNothing);
+  });
+
   testWidgets('host detail exposes provider contract metadata', (tester) async {
     final api = _CapabilityFakeApi(
       _nodeForCapabilities(
@@ -204,6 +253,12 @@ void main() {
             displayName: 'Codex',
             defaultCommand: 'codex',
             commandEnvironmentVariables: ['SIDEMESH_CODEX_BIN'],
+            supportedApprovalPolicies: [
+              'untrusted',
+              'on-failure',
+              'on-request',
+              'never',
+            ],
             capabilities: ProviderCapabilities(_minimalCapabilities),
             config: ProviderConfigSummary(kind: 'codex', command: 'codex'),
             version: 'codex-cli 0.125.0',
@@ -214,6 +269,12 @@ void main() {
             displayName: 'Fake Test Provider',
             defaultCommand: 'builtin',
             commandEnvironmentVariables: ['SIDEMESH_FAKE_CAPABILITY_PROFILE'],
+            supportedApprovalPolicies: [
+              'untrusted',
+              'on-failure',
+              'on-request',
+              'never',
+            ],
             capabilities: ProviderCapabilities(_fullCapabilities),
             config: ProviderConfigSummary(kind: 'fake', command: 'builtin'),
             version: 'fake-provider 1.0.0',
@@ -322,16 +383,20 @@ SessionSummary _session(String id) {
 
 NodeInfo _nodeForCapabilities(
   Map<String, Object?> capabilities, {
+  String providerKind = 'fake',
+  String providerName = 'Fake Test Provider',
+  String providerVersion = 'fake-provider 1.0.0',
+  String providerCommand = 'builtin',
   List<ProviderDefinitionSummary> supportedProviders = const [],
 }) => NodeInfo.fromJson({
   'label': 'fake-profile',
   'hostname': 'localhost',
   'platform': 'darwin',
-  'codexVersion': 'fake-provider 1.0.0',
-  'provider': 'fake',
-  'providerName': 'Fake Test Provider',
-  'providerVersion': 'fake-provider 1.0.0',
-  'providerConfig': {'kind': 'fake', 'command': 'builtin'},
+  'codexVersion': providerVersion,
+  'provider': providerKind,
+  'providerName': providerName,
+  'providerVersion': providerVersion,
+  'providerConfig': {'kind': providerKind, 'command': providerCommand},
   'providerCapabilities': capabilities,
   'hostCapabilities': {
     'workspace': {'filesystem': true, 'gitStatus': false, 'gitDiff': false},
@@ -343,6 +408,7 @@ NodeInfo _nodeForCapabilities(
           'displayName': provider.displayName,
           'defaultCommand': provider.defaultCommand,
           'commandEnvironmentVariables': provider.commandEnvironmentVariables,
+          'supportedApprovalPolicies': provider.supportedApprovalPolicies,
           'capabilities': provider.capabilities.values,
           'config': {
             'kind': provider.config.kind,
@@ -399,6 +465,29 @@ const Map<String, Object?> _minimalCapabilities = {
     'reasoningEffort': false,
     'fastMode': false,
     'approvalPolicy': false,
+    'sandboxMode': false,
+    'networkAccess': false,
+    'webSearch': false,
+  },
+  'workspace': {'filesystem': false, 'remoteGitDiff': false},
+};
+
+const Map<String, Object?> _copilotApprovalCapabilities = {
+  'sessions': {
+    'create': true,
+    'history': true,
+    'interrupt': true,
+    'rename': true,
+    'archive': true,
+  },
+  'input': {'text': true, 'imageUrl': true, 'localImage': true, 'skills': true},
+  'configuration': {'models': true, 'profiles': false, 'skills': true},
+  'runtimeControls': {
+    'model': true,
+    'mode': true,
+    'reasoningEffort': true,
+    'fastMode': false,
+    'approvalPolicy': true,
     'sandboxMode': false,
     'networkAccess': false,
     'webSearch': false,
