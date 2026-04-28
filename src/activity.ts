@@ -8,6 +8,10 @@ import type {
   SessionCommandActionSummary,
   SessionActivityChange,
   ToolActivity,
+  ToolActivitySemantic,
+  ToolActivitySemanticAction,
+  ToolActivitySemanticCategory,
+  ToolActivitySemanticTarget,
   ThreadItemRecord,
   ThreadRecord,
   TurnDiffActivity,
@@ -148,13 +152,7 @@ export function buildActivityFromThreadItem(
       output: truncateNullableText(asString(item.output), MAX_COMMAND_OUTPUT_CHARS),
       result: item.result ?? null,
       isError: typeof item.isError === "boolean" ? item.isError : null,
-      toolCategory: normalizeToolCategory(item.toolCategory),
-      toolAction: normalizeToolAction(item.toolAction),
-      toolTarget: asString(item.toolTarget),
-      toolTargets: asStringArray(item.toolTargets),
-      toolUrl: asString(item.toolUrl),
-      toolQuery: asString(item.toolQuery),
-      toolMode: asString(item.toolMode),
+      semantic: normalizeToolSemantic(item),
     };
   }
 
@@ -230,16 +228,7 @@ export function mergeActivity(
       output: incoming.output ?? existingTool.output,
       result: incoming.result ?? existingTool.result,
       isError: incoming.isError ?? existingTool.isError,
-      toolCategory: incoming.toolCategory ?? existingTool.toolCategory,
-      toolAction: incoming.toolAction ?? existingTool.toolAction,
-      toolTarget: incoming.toolTarget ?? existingTool.toolTarget,
-      toolTargets:
-        incoming.toolTargets.length > 0
-          ? incoming.toolTargets
-          : existingTool.toolTargets,
-      toolUrl: incoming.toolUrl ?? existingTool.toolUrl,
-      toolQuery: incoming.toolQuery ?? existingTool.toolQuery,
-      toolMode: incoming.toolMode ?? existingTool.toolMode,
+      semantic: mergeToolSemantic(existingTool.semantic, incoming.semantic),
     };
   }
 
@@ -292,6 +281,18 @@ export function mergeSessionActivities(
     merged.set(activity.id, mergeActivity(merged.get(activity.id), activity));
   }
   return [...merged.values()].sort((left, right) => left.seq - right.seq);
+}
+
+export function normalizeStoredSessionActivity(
+  activity: SessionActivity,
+): SessionActivity {
+  if (activity.type !== "tool") {
+    return activity;
+  }
+  return {
+    ...activity,
+    semantic: normalizeToolSemantic(activity),
+  };
 }
 
 export function appendCommandActivityOutput(
@@ -721,7 +722,62 @@ function normalizeChangeKind(value: unknown): SessionActivityChange["kind"] | nu
   return null;
 }
 
-function normalizeToolCategory(value: unknown): ToolActivity["toolCategory"] {
+function normalizeToolSemantic(raw: unknown): ToolActivitySemantic | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const typed = raw as Record<string, unknown>;
+  const semanticSource =
+    typed.semantic && typeof typed.semantic === "object"
+      ? (typed.semantic as Record<string, unknown>)
+      : typed;
+  const category = normalizeToolCategory(
+    semanticSource.category ?? typed.toolCategory,
+  );
+  const action = normalizeToolAction(
+    semanticSource.action ?? typed.toolAction,
+  );
+  if (!category || !action) {
+    return null;
+  }
+  const targets = normalizeToolSemanticTargets(
+    semanticSource.targets,
+    typed,
+  );
+  return {
+    category,
+    action,
+    targets,
+  };
+}
+
+function mergeToolSemantic(
+  existing: ToolActivitySemantic | null,
+  incoming: ToolActivitySemantic | null,
+): ToolActivitySemantic | null {
+  if (!existing) {
+    return incoming;
+  }
+  if (!incoming) {
+    return existing;
+  }
+  const category =
+    incoming.category === "unknown" ? existing.category : incoming.category;
+  const action =
+    incoming.category === "unknown" && incoming.action === "invoke"
+      ? existing.action
+      : incoming.action;
+  return {
+    category,
+    action,
+    targets:
+      incoming.targets.length > 0 ? incoming.targets : existing.targets,
+  };
+}
+
+function normalizeToolCategory(
+  value: unknown,
+): ToolActivitySemanticCategory | null {
   switch (value) {
     case "filesystem":
     case "network":
@@ -736,7 +792,7 @@ function normalizeToolCategory(value: unknown): ToolActivity["toolCategory"] {
   }
 }
 
-function normalizeToolAction(value: unknown): ToolActivity["toolAction"] {
+function normalizeToolAction(value: unknown): ToolActivitySemanticAction | null {
   switch (value) {
     case "read":
     case "write":
@@ -750,6 +806,129 @@ function normalizeToolAction(value: unknown): ToolActivity["toolAction"] {
     default:
       return null;
   }
+}
+
+function normalizeToolSemanticTargets(
+  raw: unknown,
+  legacy: Record<string, unknown>,
+): ToolActivitySemanticTarget[] {
+  const normalized = Array.isArray(raw)
+    ? raw
+        .map((entry) => normalizeToolSemanticTarget(entry))
+        .filter((entry): entry is ToolActivitySemanticTarget => entry !== null)
+    : [];
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  return legacyToolTargets(legacy);
+}
+
+function normalizeToolSemanticTarget(
+  raw: unknown,
+): ToolActivitySemanticTarget | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const typed = raw as Record<string, unknown>;
+  switch (typed.type) {
+    case "file": {
+      const path = asString(typed.path);
+      if (!path) return null;
+      const access =
+        typed.access === "read" || typed.access === "write"
+          ? typed.access
+          : undefined;
+      const role =
+        typed.role === "target" || typed.role === "context"
+          ? typed.role
+          : undefined;
+      return { type: "file", path, ...(access ? { access } : {}), ...(role ? { role } : {}) };
+    }
+    case "url": {
+      const url = asString(typed.url);
+      if (!url) return null;
+      const role =
+        typed.role === "target" || typed.role === "context"
+          ? typed.role
+          : undefined;
+      return { type: "url", url, ...(role ? { role } : {}) };
+    }
+    case "query": {
+      const value = asString(typed.value);
+      return value ? { type: "query", value } : null;
+    }
+    case "mode": {
+      const value = asString(typed.value);
+      return value ? { type: "mode", value } : null;
+    }
+    case "command": {
+      const command = asString(typed.command);
+      return command ? { type: "command", command } : null;
+    }
+    case "unknown": {
+      const label = asString(typed.label);
+      return label ? { type: "unknown", label } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+function legacyToolTargets(
+  legacy: Record<string, unknown>,
+): ToolActivitySemanticTarget[] {
+  const targets: ToolActivitySemanticTarget[] = [];
+  const category = normalizeToolCategory(legacy.toolCategory);
+  const action = normalizeToolAction(legacy.toolAction);
+  const toolTarget = asString(legacy.toolTarget);
+  for (const entry of asStringArray(legacy.toolTargets)) {
+    targets.push({ type: "file", path: entry, role: "target" });
+  }
+  const toolUrl = asString(legacy.toolUrl);
+  if (toolUrl) {
+    targets.push({ type: "url", url: toolUrl, role: "target" });
+  }
+  const toolQuery = asString(legacy.toolQuery);
+  if (toolQuery) {
+    targets.push({ type: "query", value: toolQuery });
+  }
+  const toolMode = asString(legacy.toolMode);
+  if (toolMode) {
+    targets.push({ type: "mode", value: toolMode });
+  }
+  if (toolTarget) {
+    const inferred =
+      category === "command"
+        ? ({ type: "command", command: toolTarget } as const)
+        : category === "session" || action === "mode_change"
+          ? ({ type: "mode", value: toolTarget } as const)
+          : toolUrl && toolUrl === toolTarget
+            ? ({ type: "url", url: toolTarget, role: "target" } as const)
+            : category === "network"
+              ? ({ type: "url", url: toolTarget, role: "target" } as const)
+              : ({ type: "file", path: toolTarget, role: "target" } as const);
+    const duplicate = targets.some((target) => {
+      if (target.type !== inferred.type) return false;
+      switch (target.type) {
+        case "file":
+          return inferred.type === "file" && target.path === inferred.path;
+        case "url":
+          return inferred.type === "url" && target.url === inferred.url;
+        case "mode":
+          return inferred.type === "mode" && target.value === inferred.value;
+        case "command":
+          return (
+            inferred.type === "command" && target.command === inferred.command
+          );
+        default:
+          return false;
+      }
+    });
+    if (!duplicate) {
+      targets.unshift(inferred);
+    }
+  }
+  return targets;
 }
 
 function normalizeCommandSource(value: unknown): string | null {
