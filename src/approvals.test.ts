@@ -88,6 +88,38 @@ describe("provider-neutral approvals", () => {
     assert.equal(parsePendingActionResponseBody({ decision: "approve", scope: "forever" }), null);
   });
 
+  it("parses user-input and elicitation responses with action context", () => {
+    assert.deepEqual(
+      parsePendingActionResponseBody(
+        { answer: "staging", wasFreeform: false },
+        { kind: "user_input" },
+      ),
+      {
+        answer: "staging",
+        wasFreeform: false,
+      },
+    );
+    assert.deepEqual(
+      parsePendingActionResponseBody(
+        {
+          action: "accept",
+          content: { region: "us-east", dryRun: true, tags: ["blue"] },
+        },
+        { kind: "elicitation" },
+      ),
+      {
+        action: "accept",
+        content: { region: "us-east", dryRun: true, tags: ["blue"] },
+      },
+    );
+    assert.equal(
+      parsePendingActionResponseBody({ content: { region: "us-east" } }, {
+        kind: "elicitation",
+      }),
+      null,
+    );
+  });
+
   it("strips provider-private fields from public pending actions", () => {
     const action = {
       id: "action-1",
@@ -128,6 +160,44 @@ describe("provider-neutral approvals", () => {
         summary: "Run tests",
         supportedScopes: ["once", "session"],
         targets: [{ type: "command", command: "npm test" }],
+      },
+    });
+  });
+
+  it("keeps structured user-input requests in public payloads", () => {
+    const action = {
+      id: "question-1",
+      sessionId: "session-2",
+      kind: "user_input",
+      title: "Agent question",
+      detail: "Which environment?",
+      requestedAt: 456,
+      canApprove: false,
+      canApproveForSession: false,
+      canDecline: false,
+      userInput: {
+        question: "Which environment?",
+        choices: ["staging", "prod"],
+        allowFreeform: false,
+      },
+      providerRequestId: 43,
+      providerRequestKind: "copilot/ask_user",
+    } as AgentPendingAction;
+
+    assert.deepEqual(toPublicPendingAction(action), {
+      id: "question-1",
+      sessionId: "session-2",
+      kind: "user_input",
+      title: "Agent question",
+      detail: "Which environment?",
+      requestedAt: 456,
+      canApprove: false,
+      canApproveForSession: false,
+      canDecline: false,
+      userInput: {
+        question: "Which environment?",
+        choices: ["staging", "prod"],
+        allowFreeform: false,
       },
     });
   });

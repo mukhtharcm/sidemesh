@@ -643,6 +643,90 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("bridges Copilot ask-user requests into Sidemesh pending actions", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-ask-user-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const opened = waitForActionOpened(provider, "user_input");
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "please ask user", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+
+      const action = await opened;
+      assert.equal(action.userInput?.question, "Which environment should I use?");
+      assert.deepEqual(action.userInput?.choices, ["staging", "production"]);
+      assert.equal(
+        provider.respondToPendingAction(action, {
+          answer: "staging",
+          wasFreeform: false,
+        }),
+        true,
+      );
+      await completed;
+
+      const log = await provider.readSessionLog!(created.thread);
+      assert.match(log.messages.at(-1)?.text ?? "", /staging/);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("bridges Copilot elicitation requests into Sidemesh pending actions", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-elicitation-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const opened = waitForActionOpened(provider, "elicitation");
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "needs elicitation", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+
+      const action = await opened;
+      assert.equal(action.elicitation?.mode, "form");
+      assert.equal(action.elicitation?.fields.length, 2);
+      assert.equal(
+        provider.respondToPendingAction(action, {
+          action: "accept",
+          content: {
+            region: "us-east",
+            dryRun: true,
+          },
+        }),
+        true,
+      );
+      await completed;
+
+      const log = await provider.readSessionLog!(created.thread);
+      assert.match(log.messages.at(-1)?.text ?? "", /us-east/);
+      assert.match(log.messages.at(-1)?.text ?? "", /dryRun/);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("stores SDK tool events as tool activities", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-tools-test-"),
@@ -1066,6 +1150,18 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
 
   public async send(options: CopilotSdkMessageOptions): Promise<string> {
     this.sent.push(options);
+    let userInputResult:
+      | {
+          answer: string;
+          wasFreeform: boolean;
+        }
+      | undefined;
+    let elicitationResult:
+      | {
+          action: string;
+          content?: Record<string, unknown>;
+        }
+      | undefined;
     if (options.prompt.includes("approval")) {
       const result = await this.config.onPermissionRequest(
         {
@@ -1090,6 +1186,43 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         );
         return `message-${this.sent.length}`;
       }
+    }
+    if (options.prompt.includes("ask user")) {
+      userInputResult = await this.config.onUserInputRequest!(
+        {
+          question: "Which environment should I use?",
+          choices: ["staging", "production"],
+          allowFreeform: false,
+        },
+        { sessionId: this.sessionId },
+      );
+    }
+    if (options.prompt.includes("elicitation")) {
+      elicitationResult = await this.config.onElicitationRequest!({
+        sessionId: this.sessionId,
+        mode: "form",
+        message: "Choose deployment options",
+        elicitationSource: "deploy",
+        requestedSchema: {
+          type: "object",
+          required: ["region"],
+          properties: {
+            region: {
+              type: "string",
+              title: "Region",
+              oneOf: [
+                { const: "us-east", title: "US East" },
+                { const: "eu-west", title: "EU West" },
+              ],
+            },
+            dryRun: {
+              type: "boolean",
+              title: "Dry run",
+              default: true,
+            },
+          },
+        },
+      });
     }
 
     queueMicrotask(() => {
@@ -1119,7 +1252,13 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
           }),
         );
       }
-      const text = `${this.resumed ? "resumed" : "copilot says"}: ${options.prompt}`;
+      const suffix = userInputResult != null
+          ? ` -> ${userInputResult.answer}`
+          : elicitationResult != null
+            ? ` -> ${JSON.stringify(elicitationResult.content ?? {})}`
+            : "";
+      const text =
+        `${this.resumed ? "resumed" : "copilot says"}: ${options.prompt}${suffix}`;
       this.emit(
         event("assistant.message_delta", {
           messageId,
@@ -1231,10 +1370,14 @@ function waitForTurnCompleted(provider: CopilotAgentProvider): Promise<void> {
 
 function waitForActionOpened(
   provider: CopilotAgentProvider,
+  kind?: string,
 ): Promise<AgentPendingAction> {
   return new Promise((resolve) => {
     provider.on("liveEvent", (liveEvent) => {
-      if (liveEvent.type === "action_opened") {
+      if (
+        liveEvent.type === "action_opened" &&
+        (kind == null || liveEvent.action.kind === kind)
+      ) {
         resolve(liveEvent.action);
       }
     });

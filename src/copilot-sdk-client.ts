@@ -3,6 +3,9 @@ import type {
   GetStatusResponse,
   MessageOptions,
   ModelInfo,
+  ElicitationContext,
+  ElicitationHandler,
+  ElicitationResult,
   PermissionHandler,
   PermissionRequest,
   PermissionRequestResult,
@@ -18,6 +21,9 @@ export type CopilotSdkMessageOptions = MessageOptions;
 export type CopilotSdkPermissionHandler = PermissionHandler;
 export type CopilotSdkPermissionRequest = PermissionRequest;
 export type CopilotSdkPermissionResult = PermissionRequestResult;
+export type CopilotSdkElicitationContext = ElicitationContext;
+export type CopilotSdkElicitationHandler = ElicitationHandler;
+export type CopilotSdkElicitationResult = ElicitationResult;
 export type CopilotSdkReasoningEffort = "low" | "medium" | "high" | "xhigh";
 export type CopilotSdkSessionMode = "interactive" | "plan" | "autopilot";
 export type CopilotSdkSessionConfig = SessionConfig;
@@ -25,6 +31,21 @@ export type CopilotSdkResumeSessionConfig = ResumeSessionConfig;
 export type CopilotSdkSessionEvent = SessionEvent;
 export type CopilotSdkSessionListFilter = SessionListFilter;
 export type CopilotSdkSessionMetadata = SessionMetadata;
+export interface CopilotSdkUserInputRequest {
+  question: string;
+  choices?: string[];
+  allowFreeform?: boolean;
+}
+
+export interface CopilotSdkUserInputResponse {
+  answer: string;
+  wasFreeform: boolean;
+}
+
+export type CopilotSdkUserInputHandler = (
+  request: CopilotSdkUserInputRequest,
+  invocation: { sessionId: string },
+) => Promise<CopilotSdkUserInputResponse> | CopilotSdkUserInputResponse;
 export interface CopilotSdkServerSkill {
   name: string;
   description: string;
