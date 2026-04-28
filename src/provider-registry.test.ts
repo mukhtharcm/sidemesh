@@ -199,6 +199,8 @@ describe("provider registry", () => {
     assert.equal(provider.capabilities.input.imageUrl, true);
     assert.equal(provider.capabilities.input.localImage, true);
     assert.equal(provider.capabilities.input.skills, true);
+    assert.equal(provider.capabilities.interaction.userInput, true);
+    assert.equal(provider.capabilities.interaction.elicitation, true);
     assert.equal(provider.capabilities.configuration.models, true);
     assert.equal(provider.capabilities.configuration.skills, true);
     assert.equal(provider.capabilities.configuration.skillManagement, true);

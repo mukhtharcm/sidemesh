@@ -977,10 +977,11 @@ int _capabilitySectionOrder(String key) {
   return switch (key) {
     'sessions' => 0,
     'input' => 1,
-    'approvals' => 2,
-    'configuration' => 3,
-    'runtimeControls' => 4,
-    'workspace' => 5,
+    'interaction' => 2,
+    'approvals' => 3,
+    'configuration' => 4,
+    'runtimeControls' => 5,
+    'workspace' => 6,
     _ => 99,
   };
 }
@@ -989,6 +990,7 @@ String _capabilitySectionTitle(String key) {
   return switch (key) {
     'sessions' => 'Sessions',
     'input' => 'Input',
+    'interaction' => 'Interactive input',
     'approvals' => 'Approvals',
     'configuration' => 'Configuration',
     'runtimeControls' => 'Runtime controls',
@@ -1001,6 +1003,7 @@ IconData _capabilitySectionIcon(String key) {
   return switch (key) {
     'sessions' => Icons.forum_rounded,
     'input' => Icons.input_rounded,
+    'interaction' => Icons.rate_review_rounded,
     'approvals' => Icons.verified_user_rounded,
     'configuration' => Icons.tune_rounded,
     'runtimeControls' => Icons.speed_rounded,
@@ -1027,6 +1030,8 @@ String _capabilityFeatureLabel(String key) {
     'gitStatus' => 'git status',
     'gitDiff' => 'git diff',
     'approveForSession' => 'approve for session',
+    'userInput' => 'ask user',
+    'elicitation' => 'form requests',
     _ => _humanizeCamelCase(key),
   };
 }

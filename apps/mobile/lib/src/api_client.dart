@@ -370,13 +370,13 @@ class ApiClient {
   Future<void> respondToAction(
     HostProfile host, {
     required String actionId,
-    required String decision,
+    required PendingActionResponseDraft response,
   }) async {
     await _post(
       host,
       '/api/actions/$actionId/respond',
-      body: {'decision': decision},
-      operation: 'resolve approval',
+      body: response.payload,
+      operation: 'respond to agent request',
     );
   }
 

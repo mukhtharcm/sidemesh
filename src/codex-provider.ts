@@ -31,6 +31,7 @@ import {
 import {
   normalizePendingActionDecision,
   type PendingActionDecisionInput,
+  type PendingActionResponseInput,
 } from "./approvals.js";
 import {
   buildActivityFromThreadItem,
@@ -267,7 +268,7 @@ export class CodexAgentProvider
 
   public respondToPendingAction(
     action: AgentPendingAction,
-    decision: PendingActionDecisionInput,
+    decision: PendingActionResponseInput,
   ): boolean {
     const result = buildCodexActionResponse(action, decision);
     if (!result) {
@@ -1725,6 +1726,10 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     localImage: true,
     skills: true,
   },
+  interaction: {
+    userInput: false,
+    elicitation: false,
+  },
   approvals: {
     command: true,
     tool: false,
@@ -1756,9 +1761,11 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
 
 function buildCodexActionResponse(
   action: AgentPendingAction,
-  input: PendingActionDecisionInput,
+  input: PendingActionResponseInput,
 ): unknown | null {
-  const decision = normalizePendingActionDecision(input);
+  const decision = normalizePendingActionDecision(
+    input as PendingActionDecisionInput,
+  );
   if (!decision) {
     return null;
   }

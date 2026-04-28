@@ -325,6 +325,14 @@ export type SessionActivity =
 
 export type PendingActionApprovalScope = "once" | "session" | "location";
 
+export type PendingActionKind =
+  | "command"
+  | "tool"
+  | "file_change"
+  | "permissions"
+  | "user_input"
+  | "elicitation";
+
 export type PendingActionDecisionId =
   | "accept"
   | "acceptForSession"
@@ -419,10 +427,74 @@ export interface PendingActionApproval {
   suggestedScope?: PendingActionApprovalScope;
 }
 
+export interface PendingActionUserInputRequest {
+  question: string;
+  choices: string[];
+  allowFreeform: boolean;
+}
+
+export type PendingActionElicitationFieldValue =
+  | string
+  | number
+  | boolean
+  | string[];
+
+export type PendingActionElicitationField =
+  | {
+      key: string;
+      type: "string";
+      title: string;
+      description?: string;
+      required: boolean;
+      defaultValue?: string;
+      minLength?: number;
+      maxLength?: number;
+      format?: "email" | "uri" | "date" | "date-time";
+      options?: Array<{ value: string; label: string }>;
+    }
+  | {
+      key: string;
+      type: "string[]";
+      title: string;
+      description?: string;
+      required: boolean;
+      defaultValue?: string[];
+      minItems?: number;
+      maxItems?: number;
+      options: Array<{ value: string; label: string }>;
+    }
+  | {
+      key: string;
+      type: "boolean";
+      title: string;
+      description?: string;
+      required: boolean;
+      defaultValue?: boolean;
+    }
+  | {
+      key: string;
+      type: "number";
+      title: string;
+      description?: string;
+      required: boolean;
+      defaultValue?: number;
+      minimum?: number;
+      maximum?: number;
+      integer?: boolean;
+    };
+
+export interface PendingActionElicitationRequest {
+  mode: "form" | "url";
+  message: string;
+  source?: string;
+  url?: string;
+  fields: PendingActionElicitationField[];
+}
+
 export interface PendingAction {
   id: string;
   sessionId: string;
-  kind: "command" | "tool" | "file_change" | "permissions";
+  kind: PendingActionKind;
   title: string;
   detail: string;
   requestedAt: number;
@@ -432,6 +504,8 @@ export interface PendingAction {
   sessionTitle?: string;
   cwd?: string;
   approval?: PendingActionApproval;
+  userInput?: PendingActionUserInputRequest;
+  elicitation?: PendingActionElicitationRequest;
 }
 
 export interface LiveEvent {

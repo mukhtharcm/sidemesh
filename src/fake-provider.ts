@@ -16,6 +16,7 @@ import nodePath from "node:path";
 import {
   normalizePendingActionDecision,
   type PendingActionDecisionInput,
+  type PendingActionResponseInput,
 } from "./approvals.js";
 import {
   type AgentCreateSessionRequest,
@@ -106,6 +107,10 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     localImage: true,
     skills: true,
   },
+  interaction: {
+    userInput: false,
+    elicitation: false,
+  },
   approvals: {
     command: true,
     tool: true,
@@ -187,6 +192,7 @@ function cloneCapabilities(
   return {
     sessions: { ...capabilities.sessions },
     input: { ...capabilities.input },
+    interaction: { ...capabilities.interaction },
     approvals: { ...capabilities.approvals },
     configuration: { ...capabilities.configuration },
     runtimeControls: { ...capabilities.runtimeControls },
@@ -415,9 +421,11 @@ export class FakeAgentProvider
 
   public respondToPendingAction(
     action: AgentPendingAction,
-    decision: PendingActionDecisionInput,
+    decision: PendingActionResponseInput,
   ): boolean {
-    const normalized = normalizePendingActionDecision(decision);
+    const normalized = normalizePendingActionDecision(
+      decision as PendingActionDecisionInput,
+    );
     if (!normalized || !isSupportedDecision(normalized.legacyDecision)) {
       return false;
     }

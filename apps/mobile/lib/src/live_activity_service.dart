@@ -137,10 +137,10 @@ class LiveActivityService {
     }
 
     final headline = count == 1
-        ? 'Approval needed'
-        : '$count approvals waiting';
+        ? 'Agent needs input'
+        : '$count requests waiting';
     final detail = title.trim().isEmpty
-        ? 'Agent is waiting for permission.'
+        ? 'Agent is waiting for a reply.'
         : title.trim();
     final footnote = sessionTitle.trim();
     await _syncPrimaryActivity({
@@ -358,10 +358,14 @@ class LiveActivityService {
 
     if (pendingAction != null) {
       return {
-        'headline': 'Approval needed',
+        'headline': pendingAction.isApproval
+            ? 'Approval needed'
+            : 'Input needed',
         'detail': _nonEmpty(
           pendingAction.title,
-          fallback: 'Agent is waiting for permission.',
+          fallback: pendingAction.isApproval
+              ? 'Agent is waiting for permission.'
+              : 'Agent is waiting for a reply.',
         ),
         'footnote': title,
         'status': 'approval',
