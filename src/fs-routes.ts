@@ -1,16 +1,23 @@
 import { Buffer } from "node:buffer";
-import { realpath, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { watch, type FSWatcher } from "node:fs";
+import {
+  copyFile,
+  cp,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
-import type { Express, Request, Response, NextFunction } from "express";
+import type { Express, NextFunction, Request, Response } from "express";
 import type { WebSocket, WebSocketServer } from "ws";
 
-import {
-  requireProviderMethod,
-  type AgentProviderMethod,
-  type AgentProviderMethodName,
-  type AgentProvider,
-} from "./agent-provider.js";
 import {
   collectWorkspaceRoots,
   resolveWorkspacePath,
@@ -22,63 +29,28 @@ const READ_SOFT_CAP_BYTES = 2 * 1024 * 1024; // 2 MiB — UX preview cap.
 const WRITE_SOFT_CAP_BYTES = 4 * 1024 * 1024; // 4 MiB — payload safety cap.
 
 interface FsRoutesOptions {
-  defaultProvider: AgentProvider;
-  providerForKind: (kind: string | null | undefined) => {
-    kind: string;
-    provider: AgentProvider;
-  } | null;
-  listSessionsForProvider: (
-    kind: string | null | undefined,
-  ) => Promise<SessionSummary[]>;
+  listSessions: () => Promise<SessionSummary[]>;
 }
 
 export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
-  const { defaultProvider, providerForKind, listSessionsForProvider } = opts;
-
-  app.use("/api/fs", (_request, response, next) => {
-    const selected = providerForRequest(_request, defaultProvider, providerForKind);
-    if (!selected) {
-      response.status(400).json({ error: "unknown provider" });
-      return;
-    }
-    if (!selected.provider.capabilities.workspace.filesystem) {
-      response.status(501).json({
-        error: `${selected.provider.displayName} does not support filesystem access`,
-      });
-      return;
-    }
-    next();
-  });
-
   app.get(
     "/api/fs/list",
     asyncRoute(async (request, response) => {
-      const selected = requireFilesystemProvider(
-        request,
-        response,
-        defaultProvider,
-        providerForKind,
-      );
-      if (!selected) {
-        return;
-      }
       const target = await resolveIncomingPath(
         request.query.path,
-        selected.provider,
-        () => listSessionsForProvider(selected.kind),
+        opts.listSessions,
       );
-      const readDirectory = requireFilesystemMethod(selected.provider, "fsReadDirectory", "filesystem directory listing");
-      const result = await readDirectory.call(selected.provider, target);
-      const entries = (result.entries || []).map((entry) => ({
-        name: entry.fileName,
-        path: path.join(target, entry.fileName),
-        isDirectory: !!entry.isDirectory,
-        isFile: !!entry.isFile,
-      }));
-      entries.sort((a, b) => {
-        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
+      const entries = (await readdir(target, { withFileTypes: true }))
+        .map((entry) => ({
+          name: entry.name,
+          path: path.join(target, entry.name),
+          isDirectory: entry.isDirectory(),
+          isFile: entry.isFile(),
+        }))
+        .sort((a, b) => {
+          if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
       response.json({ path: target, entries });
     }),
   );
@@ -86,52 +58,27 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.get(
     "/api/fs/metadata",
     asyncRoute(async (request, response) => {
-      const selected = requireFilesystemProvider(
-        request,
-        response,
-        defaultProvider,
-        providerForKind,
-      );
-      if (!selected) {
-        return;
-      }
       const target = await resolveIncomingPath(
         request.query.path,
-        selected.provider,
-        () => listSessionsForProvider(selected.kind),
+        opts.listSessions,
       );
-      const getMetadata = requireFilesystemMethod(selected.provider, "fsGetMetadata", "filesystem metadata");
-      const meta = await getMetadata.call(selected.provider, target);
-      response.json({ path: target, ...meta });
+      response.json(await buildMetadata(target));
     }),
   );
 
   app.get(
     "/api/fs/read",
     asyncRoute(async (request, response) => {
-      const selected = requireFilesystemProvider(
-        request,
-        response,
-        defaultProvider,
-        providerForKind,
-      );
-      if (!selected) {
-        return;
-      }
       const target = await resolveIncomingPath(
         request.query.path,
-        selected.provider,
-        () => listSessionsForProvider(selected.kind),
+        opts.listSessions,
       );
-      const getMetadata = requireFilesystemMethod(selected.provider, "fsGetMetadata", "filesystem metadata");
-      const readFile = requireFilesystemMethod(selected.provider, "fsReadFile", "filesystem file reads");
-      const meta = await getMetadata.call(selected.provider, target);
+      const meta = await buildMetadata(target);
       if (!meta.isFile) {
         response.status(400).json({ error: "path is not a regular file" });
         return;
       }
-      const res = await readFile.call(selected.provider, target);
-      const bytes = Buffer.from(res.dataBase64 || "", "base64");
+      const bytes = await readFile(target);
       const size = bytes.byteLength;
       const binary = isBinary(bytes);
       const truncated = size > READ_SOFT_CAP_BYTES;
@@ -148,7 +95,9 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
         });
         return;
       }
-      const preview = truncated ? bytes.subarray(0, READ_SOFT_CAP_BYTES) : bytes;
+      const preview = truncated
+        ? bytes.subarray(0, READ_SOFT_CAP_BYTES)
+        : bytes;
       response.json({
         path: target,
         size,
@@ -165,23 +114,11 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.get(
     "/api/fs/blob",
     asyncRoute(async (request, response) => {
-      const selected = requireFilesystemProvider(
-        request,
-        response,
-        defaultProvider,
-        providerForKind,
-      );
-      if (!selected) {
-        return;
-      }
       const target = await resolveIncomingBlobPath(
         request.query.path,
-        selected.provider,
-        () => listSessionsForProvider(selected.kind),
+        opts.listSessions,
       );
-      const readFile = requireFilesystemMethod(selected.provider, "fsReadFile", "filesystem blob reads");
-      const res = await readFile.call(selected.provider, target);
-      const bytes = Buffer.from(res.dataBase64 || "", "base64");
+      const bytes = await readFile(target);
       response.setHeader("Content-Type", guessMime(target));
       response.setHeader("Content-Length", String(bytes.byteLength));
       response.setHeader("Cache-Control", "private, max-age=60");
@@ -196,20 +133,12 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/write",
     asyncRoute(async (request, response) => {
-      const selected = requireFilesystemProvider(
-        request,
-        response,
-        defaultProvider,
-        providerForKind,
-      );
-      if (!selected) {
-        return;
-      }
       const target = await resolveIncomingPath(
         request.body?.path,
-        selected.provider,
-        () => listSessionsForProvider(selected.kind),
-        { allowMissing: true },
+        opts.listSessions,
+        {
+          allowMissing: true,
+        },
       );
       const contents = request.body?.contents;
       if (typeof contents !== "string") {
@@ -221,8 +150,7 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
         response.status(413).json({ error: "payload too large" });
         return;
       }
-      const writeFile = requireFilesystemMethod(selected.provider, "fsWriteFile", "filesystem file writes");
-      await writeFile.call(selected.provider, target, buffer.toString("base64"));
+      await writeFile(target, buffer);
       response.json({ path: target, bytes: buffer.byteLength });
     }),
   );
@@ -230,24 +158,15 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/createDir",
     asyncRoute(async (request, response) => {
-      const selected = requireFilesystemProvider(
-        request,
-        response,
-        defaultProvider,
-        providerForKind,
-      );
-      if (!selected) {
-        return;
-      }
       const target = await resolveIncomingPath(
         request.body?.path,
-        selected.provider,
-        () => listSessionsForProvider(selected.kind),
-        { allowMissing: true },
+        opts.listSessions,
+        {
+          allowMissing: true,
+        },
       );
       const recursive = request.body?.recursive !== false;
-      const createDirectory = requireFilesystemMethod(selected.provider, "fsCreateDirectory", "filesystem directory creation");
-      await createDirectory.call(selected.provider, target, recursive);
+      await mkdir(target, { recursive });
       response.json({ path: target });
     }),
   );
@@ -255,24 +174,13 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/remove",
     asyncRoute(async (request, response) => {
-      const selected = requireFilesystemProvider(
-        request,
-        response,
-        defaultProvider,
-        providerForKind,
-      );
-      if (!selected) {
-        return;
-      }
       const target = await resolveIncomingPath(
         request.body?.path,
-        selected.provider,
-        () => listSessionsForProvider(selected.kind),
+        opts.listSessions,
       );
       const recursive = request.body?.recursive !== false;
       const force = request.body?.force !== false;
-      const remove = requireFilesystemMethod(selected.provider, "fsRemove", "filesystem removal");
-      await remove.call(selected.provider, target, { recursive, force });
+      await rm(target, { recursive, force });
       response.json({ path: target });
     }),
   );
@@ -280,110 +188,59 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/copy",
     asyncRoute(async (request, response) => {
-      const selected = requireFilesystemProvider(
-        request,
-        response,
-        defaultProvider,
-        providerForKind,
-      );
-      if (!selected) {
-        return;
-      }
       const source = await resolveIncomingPath(
         request.body?.sourcePath,
-        selected.provider,
-        () => listSessionsForProvider(selected.kind),
+        opts.listSessions,
       );
       const destination = await resolveIncomingPath(
         request.body?.destinationPath,
-        selected.provider,
-        () => listSessionsForProvider(selected.kind),
+        opts.listSessions,
         { allowMissing: true },
       );
       const recursive = request.body?.recursive === true;
-      const copy = requireFilesystemMethod(selected.provider, "fsCopy", "filesystem copy");
-      await copy.call(selected.provider, {
-        sourcePath: source,
-        destinationPath: destination,
-        recursive,
-      });
+      const sourceMeta = await buildMetadata(source);
+      if (sourceMeta.isDirectory) {
+        if (!recursive) {
+          response
+            .status(400)
+            .json({ error: "recursive must be true when copying a directory" });
+          return;
+        }
+        await cp(source, destination, { recursive: true });
+      } else {
+        await copyFile(source, destination);
+      }
       response.json({ sourcePath: source, destinationPath: destination });
     }),
   );
 
   app.get(
     "/api/fs/roots",
-    asyncRoute(async (request, response) => {
-      const selected = requireFilesystemProvider(
-        request,
-        response,
-        defaultProvider,
-        providerForKind,
-      );
-      if (!selected) {
-        return;
-      }
-      const roots = await collectWorkspaceRoots(
-        selected.provider,
-        () => listSessionsForProvider(selected.kind),
-      );
+    asyncRoute(async (_request, response) => {
+      const roots = await collectWorkspaceRoots(opts.listSessions);
       response.json({ roots });
     }),
   );
 }
 
-function providerForRequest(
-  request: Request,
-  defaultProvider: AgentProvider,
-  providerForKind: FsRoutesOptions["providerForKind"],
-): { kind: string; provider: AgentProvider } | null {
-  const kind =
-    asString(request.query?.agentProvider) ??
-    asString(request.body?.agentProvider) ??
-    null;
-  if (kind) {
-    return providerForKind(kind);
-  }
-  return {
-    kind: defaultProvider.kind,
-    provider: defaultProvider,
-  };
-}
-
-function requireFilesystemProvider(
-  request: Request,
-  response: Response,
-  defaultProvider: AgentProvider,
-  providerForKind: FsRoutesOptions["providerForKind"],
-): { kind: string; provider: AgentProvider } | null {
-  const selected = providerForRequest(request, defaultProvider, providerForKind);
-  if (!selected) {
-    response.status(400).json({ error: "unknown provider" });
-    return null;
-  }
-  return selected;
-}
-
 async function resolveIncomingPath(
   raw: unknown,
-  provider: AgentProvider,
   listSessions: () => Promise<SessionSummary[]>,
   options: { allowMissing?: boolean } = {},
 ): Promise<string> {
   if (typeof raw !== "string") {
     throw new WorkspaceAccessError("path is required", 400);
   }
-  const roots = await collectWorkspaceRoots(provider, listSessions);
+  const roots = await collectWorkspaceRoots(listSessions);
   return resolveWorkspacePath(raw, roots, options);
 }
 
 async function resolveIncomingBlobPath(
   raw: unknown,
-  provider: AgentProvider,
   listSessions: () => Promise<SessionSummary[]>,
 ): Promise<string> {
   try {
-    return await resolveIncomingPath(raw, provider, listSessions);
+    return await resolveIncomingPath(raw, listSessions);
   } catch (error) {
     if (typeof raw !== "string" || !path.isAbsolute(raw)) {
       throw error;
@@ -414,7 +271,11 @@ async function resolveIncomingBlobPath(
 }
 
 function asyncRoute(
-  handler: (request: Request, response: Response, next: NextFunction) => Promise<void>,
+  handler: (
+    request: Request,
+    response: Response,
+    next: NextFunction,
+  ) => Promise<void>,
 ): (request: Request, response: Response, next: NextFunction) => void {
   return (request, response, next) => {
     void handler(request, response, next).catch((error) => {
@@ -427,54 +288,49 @@ function asyncRoute(
   };
 }
 
-function requireFilesystemMethod<K extends AgentProviderMethodName>(
-  provider: AgentProvider,
-  method: K,
-  feature: string,
-): AgentProviderMethod<K> {
-  try {
-    return requireProviderMethod(provider, method, feature);
-  } catch (error) {
-    throw new WorkspaceAccessError(
-      error instanceof Error ? error.message : String(error),
-      501,
-    );
-  }
-}
-
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-// ---------------------------------------------------------------------------
-// fs/watch registry — bridges WebSocket clients ↔ provider fs/watch notifications.
-//
-// The provider returns a watchId per fs/watch call. The registry tracks which client
-// owns which watchId and fans out fs/changed notifications to that client
-// only. When a client disconnects we unsubscribe all of its watches upstream.
-// ---------------------------------------------------------------------------
-
 interface WatchRecord {
   ws: WebSocket;
-  userWatchId: string; // Client-supplied id echoed back in change events.
+  userWatchId: string;
   path: string;
+  watcher: FSWatcher;
 }
 
 export class FsWatchRegistry {
   private readonly records = new Map<string, WatchRecord>();
   private readonly byClient = new WeakMap<WebSocket, Set<string>>();
 
-  public constructor(private readonly provider: AgentProvider) {}
-
   public async subscribe(
     ws: WebSocket,
     params: { path: string; userWatchId: string; roots: string[] },
   ): Promise<{ watchId: string; path: string }> {
     const resolved = await resolveWorkspacePath(params.path, params.roots);
-    const watch = requireFilesystemMethod(this.provider, "fsWatch", "filesystem watching");
-    const result = await watch.call(this.provider, resolved);
-    const watchId = result.watchId;
-    this.records.set(watchId, { ws, userWatchId: params.userWatchId, path: resolved });
+    const metadata = await buildMetadata(resolved);
+    const watchId = randomUUID();
+    const watcher = watch(
+      resolved,
+      { persistent: false },
+      (_eventType, filename) => {
+        const changedPath = this.resolveChangedPath(
+          resolved,
+          metadata.isDirectory,
+          asString(filename?.toString()),
+        );
+        this.deliver(watchId, changedPath ? [changedPath] : [resolved]);
+      },
+    );
+    watcher.on("error", () => {
+      void this.unsubscribe(ws, watchId);
+    });
+    this.records.set(watchId, {
+      ws,
+      userWatchId: params.userWatchId,
+      path: resolved,
+      watcher,
+    });
     const set = this.byClient.get(ws) ?? new Set<string>();
     set.add(watchId);
     this.byClient.set(ws, set);
@@ -486,12 +342,7 @@ export class FsWatchRegistry {
     if (!record || record.ws !== ws) return;
     this.records.delete(watchId);
     this.byClient.get(ws)?.delete(watchId);
-    try {
-      const unwatch = requireFilesystemMethod(this.provider, "fsUnwatch", "filesystem watching");
-      await unwatch.call(this.provider, watchId);
-    } catch {
-      // Best-effort; Codex may already have dropped the watch.
-    }
+    record.watcher.close();
   }
 
   public async disconnect(ws: WebSocket): Promise<void> {
@@ -499,28 +350,20 @@ export class FsWatchRegistry {
     if (!set) return;
     this.byClient.delete(ws);
     for (const watchId of set) {
+      const record = this.records.get(watchId);
       this.records.delete(watchId);
-      try {
-        const unwatch = requireFilesystemMethod(this.provider, "fsUnwatch", "filesystem watching");
-        await unwatch.call(this.provider, watchId);
-      } catch {
-        // swallow
-      }
+      record?.watcher.close();
     }
   }
 
-  public deliver(params: { watchId?: string; changedPaths?: string[] }): void {
-    const watchId = params.watchId ? String(params.watchId) : "";
-    if (!watchId) return;
+  public deliver(watchId: string, changedPaths: string[]): void {
     const record = this.records.get(watchId);
     if (!record) return;
     const payload = JSON.stringify({
       type: "fs_changed",
       watchId: record.userWatchId,
       path: record.path,
-      changedPaths: Array.isArray(params.changedPaths)
-        ? params.changedPaths.map((p) => String(p))
-        : [],
+      changedPaths,
     });
     try {
       record.ws.send(payload);
@@ -528,23 +371,23 @@ export class FsWatchRegistry {
       // swallow
     }
   }
+
+  private resolveChangedPath(
+    watchedPath: string,
+    isDirectory: boolean,
+    filename: string | null,
+  ): string | null {
+    if (!filename) {
+      return watchedPath;
+    }
+    return isDirectory ? path.join(watchedPath, filename) : watchedPath;
+  }
 }
 
-/**
- * Handle a WebSocket connection on /api/fs/live. Incoming JSON frames:
- *   { type: "subscribe", id: "...", path: "/abs/path" }
- *   { type: "unsubscribe", watchId: "..." }
- * Outgoing:
- *   { type: "subscribed", id, watchId, path }
- *   { type: "unsubscribed", watchId }
- *   { type: "fs_changed", watchId, path, changedPaths }
- *   { type: "error", id?, message }
- */
 export function attachFsLiveSocket(
   ws: WebSocket,
   registry: FsWatchRegistry,
   opts: {
-    provider: AgentProvider;
     listSessions: () => Promise<SessionSummary[]>;
   },
 ): void {
@@ -559,7 +402,7 @@ export function attachFsLiveSocket(
     const messageType = message?.type;
     try {
       if (messageType === "subscribe") {
-        const roots = await collectWorkspaceRoots(opts.provider, opts.listSessions);
+        const roots = await collectWorkspaceRoots(opts.listSessions);
         const { watchId, path: resolved } = await registry.subscribe(ws, {
           path: String(message.path ?? ""),
           userWatchId: String(message.id ?? ""),
@@ -603,7 +446,6 @@ export function attachWatchUpgrade(
   wsServer: WebSocketServer,
   registry: FsWatchRegistry,
   opts: {
-    provider: AgentProvider;
     listSessions: () => Promise<SessionSummary[]>;
   },
 ) {
@@ -617,9 +459,17 @@ export function attachWatchUpgrade(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+async function buildMetadata(target: string) {
+  const info = await lstat(target);
+  return {
+    path: target,
+    isDirectory: info.isDirectory(),
+    isFile: info.isFile(),
+    isSymlink: info.isSymbolicLink(),
+    createdAtMs: Number.isFinite(info.birthtimeMs) ? info.birthtimeMs : 0,
+    modifiedAtMs: Number.isFinite(info.mtimeMs) ? info.mtimeMs : 0,
+  };
+}
 
 function isBinary(bytes: Buffer): boolean {
   const sample = bytes.subarray(0, Math.min(bytes.byteLength, 8192));
@@ -637,41 +487,68 @@ function isBinary(bytes: Buffer): boolean {
 
 function guessMime(filePath: string): string {
   const lower = filePath.toLowerCase();
-  const ext = lower.includes(".") ? lower.slice(lower.lastIndexOf(".") + 1) : "";
+  const ext = lower.includes(".")
+    ? lower.slice(lower.lastIndexOf(".") + 1)
+    : "";
   switch (ext) {
-    case "md": return "text/markdown";
+    case "md":
+      return "text/markdown";
     case "ts":
-    case "tsx": return "text/x-typescript";
+    case "tsx":
+      return "text/x-typescript";
     case "js":
     case "mjs":
-    case "cjs": return "text/javascript";
-    case "json": return "application/json";
+    case "cjs":
+      return "text/javascript";
+    case "json":
+      return "application/json";
     case "yaml":
-    case "yml": return "text/yaml";
-    case "toml": return "text/x-toml";
+    case "yml":
+      return "text/yaml";
+    case "toml":
+      return "text/x-toml";
     case "html":
-    case "htm": return "text/html";
-    case "css": return "text/css";
-    case "rs": return "text/x-rust";
-    case "py": return "text/x-python";
-    case "go": return "text/x-go";
-    case "java": return "text/x-java";
+    case "htm":
+      return "text/html";
+    case "css":
+      return "text/css";
+    case "rs":
+      return "text/x-rust";
+    case "py":
+      return "text/x-python";
+    case "go":
+      return "text/x-go";
+    case "java":
+      return "text/x-java";
     case "kt":
-    case "kts": return "text/x-kotlin";
-    case "swift": return "text/x-swift";
-    case "dart": return "text/x-dart";
+    case "kts":
+      return "text/x-kotlin";
+    case "swift":
+      return "text/x-swift";
+    case "dart":
+      return "text/x-dart";
     case "sh":
     case "bash":
-    case "zsh": return "text/x-shellscript";
-    case "xml": return "application/xml";
-    case "svg": return "image/svg+xml";
-    case "png": return "image/png";
+    case "zsh":
+      return "text/x-shellscript";
+    case "xml":
+      return "application/xml";
+    case "svg":
+      return "image/svg+xml";
+    case "png":
+      return "image/png";
     case "jpg":
-    case "jpeg": return "image/jpeg";
-    case "gif": return "image/gif";
-    case "webp": return "image/webp";
-    case "pdf": return "application/pdf";
-    case "zip": return "application/zip";
-    default: return "application/octet-stream";
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "pdf":
+      return "application/pdf";
+    case "zip":
+      return "application/zip";
+    default:
+      return "application/octet-stream";
   }
 }
