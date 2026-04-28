@@ -17,7 +17,7 @@ void main() {
         'workspace': {'remoteGitDiff': true},
       },
       'hostCapabilities': {
-        'workspace': {'gitStatus': true, 'gitDiff': true},
+        'workspace': {'filesystem': true, 'gitStatus': true, 'gitDiff': true},
       },
       'supportedProviders': [
         {
@@ -49,6 +49,7 @@ void main() {
     );
     expect(node.supportsHostCapability('workspace', 'gitStatus'), isTrue);
     expect(node.supportsHostCapability('workspace', 'gitDiff'), isTrue);
+    expect(node.supportsHostCapability('workspace', 'filesystem'), isTrue);
     expect(node.supportedProviders, hasLength(1));
     expect(node.supportedProviders.single.kind, 'codex');
     expect(node.supportedProviders.single.commandEnvironmentVariables, [
@@ -144,40 +145,39 @@ void main() {
   });
 
   test('NodeInfo exposes fake capability profiles for UI gates', () {
-    final chatOnly = NodeInfo.fromJson(_fakeNodePayload(
-      'chat-only',
-      providerCapabilities: {
-        'sessions': {
-          'create': true,
-          'history': true,
-          'interrupt': true,
-          'archive': true,
+    final chatOnly = NodeInfo.fromJson(
+      _fakeNodePayload(
+        'chat-only',
+        providerCapabilities: {
+          'sessions': {
+            'create': true,
+            'history': true,
+            'interrupt': true,
+            'archive': true,
+          },
+          'input': {
+            'text': true,
+            'imageUrl': false,
+            'localImage': false,
+            'skills': false,
+          },
+          'configuration': {
+            'models': false,
+            'profiles': false,
+            'skills': false,
+          },
+          'runtimeControls': {'model': false, 'approvalPolicy': false},
+          'workspace': {'filesystem': false, 'remoteGitDiff': false},
         },
-        'input': {
-          'text': true,
-          'imageUrl': false,
-          'localImage': false,
-          'skills': false,
-        },
-        'configuration': {
-          'models': false,
-          'profiles': false,
-          'skills': false,
-        },
-        'runtimeControls': {
-          'model': false,
-          'approvalPolicy': false,
-        },
-        'workspace': {
-          'filesystem': false,
-          'remoteGitDiff': false,
-        },
-      },
-    ));
+      ),
+    );
 
     expect(chatOnly.providerDisplayVersion, 'fake-provider 1.0.0 (chat-only)');
     expect(chatOnly.providerCapabilities.supports('input', 'text'), isTrue);
-    expect(chatOnly.providerCapabilities.supports('input', 'imageUrl'), isFalse);
+    expect(
+      chatOnly.providerCapabilities.supports('input', 'imageUrl'),
+      isFalse,
+    );
     expect(chatOnly.providerCapabilities.supports('input', 'skills'), isFalse);
     expect(
       chatOnly.providerCapabilities.supports('configuration', 'models'),
@@ -192,15 +192,17 @@ void main() {
       isFalse,
     );
 
-    final noFiles = NodeInfo.fromJson(_fakeNodePayload(
-      'no-files',
-      providerCapabilities: {
-        'input': {'imageUrl': true, 'skills': true},
-        'configuration': {'models': true, 'skills': true},
-        'runtimeControls': {'model': true},
-        'workspace': {'filesystem': false, 'remoteGitDiff': false},
-      },
-    ));
+    final noFiles = NodeInfo.fromJson(
+      _fakeNodePayload(
+        'no-files',
+        providerCapabilities: {
+          'input': {'imageUrl': true, 'skills': true},
+          'configuration': {'models': true, 'skills': true},
+          'runtimeControls': {'model': true},
+          'workspace': {'filesystem': false, 'remoteGitDiff': false},
+        },
+      ),
+    );
 
     expect(noFiles.providerCapabilities.supports('input', 'imageUrl'), isTrue);
     expect(
@@ -233,7 +235,7 @@ Map<String, dynamic> _fakeNodePayload(
     'providerConfig': {'kind': 'fake', 'command': 'builtin'},
     'providerCapabilities': providerCapabilities,
     'hostCapabilities': {
-      'workspace': {'gitStatus': true, 'gitDiff': true},
+      'workspace': {'filesystem': true, 'gitStatus': true, 'gitDiff': true},
     },
     'supportedProviders': const [],
   };

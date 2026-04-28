@@ -431,14 +431,7 @@ class ApiClient {
 
   Uri fsBlobUri(HostProfile host, String path, {String? agentProvider}) {
     _ensureHostEnabled(host);
-    return _uri(
-      host,
-      '/api/fs/blob',
-      queryParameters: {
-        'path': path,
-        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
-      },
-    );
+    return _uri(host, '/api/fs/blob', queryParameters: {'path': path});
   }
 
   Future<Uint8List> fetchFsBlob(
@@ -449,10 +442,7 @@ class ApiClient {
     final response = await _get(
       host,
       '/api/fs/blob',
-      queryParameters: {
-        'path': path,
-        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
-      },
+      queryParameters: {'path': path},
       timeout: _transcriptReadTimeout,
       operation: 'load image',
     );
@@ -471,14 +461,7 @@ class ApiClient {
     HostProfile host, {
     String? agentProvider,
   }) async {
-    final response = await _get(
-      host,
-      '/api/fs/roots',
-      queryParameters: (agentProvider ?? '').isEmpty
-          ? null
-          : {'agentProvider': agentProvider!},
-      operation: 'load roots',
-    );
+    final response = await _get(host, '/api/fs/roots', operation: 'load roots');
     final decoded = _decodeObject(response);
     return ((decoded['roots'] as List?) ?? const [])
         .map((e) => e.toString())
@@ -493,10 +476,7 @@ class ApiClient {
     final response = await _get(
       host,
       '/api/fs/list',
-      queryParameters: {
-        'path': path,
-        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
-      },
+      queryParameters: {'path': path},
       operation: 'list directory',
     );
     return FsListing.fromJson(_decodeObject(response));
@@ -510,10 +490,7 @@ class ApiClient {
     final response = await _get(
       host,
       '/api/fs/metadata',
-      queryParameters: {
-        'path': path,
-        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
-      },
+      queryParameters: {'path': path},
       operation: 'load file metadata',
     );
     return FsMetadata.fromJson(_decodeObject(response));
@@ -527,10 +504,7 @@ class ApiClient {
     final response = await _get(
       host,
       '/api/fs/read',
-      queryParameters: {
-        'path': path,
-        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
-      },
+      queryParameters: {'path': path},
       timeout: _transcriptReadTimeout,
       operation: 'read file',
     );
@@ -546,11 +520,7 @@ class ApiClient {
     await _post(
       host,
       '/api/fs/write',
-      body: {
-        'path': path,
-        'contents': contents,
-        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider,
-      },
+      body: {'path': path, 'contents': contents},
       operation: 'write file',
     );
   }
@@ -564,11 +534,7 @@ class ApiClient {
     await _post(
       host,
       '/api/fs/createDir',
-      body: {
-        'path': path,
-        'recursive': recursive,
-        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider,
-      },
+      body: {'path': path, 'recursive': recursive},
       operation: 'create directory',
     );
   }
@@ -583,12 +549,7 @@ class ApiClient {
     await _post(
       host,
       '/api/fs/remove',
-      body: {
-        'path': path,
-        'recursive': recursive,
-        'force': force,
-        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider,
-      },
+      body: {'path': path, 'recursive': recursive, 'force': force},
       operation: 'remove file',
     );
   }
@@ -607,7 +568,6 @@ class ApiClient {
         'sourcePath': sourcePath,
         'destinationPath': destinationPath,
         'recursive': recursive,
-        if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider,
       },
       operation: 'copy file',
     );
@@ -619,9 +579,6 @@ class ApiClient {
     final wsUri = baseUri.replace(
       scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
       path: '/api/fs/live',
-      queryParameters: (agentProvider ?? '').isEmpty
-          ? null
-          : {'agentProvider': agentProvider!},
     );
     return IOWebSocketChannel.connect(
       wsUri,

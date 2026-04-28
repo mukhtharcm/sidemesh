@@ -1,7 +1,6 @@
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
-import type { AgentProvider } from "./agent-provider.js";
 import type { SessionSummary } from "./types.js";
 
 /**
@@ -36,7 +35,9 @@ export async function resolveWorkspacePath(
     canonical = await realpath(input);
   } catch (error) {
     if (!options.allowMissing) {
-      throw new WorkspaceAccessError(`cannot resolve path: ${stringifyError(error)}`);
+      throw new WorkspaceAccessError(
+        `cannot resolve path: ${stringifyError(error)}`,
+      );
     }
     // Walk up to the nearest existing ancestor and canonicalize that, then
     // append the missing tail. This lets us allow writes of new files inside
@@ -62,7 +63,9 @@ export class WorkspaceAccessError extends Error {
 async function canonicalizeRoots(roots: string[]): Promise<string[]> {
   const resolved = await Promise.all(
     roots
-      .filter((root): root is string => typeof root === "string" && root.length > 0)
+      .filter(
+        (root): root is string => typeof root === "string" && root.length > 0,
+      )
       .map(async (root) => {
         try {
           const real = await realpath(root);
@@ -82,7 +85,9 @@ async function canonicalizeWithMissingTail(target: string): Promise<string> {
   while (current.length > 1) {
     try {
       const real = await realpath(current);
-      return segments.length === 0 ? real : path.join(real, ...segments.reverse());
+      return segments.length === 0
+        ? real
+        : path.join(real, ...segments.reverse());
     } catch {
       segments.push(path.basename(current));
       const parent = path.dirname(current);
@@ -111,7 +116,6 @@ function stringifyError(error: unknown): string {
  * Collect the distinct cwds of all known sessions for use as workspace roots.
  */
 export async function collectWorkspaceRoots(
-  _provider: AgentProvider,
   listSessions: () => Promise<SessionSummary[]>,
 ): Promise<string[]> {
   try {
