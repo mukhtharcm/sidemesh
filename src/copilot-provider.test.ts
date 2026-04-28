@@ -113,7 +113,9 @@ describe("Copilot provider", () => {
   });
 
   it("runs a text turn through SDK createSession/send", async () => {
-    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-test-"));
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-test-"),
+    );
     try {
       const sdk = new FakeCopilotSdkClient();
       const provider = new CopilotAgentProvider({
@@ -182,7 +184,10 @@ describe("Copilot provider", () => {
             source: "personal-copilot",
             enabled: false,
             userInvocable: true,
-            path: nodePath.join(process.env.HOME ?? dir, ".copilot/skills/release-checks/SKILL.md"),
+            path: nodePath.join(
+              process.env.HOME ?? dir,
+              ".copilot/skills/release-checks/SKILL.md",
+            ),
           },
         ],
       });
@@ -192,7 +197,10 @@ describe("Copilot provider", () => {
       });
       await provider.start();
 
-      const catalog = await provider.listSkills!({ cwd: dir, forceReload: false });
+      const catalog = await provider.listSkills!({
+        cwd: dir,
+        forceReload: false,
+      });
       assert.deepEqual(
         catalog.skills.map((skill) => ({
           name: skill.name,
@@ -249,7 +257,11 @@ describe("Copilot provider", () => {
         cwd: dir,
         input: [
           { type: "text", text: "Use this skill", text_elements: [] },
-          { type: "skill", name: "frontend-design", path: "/tmp/skill/SKILL.md" },
+          {
+            type: "skill",
+            name: "frontend-design",
+            path: "/tmp/skill/SKILL.md",
+          },
         ],
         overrides: emptyOverrides(),
       });
@@ -695,6 +707,82 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("auto-approves Copilot permission requests when approval policy is never", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-approval-never-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      const liveEventTypes: string[] = [];
+      provider.on("liveEvent", (event) => {
+        liveEventTypes.push(event.type);
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "approval please", text_elements: [] }],
+        overrides: {
+          ...emptyOverrides(),
+          approvalPolicy: "never",
+        },
+      });
+      await completed;
+
+      const log = await provider.readSessionLog!(created.thread);
+      assert.equal(log.runtime?.approvalPolicy, "never");
+      assert.equal(liveEventTypes.includes("action_opened"), false);
+      assert.match(
+        log.messages.at(-1)?.text ?? "",
+        /copilot says: approval please/,
+      );
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("lets session approval overrides beat Copilot allow-all defaults", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-approval-override-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        allowAll: true,
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const opened = waitForActionOpened(provider);
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "approval override", text_elements: [] }],
+        overrides: {
+          ...emptyOverrides(),
+          approvalPolicy: "on-request",
+        },
+      });
+
+      const action = await opened;
+      assert.equal(provider.respondToPendingAction(action, "accept"), true);
+      await completed;
+
+      const log = await provider.readSessionLog!(created.thread);
+      assert.equal(log.runtime?.approvalPolicy, "on-request");
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("finishes the turn when SDK session creation fails", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-create-failure-"),
@@ -751,7 +839,10 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
     path?: string;
     projectPath?: string;
   }>;
-  private readonly sessionMetadata = new Map<string, CopilotSdkSessionMetadata>();
+  private readonly sessionMetadata = new Map<
+    string,
+    CopilotSdkSessionMetadata
+  >();
   private readonly sessionEvents = new Map<string, CopilotSdkSessionEvent[]>();
 
   public constructor(
@@ -824,9 +915,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
               if (projectFilter.size === 0) {
                 return true;
               }
-              return (
-                !skill.projectPath || projectFilter.has(skill.projectPath)
-              );
+              return !skill.projectPath || projectFilter.has(skill.projectPath);
             })
             .map((skill) => ({
               ...skill,
@@ -841,7 +930,10 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
     /* fake */
   }
 
-  public async getStatus(): Promise<{ version: string; protocolVersion: number }> {
+  public async getStatus(): Promise<{
+    version: string;
+    protocolVersion: number;
+  }> {
     return { version: "9.9.9", protocolVersion: 1 };
   }
 
@@ -906,15 +998,13 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
   public readonly rpc = {
     mode: {
       get: async (): Promise<CopilotSdkSessionMode> => this.currentMode,
-      set: async ({
-        mode,
-      }: {
-        mode: CopilotSdkSessionMode;
-      }): Promise<void> => {
+      set: async ({ mode }: { mode: CopilotSdkSessionMode }): Promise<void> => {
         const previousMode = this.currentMode;
         this.currentMode = mode;
         this.selectedModes.push(mode);
-        this.emit(event("session.mode_changed", { previousMode, newMode: mode }));
+        this.emit(
+          event("session.mode_changed", { previousMode, newMode: mode }),
+        );
       },
     },
     skills: {
@@ -1108,7 +1198,9 @@ function sdkModel(
       options.multiplier == null
         ? undefined
         : { multiplier: options.multiplier },
-    supportedReasoningEfforts: reasoning ? ["low", "medium", "high"] : undefined,
+    supportedReasoningEfforts: reasoning
+      ? ["low", "medium", "high"]
+      : undefined,
     defaultReasoningEffort: reasoning ? "medium" : undefined,
   };
 }
