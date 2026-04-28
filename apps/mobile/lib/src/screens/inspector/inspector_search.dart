@@ -658,6 +658,27 @@ class _SearchResultExpanded extends StatelessWidget {
     if ((activity.toolTitle ?? '').isNotEmpty) {
       addLine('title', activity.toolTitle!);
     }
+    if ((activity.toolCategory ?? '').isNotEmpty) {
+      addLine('tool category', activity.toolCategory!);
+    }
+    if ((activity.toolAction ?? '').isNotEmpty) {
+      addLine('tool action', activity.toolAction!);
+    }
+    if ((activity.toolTarget ?? '').isNotEmpty) {
+      addLine('tool target', activity.toolTarget!);
+    }
+    if (activity.toolTargets.isNotEmpty) {
+      addLine('tool targets', activity.toolTargets.join('\n  '));
+    }
+    if ((activity.toolUrl ?? '').isNotEmpty) {
+      addLine('tool url', activity.toolUrl!);
+    }
+    if ((activity.toolQuery ?? '').isNotEmpty) {
+      addLine('tool query', activity.toolQuery!);
+    }
+    if ((activity.toolMode ?? '').isNotEmpty) {
+      addLine('tool mode', activity.toolMode!);
+    }
     if ((activity.cwd ?? '').isNotEmpty) addLine('cwd', activity.cwd!);
     if ((activity.query ?? '').isNotEmpty) addLine('query', activity.query!);
     if (activity.queries.isNotEmpty) {

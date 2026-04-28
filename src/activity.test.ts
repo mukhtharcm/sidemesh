@@ -148,4 +148,48 @@ describe("Codex activity compatibility", () => {
     assert.equal(image?.type, "image_generation");
     assert.equal(image?.savedPath, "/repo/image.png");
   });
+
+  it("preserves generalized tool semantics when merging tool activities", () => {
+    const existing = buildActivityFromThreadItem(
+      {
+        id: "tool-1",
+        type: "toolExecution",
+        status: "in_progress",
+        toolName: "view",
+        title: "Read README.md",
+        args: { path: "README.md" },
+        toolCategory: "filesystem",
+        toolAction: "read",
+        toolTarget: "README.md",
+        toolTargets: ["README.md"],
+      },
+      { turnId: "turn-1", createdAt: 1000, seq: 3 },
+    );
+    const incoming = buildActivityFromThreadItem(
+      {
+        id: "tool-1",
+        type: "toolExecution",
+        status: "completed",
+        toolName: "view",
+        output: "README contents",
+        result: { content: "README contents" },
+      },
+      { turnId: "turn-1", createdAt: 2000, seq: 9 },
+    );
+
+    assert.equal(existing?.type, "tool");
+    assert.equal(existing?.toolCategory, "filesystem");
+    assert.equal(existing?.toolAction, "read");
+    assert.equal(existing?.toolTarget, "README.md");
+    assert.deepEqual(existing?.toolTargets, ["README.md"]);
+    assert.equal(incoming?.type, "tool");
+
+    const merged = mergeActivity(existing, incoming);
+    assert.equal(merged.type, "tool");
+    assert.equal(merged.toolCategory, "filesystem");
+    assert.equal(merged.toolAction, "read");
+    assert.equal(merged.toolTarget, "README.md");
+    assert.deepEqual(merged.toolTargets, ["README.md"]);
+    assert.equal(merged.output, "README contents");
+  });
 });
