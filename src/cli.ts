@@ -43,8 +43,12 @@ export async function main(argv = process.argv): Promise<void> {
     program
       .command("setup")
       .description("create or update the persisted Sidemesh config")
-      .action(async (options: { config?: string }) => {
-        await runSetup({ configPath: options.config });
+      .option("--dev", "include internal test providers in the setup wizard")
+      .action(async (options: { config?: string; dev?: boolean }) => {
+        await runSetup({
+          configPath: options.config,
+          includeDevProviders: options.dev,
+        });
       }),
   );
 

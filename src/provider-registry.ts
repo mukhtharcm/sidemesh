@@ -29,6 +29,7 @@ type ProviderEnvironment = Record<string, string | undefined>;
 interface AgentProviderDefinition {
   readonly kind: AgentProviderKind;
   readonly displayName: string;
+  readonly setupAudience: "public" | "dev";
   readonly defaultCommand: string;
   readonly capabilities: AgentProviderCapabilities;
   readonly commandEnvironmentVariables: readonly string[];
@@ -50,6 +51,7 @@ export interface AgentProviderDefinitionSummary {
   commandEnvironmentVariables: string[];
   capabilities: AgentProviderCapabilities;
   supportedApprovalPolicies: string[];
+  setupAudience: "public" | "dev";
 }
 
 export const DEFAULT_AGENT_PROVIDER_KIND: AgentProviderKind = "codex";
@@ -60,6 +62,7 @@ const COPILOT_DEFAULT_COMMAND = "copilot";
 const CODEX_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "codex",
   displayName: "Codex",
+  setupAudience: "public",
   defaultCommand: CODEX_DEFAULT_COMMAND,
   capabilities: CODEX_PROVIDER_CAPABILITIES,
   commandEnvironmentVariables: [
@@ -107,6 +110,7 @@ const CODEX_PROVIDER_DEFINITION: AgentProviderDefinition = {
 const FAKE_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "fake",
   displayName: "Fake Test Provider",
+  setupAudience: "dev",
   defaultCommand: FAKE_DEFAULT_COMMAND,
   capabilities: FAKE_PROVIDER_CAPABILITIES,
   commandEnvironmentVariables: [
@@ -174,6 +178,7 @@ const FAKE_PROVIDER_DEFINITION: AgentProviderDefinition = {
 const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "copilot",
   displayName: "GitHub Copilot",
+  setupAudience: "public",
   defaultCommand: COPILOT_DEFAULT_COMMAND,
   capabilities: COPILOT_PROVIDER_CAPABILITIES,
   commandEnvironmentVariables: [
@@ -270,7 +275,21 @@ export function listAgentProviderDefinitionSummaries(): AgentProviderDefinitionS
     commandEnvironmentVariables: [...definition.commandEnvironmentVariables],
     capabilities: definition.capabilities,
     supportedApprovalPolicies: [...definition.supportedApprovalPolicies],
+    setupAudience: definition.setupAudience,
   }));
+}
+
+export function listSetupAgentProviderDefinitionSummaries(options: {
+  includeDev?: boolean;
+  includeKinds?: readonly AgentProviderKind[];
+} = {}): AgentProviderDefinitionSummary[] {
+  const includedKinds = new Set(options.includeKinds ?? []);
+  return listAgentProviderDefinitionSummaries().filter(
+    (definition) =>
+      options.includeDev ||
+      definition.setupAudience === "public" ||
+      includedKinds.has(definition.kind as AgentProviderKind),
+  );
 }
 
 export function supportedAgentProviderKinds(): AgentProviderKind[] {
