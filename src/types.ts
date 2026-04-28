@@ -51,11 +51,13 @@ export interface NodeConfig {
   label: string;
   port: number;
   token: string;
-  tokenSource: "env" | "generated";
+  tokenSource: "env" | "file" | "generated";
   provider: AgentProviderConfig;
   providers: AgentProviderConfig[];
   defaultProviderKind: AgentProviderKind;
   stateDir: string;
+  configPath: string;
+  configExists: boolean;
 }
 
 export interface SessionSummary {
