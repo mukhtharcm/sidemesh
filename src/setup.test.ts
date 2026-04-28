@@ -23,6 +23,13 @@ describe("normalizePromptTextValue", () => {
     );
   });
 
+  it("produces a validator-safe non-blank value for required defaults", () => {
+    const value = normalizePromptTextValue("   ", {
+      defaultValue: "/Users/example/.sidemesh",
+    });
+    assert.equal(value.trim() ? undefined : "State directory cannot be empty.", undefined);
+  });
+
   it("preserves non-blank input", () => {
     assert.equal(
       normalizePromptTextValue("/tmp/custom-state", {
