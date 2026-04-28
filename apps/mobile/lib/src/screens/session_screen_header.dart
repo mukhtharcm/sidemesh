@@ -968,25 +968,112 @@ String _formatPinnedTimestamp(DateTime value) {
 
 String _twoDigits(int value) => value.toString().padLeft(2, '0');
 
-class _PendingActionCard extends StatelessWidget {
+class _PendingActionCard extends StatefulWidget {
   const _PendingActionCard({required this.action, required this.onRespond});
 
   final PendingAction action;
-  final ValueChanged<String> onRespond;
+  final ValueChanged<PendingActionResponseDraft> onRespond;
+
+  @override
+  State<_PendingActionCard> createState() => _PendingActionCardState();
+}
+
+class _PendingActionCardState extends State<_PendingActionCard> {
+  late final TextEditingController _answerController;
+  final Map<String, TextEditingController> _textControllers =
+      <String, TextEditingController>{};
+  final Map<String, bool> _boolValues = <String, bool>{};
+  final Map<String, String?> _singleValues = <String, String?>{};
+  final Map<String, Set<String>> _multiValues = <String, Set<String>>{};
+
+  PendingAction get action => widget.action;
+
+  @override
+  void initState() {
+    super.initState();
+    _answerController = TextEditingController();
+    _seedActionState(widget.action);
+  }
+
+  @override
+  void didUpdateWidget(covariant _PendingActionCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.action.id == widget.action.id) {
+      return;
+    }
+    _disposeFieldControllers();
+    _answerController.clear();
+    _seedActionState(widget.action);
+  }
+
+  @override
+  void dispose() {
+    _answerController.dispose();
+    _disposeFieldControllers();
+    super.dispose();
+  }
+
+  void _disposeFieldControllers() {
+    for (final controller in _textControllers.values) {
+      controller.dispose();
+    }
+    _textControllers.clear();
+    _boolValues.clear();
+    _singleValues.clear();
+    _multiValues.clear();
+  }
+
+  void _seedActionState(PendingAction action) {
+    final prompt = action.userInput;
+    if (prompt != null &&
+        prompt.choices.length == 1 &&
+        prompt.allowFreeform == false) {
+      _answerController.text = prompt.choices.first;
+    }
+    for (final field in action.elicitation?.fields ?? const []) {
+      switch (field.type) {
+        case 'boolean':
+          _boolValues[field.key] = field.defaultValue == true;
+          break;
+        case 'number':
+          _textControllers[field.key] = TextEditingController(
+            text: field.defaultValue?.toString() ?? '',
+          );
+          break;
+        case 'string[]':
+          final defaults = field.defaultValue is List
+              ? (field.defaultValue as List)
+                    .whereType<String>()
+                    .toSet()
+              : <String>{};
+          _multiValues[field.key] = defaults;
+          break;
+        case 'string':
+        default:
+          final controller = TextEditingController(
+            text: field.defaultValue is String ? field.defaultValue as String : '',
+          );
+          _textControllers[field.key] = controller;
+          if ((field.options ?? const []).isNotEmpty) {
+            _singleValues[field.key] = controller.text.isEmpty
+                ? null
+                : controller.text;
+          }
+          break;
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final mq = MediaQuery.of(context);
-    // Cap the card at ~38% of available height so a verbose approval
-    // payload (e.g. a long shell command or write-file preview) can never
-    // push the composer off the screen on mobile. Internal scroll keeps
-    // every button reachable.
-    final maxHeight = mq.size.height * 0.38;
+    final kindMeta = _kindMeta(action, colors);
+    final maxHeight = mq.size.height * 0.5;
     return MeshCard(
       tone: MeshCardTone.surface,
-      borderColor: colors.warning.withValues(alpha: 0.5),
-      accentStrip: colors.warning,
+      borderColor: kindMeta.accent.withValues(alpha: 0.5),
+      accentStrip: kindMeta.accent,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: maxHeight),
         child: Column(
@@ -995,12 +1082,12 @@ class _PendingActionCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.shield_rounded, color: colors.warning, size: 18),
+                Icon(kindMeta.icon, color: kindMeta.accent, size: 18),
                 const SizedBox(width: 8),
                 Text(
-                  'Approval required',
+                  kindMeta.kicker,
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: colors.warning,
+                    color: kindMeta.accent,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.6,
                   ),
@@ -1020,13 +1107,22 @@ class _PendingActionCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      action.detail,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: colors.textSecondary,
+                    if (action.detail.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        action.detail,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colors.textSecondary,
+                        ),
                       ),
-                    ),
+                    ],
+                    if (action.isUserInput) ...[
+                      const SizedBox(height: 12),
+                      _buildUserInputBody(context, action.userInput!),
+                    ] else if (action.isElicitation) ...[
+                      const SizedBox(height: 12),
+                      _buildElicitationBody(context, action.elicitation!),
+                    ],
                   ],
                 ),
               ),
@@ -1035,44 +1131,496 @@ class _PendingActionCard extends StatelessWidget {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: [
-                if (action.canApprove)
-                  FilledButton.icon(
-                    onPressed: () => onRespond('accept'),
-                    icon: const Icon(Icons.check_rounded, size: 18),
-                    label: const Text('Approve'),
-                  ),
-                if (action.canApproveForSession)
-                  OutlinedButton.icon(
-                    onPressed: () => onRespond('acceptForSession'),
-                    icon: const Icon(Icons.all_inclusive_rounded, size: 18),
-                    label: const Text('Approve for session'),
-                  ),
-                if (action.canDecline)
-                  OutlinedButton.icon(
-                    onPressed: () => onRespond('decline'),
-                    icon: Icon(
-                      Icons.close_rounded,
-                      size: 18,
-                      color: colors.danger,
-                    ),
-                    label: Text(
-                      'Decline',
-                      style: TextStyle(color: colors.danger),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(
-                        color: colors.danger.withValues(alpha: 0.5),
-                      ),
-                    ),
-                  ),
-              ],
+              children: _buildFooterActions(context, colors),
             ),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildUserInputBody(
+    BuildContext context,
+    PendingActionUserInputRequest prompt,
+  ) {
+    final colors = context.colors;
+    final choices = prompt.choices;
+    final answer = _answerController.text.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (choices.isNotEmpty) ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: choices
+                .map(
+                  (choice) => ChoiceChip(
+                    label: Text(choice),
+                    selected: answer == choice,
+                    onSelected: (_) {
+                      setState(() {
+                        _answerController.text = choice;
+                        _answerController.selection = TextSelection.collapsed(
+                          offset: choice.length,
+                        );
+                      });
+                    },
+                  ),
+                )
+                .toList(growable: false),
+          ),
+          if (prompt.allowFreeform) const SizedBox(height: 12),
+        ],
+        if (prompt.allowFreeform || choices.isEmpty)
+          TextField(
+            controller: _answerController,
+            minLines: 1,
+            maxLines: 4,
+            decoration: InputDecoration(
+              hintText: choices.isEmpty
+                  ? 'Type your answer'
+                  : 'Choose above or type your own answer',
+              filled: true,
+              fillColor: colors.surfaceMuted,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: colors.border),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: colors.border),
+              ),
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildElicitationBody(
+    BuildContext context,
+    PendingActionElicitationRequest elicitation,
+  ) {
+    final colors = context.colors;
+    final source = elicitation.source?.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (source != null && source.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: MeshPill(
+              label: source,
+              icon: Icons.extension_rounded,
+              tone: MeshPillTone.neutral,
+              mono: true,
+            ),
+          ),
+        if (elicitation.mode == 'url' && (elicitation.url ?? '').isNotEmpty)
+          GestureDetector(
+            onTap: _openElicitationUrl,
+            child: MeshPill(
+              label: 'Open browser link',
+              icon: Icons.open_in_new_rounded,
+              tone: MeshPillTone.accent,
+            ),
+          ),
+        if (elicitation.mode == 'url' && (elicitation.url ?? '').isNotEmpty)
+          const SizedBox(height: 12),
+        if (elicitation.fields.isEmpty)
+          Text(
+            'No structured fields were provided for this request.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+          )
+        else
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: elicitation.fields
+                .map((field) => _buildElicitationField(context, field))
+                .toList(growable: false),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildElicitationField(
+    BuildContext context,
+    PendingActionElicitationField field,
+  ) {
+    final colors = context.colors;
+    final label = field.required ? '${field.title} *' : field.title;
+    Widget child;
+    switch (field.type) {
+      case 'boolean':
+        child = SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _boolValues[field.key] ?? false,
+          title: Text(label),
+          subtitle: field.description == null ? null : Text(field.description!),
+          onChanged: (value) => setState(() => _boolValues[field.key] = value),
+        );
+      case 'number':
+        child = TextField(
+          controller: _textControllers[field.key],
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: _fieldDecoration(
+            colors,
+            label,
+            field.description,
+            hintText: field.integer ? 'Integer' : 'Number',
+          ),
+          onChanged: (_) => setState(() {}),
+        );
+      case 'string[]':
+        final selected = _multiValues[field.key] ?? <String>{};
+        child = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            if (field.description != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                field.description!,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: (field.options ?? const [])
+                  .map(
+                    (option) => FilterChip(
+                      label: Text(option.label),
+                      selected: selected.contains(option.value),
+                      onSelected: (picked) {
+                        setState(() {
+                          final next = {...selected};
+                          if (picked) {
+                            next.add(option.value);
+                          } else {
+                            next.remove(option.value);
+                          }
+                          _multiValues[field.key] = next;
+                        });
+                      },
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          ],
+        );
+      case 'string':
+      default:
+        final options = field.options ?? const <PendingActionElicitationOption>[];
+        if (options.isNotEmpty) {
+          child = DropdownButtonFormField<String>(
+            key: ValueKey('${field.key}:${_singleValues[field.key] ?? ''}'),
+            initialValue: _singleValues[field.key],
+            decoration: _fieldDecoration(colors, label, field.description),
+            items: options
+                .map(
+                  (option) => DropdownMenuItem<String>(
+                    value: option.value,
+                    child: Text(option.label),
+                  ),
+                )
+                .toList(growable: false),
+            onChanged: (value) {
+              setState(() {
+                _singleValues[field.key] = value;
+                _textControllers[field.key]?.text = value ?? '';
+              });
+            },
+          );
+        } else {
+          child = TextField(
+            controller: _textControllers[field.key],
+            minLines: 1,
+            maxLines: field.maxLength != null && field.maxLength! > 120 ? 4 : 1,
+            keyboardType: _keyboardTypeForField(field),
+            decoration: _fieldDecoration(
+              colors,
+              label,
+              field.description,
+              hintText: _hintForField(field),
+            ),
+            onChanged: (_) => setState(() {}),
+          );
+        }
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: child,
+    );
+  }
+
+  InputDecoration _fieldDecoration(
+    AppColors colors,
+    String label,
+    String? helper, {
+    String? hintText,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      helperText: helper,
+      hintText: hintText,
+      filled: true,
+      fillColor: colors.surfaceMuted,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: colors.border),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: colors.border),
+      ),
+    );
+  }
+
+  TextInputType? _keyboardTypeForField(PendingActionElicitationField field) {
+    return switch (field.format) {
+      'email' => TextInputType.emailAddress,
+      'uri' => TextInputType.url,
+      'date' => TextInputType.datetime,
+      'date-time' => TextInputType.datetime,
+      _ => TextInputType.text,
+    };
+  }
+
+  String? _hintForField(PendingActionElicitationField field) {
+    return switch (field.format) {
+      'email' => 'name@example.com',
+      'uri' => 'https://example.com',
+      'date' => 'YYYY-MM-DD',
+      'date-time' => 'ISO date-time',
+      _ => null,
+    };
+  }
+
+  List<Widget> _buildFooterActions(BuildContext context, AppColors colors) {
+    if (action.isUserInput) {
+      return [
+        FilledButton.icon(
+          onPressed: _submitUserInput,
+          icon: const Icon(Icons.send_rounded, size: 18),
+          label: const Text('Send answer'),
+        ),
+      ];
+    }
+    if (action.isElicitation) {
+      return [
+        FilledButton.icon(
+          onPressed: _submitElicitation,
+          icon: const Icon(Icons.check_rounded, size: 18),
+          label: Text(action.elicitation?.mode == 'url' ? 'Continue' : 'Submit'),
+        ),
+        if (action.canDecline)
+          OutlinedButton.icon(
+            onPressed: () => widget.onRespond(
+              PendingActionResponseDraft.elicitation(action: 'decline'),
+            ),
+            icon: Icon(
+              Icons.thumb_down_alt_rounded,
+              size: 18,
+              color: colors.danger,
+            ),
+            label: Text(
+              'Decline',
+              style: TextStyle(color: colors.danger),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: colors.danger.withValues(alpha: 0.5)),
+            ),
+          ),
+        OutlinedButton.icon(
+          onPressed: () => widget.onRespond(
+            PendingActionResponseDraft.elicitation(action: 'cancel'),
+          ),
+          icon: const Icon(Icons.close_rounded, size: 18),
+          label: const Text('Cancel'),
+        ),
+      ];
+    }
+    return [
+      if (action.canApprove)
+        FilledButton.icon(
+          onPressed: () => widget.onRespond(
+            PendingActionResponseDraft.approval('accept'),
+          ),
+          icon: const Icon(Icons.check_rounded, size: 18),
+          label: const Text('Approve'),
+        ),
+      if (action.canApproveForSession)
+        OutlinedButton.icon(
+          onPressed: () => widget.onRespond(
+            PendingActionResponseDraft.approval('acceptForSession'),
+          ),
+          icon: const Icon(Icons.all_inclusive_rounded, size: 18),
+          label: const Text('Approve for session'),
+        ),
+      if (action.canDecline)
+        OutlinedButton.icon(
+          onPressed: () => widget.onRespond(
+            PendingActionResponseDraft.approval('decline'),
+          ),
+          icon: Icon(
+            Icons.close_rounded,
+            size: 18,
+            color: colors.danger,
+          ),
+          label: Text(
+            'Decline',
+            style: TextStyle(color: colors.danger),
+          ),
+          style: OutlinedButton.styleFrom(
+            side: BorderSide(
+              color: colors.danger.withValues(alpha: 0.5),
+            ),
+          ),
+        ),
+    ];
+  }
+
+  void _submitUserInput() {
+    final prompt = action.userInput;
+    if (prompt == null) {
+      return;
+    }
+    final answer = _answerController.text.trim();
+    if (answer.isEmpty) {
+      showAppSnackBar(context, 'Enter an answer first.');
+      return;
+    }
+    final wasFreeform = !prompt.choices.contains(answer);
+    widget.onRespond(
+      PendingActionResponseDraft.userInput(
+        answer: answer,
+        wasFreeform: wasFreeform,
+      ),
+    );
+  }
+
+  void _submitElicitation() {
+    final elicitation = action.elicitation;
+    if (elicitation == null) {
+      return;
+    }
+    final content = <String, dynamic>{};
+    for (final field in elicitation.fields) {
+      switch (field.type) {
+        case 'boolean':
+          content[field.key] = _boolValues[field.key] ?? false;
+          break;
+        case 'number':
+          final raw = _textControllers[field.key]?.text.trim() ?? '';
+          if (raw.isEmpty) {
+            if (field.required) {
+              showAppSnackBar(context, 'Fill in ${field.title}.');
+              return;
+            }
+            continue;
+          }
+          final parsed = field.integer ? int.tryParse(raw) : num.tryParse(raw);
+          if (parsed == null) {
+            showAppSnackBar(context, 'Enter a valid number for ${field.title}.');
+            return;
+          }
+          content[field.key] = parsed;
+          break;
+        case 'string[]':
+          final values = (_multiValues[field.key] ?? <String>{}).toList();
+          if (field.required && values.isEmpty) {
+            showAppSnackBar(context, 'Choose at least one value for ${field.title}.');
+            return;
+          }
+          if (values.isNotEmpty) {
+            content[field.key] = values;
+          }
+          break;
+        case 'string':
+        default:
+          final value = (_textControllers[field.key]?.text ?? '').trim();
+          if (field.required && value.isEmpty) {
+            showAppSnackBar(context, 'Fill in ${field.title}.');
+            return;
+          }
+          if (value.isNotEmpty) {
+            content[field.key] = value;
+          }
+          break;
+      }
+    }
+    widget.onRespond(
+      PendingActionResponseDraft.elicitation(
+        action: 'accept',
+        content: content.isEmpty ? null : content,
+      ),
+    );
+  }
+
+  Future<void> _openElicitationUrl() async {
+    final raw = action.elicitation?.url;
+    if (raw == null || raw.trim().isEmpty) {
+      return;
+    }
+    final uri = Uri.tryParse(raw.trim());
+    if (uri == null) {
+      showAppSnackBar(context, 'This link is invalid.');
+      return;
+    }
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!mounted) {
+      return;
+    }
+    if (!ok) {
+      showAppSnackBar(context, 'Unable to open that link.');
+    }
+  }
+}
+
+class _PendingActionKindMeta {
+  const _PendingActionKindMeta({
+    required this.kicker,
+    required this.icon,
+    required this.accent,
+  });
+
+  final String kicker;
+  final IconData icon;
+  final Color accent;
+}
+
+_PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {
+  if (action.isUserInput) {
+    return _PendingActionKindMeta(
+      kicker: 'INPUT NEEDED',
+      icon: Icons.chat_bubble_outline_rounded,
+      accent: colors.accent,
+    );
+  }
+  if (action.isElicitation) {
+    return _PendingActionKindMeta(
+      kicker: 'FORM REQUIRED',
+      icon: Icons.fact_check_outlined,
+      accent: colors.info,
+    );
+  }
+  return _PendingActionKindMeta(
+    kicker: 'APPROVAL REQUIRED',
+    icon: Icons.shield_rounded,
+    accent: colors.warning,
+  );
 }
 
 class _HistoryTruncationCard extends StatelessWidget {
