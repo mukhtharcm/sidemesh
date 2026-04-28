@@ -1,28 +1,35 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, it } from "node:test";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import nodePath from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { loadConfig } from "./config.js";
-
-const ORIGINAL_ENV = { ...process.env };
-
-afterEach(() => {
-  for (const key of Object.keys(process.env)) {
-    if (!(key in ORIGINAL_ENV)) {
-      delete process.env[key];
-    }
-  }
-  for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
-    process.env[key] = value;
-  }
-});
+import { loadConfig, rotatePersistedToken } from "./config.js";
 
 describe("loadConfig", () => {
-  it("loads multiple providers and keeps the requested default first", () => {
-    process.env.SIDEMESH_TOKEN = "test-token";
-    process.env.SIDEMESH_PROVIDER = "copilot";
-    process.env.SIDEMESH_PROVIDERS = "codex,copilot";
+  let tempDir = "";
+  let configPath = "";
 
-    const config = loadConfig();
+  beforeEach(async () => {
+    tempDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-config-test-"));
+    configPath = nodePath.join(tempDir, "config.json");
+  });
+
+  afterEach(async () => {
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads multiple providers and keeps the requested default first", async () => {
+    const config = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_TOKEN: "test-token",
+        SIDEMESH_PROVIDER: "copilot",
+        SIDEMESH_PROVIDERS: "codex,copilot",
+      },
+    });
 
     assert.equal(config.defaultProviderKind, "copilot");
     assert.equal(config.provider.kind, "copilot");
@@ -32,12 +39,27 @@ describe("loadConfig", () => {
     );
   });
 
-  it("defaults to the first configured multi-provider entry when no default is set", () => {
-    process.env.SIDEMESH_TOKEN = "test-token";
-    delete process.env.SIDEMESH_PROVIDER;
-    process.env.SIDEMESH_PROVIDERS = "fake,copilot";
+  it("defaults to the first configured provider in the persisted config", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        defaultProviderKind: "fake",
+        providers: [
+          {
+            kind: "fake",
+            latencyMs: 15,
+            seedSessions: true,
+            workspaceRoot: null,
+            capabilityProfile: "full",
+          },
+          { kind: "copilot", bin: "copilot", stateDir: null, allowAll: false, configuredModel: null },
+        ],
+      }),
+    );
 
-    const config = loadConfig();
+    const config = await loadConfig({ configPath, env: {} });
 
     assert.equal(config.defaultProviderKind, "fake");
     assert.equal(config.provider.kind, "fake");
@@ -45,5 +67,83 @@ describe("loadConfig", () => {
       config.providers.map((provider) => provider.kind),
       ["fake", "copilot"],
     );
+    assert.equal(config.token, "file-token");
+    assert.equal(config.tokenSource, "file");
+  });
+
+  it("lets env overrides win over persisted provider config", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        defaultProviderKind: "copilot",
+        providers: [
+          {
+            kind: "copilot",
+            bin: "/opt/copilot-old",
+            stateDir: "/tmp/old-state",
+            allowAll: false,
+            configuredModel: "gpt-4o",
+          },
+        ],
+      }),
+    );
+
+    const config = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_COPILOT_BIN: "/usr/local/bin/copilot",
+        SIDEMESH_COPILOT_ALLOW_ALL: "1",
+        SIDEMESH_COPILOT_MODEL: "auto",
+      },
+    });
+
+    assert.equal(config.provider.kind, "copilot");
+    if (config.provider.kind !== "copilot") {
+      throw new Error("expected copilot provider");
+    }
+    assert.equal(config.provider.bin, "/usr/local/bin/copilot");
+    assert.equal(config.provider.allowAll, true);
+    assert.equal(config.provider.configuredModel, "auto");
+    assert.equal(config.provider.stateDir, "/tmp/old-state");
+  });
+
+  it("persists a generated token when requested", async () => {
+    const config = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_PROVIDER: "codex",
+      },
+      persistGeneratedToken: true,
+    });
+
+    assert.equal(config.tokenSource, "file");
+    assert.equal(config.configExists, true);
+
+    const raw = JSON.parse(await readFile(configPath, "utf8")) as {
+      token?: string;
+    };
+    assert.equal(raw.token, config.token);
+  });
+
+  it("rotates the persisted token in place", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "before-token",
+        defaultProviderKind: "codex",
+        providers: [{ kind: "codex", bin: "codex" }],
+      }),
+    );
+
+    const config = await rotatePersistedToken({ configPath, env: {} });
+    assert.notEqual(config.token, "before-token");
+
+    const raw = JSON.parse(await readFile(configPath, "utf8")) as {
+      token?: string;
+    };
+    assert.equal(raw.token, config.token);
   });
 });

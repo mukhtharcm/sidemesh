@@ -9,33 +9,134 @@ import type {
   NodeConfig,
 } from "./types.js";
 import {
+  persistedConfigFromNodeConfig,
+  providerConfigByKind,
+  readPersistedConfig,
+  resolveConfigPath,
+  type PersistedNodeConfig,
+  writePersistedConfig,
+} from "./config-store.js";
+import {
   DEFAULT_AGENT_PROVIDER_KIND,
   isAgentProviderKind,
-  loadAgentProviderConfig,
+  resolveAgentProviderConfig,
   summarizeAgentProviderConfig,
   supportedAgentProviderKinds,
 } from "./provider-registry.js";
 
-export function loadConfig(): NodeConfig {
-  const token = process.env.SIDEMESH_TOKEN?.trim();
-  const { defaultProviderKind, providers } = loadProviderConfigs();
+type Environment = Record<string, string | undefined>;
+
+export interface LoadConfigOptions {
+  env?: Environment;
+  configPath?: string | null;
+  persistGeneratedToken?: boolean;
+}
+
+export interface SaveConfigOptions {
+  configPath?: string | null;
+}
+
+export async function loadConfig(
+  options: LoadConfigOptions = {},
+): Promise<NodeConfig> {
+  const env = options.env ?? process.env;
+  const configPath = resolveConfigPath(options.configPath, env);
+  const persisted = await readPersistedConfig(configPath);
+  const label =
+    env.SIDEMESH_LABEL?.trim() ||
+    persisted.value?.label ||
+    hostname();
+  const stateDir =
+    env.SIDEMESH_STATE_DIR?.trim() ||
+    persisted.value?.stateDir ||
+    join(homedir(), ".sidemesh");
+  const port = parseInteger(
+    env.SIDEMESH_PORT,
+    persisted.value?.port ?? 8787,
+  );
+  const { defaultProviderKind, providers } = resolveProviderConfigs(
+    persisted.value,
+    env,
+  );
   const provider =
     providers.find((candidate) => candidate.kind === defaultProviderKind) ??
     providers[0];
   if (!provider) {
     throw new Error("No Sidemesh providers were configured.");
   }
-  return {
-    label: process.env.SIDEMESH_LABEL?.trim() || hostname(),
-    port: parseInteger(process.env.SIDEMESH_PORT, 8787),
-    token: token || randomBytes(24).toString("hex"),
-    tokenSource: token ? "env" : "generated",
+
+  let tokenSource: NodeConfig["tokenSource"];
+  let token = env.SIDEMESH_TOKEN?.trim() || null;
+  if (token) {
+    tokenSource = "env";
+  } else if (persisted.value?.token?.trim()) {
+    token = persisted.value.token.trim();
+    tokenSource = "file";
+  } else {
+    token = randomBytes(24).toString("hex");
+    tokenSource = "generated";
+  }
+
+  const config: NodeConfig = {
+    label,
+    port,
+    token,
+    tokenSource,
     provider,
     providers,
     defaultProviderKind,
-    stateDir:
-      process.env.SIDEMESH_STATE_DIR?.trim() || join(homedir(), ".sidemesh"),
+    stateDir,
+    configPath,
+    configExists: persisted.exists,
   };
+
+  if (tokenSource === "generated" && options.persistGeneratedToken === true) {
+    await saveConfig(config, { configPath });
+    return {
+      ...config,
+      tokenSource: "file",
+      configExists: true,
+    };
+  }
+
+  return config;
+}
+
+export async function saveConfig(
+  config: NodeConfig,
+  options: SaveConfigOptions = {},
+): Promise<void> {
+  const configPath = resolveConfigPath(options.configPath ?? config.configPath);
+  await writePersistedConfig(configPath, persistedConfigFromNodeConfig(config));
+}
+
+export async function readResolvedPersistedConfig(
+  options: { env?: Environment; configPath?: string | null } = {},
+): Promise<{
+  path: string;
+  exists: boolean;
+  value: PersistedNodeConfig | null;
+}> {
+  const env = options.env ?? process.env;
+  const configPath = resolveConfigPath(options.configPath, env);
+  return readPersistedConfig(configPath);
+}
+
+export async function rotatePersistedToken(
+  options: { env?: Environment; configPath?: string | null } = {},
+): Promise<NodeConfig> {
+  const config = await loadConfig({
+    env: options.env,
+    configPath: options.configPath,
+    persistGeneratedToken: false,
+  });
+  const rotated: NodeConfig = {
+    ...config,
+    token: randomBytes(24).toString("hex"),
+    tokenSource: "file",
+  };
+  await saveConfig(rotated, { configPath: rotated.configPath });
+  return { ...rotated, configExists: true };
 }
 
 export function summarizeProviderConfig(
@@ -44,21 +145,31 @@ export function summarizeProviderConfig(
   return summarizeAgentProviderConfig(provider);
 }
 
-function loadProviderConfigs(): {
+function resolveProviderConfigs(
+  persisted: PersistedNodeConfig | null,
+  env: Environment,
+): {
   defaultProviderKind: AgentProviderKind;
   providers: AgentProviderConfig[];
 } {
-  const configuredKinds = parseProviderKinds(process.env.SIDEMESH_PROVIDERS);
-  const defaultProviderKind = process.env.SIDEMESH_PROVIDER?.trim()
-    ? parseProviderKind(process.env.SIDEMESH_PROVIDER)
-    : (configuredKinds[0] ?? DEFAULT_AGENT_PROVIDER_KIND);
+  const configuredKinds = parseProviderKinds(
+    env.SIDEMESH_PROVIDERS,
+    persisted,
+  );
+  const defaultProviderKind = env.SIDEMESH_PROVIDER?.trim()
+    ? parseProviderKind(env.SIDEMESH_PROVIDER)
+    : persisted?.defaultProviderKind ||
+      configuredKinds[0] ||
+      DEFAULT_AGENT_PROVIDER_KIND;
   const kinds = dedupeProviderKinds([
     defaultProviderKind,
     ...(configuredKinds.length > 0 ? configuredKinds : [defaultProviderKind]),
   ]);
   return {
     defaultProviderKind,
-    providers: kinds.map((kind) => loadAgentProviderConfig(kind, process.env)),
+    providers: kinds.map((kind) =>
+      resolveAgentProviderConfig(kind, env, providerConfigByKind(persisted, kind)),
+    ),
   };
 }
 
@@ -72,9 +183,14 @@ function parseProviderKind(value: string | undefined): AgentProviderKind {
   );
 }
 
-function parseProviderKinds(value: string | undefined): AgentProviderKind[] {
+function parseProviderKinds(
+  value: string | undefined,
+  persisted: PersistedNodeConfig | null,
+): AgentProviderKind[] {
   if (!value?.trim()) {
-    return [];
+    return persisted?.providers
+      .map((provider) => provider.kind)
+      .filter(isAgentProviderKind) ?? [];
   }
   return value
     .split(",")
