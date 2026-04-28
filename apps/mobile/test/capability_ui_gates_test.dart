@@ -194,6 +194,88 @@ void main() {
     expect(find.text('Live web search'), findsOneWidget);
   });
 
+  testWidgets(
+    'create session sheet inherits default profile runtime settings until changed',
+    (tester) async {
+      await CreateSessionDefaultsStore.instance.ensureLoaded();
+      final api = _CapabilityFakeApi(
+        _nodeForCapabilities(_fullCapabilities),
+        models: const [_fakeModel],
+        profiles: const [_codexProfile],
+      );
+
+      await _pumpApp(
+        tester,
+        CreateSessionSheet(
+          host: _host('create-profile-inherit'),
+          api: api,
+          initialCwd: '/repo',
+          presentation: CreateSessionPresentation.dialog,
+        ),
+        size: const Size(1600, 1200),
+      );
+      await _pumpFrames(tester);
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Prompt'),
+        'Use the profile defaults.',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Start'));
+      await _pumpFrames(tester);
+
+      expect(api.lastCreateRequest, isNotNull);
+      expect(api.lastCreateRequest!.profile, isNull);
+      expect(api.lastCreateRequest!.approvalPolicy, isNull);
+      expect(api.lastCreateRequest!.sandboxMode, isNull);
+      expect(api.lastCreateRequest!.reasoningEffort, isNull);
+      expect(api.lastCreateRequest!.fastMode, isNull);
+      expect(api.lastCreateRequest!.webSearch, isNull);
+    },
+  );
+
+  testWidgets(
+    'create session sheet still sends explicit launch overrides over profiles',
+    (tester) async {
+      await CreateSessionDefaultsStore.instance.ensureLoaded();
+      final api = _CapabilityFakeApi(
+        _nodeForCapabilities(_fullCapabilities),
+        models: const [_fakeModel],
+        profiles: const [_codexProfile],
+      );
+
+      await _pumpApp(
+        tester,
+        CreateSessionSheet(
+          host: _host('create-profile-override'),
+          api: api,
+          initialCwd: '/repo',
+          presentation: CreateSessionPresentation.dialog,
+        ),
+        size: const Size(1600, 1200),
+      );
+      await _pumpFrames(tester);
+
+      await tester.tap(find.text('Tune launch'));
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Never ask').first);
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Full access (danger)').first);
+      await _pumpFrames(tester);
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Prompt'),
+        'Override the profile defaults.',
+      );
+      await tester.ensureVisible(find.widgetWithText(FilledButton, 'Start'));
+      await _pumpFrames(tester);
+      await tester.tap(find.widgetWithText(FilledButton, 'Start'));
+      await _pumpFrames(tester);
+
+      expect(api.lastCreateRequest, isNotNull);
+      expect(api.lastCreateRequest!.approvalPolicy, 'never');
+      expect(api.lastCreateRequest!.sandboxMode, 'danger-full-access');
+    },
+  );
+
   testWidgets('Copilot approval controls only show supported policies', (
     tester,
   ) async {
@@ -526,6 +608,45 @@ const _fakeProfile = ProviderProfileSummary(
   reasoningEffort: 'medium',
 );
 
+const _codexProfile = ProviderProfileSummary(
+  name: 'guardian',
+  isDefault: true,
+  model: 'fake-balanced',
+  reasoningEffort: 'high',
+  approvalPolicy: 'never',
+  sandboxMode: 'danger-full-access',
+  serviceTier: 'fast',
+  webSearch: 'live',
+);
+
+class _CapturedCreateSessionRequest {
+  const _CapturedCreateSessionRequest({
+    required this.cwd,
+    required this.prompt,
+    required this.provider,
+    required this.model,
+    required this.mode,
+    required this.reasoningEffort,
+    required this.fastMode,
+    required this.approvalPolicy,
+    required this.sandboxMode,
+    required this.webSearch,
+    required this.profile,
+  });
+
+  final String cwd;
+  final String prompt;
+  final String? provider;
+  final String? model;
+  final String? mode;
+  final String? reasoningEffort;
+  final bool? fastMode;
+  final String? approvalPolicy;
+  final String? sandboxMode;
+  final String? webSearch;
+  final String? profile;
+}
+
 class _CapabilityFakeApi extends ApiClient {
   _CapabilityFakeApi(
     this.node, {
@@ -537,6 +658,7 @@ class _CapabilityFakeApi extends ApiClient {
   final List<ModelCatalogEntry> models;
   final List<ProviderProfileSummary> profiles;
   final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
+  _CapturedCreateSessionRequest? lastCreateRequest;
 
   @override
   Future<NodeInfo> fetchNode(HostProfile host) async => node;
@@ -565,6 +687,38 @@ class _CapabilityFakeApi extends ApiClient {
     defaultProfile: profiles.isEmpty ? null : profiles.first.name,
     profiles: profiles,
   );
+
+  @override
+  Future<SessionSummary> createSession(
+    HostProfile host, {
+    required String cwd,
+    required String prompt,
+    String? provider,
+    List<SessionInputItem>? input,
+    String? model,
+    String? mode,
+    String? reasoningEffort,
+    bool? fastMode,
+    String? approvalPolicy,
+    String? sandboxMode,
+    String? webSearch,
+    String? profile,
+  }) async {
+    lastCreateRequest = _CapturedCreateSessionRequest(
+      cwd: cwd,
+      prompt: prompt,
+      provider: provider,
+      model: model,
+      mode: mode,
+      reasoningEffort: reasoningEffort,
+      fastMode: fastMode,
+      approvalPolicy: approvalPolicy,
+      sandboxMode: sandboxMode,
+      webSearch: webSearch,
+      profile: profile,
+    );
+    return _session('created-session');
+  }
 
   @override
   Future<SkillCatalog> fetchSkills(
