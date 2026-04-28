@@ -1,6 +1,7 @@
 import type {
   CopilotClientOptions,
   GetStatusResponse,
+  GetAuthStatusResponse,
   MessageOptions,
   ModelInfo,
   ElicitationContext,
@@ -31,6 +32,7 @@ export type CopilotSdkResumeSessionConfig = ResumeSessionConfig;
 export type CopilotSdkSessionEvent = SessionEvent;
 export type CopilotSdkSessionListFilter = SessionListFilter;
 export type CopilotSdkSessionMetadata = SessionMetadata;
+export type CopilotSdkAuthStatus = GetAuthStatusResponse;
 export interface CopilotSdkUserInputRequest {
   question: string;
   choices?: string[];
@@ -103,6 +105,7 @@ export interface CopilotSdkClient {
   stop?(): Promise<unknown>;
   forceStop?(): Promise<void>;
   getStatus?(): Promise<GetStatusResponse>;
+  getAuthStatus?(): Promise<GetAuthStatusResponse>;
   listModels(): Promise<CopilotSdkModelInfo[]>;
   listSessions?(
     filter?: CopilotSdkSessionListFilter,
