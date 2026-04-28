@@ -67,6 +67,7 @@ void main() {
         session: _session('controls-minimal-session'),
         runtimeModel: null,
         runtimeModelProvider: null,
+        runtimeMode: null,
         runtimeServiceTier: null,
         runtimeReasoningEffort: null,
         runtimeApproval: null,
@@ -87,6 +88,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Model & thinking'), findsNothing);
+    expect(find.text('Session mode'), findsNothing);
     expect(find.text('Approval policy'), findsNothing);
     expect(find.text('Sandbox'), findsNothing);
     expect(find.text('Network'), findsNothing);
@@ -108,6 +110,7 @@ void main() {
         session: _session('controls-full-session'),
         runtimeModel: null,
         runtimeModelProvider: null,
+        runtimeMode: null,
         runtimeServiceTier: null,
         runtimeReasoningEffort: null,
         runtimeApproval: null,
@@ -121,6 +124,7 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Model & thinking'), findsOneWidget);
+    expect(find.text('Session mode'), findsOneWidget);
     expect(find.text('Approval policy'), findsOneWidget);
     expect(find.text('Sandbox'), findsOneWidget);
     expect(find.text('Network'), findsOneWidget);
@@ -183,6 +187,7 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Profile'), findsOneWidget);
+    expect(find.text('Mode'), findsOneWidget);
     expect(find.text('Model'), findsOneWidget);
     expect(find.text('Fast mode'), findsOneWidget);
     expect(find.text('Permissions'), findsOneWidget);
@@ -257,7 +262,7 @@ void main() {
     expect(find.text('2/5'), findsOneWidget);
     expect(find.text('1/4'), findsOneWidget);
     expect(find.text('0/3'), findsOneWidget);
-    expect(find.text('0/7'), findsOneWidget);
+    expect(find.text('0/8'), findsOneWidget);
   });
 }
 
@@ -362,6 +367,7 @@ const Map<String, Object?> _fullCapabilities = {
   'configuration': {'models': true, 'profiles': true, 'skills': true},
   'runtimeControls': {
     'model': true,
+    'mode': true,
     'reasoningEffort': true,
     'fastMode': true,
     'approvalPolicy': true,
@@ -389,6 +395,7 @@ const Map<String, Object?> _minimalCapabilities = {
   'configuration': {'models': false, 'profiles': false, 'skills': false},
   'runtimeControls': {
     'model': false,
+    'mode': false,
     'reasoningEffort': false,
     'fastMode': false,
     'approvalPolicy': false,

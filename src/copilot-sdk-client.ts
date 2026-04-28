@@ -19,6 +19,7 @@ export type CopilotSdkPermissionHandler = PermissionHandler;
 export type CopilotSdkPermissionRequest = PermissionRequest;
 export type CopilotSdkPermissionResult = PermissionRequestResult;
 export type CopilotSdkReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type CopilotSdkSessionMode = "interactive" | "plan" | "autopilot";
 export type CopilotSdkSessionConfig = SessionConfig;
 export type CopilotSdkResumeSessionConfig = ResumeSessionConfig;
 export type CopilotSdkSessionEvent = SessionEvent;
@@ -63,6 +64,10 @@ export interface CopilotSdkSession {
     },
   ): Promise<void>;
   readonly rpc?: {
+    mode: {
+      get(): Promise<CopilotSdkSessionMode>;
+      set(params: { mode: CopilotSdkSessionMode }): Promise<void>;
+    };
     skills: {
       list(): Promise<CopilotSdkSkillListResult>;
       enable(params: { name: string }): Promise<void>;

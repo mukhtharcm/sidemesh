@@ -40,6 +40,7 @@ import {
   type CopilotSdkSession,
   type CopilotSdkSessionConfig,
   type CopilotSdkSessionEvent,
+  type CopilotSdkSessionMode,
   type CopilotSdkSessionMetadata,
 } from "./copilot-sdk-client.js";
 import type {
@@ -115,6 +116,11 @@ const DEFAULT_COPILOT_STATE_DIR = nodePath.join(
   "copilot-provider",
 );
 const DEFAULT_SIDEMESH_COPILOT_MODEL = "auto";
+const COPILOT_SESSION_MODES = [
+  "interactive",
+  "plan",
+  "autopilot",
+] as const satisfies readonly CopilotSdkSessionMode[];
 
 export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   sessions: {
@@ -148,6 +154,7 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   runtimeControls: {
     model: true,
+    mode: true,
     reasoningEffort: true,
     fastMode: false,
     approvalPolicy: false,
@@ -710,6 +717,10 @@ export class CopilotAgentProvider
     session: CopilotSessionState,
     sdkSession: CopilotSdkSession,
   ): Promise<void> {
+    const mode = normalizeCopilotSessionMode(session.runtime?.mode);
+    if (mode) {
+      await sdkSession.rpc?.mode.set({ mode });
+    }
     const model = modelForSdk(session.runtime?.model);
     if (!model || !sdkSession.setModel) {
       return;
@@ -748,6 +759,21 @@ export class CopilotAgentProvider
         ...(session.runtime ?? {}),
         modelProvider: "copilot",
         model: event.data.newModel,
+        updatedAt: Date.now(),
+      };
+      void this.persistSoon();
+      return;
+    }
+
+    if (event.type === "session.mode_changed") {
+      const mode = normalizeCopilotSessionMode(event.data.newMode);
+      if (!mode) {
+        return;
+      }
+      session.runtime = {
+        ...(session.runtime ?? {}),
+        modelProvider: "copilot",
+        mode,
         updatedAt: Date.now(),
       };
       void this.persistSoon();
@@ -1971,6 +1997,7 @@ function parseSdkSessionEvents(
   const activities = new Map<string, import("./types.js").SessionActivity>();
   let seq = 0;
   let model: string | undefined;
+  let mode: CopilotSdkSessionMode | undefined;
   let updatedAt: number | undefined;
 
   for (const event of events) {
@@ -1980,6 +2007,11 @@ function parseSdkSessionEvents(
 
     if (event.type === "session.model_change" && typeof data.newModel === "string") {
       model = data.newModel;
+      continue;
+    }
+
+    if (event.type === "session.mode_changed") {
+      mode = normalizeCopilotSessionMode(data.newMode) ?? mode;
       continue;
     }
 
@@ -2071,9 +2103,16 @@ function parseSdkSessionEvents(
     ? {
         model,
         modelProvider: "copilot",
+        ...(mode ? { mode } : {}),
         updatedAt: updatedAt ?? Date.now(),
       }
-    : null;
+    : mode
+      ? {
+          modelProvider: "copilot",
+          mode,
+          updatedAt: updatedAt ?? Date.now(),
+        }
+      : null;
 
   return {
     messages,
@@ -2115,6 +2154,7 @@ function mergeRuntime(
   runtime: SessionRuntimeSummary | null,
   overrides: {
     model: string | null;
+    mode: string | null;
     reasoningEffort: string | null;
   },
   configuredModel: string | null,
@@ -2126,10 +2166,12 @@ function mergeRuntime(
     DEFAULT_SIDEMESH_COPILOT_MODEL;
   const reasoningEffort =
     overrides.reasoningEffort ?? runtime?.reasoningEffort ?? null;
+  const mode = normalizeCopilotSessionMode(overrides.mode) ?? runtime?.mode ?? null;
   return {
     ...(runtime ?? {}),
     modelProvider: "copilot",
     ...(model ? { model } : {}),
+    ...(mode ? { mode } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
     updatedAt: Date.now(),
   };
@@ -2139,17 +2181,32 @@ function normalizeStoredRuntime(
   runtime: SessionRuntimeSummary | null,
 ): SessionRuntimeSummary | null {
   if (!runtime) return null;
+  const normalizedMode = normalizeCopilotSessionMode(runtime.mode);
   if (runtime.model === "gpt-5.2" && runtime.modelProvider === "copilot") {
-    const { model: _model, ...rest } = runtime;
+    const { model: _model, mode: _mode, ...rest } = runtime;
     return {
       ...rest,
       modelProvider: "copilot",
+      ...(normalizedMode ? { mode: normalizedMode } : {}),
     };
   }
+  const { mode: _mode, ...rest } = runtime;
   return {
-    ...runtime,
+    ...rest,
     modelProvider: "copilot",
+    ...(normalizedMode ? { mode: normalizedMode } : {}),
   };
+}
+
+function normalizeCopilotSessionMode(
+  value: unknown,
+): CopilotSdkSessionMode | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return COPILOT_SESSION_MODES.includes(value as CopilotSdkSessionMode)
+    ? (value as CopilotSdkSessionMode)
+    : null;
 }
 
 function normalizeCopilotSkill(

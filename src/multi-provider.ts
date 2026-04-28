@@ -597,6 +597,7 @@ function mergeCapabilities(
     },
     runtimeControls: {
       model: any((caps) => caps.runtimeControls.model),
+      mode: any((caps) => caps.runtimeControls.mode),
       reasoningEffort: any((caps) => caps.runtimeControls.reasoningEffort),
       fastMode: any((caps) => caps.runtimeControls.fastMode),
       approvalPolicy: any((caps) => caps.runtimeControls.approvalPolicy),

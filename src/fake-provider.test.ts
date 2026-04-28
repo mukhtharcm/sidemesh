@@ -14,9 +14,10 @@ import type {
 } from "./agent-provider.js";
 
 const EMPTY_OVERRIDES: AgentSessionOverrides = {
-  model: null,
-  reasoningEffort: null,
-  fastMode: null,
+    model: null,
+    mode: null,
+    reasoningEffort: null,
+    fastMode: null,
   approvalPolicy: null,
   sandboxMode: null,
   networkAccess: null,

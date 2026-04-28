@@ -20,6 +20,7 @@ class PendingSessionSend {
     required this.nextAttemptAt,
     required this.retryCount,
     this.model,
+    this.mode,
     this.reasoningEffort,
     this.fastMode,
     this.approvalPolicy,
@@ -41,6 +42,7 @@ class PendingSessionSend {
   final DateTime nextAttemptAt;
   final int retryCount;
   final String? model;
+  final String? mode;
   final String? reasoningEffort;
   final bool? fastMode;
   final String? approvalPolicy;
@@ -73,6 +75,7 @@ class PendingSessionSend {
       nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
       retryCount: retryCount ?? this.retryCount,
       model: model,
+      mode: mode,
       reasoningEffort: reasoningEffort,
       fastMode: fastMode,
       approvalPolicy: approvalPolicy,
@@ -102,6 +105,7 @@ class PendingSessionSend {
       nextAttemptAt: _dateValue(json['nextAttemptAt']),
       retryCount: _intValue(json['retryCount']),
       model: _stringOrNull(json['model']),
+      mode: _stringOrNull(json['mode']),
       reasoningEffort: _stringOrNull(json['reasoningEffort']),
       fastMode: json['fastMode'] is bool ? json['fastMode'] as bool : null,
       approvalPolicy: _stringOrNull(json['approvalPolicy']),
@@ -127,6 +131,7 @@ class PendingSessionSend {
     'nextAttemptAt': nextAttemptAt.millisecondsSinceEpoch,
     'retryCount': retryCount,
     'model': model,
+    'mode': mode,
     'reasoningEffort': reasoningEffort,
     'fastMode': fastMode,
     'approvalPolicy': approvalPolicy,

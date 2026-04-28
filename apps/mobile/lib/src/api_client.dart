@@ -230,6 +230,7 @@ class ApiClient {
     String? provider,
     List<SessionInputItem>? input,
     String? model,
+    String? mode,
     String? reasoningEffort,
     bool? fastMode,
     String? approvalPolicy,
@@ -246,6 +247,9 @@ class ApiClient {
     }
     if ((model ?? '').isNotEmpty) {
       body['model'] = model;
+    }
+    if ((mode ?? '').isNotEmpty) {
+      body['mode'] = mode;
     }
     if ((reasoningEffort ?? '').isNotEmpty) {
       body['reasoningEffort'] = reasoningEffort;
@@ -282,6 +286,7 @@ class ApiClient {
     List<SessionInputItem>? input,
     String? clientMessageId,
     String? model,
+    String? mode,
     String? reasoningEffort,
     bool? fastMode,
     String? approvalPolicy,
@@ -296,6 +301,7 @@ class ApiClient {
           ? null
           : <String, dynamic>{'clientMessageId': clientMessageId},
       ...?(model ?? '').isEmpty ? null : <String, dynamic>{'model': model},
+      ...?(mode ?? '').isEmpty ? null : <String, dynamic>{'mode': mode},
       ...?(reasoningEffort ?? '').isEmpty
           ? null
           : <String, dynamic>{'reasoningEffort': reasoningEffort},
