@@ -3066,7 +3066,7 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
-  Future<void> _respondAction(String decision) async {
+  Future<void> _respondAction(PendingActionResponseDraft response) async {
     final action = _pendingAction;
     if (action == null) {
       return;
@@ -3075,7 +3075,7 @@ class _SessionScreenState extends State<SessionScreen>
       await widget.api.respondToAction(
         widget.host,
         actionId: action.id,
-        decision: decision,
+        response: response,
       );
       if (!mounted) {
         return;
@@ -3085,11 +3085,16 @@ class _SessionScreenState extends State<SessionScreen>
         _pendingAction = null;
       });
       _syncSessionLiveActivity();
-      final label = switch (decision) {
-        'approved' => 'Approved this step',
-        'approvedForSession' => 'Approved for the rest of the session',
-        'denied' => 'Declined',
-        _ => 'Decision sent',
+      final label = switch (action.kind) {
+        'user_input' => 'Answer sent',
+        'elicitation' => 'Response sent',
+        _ => switch (response.payload['decision']) {
+            'accept' => 'Approved this step',
+            'acceptForSession' => 'Approved for the rest of the session',
+            'decline' => 'Declined',
+            'cancel' => 'Cancelled',
+            _ => 'Decision sent',
+          },
       };
       showAppSnackBar(context, label, duration: const Duration(seconds: 2));
     } catch (error) {

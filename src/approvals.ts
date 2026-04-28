@@ -4,6 +4,7 @@ import type {
   PendingActionDecisionId,
   PendingActionDecisionKind,
   PendingActionDecisionRequest,
+  PendingActionElicitationFieldValue,
 } from "./types.js";
 
 export interface NormalizedPendingActionDecision {
@@ -18,6 +19,21 @@ export type PendingActionDecisionInput =
   | PendingActionDecisionId
   | null
   | undefined;
+
+export interface PendingActionUserInputResponse {
+  answer: string;
+  wasFreeform: boolean;
+}
+
+export interface PendingActionElicitationResponse {
+  action: "accept" | "decline" | "cancel";
+  content?: Record<string, PendingActionElicitationFieldValue>;
+}
+
+export type PendingActionResponseInput =
+  | PendingActionDecisionInput
+  | PendingActionUserInputResponse
+  | PendingActionElicitationResponse;
 
 const LEGACY_DECISIONS = new Set<PendingActionDecisionId>([
   "accept",
@@ -54,7 +70,14 @@ export function parsePendingActionDecision(
 
 export function parsePendingActionResponseBody(
   value: unknown,
-): NormalizedPendingActionDecision | null {
+  action?: Pick<PendingAction, "kind"> | null,
+): PendingActionResponseInput | null {
+  if (action?.kind === "user_input") {
+    return parsePendingActionUserInputResponse(value);
+  }
+  if (action?.kind === "elicitation") {
+    return parsePendingActionElicitationResponse(value);
+  }
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -67,6 +90,44 @@ export function parsePendingActionResponseBody(
     return parsePendingActionDecision(typed);
   }
   return parsePendingActionDecision(typed.decision);
+}
+
+export function parsePendingActionUserInputResponse(
+  value: unknown,
+): PendingActionUserInputResponse | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const typed = value as Record<string, unknown>;
+  const answer = typed.answer;
+  if (typeof answer !== "string") {
+    return null;
+  }
+  return {
+    answer,
+    wasFreeform: typed.wasFreeform !== false,
+  };
+}
+
+export function parsePendingActionElicitationResponse(
+  value: unknown,
+): PendingActionElicitationResponse | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const typed = value as Record<string, unknown>;
+  const action = typed.action;
+  if (action !== "accept" && action !== "decline" && action !== "cancel") {
+    return null;
+  }
+  const content = normalizeElicitationContent(typed.content);
+  if (typed.content !== undefined && content == null) {
+    return null;
+  }
+  return {
+    action,
+    ...(content == null ? {} : { content }),
+  };
 }
 
 export function normalizePendingActionDecision(
@@ -110,6 +171,10 @@ export function toPublicPendingAction(action: PendingAction): PendingAction {
       : { sessionTitle: action.sessionTitle }),
     ...(action.cwd === undefined ? {} : { cwd: action.cwd }),
     ...(action.approval === undefined ? {} : { approval: action.approval }),
+    ...(action.userInput === undefined ? {} : { userInput: action.userInput }),
+    ...(action.elicitation === undefined
+      ? {}
+      : { elicitation: action.elicitation }),
   };
 }
 
@@ -141,4 +206,39 @@ function isDecisionKind(value: unknown): value is PendingActionDecisionKind {
 
 function isApprovalScope(value: unknown): value is PendingActionApprovalScope {
   return value === "once" || value === "session" || value === "location";
+}
+
+function normalizeElicitationContent(
+  value: unknown,
+): Record<string, PendingActionElicitationFieldValue> | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const result: Record<string, PendingActionElicitationFieldValue> = {};
+  for (const [key, fieldValue] of Object.entries(value)) {
+    if (!isElicitationFieldValue(fieldValue)) {
+      return null;
+    }
+    result[key] = fieldValue;
+  }
+  return result;
+}
+
+function isElicitationFieldValue(
+  value: unknown,
+): value is PendingActionElicitationFieldValue {
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  return value.every((item) => typeof item === "string");
 }
