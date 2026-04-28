@@ -179,6 +179,10 @@ class StubProvider
       localImage: false,
       skills: false,
     },
+    interaction: {
+      userInput: false,
+      elicitation: false,
+    },
     approvals: {
       command: true,
       tool: false,

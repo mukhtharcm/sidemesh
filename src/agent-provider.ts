@@ -1,6 +1,6 @@
 import type { EventEmitter } from "node:events";
 
-import type { PendingActionDecisionInput } from "./approvals.js";
+import type { PendingActionResponseInput } from "./approvals.js";
 import type {
   CommandActivity,
   FileChangeActivity,
@@ -185,6 +185,10 @@ export interface AgentProviderCapabilities {
     localImage: boolean;
     skills: boolean;
   };
+  interaction: {
+    userInput: boolean;
+    elicitation: boolean;
+  };
   approvals: {
     command: boolean;
     tool: boolean;
@@ -309,7 +313,7 @@ export interface AgentSessionLifecycleProvider {
 export interface AgentApprovalProvider {
   respondToPendingAction(
     action: AgentPendingAction,
-    decision: PendingActionDecisionInput,
+    decision: PendingActionResponseInput,
   ): boolean;
 }
 

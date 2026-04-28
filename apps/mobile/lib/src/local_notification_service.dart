@@ -303,7 +303,9 @@ class LocalNotificationService with WidgetsBindingObserver {
     final hostLabel = _cleanLine(host.label);
     final sessionTitle = _cleanLine(action.sessionTitle ?? '');
     final kindLabel = _actionKindLabel(action.kind);
-    final title = 'Approval waiting on $hostLabel';
+    final title = action.isApproval
+        ? 'Approval waiting on $hostLabel'
+        : 'Agent needs input on $hostLabel';
     final subtitle = sessionTitle.isNotEmpty ? sessionTitle : kindLabel;
     final actionTitle = _cleanLine(action.title);
     final detail = _cleanText(action.detail);
@@ -331,8 +333,10 @@ class LocalNotificationService with WidgetsBindingObserver {
       'tool' => 'Tool approval',
       'file_change' => 'File change approval',
       'permissions' => 'Permission request',
-      '' => 'Approval request',
-      _ => '${kind.replaceAll('_', ' ')} approval',
+      'user_input' => 'Agent question',
+      'elicitation' => 'Structured input request',
+      '' => 'Agent request',
+      _ => kind.replaceAll('_', ' '),
     };
   }
 

@@ -28,7 +28,7 @@ import type {
   AgentSkillConfigWriteRequest,
   AgentSkillListOptions,
 } from "./agent-provider.js";
-import type { PendingActionDecisionInput } from "./approvals.js";
+import type { PendingActionResponseInput } from "./approvals.js";
 import type {
   AgentProviderConfig,
   AgentProviderKind,
@@ -292,7 +292,7 @@ export class MultiAgentProvider
 
   public respondToPendingAction(
     action: AgentPendingAction,
-    decision: PendingActionDecisionInput,
+    decision: PendingActionResponseInput,
   ): boolean {
     const resolved = this.resolveAction(action);
     return requireProviderMethod(
@@ -581,6 +581,10 @@ function mergeCapabilities(
       imageUrl: any((caps) => caps.input.imageUrl),
       localImage: any((caps) => caps.input.localImage),
       skills: any((caps) => caps.input.skills),
+    },
+    interaction: {
+      userInput: any((caps) => caps.interaction.userInput),
+      elicitation: any((caps) => caps.interaction.elicitation),
     },
     approvals: {
       command: any((caps) => caps.approvals.command),

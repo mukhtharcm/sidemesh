@@ -1382,13 +1382,13 @@ class _InboxPaneState extends State<InboxPane> {
   Future<void> _respond(
     HostProfile host,
     PendingAction action,
-    String decision,
+    PendingActionResponseDraft response,
   ) async {
     try {
       await widget.api.respondToAction(
         host,
         actionId: action.id,
-        decision: decision,
+        response: response,
       );
       if (!mounted) return;
       // Optimistically drop the entry so the list feels responsive; the
@@ -1767,10 +1767,10 @@ class _InboxPaneState extends State<InboxPane> {
             _InboxSectionHeader(
               icon: Icons.verified_user_rounded,
               title: entries.length == 1
-                  ? '1 approval pending'
-                  : '${entries.length} approvals pending',
+                  ? '1 request pending'
+                  : '${entries.length} requests pending',
               subtitle:
-                  'Command, file, and permission prompts waiting across your hosts.',
+                  'Approvals, questions, and form prompts waiting across your hosts.',
             ),
             cardSpacing,
             for (var index = 0; index < entries.length; index += 1) ...[
@@ -1797,14 +1797,14 @@ class _InboxPaneState extends State<InboxPane> {
                 icon: Icons.search_off_rounded,
                 title: 'No matches',
                 body:
-                    'No queued messages or approvals match "${widget.query.trim()}".',
+                    'No queued messages or requests match "${widget.query.trim()}".',
               )
             else
               const MeshEmptyState(
                 icon: Icons.verified_rounded,
                 title: 'Inbox is clear',
                 body:
-                    'Queued sends and approval prompts from your nodes will show up here.',
+                    'Queued sends and agent requests from your nodes will show up here.',
               ),
           ],
         ],
@@ -2329,7 +2329,7 @@ class _InboxCard extends StatelessWidget {
 
   final PendingActionEntry entry;
   final VoidCallback onOpenSession;
-  final ValueChanged<String> onRespond;
+  final ValueChanged<PendingActionResponseDraft> onRespond;
   final bool dense;
 
   @override
@@ -2470,7 +2470,9 @@ class _InboxCard extends StatelessWidget {
                   tooltip: 'Approve for session',
                   foreground: colors.textSecondary,
                   background: colors.surfaceMuted,
-                  onTap: () => onRespond('acceptForSession'),
+                  onTap: () => onRespond(
+                    PendingActionResponseDraft.approval('acceptForSession'),
+                  ),
                 ),
               if (action.canDecline) ...[
                 if (action.canApproveForSession) const SizedBox(width: 8),
@@ -2479,7 +2481,8 @@ class _InboxCard extends StatelessWidget {
                   tooltip: 'Decline',
                   foreground: colors.danger,
                   background: colors.danger.withValues(alpha: 0.12),
-                  onTap: () => onRespond('decline'),
+                  onTap: () =>
+                      onRespond(PendingActionResponseDraft.approval('decline')),
                 ),
               ],
               if (action.canApprove) ...[
@@ -2489,7 +2492,8 @@ class _InboxCard extends StatelessWidget {
                   tooltip: 'Approve',
                   foreground: Colors.white,
                   background: colors.success,
-                  onTap: () => onRespond('accept'),
+                  onTap: () =>
+                      onRespond(PendingActionResponseDraft.approval('accept')),
                 ),
               ],
             ],
@@ -2506,6 +2510,8 @@ String _actionKindLabel(String kind) {
     'tool' => 'tool',
     'file_change' => 'files',
     'permissions' => 'permissions',
+    'user_input' => 'question',
+    'elicitation' => 'form',
     _ => kind,
   };
 }
@@ -2517,7 +2523,7 @@ class _InboxDenseActions extends StatelessWidget {
   const _InboxDenseActions({required this.action, required this.onRespond});
 
   final PendingAction action;
-  final ValueChanged<String> onRespond;
+  final ValueChanged<PendingActionResponseDraft> onRespond;
 
   @override
   Widget build(BuildContext context) {
@@ -2532,7 +2538,8 @@ class _InboxDenseActions extends StatelessWidget {
             tooltip: canExtended ? 'Approve (right-click for more)' : 'Approve',
             foreground: colors.success,
             background: colors.success.withValues(alpha: 0.12),
-            onTap: () => onRespond('accept'),
+            onTap: () =>
+                onRespond(PendingActionResponseDraft.approval('accept')),
             onSecondaryTap: canExtended
                 ? (pos) => _showExtendedMenu(context, pos)
                 : null,
@@ -2544,7 +2551,8 @@ class _InboxDenseActions extends StatelessWidget {
             tooltip: 'Decline',
             foreground: colors.danger,
             background: colors.danger.withValues(alpha: 0.12),
-            onTap: () => onRespond('decline'),
+            onTap: () =>
+                onRespond(PendingActionResponseDraft.approval('decline')),
           ),
         ],
       ],
@@ -2568,7 +2576,9 @@ class _InboxDenseActions extends StatelessWidget {
         ),
       ],
     );
-    if (result != null) onRespond(result);
+    if (result != null) {
+      onRespond(PendingActionResponseDraft.approval(result));
+    }
   }
 }
 

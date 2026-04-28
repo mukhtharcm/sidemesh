@@ -1286,6 +1286,9 @@ class PendingAction {
     required this.canDecline,
     this.sessionTitle,
     this.cwd,
+    this.approval,
+    this.userInput,
+    this.elicitation,
   });
 
   final String id;
@@ -1299,6 +1302,17 @@ class PendingAction {
   final bool canDecline;
   final String? sessionTitle;
   final String? cwd;
+  final PendingActionApprovalDetails? approval;
+  final PendingActionUserInputRequest? userInput;
+  final PendingActionElicitationRequest? elicitation;
+
+  bool get isApproval =>
+      kind == 'command' ||
+      kind == 'tool' ||
+      kind == 'file_change' ||
+      kind == 'permissions';
+  bool get isUserInput => kind == 'user_input' && userInput != null;
+  bool get isElicitation => kind == 'elicitation' && elicitation != null;
 
   factory PendingAction.fromJson(Map<String, dynamic> json) => PendingAction(
     id: _stringValue(json['id']),
@@ -1312,6 +1326,21 @@ class PendingAction {
     canDecline: _boolValue(json['canDecline']),
     sessionTitle: json['sessionTitle'] as String?,
     cwd: json['cwd'] as String?,
+    approval: json['approval'] is Map<String, dynamic>
+        ? PendingActionApprovalDetails.fromJson(
+            json['approval'] as Map<String, dynamic>,
+          )
+        : null,
+    userInput: json['userInput'] is Map<String, dynamic>
+        ? PendingActionUserInputRequest.fromJson(
+            json['userInput'] as Map<String, dynamic>,
+          )
+        : null,
+    elicitation: json['elicitation'] is Map<String, dynamic>
+        ? PendingActionElicitationRequest.fromJson(
+            json['elicitation'] as Map<String, dynamic>,
+          )
+        : null,
   );
 
   Map<String, dynamic> toJson() => {
@@ -1326,7 +1355,251 @@ class PendingAction {
     'canDecline': canDecline,
     'sessionTitle': sessionTitle,
     'cwd': cwd,
+    'approval': approval?.toJson(),
+    'userInput': userInput?.toJson(),
+    'elicitation': elicitation?.toJson(),
   };
+}
+
+class PendingActionApprovalDetails {
+  const PendingActionApprovalDetails({
+    required this.category,
+    required this.operation,
+    required this.summary,
+    required this.supportedScopes,
+    required this.targets,
+    this.detail,
+    this.cwd,
+    this.suggestedScope,
+  });
+
+  final String category;
+  final String operation;
+  final String summary;
+  final String? detail;
+  final String? cwd;
+  final List<String> supportedScopes;
+  final String? suggestedScope;
+  final List<Map<String, dynamic>> targets;
+
+  factory PendingActionApprovalDetails.fromJson(Map<String, dynamic> json) =>
+      PendingActionApprovalDetails(
+        category: _stringValue(json['category']),
+        operation: _stringValue(json['operation']),
+        summary: _stringValue(json['summary']),
+        detail: _stringOrNull(json['detail']),
+        cwd: _stringOrNull(json['cwd']),
+        supportedScopes: (json['supportedScopes'] as List<dynamic>? ?? const [])
+            .map(_stringValue)
+            .toList(growable: false),
+        suggestedScope: _stringOrNull(json['suggestedScope']),
+        targets: (json['targets'] as List<dynamic>? ?? const [])
+            .whereType<Map<dynamic, dynamic>>()
+            .map((item) => item.cast<String, dynamic>())
+            .toList(growable: false),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'category': category,
+    'operation': operation,
+    'summary': summary,
+    'detail': detail,
+    'cwd': cwd,
+    'supportedScopes': supportedScopes,
+    'suggestedScope': suggestedScope,
+    'targets': targets,
+  };
+}
+
+class PendingActionUserInputRequest {
+  const PendingActionUserInputRequest({
+    required this.question,
+    required this.choices,
+    required this.allowFreeform,
+  });
+
+  final String question;
+  final List<String> choices;
+  final bool allowFreeform;
+
+  factory PendingActionUserInputRequest.fromJson(Map<String, dynamic> json) =>
+      PendingActionUserInputRequest(
+        question: _stringValue(json['question']),
+        choices: (json['choices'] as List<dynamic>? ?? const [])
+            .map(_stringValue)
+            .where((item) => item.isNotEmpty)
+            .toList(growable: false),
+        allowFreeform: json['allowFreeform'] != false,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'question': question,
+    'choices': choices,
+    'allowFreeform': allowFreeform,
+  };
+}
+
+class PendingActionElicitationRequest {
+  const PendingActionElicitationRequest({
+    required this.mode,
+    required this.message,
+    required this.fields,
+    this.source,
+    this.url,
+  });
+
+  final String mode;
+  final String message;
+  final String? source;
+  final String? url;
+  final List<PendingActionElicitationField> fields;
+
+  factory PendingActionElicitationRequest.fromJson(Map<String, dynamic> json) =>
+      PendingActionElicitationRequest(
+        mode: _stringValue(json['mode']),
+        message: _stringValue(json['message']),
+        source: _stringOrNull(json['source']),
+        url: _stringOrNull(json['url']),
+        fields: (json['fields'] as List<dynamic>? ?? const [])
+            .whereType<Map<dynamic, dynamic>>()
+            .map(
+              (item) => PendingActionElicitationField.fromJson(
+                item.cast<String, dynamic>(),
+              ),
+            )
+            .toList(growable: false),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'mode': mode,
+    'message': message,
+    'source': source,
+    'url': url,
+    'fields': fields.map((item) => item.toJson()).toList(),
+  };
+}
+
+class PendingActionElicitationField {
+  const PendingActionElicitationField({
+    required this.key,
+    required this.type,
+    required this.title,
+    required this.required,
+    this.description,
+    this.defaultValue,
+    this.minLength,
+    this.maxLength,
+    this.format,
+    this.minItems,
+    this.maxItems,
+    this.options,
+    this.minimum,
+    this.maximum,
+    this.integer = false,
+  });
+
+  final String key;
+  final String type;
+  final String title;
+  final String? description;
+  final bool required;
+  final Object? defaultValue;
+  final int? minLength;
+  final int? maxLength;
+  final String? format;
+  final int? minItems;
+  final int? maxItems;
+  final List<PendingActionElicitationOption>? options;
+  final num? minimum;
+  final num? maximum;
+  final bool integer;
+
+  factory PendingActionElicitationField.fromJson(Map<String, dynamic> json) =>
+      PendingActionElicitationField(
+        key: _stringValue(json['key']),
+        type: _stringValue(json['type']),
+        title: _stringValue(json['title']),
+        description: _stringOrNull(json['description']),
+        required: _boolValue(json['required']),
+        defaultValue: json['defaultValue'],
+        minLength: _intOrNull(json['minLength']),
+        maxLength: _intOrNull(json['maxLength']),
+        format: _stringOrNull(json['format']),
+        minItems: _intOrNull(json['minItems']),
+        maxItems: _intOrNull(json['maxItems']),
+        options: (json['options'] as List<dynamic>?)
+            ?.whereType<Map<dynamic, dynamic>>()
+            .map(
+              (item) => PendingActionElicitationOption.fromJson(
+                item.cast<String, dynamic>(),
+              ),
+            )
+            .toList(growable: false),
+        minimum: json['minimum'] as num?,
+        maximum: json['maximum'] as num?,
+        integer: _boolValue(json['integer']),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'key': key,
+    'type': type,
+    'title': title,
+    'description': description,
+    'required': required,
+    'defaultValue': defaultValue,
+    'minLength': minLength,
+    'maxLength': maxLength,
+    'format': format,
+    'minItems': minItems,
+    'maxItems': maxItems,
+    'options': options?.map((item) => item.toJson()).toList(),
+    'minimum': minimum,
+    'maximum': maximum,
+    'integer': integer,
+  };
+}
+
+class PendingActionElicitationOption {
+  const PendingActionElicitationOption({
+    required this.value,
+    required this.label,
+  });
+
+  final String value;
+  final String label;
+
+  factory PendingActionElicitationOption.fromJson(Map<String, dynamic> json) =>
+      PendingActionElicitationOption(
+        value: _stringValue(json['value']),
+        label: _stringValue(json['label']),
+      );
+
+  Map<String, dynamic> toJson() => {'value': value, 'label': label};
+}
+
+class PendingActionResponseDraft {
+  const PendingActionResponseDraft._(this.payload);
+
+  final Map<String, dynamic> payload;
+
+  factory PendingActionResponseDraft.approval(String decision) =>
+      PendingActionResponseDraft._({'decision': decision});
+
+  factory PendingActionResponseDraft.userInput({
+    required String answer,
+    required bool wasFreeform,
+  }) => PendingActionResponseDraft._({
+    'answer': answer,
+    'wasFreeform': wasFreeform,
+  });
+
+  factory PendingActionResponseDraft.elicitation({
+    required String action,
+    Map<String, dynamic>? content,
+  }) => PendingActionResponseDraft._({
+    'action': action,
+    ...?(content == null ? null : {'content': content}),
+  });
 }
 
 class SessionLog {
