@@ -1652,6 +1652,15 @@ class _SessionScreenState extends State<SessionScreen>
         }
         _pendingActivityUpdates[activity.id] = activity;
         _scheduleLiveFlush();
+      case 'runtime_updated':
+        final runtime = event.runtime;
+        if (runtime == null) {
+          return;
+        }
+        setState(() {
+          _session = (_session ?? widget.session).copyWith(runtime: runtime);
+        });
+        _persistCurrentSessionLog();
       case 'action_opened':
         setState(() {
           _pendingAction = event.action;
@@ -3089,12 +3098,12 @@ class _SessionScreenState extends State<SessionScreen>
         'user_input' => 'Answer sent',
         'elicitation' => 'Response sent',
         _ => switch (response.payload['decision']) {
-            'accept' => 'Approved this step',
-            'acceptForSession' => 'Approved for the rest of the session',
-            'decline' => 'Declined',
-            'cancel' => 'Cancelled',
-            _ => 'Decision sent',
-          },
+          'accept' => 'Approved this step',
+          'acceptForSession' => 'Approved for the rest of the session',
+          'decline' => 'Declined',
+          'cancel' => 'Cancelled',
+          _ => 'Decision sent',
+        },
       };
       showAppSnackBar(context, label, duration: const Duration(seconds: 2));
     } catch (error) {

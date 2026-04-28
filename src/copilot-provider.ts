@@ -854,13 +854,13 @@ export class CopilotAgentProvider
     const active = this.activeTurns.get(sessionId);
 
     if (event.type === "session.model_change") {
-      session.runtime = {
-        ...(session.runtime ?? {}),
-        modelProvider: "copilot",
-        model: event.data.newModel,
-        updatedAt: Date.now(),
-      };
-      void this.persistSoon();
+      this.replaceRuntime(
+        session,
+        withRuntimeMetadata(session.runtime, {
+          model: event.data.newModel,
+          updatedAt: Date.now(),
+        }),
+      );
       return;
     }
 
@@ -869,12 +869,13 @@ export class CopilotAgentProvider
       if (!mode) {
         return;
       }
-      session.runtime = {
-        ...(session.runtime ?? {}),
-        modelProvider: "copilot",
-        mode,
-        updatedAt: Date.now(),
-      };
+      this.replaceRuntime(
+        session,
+        withRuntimeMetadata(session.runtime, {
+          mode,
+          updatedAt: Date.now(),
+        }),
+      );
       this.upsertAndEmitActivity(
         session,
         active?.turnId ?? null,
@@ -885,7 +886,23 @@ export class CopilotAgentProvider
           previousMode: event.data.previousMode,
         }),
       );
-      void this.persistSoon();
+      return;
+    }
+
+    if (
+      event.type === "session.usage_info" ||
+      event.type === "assistant.usage" ||
+      event.type === "session.compaction_start" ||
+      event.type === "session.compaction_complete"
+    ) {
+      this.replaceRuntime(
+        session,
+        applyCopilotRuntimeEvent(
+          session.runtime,
+          event,
+          millisFromDateLike(event.timestamp) ?? Date.now(),
+        ),
+      );
       return;
     }
 
@@ -1174,6 +1191,23 @@ export class CopilotAgentProvider
       activityId,
       delta,
     });
+  }
+
+  private replaceRuntime(
+    session: CopilotSessionState,
+    next: SessionRuntimeSummary | null,
+  ): void {
+    if (runtimeSummaryEquals(session.runtime, next)) {
+      return;
+    }
+    session.runtime = next;
+    this.touch(session);
+    this.emit("liveEvent", {
+      type: "runtime_updated",
+      sessionId: session.thread.id,
+      runtime: next ? { ...next } : null,
+    });
+    void this.persistSoon();
   }
 
   private async handlePermissionRequest(
@@ -2470,8 +2504,7 @@ function parseSdkSessionEvents(
   const messages: SessionMessage[] = [];
   const activities = new Map<string, import("./types.js").SessionActivity>();
   let seq = 0;
-  let model: string | undefined;
-  let mode: CopilotSdkSessionMode | undefined;
+  let runtime: SessionRuntimeSummary | null = null;
   let updatedAt: number | undefined;
 
   for (const event of events) {
@@ -2483,14 +2516,20 @@ function parseSdkSessionEvents(
       event.type === "session.model_change" &&
       typeof data.newModel === "string"
     ) {
-      model = data.newModel;
+      runtime = withRuntimeMetadata(runtime, {
+        model: data.newModel,
+        updatedAt: timestamp,
+      });
       continue;
     }
 
     if (event.type === "session.mode_changed") {
       const nextMode = normalizeCopilotSessionMode(data.newMode);
       if (nextMode) {
-        mode = nextMode;
+        runtime = withRuntimeMetadata(runtime, {
+          mode: nextMode,
+          updatedAt: timestamp,
+        });
         const activity = buildCopilotModeChangeActivity({
           activityId: copilotModeActivityId(event, seq),
           turnId: null,
@@ -2503,6 +2542,16 @@ function parseSdkSessionEvents(
           seq: seq++,
         });
       }
+      continue;
+    }
+
+    if (
+      event.type === "session.usage_info" ||
+      event.type === "assistant.usage" ||
+      event.type === "session.compaction_start" ||
+      event.type === "session.compaction_complete"
+    ) {
+      runtime = applyCopilotRuntimeEvent(runtime, event, timestamp);
       continue;
     }
 
@@ -2522,7 +2571,12 @@ function parseSdkSessionEvents(
       event.type === "assistant.message" &&
       typeof data.content === "string"
     ) {
-      if (typeof data.model === "string") model = data.model;
+      if (typeof data.model === "string") {
+        runtime = withRuntimeMetadata(runtime, {
+          model: data.model,
+          updatedAt: timestamp,
+        });
+      }
       const text = data.content.trim();
       if (text.length > 0) {
         messages.push({
@@ -2569,7 +2623,12 @@ function parseSdkSessionEvents(
       event.type === "tool.execution_complete" &&
       typeof data.toolCallId === "string"
     ) {
-      if (typeof data.model === "string") model = data.model;
+      if (typeof data.model === "string") {
+        runtime = withRuntimeMetadata(runtime, {
+          model: data.model,
+          updatedAt: timestamp,
+        });
+      }
       const existing = activities.get(data.toolCallId);
       const existingTool = existing?.type === "tool" ? existing : null;
       const output =
@@ -2603,20 +2662,12 @@ function parseSdkSessionEvents(
     }
   }
 
-  const runtime: SessionRuntimeSummary | null = model
-    ? {
-        model,
-        modelProvider: "copilot",
-        ...(mode ? { mode } : {}),
-        updatedAt: updatedAt ?? Date.now(),
-      }
-    : mode
-      ? {
-          modelProvider: "copilot",
-          mode,
-          updatedAt: updatedAt ?? Date.now(),
-        }
-      : null;
+  if (runtime && updatedAt != null) {
+    runtime = {
+      ...runtime,
+      updatedAt,
+    };
+  }
 
   return {
     messages,
@@ -2977,6 +3028,153 @@ function millisFromDateLike(value: Date | string | undefined): number | null {
   if (!value) return null;
   const millis = value instanceof Date ? value.getTime() : Date.parse(value);
   return Number.isFinite(millis) ? millis : null;
+}
+
+function withRuntimeMetadata(
+  runtime: SessionRuntimeSummary | null,
+  patch: Partial<SessionRuntimeSummary>,
+): SessionRuntimeSummary {
+  return {
+    ...(runtime ?? {}),
+    modelProvider: "copilot",
+    ...patch,
+  };
+}
+
+function applyCopilotRuntimeEvent(
+  runtime: SessionRuntimeSummary | null,
+  event: CopilotSdkSessionEvent,
+  updatedAt: number,
+): SessionRuntimeSummary {
+  const next = withRuntimeMetadata(runtime, { updatedAt });
+  const data = (event.data ?? {}) as Record<string, unknown>;
+  const telemetry = { ...(next.telemetry ?? {}) };
+
+  if (event.type === "session.usage_info") {
+    telemetry.contextWindow = {
+      currentTokens: numericValue(data.currentTokens) ?? 0,
+      tokenLimit: numericValue(data.tokenLimit) ?? 0,
+      messagesLength: numericValue(data.messagesLength) ?? 0,
+      conversationTokens: numericValue(data.conversationTokens),
+      systemTokens: numericValue(data.systemTokens),
+      toolDefinitionsTokens: numericValue(data.toolDefinitionsTokens),
+      updatedAt,
+    };
+    return {
+      ...next,
+      telemetry,
+    };
+  }
+
+  if (event.type === "assistant.usage") {
+    const copilotUsage = asRecord(data.copilotUsage);
+    telemetry.lastUsage = {
+      model: stringValue(data.model),
+      inputTokens: numericValue(data.inputTokens),
+      outputTokens: numericValue(data.outputTokens),
+      reasoningTokens: numericValue(data.reasoningTokens),
+      cacheReadTokens: numericValue(data.cacheReadTokens),
+      cacheWriteTokens: numericValue(data.cacheWriteTokens),
+      durationMs: numericValue(data.duration),
+      ttftMs: numericValue(data.ttftMs),
+      interTokenLatencyMs: numericValue(data.interTokenLatencyMs),
+      cost: typeof data.cost === "number" ? data.cost : undefined,
+      reasoningEffort: stringValue(data.reasoningEffort),
+      totalNanoAiu: numericValue(copilotUsage?.totalNanoAiu),
+      updatedAt,
+    };
+    if (telemetry.lastUsage.model) {
+      next.model = telemetry.lastUsage.model;
+    }
+    if (telemetry.lastUsage.reasoningEffort) {
+      next.reasoningEffort = telemetry.lastUsage.reasoningEffort;
+    }
+    return {
+      ...next,
+      telemetry,
+    };
+  }
+
+  if (event.type === "session.compaction_start") {
+    const preCompactionTokens =
+      sumNumbers(
+        numericValue(data.conversationTokens),
+        numericValue(data.systemTokens),
+        numericValue(data.toolDefinitionsTokens),
+      ) ?? telemetry.compaction?.preCompactionTokens;
+    telemetry.compaction = {
+      ...(telemetry.compaction ?? {}),
+      status: "running",
+      startedAt: updatedAt,
+      updatedAt,
+      preCompactionTokens,
+    };
+    return {
+      ...next,
+      telemetry,
+    };
+  }
+
+  if (event.type === "session.compaction_complete") {
+    const usage = asRecord(data.compactionTokensUsed);
+    const copilotUsage = asRecord(usage?.copilotUsage);
+    telemetry.compaction = {
+      ...(telemetry.compaction ?? {}),
+      status: data.success === false ? "failed" : "completed",
+      completedAt: updatedAt,
+      updatedAt,
+      preCompactionTokens:
+        numericValue(data.preCompactionTokens) ??
+        telemetry.compaction?.preCompactionTokens,
+      postCompactionTokens: numericValue(data.postCompactionTokens),
+      tokensRemoved: numericValue(data.tokensRemoved),
+      messagesRemoved: numericValue(data.messagesRemoved),
+      inputTokens: numericValue(usage?.inputTokens),
+      outputTokens: numericValue(usage?.outputTokens),
+      cacheReadTokens: numericValue(usage?.cacheReadTokens),
+      cacheWriteTokens: numericValue(usage?.cacheWriteTokens),
+      durationMs: numericValue(usage?.duration),
+      model: stringValue(usage?.model),
+      totalNanoAiu: numericValue(copilotUsage?.totalNanoAiu),
+      error: stringValue(data.error),
+    };
+    return {
+      ...next,
+      telemetry,
+    };
+  }
+
+  return next;
+}
+
+function runtimeSummaryEquals(
+  left: SessionRuntimeSummary | null,
+  right: SessionRuntimeSummary | null,
+): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function numericValue(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.trunc(value);
+}
+
+function stringValue(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function sumNumbers(...values: Array<number | undefined>): number | undefined {
+  const defined = values.filter((value): value is number => value != null);
+  if (defined.length === 0) {
+    return undefined;
+  }
+  return defined.reduce((total, value) => total + value, 0);
 }
 
 function mergeRuntime(
