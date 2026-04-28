@@ -161,6 +161,7 @@ class ProviderDefinitionSummary {
     required this.displayName,
     required this.defaultCommand,
     required this.commandEnvironmentVariables,
+    required this.supportedApprovalPolicies,
     required this.capabilities,
     required this.config,
     required this.version,
@@ -172,6 +173,7 @@ class ProviderDefinitionSummary {
     displayName: '',
     defaultCommand: '',
     commandEnvironmentVariables: <String>[],
+    supportedApprovalPolicies: <String>[],
     capabilities: ProviderCapabilities.empty,
     config: ProviderConfigSummary.empty,
     version: '',
@@ -182,6 +184,7 @@ class ProviderDefinitionSummary {
   final String displayName;
   final String defaultCommand;
   final List<String> commandEnvironmentVariables;
+  final List<String> supportedApprovalPolicies;
   final ProviderCapabilities capabilities;
   final ProviderConfigSummary config;
   final String version;
@@ -195,6 +198,11 @@ class ProviderDefinitionSummary {
       defaultCommand: _stringValue(json['defaultCommand']),
       commandEnvironmentVariables:
           (json['commandEnvironmentVariables'] as List<dynamic>? ?? const [])
+              .map(_stringValue)
+              .where((value) => value.isNotEmpty)
+              .toList(),
+      supportedApprovalPolicies:
+          (json['supportedApprovalPolicies'] as List<dynamic>? ?? const [])
               .map(_stringValue)
               .where((value) => value.isNotEmpty)
               .toList(),
