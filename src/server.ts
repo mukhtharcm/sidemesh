@@ -1467,10 +1467,14 @@ export async function startServer(config: NodeConfig): Promise<void> {
     "/api/actions/:actionId/respond",
     asyncRoute(async (request, response) => {
       const actionId = pathParam(request.params.actionId);
-      const decision = parsePendingActionResponseBody(request.body);
       const action = pendingActions.get(actionId);
       if (!action) {
         response.status(404).json({ error: "action not found" });
+        return;
+      }
+      const decision = parsePendingActionResponseBody(request.body, action);
+      if (!decision) {
+        response.status(400).json({ error: "invalid action response" });
         return;
       }
 
@@ -1479,7 +1483,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
           response,
           provider,
           true,
-          "approval responses",
+          "pending action responses",
           "respondToPendingAction",
         )
       ) {

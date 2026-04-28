@@ -24,8 +24,11 @@ import {
 } from "./agent-provider.js";
 import {
   type NormalizedPendingActionDecision,
-  normalizePendingActionDecision,
   type PendingActionDecisionInput,
+  type PendingActionElicitationResponse,
+  type PendingActionResponseInput,
+  type PendingActionUserInputResponse,
+  normalizePendingActionDecision,
 } from "./approvals.js";
 import {
   approveOnce,
@@ -33,6 +36,8 @@ import {
   rejectPermission,
   type CopilotSdkClient,
   type CopilotSdkClientFactory,
+  type CopilotSdkElicitationContext,
+  type CopilotSdkElicitationResult,
   type CopilotSdkModelInfo,
   type CopilotSdkPermissionRequest,
   type CopilotSdkPermissionResult,
@@ -42,9 +47,12 @@ import {
   type CopilotSdkSessionEvent,
   type CopilotSdkSessionMode,
   type CopilotSdkSessionMetadata,
+  type CopilotSdkUserInputRequest,
+  type CopilotSdkUserInputResponse,
 } from "./copilot-sdk-client.js";
 import type {
   ModelSummary,
+  PendingActionElicitationField,
   SessionActivity,
   SkillCatalogEntry,
   SkillSummary,
@@ -105,6 +113,16 @@ interface PendingCopilotPermission {
   resolve(result: CopilotSdkPermissionResult): void;
 }
 
+interface PendingCopilotUserInput {
+  action: AgentPendingAction;
+  resolve(result: CopilotSdkUserInputResponse): void;
+}
+
+interface PendingCopilotElicitation {
+  action: AgentPendingAction;
+  resolve(result: CopilotSdkElicitationResult): void;
+}
+
 type CopilotSessionApproval = Extract<
   CopilotSdkPermissionResult,
   { kind: "approve-for-session" }
@@ -139,6 +157,10 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     imageUrl: true,
     localImage: true,
     skills: true,
+  },
+  interaction: {
+    userInput: true,
+    elicitation: true,
   },
   approvals: {
     command: true,
@@ -189,6 +211,11 @@ export class CopilotAgentProvider
   private readonly pendingPermissions = new Map<
     string,
     PendingCopilotPermission
+  >();
+  private readonly pendingUserInputs = new Map<string, PendingCopilotUserInput>();
+  private readonly pendingElicitations = new Map<
+    string,
+    PendingCopilotElicitation
   >();
   private sdkClient: CopilotSdkClient | null = null;
   private saveChain: Promise<void> = Promise.resolve();
@@ -430,6 +457,13 @@ export class CopilotAgentProvider
     }
     await active.sdkSession.abort().catch(() => undefined);
     this.resolvePendingPermissionsForSession(threadId, rejectPermission());
+    this.resolvePendingUserInputsForSession(threadId, {
+      answer: "",
+      wasFreeform: true,
+    });
+    this.resolvePendingElicitationsForSession(threadId, {
+      action: "cancel",
+    });
     this.completeActiveTurn(threadId, "interrupted");
     await this.persistSoon();
     return { interrupted: true };
@@ -437,26 +471,48 @@ export class CopilotAgentProvider
 
   public respondToPendingAction(
     action: AgentPendingAction,
-    decision: PendingActionDecisionInput,
+    decision: PendingActionResponseInput,
   ): boolean {
-    const normalized = normalizePendingActionDecision(decision);
-    if (!normalized) {
-      return false;
-    }
     const pending = this.pendingPermissions.get(action.id);
-    if (!pending) {
-      return false;
+    if (pending) {
+      const normalized = normalizePendingActionDecision(
+        decision as PendingActionDecisionInput,
+      );
+      if (!normalized) {
+        return false;
+      }
+      const result = buildCopilotPermissionResult(
+        normalized,
+        pending.action.providerPayload,
+      );
+      if (!result) {
+        return false;
+      }
+      this.pendingPermissions.delete(action.id);
+      pending.resolve(result);
+      return true;
     }
-    const result = buildCopilotPermissionResult(
-      normalized,
-      pending.action.providerPayload,
-    );
-    if (!result) {
-      return false;
+
+    const inputRequest = this.pendingUserInputs.get(action.id);
+    if (inputRequest) {
+      if (!isCopilotUserInputResponse(decision)) {
+        return false;
+      }
+      this.pendingUserInputs.delete(action.id);
+      inputRequest.resolve(decision);
+      return true;
     }
-    this.pendingPermissions.delete(action.id);
-    pending.resolve(result);
-    return true;
+
+    const elicitation = this.pendingElicitations.get(action.id);
+    if (elicitation) {
+      if (!isCopilotElicitationResponse(decision)) {
+        return false;
+      }
+      this.pendingElicitations.delete(action.id);
+      elicitation.resolve(decision);
+      return true;
+    }
+    return false;
   }
 
   public async listModels(
@@ -738,6 +794,10 @@ export class CopilotAgentProvider
       enableConfigDiscovery: true,
       onPermissionRequest: (request) =>
         this.handlePermissionRequest(session.thread.id, request),
+      onUserInputRequest: (request) =>
+        this.handleUserInputRequest(session.thread.id, request),
+      onElicitationRequest: (request) =>
+        this.handleElicitationRequest(session.thread.id, request),
       onEvent: (event) => this.handleSdkEvent(session.thread.id, event),
     };
   }
@@ -1106,6 +1166,44 @@ export class CopilotAgentProvider
     });
   }
 
+  private async handleUserInputRequest(
+    sessionId: string,
+    request: CopilotSdkUserInputRequest,
+  ): Promise<CopilotSdkUserInputResponse> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return { answer: "", wasFreeform: true };
+    }
+
+    const action = buildCopilotUserInputAction(session, request);
+    this.emit("liveEvent", {
+      type: "action_opened",
+      action,
+    });
+    return new Promise<CopilotSdkUserInputResponse>((resolve) => {
+      this.pendingUserInputs.set(action.id, { action, resolve });
+    });
+  }
+
+  private async handleElicitationRequest(
+    sessionId: string,
+    request: CopilotSdkElicitationContext,
+  ): Promise<CopilotSdkElicitationResult> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return { action: "cancel" };
+    }
+
+    const action = buildCopilotElicitationAction(session, request);
+    this.emit("liveEvent", {
+      type: "action_opened",
+      action,
+    });
+    return new Promise<CopilotSdkElicitationResult>((resolve) => {
+      this.pendingElicitations.set(action.id, { action, resolve });
+    });
+  }
+
   private resolvePendingPermissionsForSession(
     sessionId: string,
     result: CopilotSdkPermissionResult,
@@ -1115,6 +1213,32 @@ export class CopilotAgentProvider
         continue;
       }
       this.pendingPermissions.delete(actionId);
+      pending.resolve(result);
+    }
+  }
+
+  private resolvePendingUserInputsForSession(
+    sessionId: string,
+    result: CopilotSdkUserInputResponse,
+  ): void {
+    for (const [actionId, pending] of this.pendingUserInputs) {
+      if (pending.action.sessionId !== sessionId) {
+        continue;
+      }
+      this.pendingUserInputs.delete(actionId);
+      pending.resolve(result);
+    }
+  }
+
+  private resolvePendingElicitationsForSession(
+    sessionId: string,
+    result: CopilotSdkElicitationResult,
+  ): void {
+    for (const [actionId, pending] of this.pendingElicitations) {
+      if (pending.action.sessionId !== sessionId) {
+        continue;
+      }
+      this.pendingElicitations.delete(actionId);
       pending.resolve(result);
     }
   }
@@ -1674,10 +1798,182 @@ function buildCopilotPendingAction(
   };
 }
 
+function buildCopilotUserInputAction(
+  session: CopilotSessionState,
+  request: CopilotSdkUserInputRequest,
+): AgentPendingAction {
+  const actionId = `copilot-user-input-${randomUUID()}`;
+  const question = request.question?.trim() || "Agent question";
+  const choices = (request.choices ?? []).filter(
+    (choice: string | undefined): choice is string =>
+      typeof choice === "string" && choice.trim().length > 0,
+  );
+  return {
+    id: actionId,
+    sessionId: session.thread.id,
+    kind: "user_input",
+    title: "Agent question",
+    detail: question,
+    requestedAt: Date.now(),
+    canApprove: false,
+    canApproveForSession: false,
+    canDecline: false,
+    sessionTitle: session.thread.name ?? session.thread.preview,
+    cwd: session.thread.cwd,
+    userInput: {
+      question,
+      choices,
+      allowFreeform: request.allowFreeform !== false,
+    },
+    providerRequestId: actionId,
+    providerRequestKind: "copilot/ask_user",
+    providerPayload: request,
+  };
+}
+
+function buildCopilotElicitationAction(
+  session: CopilotSessionState,
+  request: CopilotSdkElicitationContext,
+): AgentPendingAction {
+  const actionId = `copilot-elicitation-${randomUUID()}`;
+  const fields = normalizeCopilotElicitationFields(request.requestedSchema);
+  const message = request.message?.trim() || "Structured input requested";
+  return {
+    id: actionId,
+    sessionId: session.thread.id,
+    kind: "elicitation",
+    title: request.mode === "url" ? "Browser sign-in required" : "Structured input requested",
+    detail: message,
+    requestedAt: Date.now(),
+    canApprove: false,
+    canApproveForSession: false,
+    canDecline: request.mode !== "url" || Boolean(request.url),
+    sessionTitle: session.thread.name ?? session.thread.preview,
+    cwd: session.thread.cwd,
+    elicitation: {
+      mode: request.mode === "url" ? "url" : "form",
+      message,
+      ...(request.elicitationSource ? { source: request.elicitationSource } : {}),
+      ...(request.url ? { url: request.url } : {}),
+      fields,
+    },
+    providerRequestId: actionId,
+    providerRequestKind: "copilot/elicitation",
+    providerPayload: request,
+  };
+}
+
 function copilotPendingActionKind(kind: unknown): AgentPendingAction["kind"] {
   if (kind === "shell") return "command";
   if (kind === "write") return "file_change";
   return "permissions";
+}
+
+function normalizeCopilotElicitationFields(
+  schema: CopilotSdkElicitationContext["requestedSchema"],
+): PendingActionElicitationField[] {
+  if (!schema || schema.type !== "object" || !schema.properties) {
+    return [];
+  }
+  const required = new Set(schema.required ?? []);
+  return Object.entries(schema.properties)
+    .map(([key, field]) => normalizeCopilotElicitationField(key, field, required))
+    .filter((field): field is PendingActionElicitationField => field !== null);
+}
+
+function normalizeCopilotElicitationField(
+  key: string,
+  field: NonNullable<CopilotSdkElicitationContext["requestedSchema"]>["properties"][string],
+  required: Set<string>,
+): PendingActionElicitationField | null {
+  const title =
+    ("title" in field && typeof field.title === "string" && field.title.trim()) ||
+    key;
+  const description =
+    "description" in field && typeof field.description === "string"
+      ? field.description
+      : undefined;
+  const isRequired = required.has(key);
+
+  if (field.type === "boolean") {
+    return {
+      key,
+      type: "boolean",
+      title,
+      description,
+      required: isRequired,
+      ...(typeof field.default === "boolean"
+        ? { defaultValue: field.default }
+        : {}),
+    };
+  }
+  if (field.type === "number" || field.type === "integer") {
+    return {
+      key,
+      type: "number",
+      title,
+      description,
+      required: isRequired,
+      integer: field.type === "integer",
+      ...(typeof field.default === "number"
+        ? { defaultValue: field.default }
+        : {}),
+      ...(typeof field.minimum === "number" ? { minimum: field.minimum } : {}),
+      ...(typeof field.maximum === "number" ? { maximum: field.maximum } : {}),
+    };
+  }
+  if (field.type === "array") {
+    const options = "enum" in field.items
+      ? field.items.enum.map((value) => ({ value, label: value }))
+      : "anyOf" in field.items
+        ? field.items.anyOf
+            .filter((item) => typeof item.const === "string")
+            .map((item) => ({ value: item.const, label: item.title || item.const }))
+        : [];
+    return {
+      key,
+      type: "string[]",
+      title,
+      description,
+      required: isRequired,
+      options,
+      ...(Array.isArray(field.default) ? { defaultValue: field.default } : {}),
+      ...(typeof field.minItems === "number" ? { minItems: field.minItems } : {}),
+      ...(typeof field.maxItems === "number" ? { maxItems: field.maxItems } : {}),
+    };
+  }
+  const options =
+    "enum" in field
+      ? field.enum.map((value, index) => ({
+          value,
+          label:
+            Array.isArray(field.enumNames) &&
+            typeof field.enumNames[index] === "string" &&
+            field.enumNames[index].trim().length > 0
+              ? field.enumNames[index]
+              : value,
+        }))
+      : "oneOf" in field
+        ? field.oneOf
+            .filter((item) => typeof item.const === "string")
+            .map((item) => ({ value: item.const, label: item.title || item.const }))
+        : undefined;
+  return {
+    key,
+    type: "string",
+    title,
+    description,
+    required: isRequired,
+    ...(typeof field.default === "string" ? { defaultValue: field.default } : {}),
+    ...(("minLength" in field && typeof field.minLength === "number")
+      ? { minLength: field.minLength }
+      : {}),
+    ...(("maxLength" in field && typeof field.maxLength === "number")
+      ? { maxLength: field.maxLength }
+      : {}),
+    ...(("format" in field && field.format) ? { format: field.format } : {}),
+    ...(options && options.length > 0 ? { options } : {}),
+  };
 }
 
 function copilotApprovalCategory(
@@ -2017,6 +2313,32 @@ function buildCopilotPermissionResult(
     return rejectPermission();
   }
   return null;
+}
+
+function isCopilotUserInputResponse(
+  value: PendingActionResponseInput,
+): value is PendingActionUserInputResponse {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "answer" in value &&
+    typeof value.answer === "string" &&
+    "wasFreeform" in value &&
+    typeof value.wasFreeform === "boolean"
+  );
+}
+
+function isCopilotElicitationResponse(
+  value: PendingActionResponseInput,
+): value is PendingActionElicitationResponse {
+  if (!value || typeof value !== "object" || !("action" in value)) {
+    return false;
+  }
+  return (
+    value.action === "accept" ||
+    value.action === "decline" ||
+    value.action === "cancel"
+  );
 }
 
 function copilotSessionApproval(
