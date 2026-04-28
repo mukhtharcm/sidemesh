@@ -1585,10 +1585,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     return widgets;
   }
 
-  List<Widget> _buildToolBody(
-    BuildContext context,
-    SessionActivity activity,
-  ) {
+  List<Widget> _buildToolBody(BuildContext context, SessionActivity activity) {
     final widgets = <Widget>[];
     widgets.addAll(_buildToolSemanticBlocks(context, activity));
     if (widgets.isNotEmpty) {
@@ -1927,9 +1924,10 @@ class _ActivityCardState extends State<_ActivityCard> {
         'list' => Icons.folder_open_rounded,
         _ => Icons.description_rounded,
       },
-      'network' => activity.toolAction == 'search'
-          ? Icons.travel_explore_rounded
-          : Icons.public_rounded,
+      'network' =>
+        activity.toolAction == 'search'
+            ? Icons.travel_explore_rounded
+            : Icons.public_rounded,
       'command' => Icons.terminal_rounded,
       'session' => Icons.tune_rounded,
       'memory' => Icons.psychology_alt_rounded,
@@ -1974,7 +1972,9 @@ class _ActivityCardState extends State<_ActivityCard> {
       rows.add(_activityInfoBlock(context, 'Mode', activity.toolMode!.trim()));
     }
     if ((activity.toolQuery ?? '').trim().isNotEmpty) {
-      rows.add(_activityInfoBlock(context, 'Query', activity.toolQuery!.trim()));
+      rows.add(
+        _activityInfoBlock(context, 'Query', activity.toolQuery!.trim()),
+      );
     }
     if ((activity.toolUrl ?? '').trim().isNotEmpty) {
       rows.add(
@@ -2022,17 +2022,19 @@ class _ActivityCardState extends State<_ActivityCard> {
   String _toolCommandText(SessionActivity activity) {
     final args = activity.toolArgs;
     if (args is Map<String, dynamic>) {
-      final command = (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
-          ?.toString()
-          .trim();
+      final command =
+          (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
+              ?.toString()
+              .trim();
       if (command != null && command.isNotEmpty) {
         return command;
       }
     }
     if (args is Map) {
-      final command = (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
-          ?.toString()
-          .trim();
+      final command =
+          (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
+              ?.toString()
+              .trim();
       if (command != null && command.isNotEmpty) {
         return command;
       }
@@ -2423,7 +2425,7 @@ class _SessionRuntimeDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final details = <({String label, String value})>[
+    final runtimeDetails = <({String label, String value})>[
       (label: 'Model', value: runtimeValue(runtime.model)),
       if ((runtime.modelProvider ?? '').isNotEmpty &&
           runtime.modelProvider != 'openai')
@@ -2436,11 +2438,100 @@ class _SessionRuntimeDetails extends StatelessWidget {
     ];
 
     if ((runtime.personality ?? '').isNotEmpty) {
-      details.add((label: 'Style', value: runtime.personality!));
+      runtimeDetails.add((label: 'Style', value: runtime.personality!));
     }
     if ((runtime.summaryMode ?? '').isNotEmpty) {
-      details.add((label: 'Summary', value: runtime.summaryMode!));
+      runtimeDetails.add((label: 'Summary', value: runtime.summaryMode!));
     }
+
+    final telemetry = runtime.telemetry;
+    final contextDetails = telemetry?.contextWindow == null
+        ? const <({String label, String value})>[]
+        : <({String label, String value})>[
+            (
+              label: 'Window',
+              value: _formatTokenWindow(telemetry!.contextWindow!),
+            ),
+            (
+              label: 'Messages',
+              value: '${telemetry.contextWindow!.messagesLength}',
+            ),
+            if (telemetry.contextWindow!.conversationTokens != null)
+              (
+                label: 'Conversation',
+                value: '${telemetry.contextWindow!.conversationTokens!} tokens',
+              ),
+            if (telemetry.contextWindow!.systemTokens != null)
+              (
+                label: 'System',
+                value: '${telemetry.contextWindow!.systemTokens!} tokens',
+              ),
+            if (telemetry.contextWindow!.toolDefinitionsTokens != null)
+              (
+                label: 'Tools',
+                value:
+                    '${telemetry.contextWindow!.toolDefinitionsTokens!} tokens',
+              ),
+          ];
+    final usageDetails = telemetry?.lastUsage == null
+        ? const <({String label, String value})>[]
+        : <({String label, String value})>[
+            if ((telemetry!.lastUsage!.model ?? '').isNotEmpty)
+              (label: 'Model', value: telemetry.lastUsage!.model!),
+            if (telemetry.lastUsage!.inputTokens != null)
+              (label: 'Input', value: '${telemetry.lastUsage!.inputTokens}'),
+            if (telemetry.lastUsage!.outputTokens != null)
+              (label: 'Output', value: '${telemetry.lastUsage!.outputTokens}'),
+            if (telemetry.lastUsage!.reasoningTokens != null)
+              (
+                label: 'Reasoning',
+                value: '${telemetry.lastUsage!.reasoningTokens}',
+              ),
+            if (telemetry.lastUsage!.durationMs != null)
+              (
+                label: 'Duration',
+                value: _formatDurationMs(telemetry.lastUsage!.durationMs!),
+              ),
+            if (telemetry.lastUsage!.ttftMs != null)
+              (
+                label: 'TTFT',
+                value: _formatDurationMs(telemetry.lastUsage!.ttftMs!),
+              ),
+            if (telemetry.lastUsage!.cacheReadTokens != null)
+              (
+                label: 'Cache read',
+                value: '${telemetry.lastUsage!.cacheReadTokens}',
+              ),
+            if (telemetry.lastUsage!.cacheWriteTokens != null)
+              (
+                label: 'Cache write',
+                value: '${telemetry.lastUsage!.cacheWriteTokens}',
+              ),
+          ];
+    final compactionDetails = telemetry?.compaction == null
+        ? const <({String label, String value})>[]
+        : <({String label, String value})>[
+            (label: 'Status', value: _titleCase(telemetry!.compaction!.status)),
+            if (telemetry.compaction!.tokensRemoved != null)
+              (
+                label: 'Tokens removed',
+                value: '${telemetry.compaction!.tokensRemoved}',
+              ),
+            if (telemetry.compaction!.messagesRemoved != null)
+              (
+                label: 'Messages removed',
+                value: '${telemetry.compaction!.messagesRemoved}',
+              ),
+            if (telemetry.compaction!.durationMs != null)
+              (
+                label: 'Duration',
+                value: _formatDurationMs(telemetry.compaction!.durationMs!),
+              ),
+            if ((telemetry.compaction!.model ?? '').isNotEmpty)
+              (label: 'Model', value: telemetry.compaction!.model!),
+            if ((telemetry.compaction!.error ?? '').isNotEmpty)
+              (label: 'Error', value: telemetry.compaction!.error!),
+          ];
 
     return MeshCard(
       tone: MeshCardTone.muted,
@@ -2457,49 +2548,110 @@ class _SessionRuntimeDetails extends StatelessWidget {
             ).copyWith(letterSpacing: 1.2),
           ),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: details
-                .map(
-                  (detail) => Container(
-                    constraints: const BoxConstraints(
-                      minWidth: 132,
-                      maxWidth: 200,
-                    ),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: colors.surface,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: colors.border),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          detail.label.toUpperCase(),
-                          style: monoStyle(
-                            color: colors.textSecondary,
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w800,
-                          ).copyWith(letterSpacing: 1.1),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          detail.value,
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(fontWeight: FontWeight.w600),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
+          _RuntimeSection(title: 'Runtime', details: runtimeDetails),
+          if (contextDetails.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _RuntimeSection(title: 'Context', details: contextDetails),
+          ],
+          if (usageDetails.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _RuntimeSection(title: 'Last usage', details: usageDetails),
+          ],
+          if (compactionDetails.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _RuntimeSection(title: 'Compaction', details: compactionDetails),
+          ],
         ],
       ),
     );
   }
+}
+
+class _RuntimeSection extends StatelessWidget {
+  const _RuntimeSection({required this.title, required this.details});
+
+  final String title;
+  final List<({String label, String value})> details;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title.toUpperCase(),
+          style: monoStyle(
+            color: colors.textSecondary,
+            fontSize: 9.5,
+            fontWeight: FontWeight.w800,
+          ).copyWith(letterSpacing: 1.1),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: details
+              .map(
+                (detail) => Container(
+                  constraints: const BoxConstraints(
+                    minWidth: 132,
+                    maxWidth: 220,
+                  ),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: colors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: colors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        detail.label.toUpperCase(),
+                        style: monoStyle(
+                          color: colors.textSecondary,
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                        ).copyWith(letterSpacing: 1.1),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        detail.value,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      ],
+    );
+  }
+}
+
+String _formatTokenWindow(SessionContextWindowSummary summary) {
+  final percent = summary.usageFraction == null
+      ? null
+      : (summary.usageFraction! * 100).clamp(0, 999).round();
+  final base = '${summary.currentTokens}/${summary.tokenLimit} tokens';
+  return percent == null ? base : '$base ($percent%)';
+}
+
+String _formatDurationMs(int value) {
+  if (value >= 1000) {
+    final seconds = value / 1000;
+    return '${seconds.toStringAsFixed(seconds >= 10 ? 0 : 1)}s';
+  }
+  return '${value}ms';
+}
+
+String _titleCase(String value) {
+  if (value.isEmpty) return value;
+  return value[0].toUpperCase() + value.substring(1);
 }
 
 String _relativeSessionPath(String fullPath, String sessionCwd) {
