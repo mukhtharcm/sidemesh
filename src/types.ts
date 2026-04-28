@@ -289,6 +289,30 @@ export interface ToolActivity extends SessionActivityBase {
   output: string | null;
   result: unknown;
   isError: boolean | null;
+  toolCategory:
+    | "filesystem"
+    | "network"
+    | "command"
+    | "session"
+    | "memory"
+    | "task"
+    | "unknown"
+    | null;
+  toolAction:
+    | "read"
+    | "write"
+    | "search"
+    | "list"
+    | "fetch"
+    | "mode_change"
+    | "invoke"
+    | "unknown"
+    | null;
+  toolTarget: string | null;
+  toolTargets: string[];
+  toolUrl: string | null;
+  toolQuery: string | null;
+  toolMode: string | null;
 }
 
 export interface FileChangeActivity extends SessionActivityBase {

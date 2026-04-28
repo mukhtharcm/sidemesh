@@ -1237,7 +1237,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     final title = switch (activity.type) {
       'command' =>
         (activity.command ?? '').trim().isEmpty ? 'Command' : activity.command!,
-      'tool' => _toolActivityTitle(activity),
+      'tool' => _toolActivityTitle(activity, sessionCwd),
       'file_change' =>
         activity.changes.length == 1
             ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
@@ -1250,9 +1250,7 @@ class _ActivityCardState extends State<_ActivityCard> {
 
     final subtitle = switch (activity.type) {
       'command' => _relativeSessionPath(activity.cwd ?? sessionCwd, sessionCwd),
-      'tool' => (activity.toolName ?? '').trim().isNotEmpty
-          ? activity.toolName!.trim()
-          : null,
+      'tool' => _toolActivitySubtitle(activity, sessionCwd),
       'file_change' => _activityFileSummary(activity.changes, sessionCwd),
       'turn_diff' => 'Aggregated patch snapshot for this turn',
       'web_search' => _webSearchSubtitle(activity),
@@ -1265,7 +1263,7 @@ class _ActivityCardState extends State<_ActivityCard> {
 
     final activityLabel = switch (activity.type) {
       'command' => 'COMMAND',
-      'tool' => 'TOOL',
+      'tool' => _toolActivityLabel(activity),
       'file_change' => 'FILE CHANGE',
       'turn_diff' => 'TURN DIFF',
       'web_search' => 'WEB SEARCH',
@@ -1275,7 +1273,7 @@ class _ActivityCardState extends State<_ActivityCard> {
 
     final activityIcon = switch (activity.type) {
       'command' => Icons.terminal_rounded,
-      'tool' => Icons.extension_rounded,
+      'tool' => _toolActivityIcon(activity),
       'file_change' => Icons.edit_note_rounded,
       'turn_diff' => Icons.difference_rounded,
       'web_search' => Icons.travel_explore_rounded,
@@ -1459,8 +1457,22 @@ class _ActivityCardState extends State<_ActivityCard> {
                           (action) => MeshPill(label: action.label, mono: true),
                         ),
                       if (activity.isTool &&
+                          (_toolSemanticPillLabel(activity) ?? '').isNotEmpty)
+                        MeshPill(
+                          label: _toolSemanticPillLabel(activity)!,
+                          tone: MeshPillTone.info,
+                          mono: true,
+                        ),
+                      if (activity.isTool &&
                           (activity.toolName ?? '').trim().isNotEmpty)
                         MeshPill(label: activity.toolName!.trim(), mono: true),
+                      if (activity.isTool &&
+                          (activity.toolMode ?? '').trim().isNotEmpty)
+                        MeshPill(
+                          label: activity.toolMode!.trim(),
+                          tone: MeshPillTone.info,
+                          mono: true,
+                        ),
                       if (activity.isTool && activity.toolError == true)
                         const MeshPill(
                           label: 'tool error',
@@ -1578,6 +1590,10 @@ class _ActivityCardState extends State<_ActivityCard> {
     SessionActivity activity,
   ) {
     final widgets = <Widget>[];
+    widgets.addAll(_buildToolSemanticBlocks(context, activity));
+    if (widgets.isNotEmpty) {
+      widgets.add(const SizedBox(height: 12));
+    }
     final output = (activity.output ?? '').trimRight();
     final args = _formatActivityValue(activity.toolArgs);
     final result = _formatActivityValue(activity.toolResult);
@@ -1795,12 +1811,233 @@ class _ActivityCardState extends State<_ActivityCard> {
     );
   }
 
-  String _toolActivityTitle(SessionActivity activity) {
+  String _toolActivityTitle(SessionActivity activity, String sessionCwd) {
+    final target = _toolPrimaryTarget(activity, sessionCwd);
+    final query = (activity.toolQuery ?? '').trim();
+    final url = (activity.toolUrl ?? '').trim();
+    final mode = (activity.toolMode ?? '').trim();
+    final command = _toolCommandText(activity);
+
+    if (activity.toolAction == 'mode_change' && mode.isNotEmpty) {
+      return 'Switched to $mode mode';
+    }
+    if (activity.toolCategory == 'filesystem' &&
+        activity.toolAction == 'read' &&
+        target.isNotEmpty) {
+      return 'Read $target';
+    }
+    if (activity.toolCategory == 'filesystem' &&
+        activity.toolAction == 'write' &&
+        target.isNotEmpty) {
+      return 'Edited $target';
+    }
+    if (activity.toolCategory == 'filesystem' &&
+        activity.toolAction == 'list' &&
+        target.isNotEmpty) {
+      return 'Listed $target';
+    }
+    if (activity.toolCategory == 'filesystem' &&
+        activity.toolAction == 'search') {
+      if (query.isNotEmpty && target.isNotEmpty) {
+        return 'Search "$query" in $target';
+      }
+      if (query.isNotEmpty) {
+        return 'Search "$query"';
+      }
+    }
+    if (activity.toolCategory == 'network' &&
+        activity.toolAction == 'fetch' &&
+        url.isNotEmpty) {
+      return 'Fetch ${_truncateMiddle(url, 44)}';
+    }
+    if (activity.toolCategory == 'network' &&
+        activity.toolAction == 'search' &&
+        query.isNotEmpty) {
+      return 'Search web for "$query"';
+    }
+    if (activity.toolCategory == 'command' && command.isNotEmpty) {
+      return command;
+    }
+
     final title = (activity.toolTitle ?? '').trim();
     if (title.isNotEmpty) return title;
     final name = (activity.toolName ?? '').trim();
     if (name.isNotEmpty) return name;
     return 'Tool execution';
+  }
+
+  String? _toolActivitySubtitle(SessionActivity activity, String sessionCwd) {
+    final target = _toolPrimaryTarget(activity, sessionCwd);
+    final url = (activity.toolUrl ?? '').trim();
+    final query = (activity.toolQuery ?? '').trim();
+    if (activity.toolAction == 'mode_change') {
+      return 'Session runtime control';
+    }
+    if (activity.toolCategory == 'filesystem' &&
+        activity.toolAction == 'search' &&
+        target.isNotEmpty &&
+        query.isNotEmpty) {
+      return target;
+    }
+    if (activity.toolCategory == 'network' && url.isNotEmpty) {
+      return _truncateMiddle(url, 72);
+    }
+    if (target.isNotEmpty &&
+        (activity.toolCategory == 'filesystem' ||
+            activity.toolCategory == 'command')) {
+      return target;
+    }
+    final name = (activity.toolName ?? '').trim();
+    return name.isNotEmpty ? name : null;
+  }
+
+  String _toolActivityLabel(SessionActivity activity) {
+    if (activity.toolAction == 'mode_change') {
+      return 'MODE';
+    }
+    return switch (activity.toolCategory) {
+      'filesystem' => switch (activity.toolAction) {
+        'read' => 'FILE READ',
+        'write' => 'FILE EDIT',
+        'list' => 'FILE LIST',
+        'search' => 'FILE SEARCH',
+        _ => 'FILESYSTEM',
+      },
+      'network' => switch (activity.toolAction) {
+        'fetch' => 'WEB FETCH',
+        'search' => 'WEB SEARCH',
+        _ => 'NETWORK',
+      },
+      'command' => 'COMMAND TOOL',
+      'session' => 'SESSION',
+      'memory' => 'MEMORY',
+      'task' => 'TASK',
+      _ => 'TOOL',
+    };
+  }
+
+  IconData _toolActivityIcon(SessionActivity activity) {
+    if (activity.toolAction == 'mode_change') {
+      return Icons.tune_rounded;
+    }
+    return switch (activity.toolCategory) {
+      'filesystem' => switch (activity.toolAction) {
+        'write' => Icons.edit_note_rounded,
+        'search' => Icons.manage_search_rounded,
+        'list' => Icons.folder_open_rounded,
+        _ => Icons.description_rounded,
+      },
+      'network' => activity.toolAction == 'search'
+          ? Icons.travel_explore_rounded
+          : Icons.public_rounded,
+      'command' => Icons.terminal_rounded,
+      'session' => Icons.tune_rounded,
+      'memory' => Icons.psychology_alt_rounded,
+      'task' => Icons.checklist_rounded,
+      _ => Icons.extension_rounded,
+    };
+  }
+
+  String? _toolSemanticPillLabel(SessionActivity activity) {
+    if (activity.toolAction == 'mode_change') {
+      return 'mode change';
+    }
+    return switch (activity.toolCategory) {
+      'filesystem' => switch (activity.toolAction) {
+        'read' => 'file read',
+        'write' => 'file edit',
+        'list' => 'file list',
+        'search' => 'file search',
+        _ => 'filesystem',
+      },
+      'network' => activity.toolAction == 'search' ? 'web search' : 'web fetch',
+      'command' => 'command tool',
+      'session' => 'session',
+      'memory' => 'memory',
+      'task' => 'task',
+      _ => null,
+    };
+  }
+
+  List<Widget> _buildToolSemanticBlocks(
+    BuildContext context,
+    SessionActivity activity,
+  ) {
+    final target = _toolPrimaryTarget(activity, widget.sessionCwd);
+    final targets = activity.toolTargets
+        .map((item) => _toolDisplayPath(item, widget.sessionCwd))
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    final rows = <Widget>[];
+
+    if ((activity.toolMode ?? '').trim().isNotEmpty) {
+      rows.add(_activityInfoBlock(context, 'Mode', activity.toolMode!.trim()));
+    }
+    if ((activity.toolQuery ?? '').trim().isNotEmpty) {
+      rows.add(_activityInfoBlock(context, 'Query', activity.toolQuery!.trim()));
+    }
+    if ((activity.toolUrl ?? '').trim().isNotEmpty) {
+      rows.add(
+        _activityInfoBlock(
+          context,
+          'URL',
+          activity.toolUrl!.trim(),
+          linkify: true,
+        ),
+      );
+    }
+    if (targets.length > 1) {
+      rows.add(_activityInfoBlock(context, 'Targets', targets.join('\n')));
+    } else if (target.isNotEmpty) {
+      rows.add(_activityInfoBlock(context, 'Target', target));
+    }
+
+    if (rows.isEmpty) {
+      return const [];
+    }
+
+    return [
+      ...rows.expand((row) => [row, const SizedBox(height: 10)]),
+    ]..removeLast();
+  }
+
+  String _toolPrimaryTarget(SessionActivity activity, String sessionCwd) {
+    final raw = (activity.toolTarget ?? '').trim();
+    if (raw.isNotEmpty) {
+      return _toolDisplayPath(raw, sessionCwd);
+    }
+    if (activity.toolTargets.isNotEmpty) {
+      return _toolDisplayPath(activity.toolTargets.first, sessionCwd);
+    }
+    return '';
+  }
+
+  String _toolDisplayPath(String raw, String sessionCwd) {
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      return _truncateMiddle(raw, 72);
+    }
+    return _relativeSessionPath(raw, sessionCwd);
+  }
+
+  String _toolCommandText(SessionActivity activity) {
+    final args = activity.toolArgs;
+    if (args is Map<String, dynamic>) {
+      final command = (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
+          ?.toString()
+          .trim();
+      if (command != null && command.isNotEmpty) {
+        return command;
+      }
+    }
+    if (args is Map) {
+      final command = (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
+          ?.toString()
+          .trim();
+      if (command != null && command.isNotEmpty) {
+        return command;
+      }
+    }
+    return '';
   }
 
   String _formatActivityValue(Object? value) {
