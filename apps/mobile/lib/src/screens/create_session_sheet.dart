@@ -267,6 +267,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   List<ModelCatalogEntry> _models = const <ModelCatalogEntry>[];
   List<ProviderProfileSummary> _profiles = const <ProviderProfileSummary>[];
   ModelCatalogEntry? _selectedModel;
+  String? _mode;
   String? _reasoningEffort;
   String? _modelsError;
   String? _profilesError;
@@ -391,6 +392,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   bool get _supportsProfiles => _supports('configuration', 'profiles');
 
   bool get _supportsModelOverride => _supports('runtimeControls', 'model');
+
+  bool get _supportsMode => _supports('runtimeControls', 'mode');
 
   bool get _supportsReasoningEffort =>
       _supports('runtimeControls', 'reasoningEffort');
@@ -521,6 +524,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return _trimmedOrNull(_reasoningEffort);
   }
 
+  String? get _modeToSubmit {
+    if (!_supportsMode) return null;
+    return _trimmedOrNull(_mode);
+  }
+
   String? get _currentCwd => _trimmedOrNull(_cwdController.text);
 
   String? get _profileToSubmit => _trimmedOrNull(_profileController.text);
@@ -579,6 +587,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     }
     if (!_supportsReasoningEffort) {
       _reasoningEffort = null;
+    }
+    if (!_supportsMode) {
+      _mode = null;
     }
     if (!_supportsFastMode) {
       _fastMode = false;
@@ -996,6 +1007,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         prompt: prompt,
         provider: _selectedProviderKindOrDefault,
         model: _supportsModelOverride ? _selectedModel?.model : null,
+        mode: _modeToSubmit,
         reasoningEffort: _reasoningToSubmit,
         fastMode: _supportsFastMode && _fastMode ? true : null,
         approvalPolicy: _supportsApprovalPolicy ? _approval.wire : null,
@@ -1277,6 +1289,30 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                 ),
                 const SizedBox(height: 10),
               ],
+              if (_supportsMode) ...[
+                _MiniChoiceWrap<String?>(
+                  icon: Icons.alt_route_rounded,
+                  label: 'Mode',
+                  value: _modeToSubmit,
+                  options: const <String?>[null, ...kSessionModes],
+                  optionLabel: _sessionModeChoiceLabel,
+                  isDefault: (value) => value == null,
+                  onChanged: (value) {
+                    setState(() {
+                      _mode = value;
+                    });
+                  },
+                ),
+                const SizedBox(height: 6),
+                _CompactInfoLine(
+                  icon: Icons.info_outline_rounded,
+                  text: _sessionModeDescription(
+                    _modeToSubmit,
+                    providerName: _providerName,
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               if (_supportsModels && _supportsModelOverride) ...[
                 _ModelSelectionCard(
                   title: 'Model',
@@ -1478,6 +1514,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           tone: _profileToSubmit == null
               ? MeshPillTone.neutral
               : MeshPillTone.accent,
+        ),
+      if (_supportsMode)
+        MeshPill(
+          label: _sessionModeChoiceLabel(_modeToSubmit),
+          icon: Icons.alt_route_rounded,
+          tone: _modeToSubmit == null
+              ? MeshPillTone.neutral
+              : MeshPillTone.info,
         ),
       if (_supportsModels && _supportsModelOverride)
         MeshPill(
@@ -2439,6 +2483,27 @@ String _reasoningEffortLabel(String value) {
     'high' => 'High',
     'xhigh' => 'Extra high',
     _ => value,
+  };
+}
+
+String _sessionModeChoiceLabel(String? value) {
+  if (value == null || value.trim().isEmpty) {
+    return 'provider default';
+  }
+  return sessionModeLabel(value);
+}
+
+String _sessionModeDescription(String? value, {required String providerName}) {
+  return switch (value) {
+    null =>
+      'Leave mode unset to let $providerName use its default session behavior.',
+    'interactive' =>
+      'Interactive keeps the session conversational and asks before risky actions.',
+    'plan' =>
+      'Plan focuses on outlining or analyzing before executing changes.',
+    'autopilot' =>
+      'Autopilot lets the provider run with its strongest self-directed execution mode.',
+    _ => '$providerName will start in ${sessionModeLabel(value)} mode.',
   };
 }
 

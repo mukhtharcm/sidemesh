@@ -194,6 +194,7 @@ class StubProvider
     },
     runtimeControls: {
       model: true,
+      mode: false,
       reasoningEffort: true,
       fastMode: false,
       approvalPolicy: true,
@@ -334,6 +335,7 @@ function stubThread(id: string, cwd: string, source: string) {
 function emptyOverrides() {
   return {
     model: null,
+    mode: null,
     reasoningEffort: null,
     fastMode: null,
     approvalPolicy: null,

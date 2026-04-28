@@ -8,6 +8,7 @@ class SessionControlsSheet extends StatefulWidget {
     required this.session,
     required this.runtimeModel,
     required this.runtimeModelProvider,
+    required this.runtimeMode,
     required this.runtimeServiceTier,
     required this.runtimeReasoningEffort,
     required this.runtimeApproval,
@@ -22,6 +23,7 @@ class SessionControlsSheet extends StatefulWidget {
   final SessionSummary session;
   final String? runtimeModel;
   final String? runtimeModelProvider;
+  final String? runtimeMode;
   final String? runtimeServiceTier;
   final String? runtimeReasoningEffort;
   final ApprovalPolicy? runtimeApproval;
@@ -72,6 +74,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
   bool get _supportsModelOverride => _supports('runtimeControls', 'model');
 
+  bool get _supportsMode => _supports('runtimeControls', 'mode');
+
   bool get _supportsReasoningEffort =>
       _supports('runtimeControls', 'reasoningEffort');
 
@@ -88,7 +92,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   bool _supports(String section, String feature) {
     final node = _nodeInfo;
     if (node == null) return true;
-    return node.capabilitiesForProvider(_providerKind).supports(section, feature);
+    return node
+        .capabilitiesForProvider(_providerKind)
+        .supports(section, feature);
   }
 
   ApprovalPolicy get _effectiveApproval =>
@@ -119,6 +125,14 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       return runtime;
     }
     return _defaultModelEntry?.model;
+  }
+
+  String? get _effectiveMode {
+    final local = _trimmedOrNull(_turnConfig.mode);
+    if (local != null) {
+      return local;
+    }
+    return _trimmedOrNull(widget.runtimeMode);
   }
 
   ModelCatalogEntry? get _defaultModelEntry {
@@ -270,6 +284,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     }
     if (!_supportsReasoningEffort) {
       nextConfig = nextConfig.copyWith(reasoningEffort: null);
+    }
+    if (!_supportsMode) {
+      nextConfig = nextConfig.copyWith(mode: null);
     }
     if (!_supportsFastMode) {
       nextConfig = nextConfig.copyWith(fastMode: null);
@@ -432,6 +449,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     final savedTurnConfig = _normalisedTurnConfig(
       SessionTurnConfig(
         model: _supportsModelOverride ? _turnConfig.model : null,
+        mode: _supportsMode ? _turnConfig.mode : null,
         reasoningEffort: _supportsReasoningEffort
             ? _turnConfig.reasoningEffort
             : null,
@@ -485,6 +503,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     }
     return SessionTurnConfig(
       model: defaultModel.model,
+      mode: null,
       reasoningEffort: defaultModel.isAutoModel
           ? null
           : defaultModel.defaultReasoningEffort,
@@ -497,12 +516,14 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     ModelCatalogEntry? selectedModel,
   }) {
     if (!_supportsModels || !_supportsModelOverride) {
-      return const SessionTurnConfig();
+      return SessionTurnConfig(mode: _supportsMode ? config.mode : null);
     }
     final resolvedModel = _trimmedOrNull(config.model);
     final model =
         selectedModel ?? _findModelByName(resolvedModel ?? widget.runtimeModel);
+    final runtimeMode = _trimmedOrNull(widget.runtimeMode);
     var nextModel = resolvedModel;
+    var nextMode = _trimmedOrNull(config.mode);
     var nextReasoning = _trimmedOrNull(config.reasoningEffort);
     var nextFast = config.fastMode;
 
@@ -512,6 +533,11 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
     if (runtimeModel != null && nextModel == runtimeModel) {
       nextModel = null;
+    }
+    if (!_supportsMode) {
+      nextMode = null;
+    } else if (runtimeMode != null && nextMode == runtimeMode) {
+      nextMode = null;
     }
     if (!_supportsReasoningEffort || (model != null && model.isAutoModel)) {
       nextReasoning = null;
@@ -532,6 +558,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
     return SessionTurnConfig(
       model: nextModel,
+      mode: nextMode,
       reasoningEffort: nextReasoning,
       fastMode: nextFast,
     );
@@ -565,6 +592,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       }
     }
     final showModelControls = _supportsModels && _supportsModelOverride;
+    final showModeControls = _supportsMode;
     final showReasoningControls = showModelControls && _supportsReasoningEffort;
     final showAutopilot =
         _supportsApprovalPolicy &&
@@ -575,6 +603,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         _supportsSandboxMode ||
         _supportsNetworkAccess;
     final showAnyControls =
+        showModeControls ||
         showModelControls ||
         showReasoningControls ||
         _showFastSection ||
@@ -655,6 +684,52 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                   ),
                 ),
               ] else ...[
+                if (showModeControls) ...[
+                  const SizedBox(height: 20),
+                  Text(
+                    'Session mode',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: colors.textSecondary,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <String?>[null, ...kSessionModes].map((mode) {
+                      final selected = mode == _effectiveMode;
+                      final fromRuntime =
+                          mode != null &&
+                          _turnConfig.mode == null &&
+                          widget.runtimeMode == mode;
+                      return _ReasoningChoiceChip(
+                        label: _sessionModeChoiceLabel(mode),
+                        selected: selected,
+                        isDefault: mode == null || fromRuntime,
+                        defaultLabel: mode == null ? 'inherit' : 'current',
+                        onTap: () {
+                          setState(() {
+                            _turnConfig = _normalisedTurnConfig(
+                              _turnConfig.copyWith(mode: mode),
+                            );
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _sessionModeDescription(
+                      _effectiveMode,
+                      providerName: _providerName,
+                    ),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
                 if (showModelControls) ...[
                   const SizedBox(height: 20),
                   Text(
@@ -1033,12 +1108,14 @@ class _ReasoningChoiceChip extends StatelessWidget {
     required this.selected,
     required this.isDefault,
     required this.onTap,
+    this.defaultLabel = 'default',
   });
 
   final String label;
   final bool selected;
   final bool isDefault;
   final VoidCallback onTap;
+  final String defaultLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -1064,7 +1141,7 @@ class _ReasoningChoiceChip extends StatelessWidget {
             ),
             if (isDefault) ...[
               const SizedBox(width: 8),
-              const _InlineBadge(label: 'default'),
+              _InlineBadge(label: defaultLabel),
             ],
           ],
         ),
@@ -1610,6 +1687,28 @@ String _reasoningEffortLabel(String value) {
   };
 }
 
+String _sessionModeChoiceLabel(String? value) {
+  if (value == null || value.trim().isEmpty) {
+    return 'Inherit current';
+  }
+  return sessionModeLabel(value);
+}
+
+String _sessionModeDescription(String? value, {required String providerName}) {
+  return switch (value) {
+    null =>
+      'Leave mode alone and keep the current $providerName session behavior.',
+    'interactive' =>
+      'Interactive keeps the agent conversational and approval-oriented.',
+    'plan' =>
+      'Plan focuses on outlining or analyzing before it starts making changes.',
+    'autopilot' =>
+      'Autopilot lets the provider run with its most self-directed execution mode.',
+    _ =>
+      '$providerName will switch to ${sessionModeLabel(value)} mode on the next fresh turn.',
+  };
+}
+
 String? _trimmedOrNull(String? value) {
   final trimmed = value?.trim();
   if (trimmed == null || trimmed.isEmpty) {
@@ -1620,6 +1719,7 @@ String? _trimmedOrNull(String? value) {
 
 bool _sameTurnConfig(SessionTurnConfig left, SessionTurnConfig right) {
   return left.model == right.model &&
+      left.mode == right.mode &&
       left.reasoningEffort == right.reasoningEffort &&
       left.fastMode == right.fastMode;
 }
