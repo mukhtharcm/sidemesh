@@ -1786,6 +1786,9 @@ function unsupportedOverrideCapability(
   if (overrides.model && !provider.capabilities.runtimeControls.model) {
     return `${provider.displayName} does not support model overrides`;
   }
+  if (overrides.mode && !provider.capabilities.runtimeControls.mode) {
+    return `${provider.displayName} does not support mode overrides`;
+  }
   if (
     overrides.reasoningEffort &&
     !provider.capabilities.runtimeControls.reasoningEffort
@@ -2569,6 +2572,7 @@ function parseCreateSessionOverrides(value: unknown): AgentSessionOverrides {
       : {};
   return {
     model: asString(typed.model),
+    mode: asString(typed.mode),
     reasoningEffort: asString(typed.reasoningEffort),
     fastMode: parseOptionalBool(typed.fastMode),
     approvalPolicy: asString(typed.approvalPolicy),
@@ -2586,6 +2590,7 @@ function parseTurnOverrides(value: unknown): AgentSessionOverrides {
       : {};
   return {
     model: asString(typed.model),
+    mode: asString(typed.mode),
     reasoningEffort: asString(typed.reasoningEffort),
     fastMode: parseOptionalBool(typed.fastMode),
     approvalPolicy: asString(typed.approvalPolicy),

@@ -486,8 +486,7 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
     final supportedKinds = widget.node.supportedProviders
         .map((provider) => provider.kind)
         .toSet();
-    if (
-        _selectedProviderKind.isEmpty ||
+    if (_selectedProviderKind.isEmpty ||
         !supportedKinds.contains(_selectedProviderKind)) {
       _selectedProviderKind = _initialProviderKind(widget.node);
     }
@@ -497,7 +496,10 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
   Widget build(BuildContext context) {
     final node = widget.node;
     final colors = context.colors;
-    final selectedSummary = _selectedProviderSummary(node, _selectedProviderKind);
+    final selectedSummary = _selectedProviderSummary(
+      node,
+      _selectedProviderKind,
+    );
     final providerGroups = _capabilityGroups(
       node.capabilitiesForProvider(_selectedProviderKind),
     );
@@ -612,7 +614,9 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
   }
 
   static String _initialProviderKind(NodeInfo node) {
-    if (node.supportedProviders.any((provider) => provider.kind == node.provider)) {
+    if (node.supportedProviders.any(
+      (provider) => provider.kind == node.provider,
+    )) {
       return node.provider;
     }
     if (node.supportedProviders.isNotEmpty) {
@@ -720,9 +724,7 @@ class _ProviderDefinitionList extends StatelessWidget {
                       ? Icons.check_circle_rounded
                       : Icons.circle_outlined,
                   tone: selected
-                      ? (active
-                            ? MeshPillTone.success
-                            : MeshPillTone.accent)
+                      ? (active ? MeshPillTone.success : MeshPillTone.accent)
                       : MeshPillTone.neutral,
                   selected: selected,
                   onTap: () => onSelect(provider),
@@ -760,12 +762,7 @@ class _ProviderSelectPill extends StatelessWidget {
         child: AnimatedScale(
           duration: const Duration(milliseconds: 140),
           scale: selected ? 1.0 : 0.985,
-          child: MeshPill(
-            label: label,
-            icon: icon,
-            tone: tone,
-            mono: true,
-          ),
+          child: MeshPill(label: label, icon: icon, tone: tone, mono: true),
         ),
       ),
     );
@@ -1019,6 +1016,7 @@ String _capabilityFeatureLabel(String key) {
     'eventReplay' => 'event replay',
     'recentFallback' => 'recent fallback',
     'skillManagement' => 'skill management',
+    'mode' => 'mode',
     'reasoningEffort' => 'reasoning',
     'fastMode' => 'fast mode',
     'approvalPolicy' => 'approval policy',

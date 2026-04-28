@@ -540,6 +540,7 @@ export interface SessionLogSnapshot {
 export interface SessionRuntimeSummary {
   model?: string;
   modelProvider?: string;
+  mode?: string;
   serviceTier?: string;
   reasoningEffort?: string;
   approvalPolicy?: string;

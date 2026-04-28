@@ -173,6 +173,7 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
         input: send.inputItems,
         clientMessageId: send.clientMessageId,
         model: send.model,
+        mode: send.mode,
         reasoningEffort: send.reasoningEffort,
         fastMode: send.fastMode,
         approvalPolicy: send.approvalPolicy,

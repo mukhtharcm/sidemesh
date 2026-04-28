@@ -186,6 +186,7 @@ describe("provider registry", () => {
     assert.equal(provider.capabilities.configuration.skills, true);
     assert.equal(provider.capabilities.configuration.skillManagement, true);
     assert.equal(provider.capabilities.runtimeControls.model, true);
+    assert.equal(provider.capabilities.runtimeControls.mode, true);
   });
 
   it("still exposes Copilot model controls without an explicit configured model", () => {
@@ -202,5 +203,6 @@ describe("provider registry", () => {
     const provider = createAgentProviderFromConfig(config);
     assert.equal(provider.capabilities.configuration.models, true);
     assert.equal(provider.capabilities.runtimeControls.model, true);
+    assert.equal(provider.capabilities.runtimeControls.mode, true);
   });
 });
