@@ -278,6 +278,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   bool _loadingProfiles = false;
   bool _fastMode = false;
   bool _webSearch = false;
+  bool _reasoningTouched = false;
+  bool _fastModeTouched = false;
+  bool _approvalTouched = false;
+  bool _sandboxTouched = false;
+  bool _webSearchTouched = false;
   bool _showAdvanced = false;
   bool _submitting = false;
   bool _loadingNode = false;
@@ -436,9 +441,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   String? get _effectiveReasoningEffort {
     final model = _controlModel;
-    if (model == null) return _reasoningEffort;
+    final inheritedReasoning = _hasProfileRuntimeContext && !_reasoningTouched
+        ? _trimmedOrNull(_activeProfile?.reasoningEffort)
+        : null;
+    if (model == null) return _reasoningEffort ?? inheritedReasoning;
     if (model.isAutoModel) return model.defaultReasoningEffort;
-    return _reasoningEffort ?? _trimmedOrNull(model.defaultReasoningEffort);
+    return _reasoningEffort ??
+        inheritedReasoning ??
+        _trimmedOrNull(model.defaultReasoningEffort);
   }
 
   List<ModelReasoningEffortOption> get _supportedReasoningOptions {
@@ -519,7 +529,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (selected != null) {
       final provider = _profileProviderLabel(selected);
       final providerText = provider == null ? '' : ' Provider: $provider.';
-      return '${_describeProviderProfile(selected)}$providerText Model discovery will use this profile first.';
+      return '${_describeProviderProfile(selected)}$providerText Unchanged launch controls will inherit this profile.';
     }
     final unresolvedProfile = _profileToSubmit;
     if (unresolvedProfile != null) {
@@ -540,6 +550,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   String? get _reasoningToSubmit {
     if (!_supportsReasoningEffort) return null;
     if (_controlModelIsAuto) return null;
+    if (_hasProfileRuntimeContext && !_reasoningTouched) {
+      return null;
+    }
     return _trimmedOrNull(_reasoningEffort);
   }
 
@@ -563,6 +576,84 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return null;
   }
 
+  ProviderProfileSummary? get _activeProfile {
+    final selected = _selectedProfile;
+    if (selected != null) {
+      return selected;
+    }
+    final defaultName = _defaultProfileName;
+    if (defaultName == null) {
+      return null;
+    }
+    for (final profile in _profiles) {
+      if (profile.name == defaultName) {
+        return profile;
+      }
+    }
+    return null;
+  }
+
+  bool get _hasProfileRuntimeContext =>
+      _profileToSubmit != null || _defaultProfileName != null;
+
+  ApprovalPolicy get _effectiveApproval {
+    if (_hasProfileRuntimeContext && !_approvalTouched) {
+      final inherited = ApprovalPolicy.fromWire(_activeProfile?.approvalPolicy);
+      if (inherited != null) {
+        return inherited;
+      }
+    }
+    return _approval;
+  }
+
+  SandboxMode get _effectiveSandbox {
+    if (_hasProfileRuntimeContext && !_sandboxTouched) {
+      final inherited = SandboxMode.fromWire(_activeProfile?.sandboxMode);
+      if (inherited != null) {
+        return inherited;
+      }
+    }
+    return _sandbox;
+  }
+
+  bool get _effectiveFastMode {
+    if (_hasProfileRuntimeContext && !_fastModeTouched) {
+      return (_activeProfile?.serviceTier ?? '').trim() == 'fast';
+    }
+    return _fastMode;
+  }
+
+  bool get _effectiveWebSearch {
+    if (_hasProfileRuntimeContext && !_webSearchTouched) {
+      return (_activeProfile?.webSearch ?? '').trim() == 'live';
+    }
+    return _webSearch;
+  }
+
+  String? get _approvalPolicyToSubmit {
+    if (!_supportsApprovalPolicy) return null;
+    if (_hasProfileRuntimeContext && !_approvalTouched) return null;
+    return _effectiveApproval.wire;
+  }
+
+  String? get _sandboxModeToSubmit {
+    if (!_supportsSandboxMode) return null;
+    if (_hasProfileRuntimeContext && !_sandboxTouched) return null;
+    return _effectiveSandbox.wire;
+  }
+
+  bool? get _fastModeToSubmit {
+    if (!_supportsFastMode) return null;
+    if (_hasProfileRuntimeContext && !_fastModeTouched) return null;
+    return _effectiveFastMode;
+  }
+
+  String? get _webSearchToSubmit {
+    if (!_supportsWebSearch) return null;
+    if (_hasProfileRuntimeContext && !_webSearchTouched) return null;
+    return _effectiveWebSearch ? 'live' : 'disabled';
+  }
+
   Future<void> _loadNodeInfo() async {
     if (_loadingNode) return;
     setState(() {
@@ -580,6 +671,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         _nodeError = null;
         _coerceForProviderCapabilities();
       });
+      if (_supportsProfiles && _currentCwd != null) {
+        unawaited(_loadProfiles());
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -606,20 +700,29 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     }
     if (!_supportsReasoningEffort) {
       _reasoningEffort = null;
+      _reasoningTouched = false;
     }
     if (!_supportsMode) {
       _mode = null;
     }
     if (!_supportsFastMode) {
       _fastMode = false;
+      _fastModeTouched = false;
     }
     if (!_supportsApprovalPolicy) {
       _approval = ApprovalPolicy.onRequest;
+      _approvalTouched = false;
     } else if (!_approvalOptions.contains(_approval)) {
       _approval = _approvalOptions.first;
+      _approvalTouched = false;
+    }
+    if (!_supportsSandboxMode) {
+      _sandbox = SandboxMode.workspaceWrite;
+      _sandboxTouched = false;
     }
     if (!_supportsWebSearch) {
       _webSearch = false;
+      _webSearchTouched = false;
     }
   }
 
@@ -639,6 +742,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     _modelsLoadedForCwd = null;
     _modelsLoadedForProfile = null;
     _profilesLoadedForCwd = null;
+    _reasoningTouched = false;
+    _fastModeTouched = false;
+    _approvalTouched = false;
+    _sandboxTouched = false;
+    _webSearchTouched = false;
     _coerceForProviderCapabilities();
   }
 
@@ -673,10 +781,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       _defaultProfileName = null;
       _profilesLoadedForCwd = null;
     });
-    if (_showAdvanced &&
-        _supportsProfiles &&
-        cwd != null &&
-        !_loadingProfiles) {
+    if (_supportsProfiles && cwd != null && !_loadingProfiles) {
       unawaited(_loadProfiles());
     }
   }
@@ -815,6 +920,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (model == null) {
       _reasoningEffort = null;
       _fastMode = false;
+      _reasoningTouched = false;
+      _fastModeTouched = false;
       return;
     }
 
@@ -827,11 +934,13 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       final reasoning = _trimmedOrNull(_reasoningEffort);
       if (reasoning != null && !supported.contains(reasoning)) {
         _reasoningEffort = _trimmedOrNull(model.defaultReasoningEffort);
+        _reasoningTouched = false;
       }
     }
 
     if (!model.supportsFastMode) {
       _fastMode = false;
+      _fastModeTouched = false;
     }
   }
 
@@ -946,11 +1055,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     setState(() {
       _selectProvider(result);
     });
+    if (_supportsProfiles && _currentCwd != null) {
+      unawaited(_loadProfiles(force: true));
+    }
     if (_showAdvanced) {
       unawaited(_loadModels(force: true));
-      if (_currentCwd != null) {
-        unawaited(_loadProfiles(force: true));
-      }
     }
   }
 
@@ -1005,9 +1114,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (_supportsApprovalPolicy &&
           _approvalOptions.contains(ApprovalPolicy.never)) {
         _approval = ApprovalPolicy.never;
+        _approvalTouched = true;
       }
       if (_supportsSandboxMode) {
         _sandbox = SandboxMode.dangerFullAccess;
+        _sandboxTouched = true;
       }
     });
   }
@@ -1026,6 +1137,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     });
 
     try {
+      if (_supportsProfiles &&
+          _currentCwd != null &&
+          _profilesLoadedForCwd != _currentCwd) {
+        await _loadProfiles();
+      }
       final session = await widget.api.createSession(
         widget.host,
         cwd: cwd,
@@ -1034,10 +1150,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         model: _supportsModelOverride ? _selectedModel?.model : null,
         mode: _modeToSubmit,
         reasoningEffort: _reasoningToSubmit,
-        fastMode: _supportsFastMode && _fastMode ? true : null,
-        approvalPolicy: _supportsApprovalPolicy ? _approval.wire : null,
-        sandboxMode: _supportsSandboxMode ? _sandbox.wire : null,
-        webSearch: _supportsWebSearch && _webSearch ? 'live' : null,
+        fastMode: _fastModeToSubmit,
+        approvalPolicy: _approvalPolicyToSubmit,
+        sandboxMode: _sandboxModeToSubmit,
+        webSearch: _webSearchToSubmit,
         profile: _supportsProfiles ? _profileToSubmit : null,
       );
       final submittedAt = DateTime.now();
@@ -1398,6 +1514,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                     onChanged: (value) {
                       setState(() {
                         _reasoningEffort = value;
+                        _reasoningTouched = true;
                       });
                     },
                   ),
@@ -1423,9 +1540,12 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                   subtitle: _fastSupported
                       ? 'Ask for the fast service tier.'
                       : 'Not advertised by this model.',
-                  value: _fastMode,
+                  value: _effectiveFastMode,
                   enabled: _fastSupported,
-                  onChanged: (value) => setState(() => _fastMode = value),
+                  onChanged: (value) => setState(() {
+                    _fastMode = value;
+                    _fastModeTouched = true;
+                  }),
                 ),
               ],
             ],
@@ -1450,10 +1570,13 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                   _MiniChoiceWrap<ApprovalPolicy>(
                     icon: Icons.verified_user_rounded,
                     label: 'Approval',
-                    value: _approval,
+                    value: _effectiveApproval,
                     options: _approvalOptions,
                     optionLabel: (policy) => policy.label,
-                    onChanged: (value) => setState(() => _approval = value),
+                    onChanged: (value) => setState(() {
+                      _approval = value;
+                      _approvalTouched = true;
+                    }),
                   ),
                 ],
                 if (_supportsApprovalPolicy && _supportsSandboxMode)
@@ -1462,19 +1585,22 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                   _MiniChoiceWrap<SandboxMode>(
                     icon: Icons.folder_special_rounded,
                     label: 'Sandbox',
-                    value: _sandbox,
+                    value: _effectiveSandbox,
                     options: SandboxMode.values,
                     optionLabel: (sandbox) => sandbox.label,
                     danger: (sandbox) =>
                         sandbox == SandboxMode.dangerFullAccess,
-                    onChanged: (value) => setState(() => _sandbox = value),
+                    onChanged: (value) => setState(() {
+                      _sandbox = value;
+                      _sandboxTouched = true;
+                    }),
                   ),
                 const SizedBox(height: 8),
                 _CompactInfoLine(
                   icon: Icons.info_outline_rounded,
                   text: [
-                    if (_supportsApprovalPolicy) _approval.description,
-                    if (_supportsSandboxMode) _sandbox.description,
+                    if (_supportsApprovalPolicy) _effectiveApproval.description,
+                    if (_supportsSandboxMode) _effectiveSandbox.description,
                   ].join(' '),
                 ),
               ],
@@ -1490,9 +1616,12 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                   icon: Icons.public_rounded,
                   title: 'Live web search',
                   subtitle: 'Starts the thread with web search enabled.',
-                  value: _webSearch,
+                  value: _effectiveWebSearch,
                   enabled: !_submitting,
-                  onChanged: (value) => setState(() => _webSearch = value),
+                  onChanged: (value) => setState(() {
+                    _webSearch = value;
+                    _webSearchTouched = true;
+                  }),
                 ),
               ],
             ),
@@ -1570,25 +1699,28 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               : _reasoningEffortLabel(reasoning),
           icon: Icons.psychology_alt_rounded,
         ),
-      if (_supportsFastMode && _fastMode)
+      if (_supportsFastMode && _effectiveFastMode)
         const MeshPill(
           label: 'fast',
           icon: Icons.bolt_rounded,
           tone: MeshPillTone.warning,
         ),
       if (_supportsApprovalPolicy)
-        MeshPill(label: _approval.label, icon: Icons.verified_user_rounded),
+        MeshPill(
+          label: _effectiveApproval.label,
+          icon: Icons.verified_user_rounded,
+        ),
       if (_supportsSandboxMode)
         MeshPill(
-          label: _sandbox.label,
-          icon: _sandbox == SandboxMode.dangerFullAccess
+          label: _effectiveSandbox.label,
+          icon: _effectiveSandbox == SandboxMode.dangerFullAccess
               ? Icons.lock_open_rounded
               : Icons.folder_special_rounded,
-          tone: _sandbox == SandboxMode.dangerFullAccess
+          tone: _effectiveSandbox == SandboxMode.dangerFullAccess
               ? MeshPillTone.danger
               : MeshPillTone.neutral,
         ),
-      if (_supportsWebSearch && _webSearch)
+      if (_supportsWebSearch && _effectiveWebSearch)
         const MeshPill(
           label: 'web search',
           icon: Icons.public_rounded,
