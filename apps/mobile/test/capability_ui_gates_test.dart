@@ -199,20 +199,20 @@ void main() {
             displayName: 'Codex',
             defaultCommand: 'codex',
             commandEnvironmentVariables: ['SIDEMESH_CODEX_BIN'],
-            capabilities: ProviderCapabilities.empty,
-            config: ProviderConfigSummary.empty,
-            version: '',
-            isDefault: true,
+            capabilities: ProviderCapabilities(_minimalCapabilities),
+            config: ProviderConfigSummary(kind: 'codex', command: 'codex'),
+            version: 'codex-cli 0.125.0',
+            isDefault: false,
           ),
           ProviderDefinitionSummary(
             kind: 'fake',
             displayName: 'Fake Test Provider',
             defaultCommand: 'builtin',
             commandEnvironmentVariables: ['SIDEMESH_FAKE_CAPABILITY_PROFILE'],
-            capabilities: ProviderCapabilities.empty,
-            config: ProviderConfigSummary.empty,
-            version: '',
-            isDefault: false,
+            capabilities: ProviderCapabilities(_fullCapabilities),
+            config: ProviderConfigSummary(kind: 'fake', command: 'builtin'),
+            version: 'fake-provider 1.0.0',
+            isDefault: true,
           ),
         ],
       ),
@@ -246,6 +246,18 @@ void main() {
     expect(find.text('web search'), findsOneWidget);
     expect(find.text('Host-owned capabilities'), findsOneWidget);
     expect(find.text('git status'), findsOneWidget);
+
+    await tester.tap(find.text('Codex'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Codex - codex-cli 0.125.0'), findsOneWidget);
+    expect(find.text('viewing: codex'), findsOneWidget);
+    expect(find.text('command: codex'), findsOneWidget);
+    expect(find.text('Fake Test Provider active'), findsOneWidget);
+    expect(find.text('2/5'), findsOneWidget);
+    expect(find.text('1/4'), findsOneWidget);
+    expect(find.text('0/3'), findsOneWidget);
+    expect(find.text('0/7'), findsOneWidget);
   });
 }
 
@@ -326,6 +338,13 @@ NodeInfo _nodeForCapabilities(
           'displayName': provider.displayName,
           'defaultCommand': provider.defaultCommand,
           'commandEnvironmentVariables': provider.commandEnvironmentVariables,
+          'capabilities': provider.capabilities.values,
+          'config': {
+            'kind': provider.config.kind,
+            'command': provider.config.command,
+          },
+          'version': provider.version,
+          'isDefault': provider.isDefault,
         },
       )
       .toList(growable: false),
