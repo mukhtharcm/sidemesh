@@ -55,7 +55,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       models: 501,
       profiles: 501,
       skills: 501,
-      fsList: 501,
+      fsList: 200,
       createWithModel: 501,
       createWithImage: 501,
     },
@@ -80,7 +80,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       models: 200,
       profiles: 200,
       skills: 200,
-      fsList: 501,
+      fsList: 200,
       createWithModel: 201,
       createWithImage: 201,
     },
@@ -155,7 +155,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       models: 501,
       profiles: 501,
       skills: 501,
-      fsList: 501,
+      fsList: 200,
       createWithModel: 501,
       createWithImage: 501,
     },
@@ -186,7 +186,9 @@ describe("fake provider capability profile API smoke", () => {
   const tempRoots: string[] = [];
 
   after(async () => {
-    await Promise.all(tempRoots.map((root) => rm(root, { recursive: true, force: true })));
+    await Promise.all(
+      tempRoots.map((root) => rm(root, { recursive: true, force: true })),
+    );
   });
 
   for (const expectation of PROFILE_EXPECTATIONS) {
@@ -201,10 +203,19 @@ describe("fake provider capability profile API smoke", () => {
       try {
         const node = await getJson(daemon.baseUrl, "/api/node");
         assert.equal(node.provider, "fake");
-        assert.match(asString(node.providerVersion), new RegExp(`\\(${expectation.profile}\\)$`));
+        assert.match(
+          asString(node.providerVersion),
+          new RegExp(`\\(${expectation.profile}\\)$`),
+        );
 
-        for (const [path, supported] of Object.entries(expectation.capabilities)) {
-          assert.equal(readCapability(node.providerCapabilities, path), supported, path);
+        for (const [path, supported] of Object.entries(
+          expectation.capabilities,
+        )) {
+          assert.equal(
+            readCapability(node.providerCapabilities, path),
+            supported,
+            path,
+          );
         }
 
         assert.equal(
@@ -215,14 +226,26 @@ describe("fake provider capability profile API smoke", () => {
           201,
         );
 
-        assert.equal(await status(daemon.baseUrl, "/api/models"), expectation.routes.models);
-        assert.equal(await status(daemon.baseUrl, "/api/profiles"), expectation.routes.profiles);
         assert.equal(
-          await status(daemon.baseUrl, `/api/skills?cwd=${encodeURIComponent(workspaceRoot)}`),
+          await status(daemon.baseUrl, "/api/models"),
+          expectation.routes.models,
+        );
+        assert.equal(
+          await status(daemon.baseUrl, "/api/profiles"),
+          expectation.routes.profiles,
+        );
+        assert.equal(
+          await status(
+            daemon.baseUrl,
+            `/api/skills?cwd=${encodeURIComponent(workspaceRoot)}`,
+          ),
           expectation.routes.skills,
         );
         assert.equal(
-          await status(daemon.baseUrl, `/api/fs/list?path=${encodeURIComponent(workspaceRoot)}`),
+          await status(
+            daemon.baseUrl,
+            `/api/fs/list?path=${encodeURIComponent(workspaceRoot)}`,
+          ),
           expectation.routes.fsList,
         );
 
@@ -306,7 +329,9 @@ async function waitForHealth(
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      throw new Error(`daemon exited early with ${child.exitCode}\n${output()}`);
+      throw new Error(
+        `daemon exited early with ${child.exitCode}\n${output()}`,
+      );
     }
     try {
       const response = await fetch(`${baseUrl}/healthz`);
@@ -321,7 +346,9 @@ async function waitForHealth(
   throw new Error(`daemon did not become healthy\n${output()}`);
 }
 
-async function stopProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
+async function stopProcess(
+  child: ChildProcessWithoutNullStreams,
+): Promise<void> {
   if (child.exitCode !== null) {
     return;
   }
@@ -339,7 +366,10 @@ async function stopProcess(child: ChildProcessWithoutNullStreams): Promise<void>
   }
 }
 
-async function getJson(baseUrl: string, path: string): Promise<Record<string, unknown>> {
+async function getJson(
+  baseUrl: string,
+  path: string,
+): Promise<Record<string, unknown>> {
   const response = await request(baseUrl, path);
   assert.equal(response.status, 200, `${path} status`);
   const body = (await response.json()) as unknown;
@@ -357,11 +387,13 @@ async function postStatus(
   path: string,
   body: Record<string, unknown>,
 ): Promise<number> {
-  return (await request(baseUrl, path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })).status;
+  return (
+    await request(baseUrl, path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  ).status;
 }
 
 function request(
@@ -382,7 +414,8 @@ function readCapability(raw: unknown, path: string): boolean {
   const [section, feature] = path.split(".");
   assert.ok(section);
   assert.ok(feature);
-  const capabilities = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const capabilities =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const group = capabilities[section];
   if (!group || typeof group !== "object") {
     return false;
@@ -395,7 +428,9 @@ function asString(value: unknown): string {
 }
 
 async function tempRoot(roots: string[]): Promise<string> {
-  const root = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-profile-smoke-"));
+  const root = await mkdtemp(
+    nodePath.join(tmpdir(), "sidemesh-profile-smoke-"),
+  );
   roots.push(root);
   return root;
 }
@@ -406,7 +441,9 @@ async function freePort(): Promise<number> {
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       if (!address || typeof address === "string") {
-        server.close(() => reject(new Error("failed to allocate a local port")));
+        server.close(() =>
+          reject(new Error("failed to allocate a local port")),
+        );
         return;
       }
       const { port } = address;

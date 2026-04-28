@@ -21,14 +21,10 @@ class WorkspaceLiveStore {
     ApiClient api, {
     String? agentProvider,
   }) {
-    final key = _sessionKey(host.id, agentProvider);
+    final key = _sessionKey(host.id);
     var session = _sessions[key];
     if (session == null) {
-      session = _LiveSession(
-        host: host,
-        api: api,
-        agentProvider: _normalizedProvider(agentProvider),
-      );
+      session = _LiveSession(host: host, api: api);
       _sessions[key] = session;
       session._connect();
     }
@@ -40,18 +36,12 @@ class WorkspaceLiveStore {
     final session = handle._session;
     session._refs--;
     if (session._refs <= 0) {
-      _sessions.remove(_sessionKey(session.host.id, session.agentProvider));
+      _sessions.remove(_sessionKey(session.host.id));
       session._dispose();
     }
   }
 
-  String _sessionKey(String hostId, String? agentProvider) =>
-      '$hostId::${_normalizedProvider(agentProvider) ?? ''}';
-
-  String? _normalizedProvider(String? value) {
-    final trimmed = value?.trim();
-    return trimmed == null || trimmed.isEmpty ? null : trimmed;
-  }
+  String _sessionKey(String hostId) => hostId;
 }
 
 class WorkspaceLiveHandle {
@@ -66,15 +56,10 @@ class WorkspaceLiveHandle {
 }
 
 class _LiveSession {
-  _LiveSession({
-    required this.host,
-    required this.api,
-    required this.agentProvider,
-  });
+  _LiveSession({required this.host, required this.api});
 
   final HostProfile host;
   final ApiClient api;
-  final String? agentProvider;
 
   int _refs = 0;
   WebSocketChannel? _channel;
@@ -90,7 +75,7 @@ class _LiveSession {
   void _connect() {
     if (_disposed || !host.enabled) return;
     try {
-      _channel = api.openFsLive(host, agentProvider: agentProvider);
+      _channel = api.openFsLive(host);
     } catch (_) {
       if (!host.enabled) return;
       _scheduleReconnect();
