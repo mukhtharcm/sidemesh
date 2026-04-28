@@ -72,6 +72,7 @@ import {
   SessionInputDedupeStore,
   type StoredSessionInputDedupeEntry,
 } from "./session-input-dedupe-store.js";
+import { startupSummaryLines } from "./startup-summary.js";
 
 const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
@@ -1654,11 +1655,13 @@ export async function startServer(config: NodeConfig): Promise<void> {
   );
 
   server.listen(config.port, () => {
-    console.log(`[sidemesh] ${config.label} listening on port ${config.port}`);
-    console.log(
-      `[sidemesh] provider: ${provider.displayName} (${provider.kind})`,
-    );
-    console.log(`[sidemesh] token (${config.tokenSource}): ${config.token}`);
+    for (const line of startupSummaryLines({
+      config,
+      providerDisplayName: provider.displayName,
+      providerKinds: providerRuntime.providers.map((entry) => entry.kind),
+    })) {
+      console.log(line);
+    }
   });
 }
 

@@ -19,17 +19,44 @@ From this directory:
 node --version # requires Node.js 20+
 npm install
 npm run mobile:get
+npm run setup
 npm run daemon
 ```
 
-If `SIDEMESH_TOKEN` is not set, the daemon generates one on startup and prints it.
-The daemon stores lightweight local state in `SIDEMESH_STATE_DIR`, defaulting to
-`~/.sidemesh`; this currently includes a bounded send-retry ledger for
-`clientMessageId` replay protection.
+The first run should go through `sidemesh setup`. That writes a persisted config
+to `~/.sidemesh/config.json` by default, including the shared token and selected
+providers. The daemon stores lightweight local state in `SIDEMESH_STATE_DIR`,
+defaulting to `~/.sidemesh`; this currently includes a bounded send-retry
+ledger for `clientMessageId` replay protection.
+
+Useful CLI commands:
+
+```bash
+npm run setup           # guided config wizard
+npm run doctor          # startup and provider diagnostics
+npm run status          # resolved config + local daemon health
+npm run pair            # host URL + token for the mobile app
+npm run daemon          # start the server
+```
+
+Or directly:
+
+```bash
+npx tsx src/cli.ts setup
+npx tsx src/cli.ts doctor
+npx tsx src/cli.ts pair
+```
+
+Configuration resolution works like this:
+
+1. CLI `--config` picks which config file to read
+2. environment variables override persisted config values
+3. persisted config values override built-in defaults
 
 Optional environment variables:
 
 ```bash
+SIDEMESH_CONFIG=~/.sidemesh/config.json
 SIDEMESH_LABEL=MacBook
 SIDEMESH_PORT=8787
 SIDEMESH_TOKEN=your-shared-token
@@ -51,7 +78,8 @@ SIDEMESH_STATE_DIR=~/.sidemesh
 provider-neutral command override; provider-specific command variables such as
 `SIDEMESH_CODEX_BIN` and `SIDEMESH_COPILOT_BIN` take precedence.
 
-To run against GitHub Copilot CLI instead of Codex:
+To run against GitHub Copilot CLI instead of Codex without using the setup
+wizard:
 
 ```bash
 SIDEMESH_PROVIDER=copilot \
@@ -62,10 +90,10 @@ npm run daemon
 
 The Copilot provider is the first real non-Codex adapter. It reads native
 Copilot SDK for session discovery, transcript replay, model metadata,
-streaming turns, resume, interruption, tool activity, and permission requests.
-It does not read Copilot's on-disk session files directly. It does not yet
-expose images, skills, or filesystem browsing. Sidemesh does not maintain a
-hand-written Copilot model catalog; the model picker is built from SDK
+streaming turns, resume, interruption, tool activity, permission requests,
+image input, skills, and interactive input. It does not read Copilot's on-disk
+session files directly. Sidemesh does not maintain a hand-written Copilot model
+catalog; the model picker is built from SDK
 `listModels()` metadata and includes Copilot's `auto` selection. Sidemesh
 defaults new app-started Copilot turns to `auto` so an expensive persistent
 Copilot setting is not used accidentally. Set `SIDEMESH_COPILOT_MODEL`,
@@ -118,7 +146,17 @@ capabilities plus key route gates.
 
 ## Dogfood flow
 
-Run one daemon per machine you want to reach from the phone:
+Run one daemon per machine you want to reach from the phone. The recommended
+flow is:
+
+```bash
+npm run setup
+npm run doctor
+npm run daemon
+npm run pair
+```
+
+If you prefer raw env vars, this still works:
 
 ```bash
 SIDEMESH_LABEL=mbp \
@@ -130,8 +168,8 @@ npm run daemon
 Then add that machine inside the mobile app with:
 
 - `label`: any friendly name such as `MacBook`, `nyc-vps`, or `lab-box`
-- `base URL`: `http://<tailscale-ip-or-hostname>:8899`
-- `token`: the same `SIDEMESH_TOKEN`
+- `base URL`: one of the addresses shown by `sidemesh pair`
+- `token`: the token shown by `sidemesh pair`
 
 Examples:
 

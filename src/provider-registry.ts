@@ -36,6 +36,10 @@ interface AgentProviderDefinition {
 
   create(config: AgentProviderConfig): AgentProvider;
   loadConfig(env: ProviderEnvironment): AgentProviderConfig;
+  resolveConfig(
+    env: ProviderEnvironment,
+    base: AgentProviderConfig | null,
+  ): AgentProviderConfig;
   summarizeConfig(config: AgentProviderConfig): AgentProviderConfigSummary;
 }
 
@@ -75,6 +79,18 @@ const CODEX_PROVIDER_DEFINITION: AgentProviderDefinition = {
       bin:
         env.SIDEMESH_CODEX_BIN?.trim() ||
         env.SIDEMESH_PROVIDER_COMMAND?.trim() ||
+        CODEX_DEFAULT_COMMAND,
+    };
+  },
+
+  resolveConfig(env, base) {
+    const codex = base?.kind === "codex" ? base : null;
+    return {
+      kind: "codex",
+      bin:
+        env.SIDEMESH_CODEX_BIN?.trim() ||
+        env.SIDEMESH_PROVIDER_COMMAND?.trim() ||
+        codex?.bin ||
         CODEX_DEFAULT_COMMAND,
     };
   },
@@ -120,6 +136,29 @@ const FAKE_PROVIDER_DEFINITION: AgentProviderDefinition = {
       capabilityProfile: parseFakeCapabilityProfile(
         env.SIDEMESH_FAKE_CAPABILITY_PROFILE,
       ),
+    };
+  },
+
+  resolveConfig(env, base) {
+    const fake = base?.kind === "fake" ? base : null;
+    return {
+      kind: "fake",
+      latencyMs: parseInteger(
+        env.SIDEMESH_FAKE_LATENCY_MS,
+        fake?.latencyMs ?? 15,
+      ),
+      seedSessions:
+        env.SIDEMESH_FAKE_SEED === undefined
+          ? fake?.seedSessions ?? true
+          : env.SIDEMESH_FAKE_SEED?.trim() !== "0",
+      workspaceRoot:
+        env.SIDEMESH_FAKE_WORKSPACE_ROOT?.trim() ??
+        fake?.workspaceRoot ??
+        null,
+      capabilityProfile:
+        env.SIDEMESH_FAKE_CAPABILITY_PROFILE === undefined
+          ? fake?.capabilityProfile ?? "full"
+          : parseFakeCapabilityProfile(env.SIDEMESH_FAKE_CAPABILITY_PROFILE),
     };
   },
 
@@ -177,6 +216,33 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
     };
   },
 
+  resolveConfig(env, base) {
+    const copilot = base?.kind === "copilot" ? base : null;
+    return {
+      kind: "copilot",
+      bin:
+        env.SIDEMESH_COPILOT_BIN?.trim() ||
+        env.SIDEMESH_PROVIDER_COMMAND?.trim() ||
+        copilot?.bin ||
+        COPILOT_DEFAULT_COMMAND,
+      stateDir:
+        env.SIDEMESH_COPILOT_STATE_DIR === undefined
+          ? copilot?.stateDir ?? null
+          : env.SIDEMESH_COPILOT_STATE_DIR?.trim() || null,
+      allowAll:
+        env.SIDEMESH_COPILOT_ALLOW_ALL === undefined
+          ? copilot?.allowAll ?? false
+          : parseBoolean(env.SIDEMESH_COPILOT_ALLOW_ALL, false),
+      configuredModel:
+        env.SIDEMESH_COPILOT_MODEL?.trim() ||
+        env.COPILOT_MODEL?.trim() ||
+        env.COPILOT_PROVIDER_MODEL_ID?.trim() ||
+        env.COPILOT_PROVIDER_WIRE_MODEL?.trim() ||
+        copilot?.configuredModel ||
+        null,
+    };
+  },
+
   summarizeConfig(config) {
     const copilot = expectCopilotProviderConfig(config);
     return {
@@ -222,6 +288,14 @@ export function loadAgentProviderConfig(
   env: ProviderEnvironment,
 ): AgentProviderConfig {
   return getAgentProviderDefinition(kind).loadConfig(env);
+}
+
+export function resolveAgentProviderConfig(
+  kind: AgentProviderKind,
+  env: ProviderEnvironment,
+  base: AgentProviderConfig | null,
+): AgentProviderConfig {
+  return getAgentProviderDefinition(kind).resolveConfig(env, base);
 }
 
 export function createAgentProviderFromConfig(
