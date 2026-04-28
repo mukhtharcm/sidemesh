@@ -231,6 +231,53 @@ void main() {
       isFalse,
     );
   });
+
+  test('SessionActivity decodes nested and legacy tool semantic payloads', () {
+    final nested = SessionActivity.fromJson({
+      'id': 'tool-1',
+      'type': 'tool',
+      'createdAt': DateTime(2026, 4, 28).millisecondsSinceEpoch,
+      'seq': 1,
+      'status': 'completed',
+      'toolName': 'view',
+      'title': 'Read README.md',
+      'args': {'path': 'README.md'},
+      'result': {'content': 'hello'},
+      'semantic': {
+        'category': 'filesystem',
+        'action': 'read',
+        'targets': [
+          {
+            'type': 'file',
+            'path': 'README.md',
+            'access': 'read',
+            'role': 'target',
+          },
+        ],
+      },
+    });
+
+    expect(nested.toolSemantic?.category, 'filesystem');
+    expect(nested.toolSemantic?.action, 'read');
+    expect(nested.toolTarget, 'README.md');
+    expect(nested.toolTargets, ['README.md']);
+
+    final legacy = SessionActivity.fromJson({
+      'id': 'tool-2',
+      'type': 'tool',
+      'createdAt': DateTime(2026, 4, 28).millisecondsSinceEpoch,
+      'seq': 2,
+      'status': 'completed',
+      'toolName': 'session.mode',
+      'toolCategory': 'session',
+      'toolAction': 'mode_change',
+      'toolMode': 'autopilot',
+    });
+
+    expect(legacy.toolSemantic?.category, 'session');
+    expect(legacy.toolSemantic?.action, 'mode_change');
+    expect(legacy.toolMode, 'autopilot');
+  });
 }
 
 Map<String, dynamic> _fakeNodePayload(
