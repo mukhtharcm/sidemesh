@@ -125,8 +125,8 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   input: {
     text: true,
-    imageUrl: false,
-    localImage: false,
+    imageUrl: true,
+    localImage: true,
     skills: false,
   },
   approvals: {
@@ -548,8 +548,8 @@ export class CopilotAgentProvider
         });
       });
       await sdkSession.send({
-        prompt: inputText(input),
-        attachments: sdkAttachments(input),
+        prompt: inputPromptText(input),
+        attachments: await sdkAttachments(input),
         mode: "enqueue",
       });
       await completed;
@@ -981,7 +981,7 @@ export class CopilotAgentProvider
   ): void {
     this.appendMessage(session, {
       role: "user",
-      text: inputText(input),
+      text: inputDisplayText(input),
       attachments: inputAttachments(input),
     });
   }
@@ -1361,9 +1361,9 @@ function assistantPhase(phase: string | undefined): "commentary" | "final_answer
     : "final_answer";
 }
 
-function sdkAttachments(
+async function sdkAttachments(
   input: AgentSessionInputItem[],
-): import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"] {
+): Promise<import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]> {
   const attachments: NonNullable<
     import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
   > = [];
@@ -1374,9 +1374,111 @@ function sdkAttachments(
         path: item.path,
         displayName: nodePath.basename(item.path),
       });
+      continue;
+    }
+    if (item.type === "image") {
+      attachments.push(await sdkAttachmentForImage(item.url));
     }
   }
   return attachments.length > 0 ? attachments : undefined;
+}
+
+async function sdkAttachmentForImage(
+  url: string,
+): Promise<NonNullable<
+  import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
+>[number]> {
+  const inline = inlineImageAttachment(url);
+  if (inline) {
+    return inline;
+  }
+  return fetchImageAttachment(url);
+}
+
+function inlineImageAttachment(
+  url: string,
+): NonNullable<
+  import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
+>[number] | null {
+  const trimmed = url.trim();
+  const match = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/i.exec(trimmed);
+  if (!match) {
+    return null;
+  }
+  const mimeType = match[1]?.trim() || "image/png";
+  const data = match[2]?.trim();
+  if (!data) {
+    throw new Error("Copilot image attachment data URL is missing payload.");
+  }
+  return {
+    type: "blob",
+    data,
+    mimeType,
+    displayName: suggestedInlineImageName(mimeType),
+  };
+}
+
+async function fetchImageAttachment(
+  url: string,
+): Promise<NonNullable<
+  import("./copilot-sdk-client.js").CopilotSdkMessageOptions["attachments"]
+>[number]> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Unsupported Copilot image URL: ${url}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Unsupported Copilot image URL protocol: ${parsed.protocol}`);
+  }
+  const response = await fetch(parsed);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch Copilot image URL: ${response.status} ${response.statusText}`,
+    );
+  }
+  const mimeType =
+    response.headers.get("content-type")?.split(";")[0]?.trim() || "image/png";
+  const bytes = Buffer.from(await response.arrayBuffer());
+  return {
+    type: "blob",
+    data: bytes.toString("base64"),
+    mimeType,
+    displayName:
+      nodePath.basename(parsed.pathname) || suggestedInlineImageName(mimeType),
+  };
+}
+
+function suggestedInlineImageName(mimeType: string): string {
+  const normalized = mimeType.trim().toLowerCase();
+  const extension = inlineImageExtension(normalized);
+  return extension ? `pasted-image.${extension}` : "pasted-image";
+}
+
+function inlineImageExtension(mimeType: string): string | null {
+  switch (mimeType) {
+    case "image/png":
+      return "png";
+    case "image/jpeg":
+      return "jpg";
+    case "image/gif":
+      return "gif";
+    case "image/webp":
+      return "webp";
+    case "image/bmp":
+      return "bmp";
+    case "image/tiff":
+      return "tiff";
+    case "image/avif":
+      return "avif";
+    case "image/heic":
+      return "heic";
+    case "image/heif":
+      return "heif";
+    default:
+      return null;
+  }
 }
 
 function buildCopilotPendingAction(
@@ -1974,26 +2076,52 @@ function normalizeStoredRuntime(
 }
 
 function previewFromInput(input: AgentSessionInputItem[]): string {
-  const text = inputText(input).trim();
+  const text = inputDisplayText(input).trim();
+  if (!text) {
+    return hasImageInput(input) ? "Image prompt" : "";
+  }
   return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 }
 
-function inputText(input: AgentSessionInputItem[]): string {
+function inputPromptText(input: AgentSessionInputItem[]): string {
+  const text = inputDisplayText(input).trim();
+  if (text) {
+    return text;
+  }
+  const imageCount = countImageInput(input);
+  if (imageCount === 1) {
+    return "Please inspect the attached image.";
+  }
+  if (imageCount > 1) {
+    return `Please inspect the ${imageCount} attached images.`;
+  }
+  return "";
+}
+
+function inputDisplayText(input: AgentSessionInputItem[]): string {
   return input
     .map((item) => {
       switch (item.type) {
         case "text":
           return item.text;
         case "image":
-          return `[unsupported image:${item.url}]`;
+          return "";
         case "localImage":
-          return `[unsupported local image:${item.path}]`;
+          return "";
         case "skill":
           return `$${item.name}`;
       }
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function countImageInput(input: AgentSessionInputItem[]): number {
+  return input.filter((item) => item.type === "image" || item.type === "localImage").length;
+}
+
+function hasImageInput(input: AgentSessionInputItem[]): boolean {
+  return countImageInput(input) > 0;
 }
 
 function inputAttachments(
