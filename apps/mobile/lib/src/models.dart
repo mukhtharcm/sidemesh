@@ -1414,6 +1414,81 @@ class SessionCommandActionSummary {
   Map<String, dynamic> toJson() => {'kind': kind, 'label': label};
 }
 
+class SessionToolSemanticTarget {
+  const SessionToolSemanticTarget({
+    required this.type,
+    this.path,
+    this.access,
+    this.role,
+    this.url,
+    this.value,
+    this.command,
+    this.label,
+  });
+
+  final String type;
+  final String? path;
+  final String? access;
+  final String? role;
+  final String? url;
+  final String? value;
+  final String? command;
+  final String? label;
+
+  factory SessionToolSemanticTarget.fromJson(Map<String, dynamic> json) =>
+      SessionToolSemanticTarget(
+        type: _stringValue(json['type']),
+        path: _stringOrNull(json['path']),
+        access: _stringOrNull(json['access']),
+        role: _stringOrNull(json['role']),
+        url: _stringOrNull(json['url']),
+        value: _stringOrNull(json['value']),
+        command: _stringOrNull(json['command']),
+        label: _stringOrNull(json['label']),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'type': type,
+    'path': path,
+    'access': access,
+    'role': role,
+    'url': url,
+    'value': value,
+    'command': command,
+    'label': label,
+  };
+}
+
+class SessionToolSemantic {
+  const SessionToolSemantic({
+    required this.category,
+    required this.action,
+    required this.targets,
+  });
+
+  final String category;
+  final String action;
+  final List<SessionToolSemanticTarget> targets;
+
+  factory SessionToolSemantic.fromJson(Map<String, dynamic> json) =>
+      SessionToolSemantic(
+        category: _stringValue(json['category']),
+        action: _stringValue(json['action']),
+        targets: (json['targets'] as List<dynamic>? ?? const <dynamic>[])
+            .map(
+              (item) =>
+                  SessionToolSemanticTarget.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'category': category,
+    'action': action,
+    'targets': targets.map((item) => item.toJson()).toList(),
+  };
+}
+
 class SessionActivity {
   const SessionActivity({
     required this.id,
@@ -1437,13 +1512,7 @@ class SessionActivity {
     required this.toolArgs,
     required this.toolResult,
     required this.toolError,
-    required this.toolCategory,
-    required this.toolAction,
-    required this.toolTarget,
-    required this.toolTargets,
-    required this.toolUrl,
-    required this.toolQuery,
-    required this.toolMode,
+    required this.toolSemantic,
     required this.changes,
     required this.diff,
     required this.query,
@@ -1475,13 +1544,7 @@ class SessionActivity {
   final Object? toolArgs;
   final Object? toolResult;
   final bool? toolError;
-  final String? toolCategory;
-  final String? toolAction;
-  final String? toolTarget;
-  final List<String> toolTargets;
-  final String? toolUrl;
-  final String? toolQuery;
-  final String? toolMode;
+  final SessionToolSemantic? toolSemantic;
   final List<SessionActivityChange> changes;
   final String? diff;
   final String? query;
@@ -1497,6 +1560,31 @@ class SessionActivity {
   bool get isTurnDiff => type == 'turn_diff';
   bool get isWebSearch => type == 'web_search';
   bool get isImageGeneration => type == 'image_generation';
+  String? get toolCategory => toolSemantic?.category;
+  String? get toolAction => toolSemantic?.action;
+  List<SessionToolSemanticTarget> get toolSemanticTargets =>
+      toolSemantic?.targets ?? const <SessionToolSemanticTarget>[];
+  String? get toolTarget {
+    for (final target in toolSemanticTargets) {
+      if (target.type == 'file' || target.type == 'url') {
+        final value = _semanticTargetPrimaryValue(target);
+        if (value != null && value.isNotEmpty) {
+          return value;
+        }
+      }
+    }
+    return null;
+  }
+  List<String> get toolTargets => toolSemanticTargets
+      .map(_semanticTargetPrimaryValue)
+      .where((item) => item != null && item.isNotEmpty)
+      .cast<String>()
+      .toList(growable: false);
+  String? get toolUrl => _firstSemanticTargetOfType(toolSemanticTargets, 'url')?.url;
+  String? get toolQuery =>
+      _firstSemanticTargetOfType(toolSemanticTargets, 'query')?.value;
+  String? get toolMode =>
+      _firstSemanticTargetOfType(toolSemanticTargets, 'mode')?.value;
 
   factory SessionActivity.fromJson(
     Map<String, dynamic> json,
@@ -1528,16 +1616,7 @@ class SessionActivity {
     toolArgs: json['args'],
     toolResult: json['result'],
     toolError: json['isError'] is bool ? json['isError'] as bool : null,
-    toolCategory: _stringOrNull(json['toolCategory']),
-    toolAction: _stringOrNull(json['toolAction']),
-    toolTarget: _stringOrNull(json['toolTarget']),
-    toolTargets: (json['toolTargets'] as List<dynamic>? ?? const <dynamic>[])
-        .map((item) => _stringValue(item))
-        .where((item) => item.isNotEmpty)
-        .toList(),
-    toolUrl: _stringOrNull(json['toolUrl']),
-    toolQuery: _stringOrNull(json['toolQuery']),
-    toolMode: _stringOrNull(json['toolMode']),
+    toolSemantic: _toolSemanticFromActivityJson(json),
     changes: (json['changes'] as List<dynamic>? ?? [])
         .map(
           (item) =>
@@ -1578,13 +1657,7 @@ class SessionActivity {
     'args': toolArgs,
     'result': toolResult,
     'isError': toolError,
-    'toolCategory': toolCategory,
-    'toolAction': toolAction,
-    'toolTarget': toolTarget,
-    'toolTargets': toolTargets,
-    'toolUrl': toolUrl,
-    'toolQuery': toolQuery,
-    'toolMode': toolMode,
+    'semantic': toolSemantic?.toJson(),
     'changes': changes.map((item) => item.toJson()).toList(),
     'diff': diff,
     'query': query,
@@ -1594,6 +1667,108 @@ class SessionActivity {
     'revisedPrompt': revisedPrompt,
     'savedPath': savedPath,
   };
+}
+
+SessionToolSemantic? _toolSemanticFromActivityJson(Map<String, dynamic> json) {
+  final raw = json['semantic'];
+  if (raw is Map<String, dynamic>) {
+    return SessionToolSemantic.fromJson(raw);
+  }
+  if (raw is Map) {
+    return SessionToolSemantic.fromJson(raw.cast<String, dynamic>());
+  }
+  final category = _stringOrNull(json['toolCategory']);
+  final action = _stringOrNull(json['toolAction']);
+  if (category == null || action == null) {
+    return null;
+  }
+  final targets = <SessionToolSemanticTarget>[];
+  final legacyTargets = (json['toolTargets'] as List<dynamic>? ?? const <dynamic>[])
+      .map((item) => _stringValue(item))
+      .where((item) => item.isNotEmpty)
+      .toList();
+  for (final path in legacyTargets) {
+    targets.add(
+      SessionToolSemanticTarget(type: 'file', path: path, role: 'target'),
+    );
+  }
+  final toolTarget = _stringOrNull(json['toolTarget']);
+  if (toolTarget != null) {
+    final toolUrl = _stringOrNull(json['toolUrl']);
+    final inferred =
+        category == 'command'
+            ? SessionToolSemanticTarget(type: 'command', command: toolTarget)
+            : category == 'session' || action == 'mode_change'
+            ? SessionToolSemanticTarget(type: 'mode', value: toolTarget)
+            : toolUrl == toolTarget || category == 'network'
+            ? SessionToolSemanticTarget(type: 'url', url: toolTarget, role: 'target')
+            : SessionToolSemanticTarget(type: 'file', path: toolTarget, role: 'target');
+    final duplicate = targets.any((target) {
+      if (target.type != inferred.type) return false;
+      switch (target.type) {
+        case 'file':
+          return target.path == inferred.path;
+        case 'url':
+          return target.url == inferred.url;
+        case 'mode':
+          return target.value == inferred.value;
+        case 'command':
+          return target.command == inferred.command;
+        default:
+          return target.label == inferred.label;
+      }
+    });
+    if (!duplicate) {
+      targets.insert(0, inferred);
+    }
+  }
+  final toolUrl = _stringOrNull(json['toolUrl']);
+  if (toolUrl != null) {
+    targets.add(SessionToolSemanticTarget(type: 'url', url: toolUrl, role: 'target'));
+  }
+  final toolQuery = _stringOrNull(json['toolQuery']);
+  if (toolQuery != null) {
+    targets.add(SessionToolSemanticTarget(type: 'query', value: toolQuery));
+  }
+  final toolMode = _stringOrNull(json['toolMode']);
+  if (toolMode != null) {
+    targets.add(SessionToolSemanticTarget(type: 'mode', value: toolMode));
+  }
+  return SessionToolSemantic(
+    category: category,
+    action: action,
+    targets: targets,
+  );
+}
+
+SessionToolSemanticTarget? _firstSemanticTargetOfType(
+  List<SessionToolSemanticTarget> targets,
+  String type,
+) {
+  for (final target in targets) {
+    if (target.type == type) {
+      return target;
+    }
+  }
+  return null;
+}
+
+String? _semanticTargetPrimaryValue(SessionToolSemanticTarget target) {
+  switch (target.type) {
+    case 'file':
+      return target.path;
+    case 'url':
+      return target.url;
+    case 'query':
+    case 'mode':
+      return target.value;
+    case 'command':
+      return target.command;
+    case 'unknown':
+      return target.label;
+    default:
+      return null;
+  }
 }
 
 class PendingAction {
