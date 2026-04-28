@@ -258,7 +258,7 @@ class _SessionScreenState extends State<SessionScreen>
       _supportsProviderCapability('sessions', 'archive');
 
   bool get _supportsFilesystem =>
-      _supportsProviderCapability('workspace', 'filesystem');
+      _supportsHostCapability('workspace', 'filesystem');
 
   bool get _supportsGitStatus =>
       _supportsHostCapability('workspace', 'gitStatus');
@@ -3302,10 +3302,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _openWorkspaceFile(String path) {
     if (!_supportsFilesystem) {
-      showAppSnackBar(
-        context,
-        'This provider does not expose workspace files.',
-      );
+      showAppSnackBar(context, 'This host does not expose workspace files.');
       return;
     }
     final session = _session ?? widget.session;

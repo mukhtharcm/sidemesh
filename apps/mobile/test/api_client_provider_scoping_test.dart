@@ -14,56 +14,58 @@ void main() {
     token: 'secret',
   );
 
-  test('ApiClient scopes skills and profiles requests by agent provider', () async {
-    final requests = <Uri>[];
-    final api = ApiClient(
-      client: MockClient((request) async {
-        requests.add(request.url);
-        if (request.url.path == '/api/skills') {
-          return http.Response(
-            '{"cwd":"/repo","skills":[],"errors":[]}',
-            200,
-            headers: {'content-type': 'application/json'},
-          );
-        }
-        if (request.url.path == '/api/profiles') {
-          return http.Response(
-            '{"defaultProfile":null,"profiles":[]}',
-            200,
-            headers: {'content-type': 'application/json'},
-          );
-        }
-        throw StateError('Unexpected path ${request.url.path}');
-      }),
-    );
+  test(
+    'ApiClient scopes skills and profiles requests by agent provider',
+    () async {
+      final requests = <Uri>[];
+      final api = ApiClient(
+        client: MockClient((request) async {
+          requests.add(request.url);
+          if (request.url.path == '/api/skills') {
+            return http.Response(
+              '{"cwd":"/repo","skills":[],"errors":[]}',
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          if (request.url.path == '/api/profiles') {
+            return http.Response(
+              '{"defaultProfile":null,"profiles":[]}',
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          throw StateError('Unexpected path ${request.url.path}');
+        }),
+      );
 
-    await api.fetchSkills(
-      host,
-      cwd: '/repo',
-      forceReload: true,
-      agentProvider: 'copilot',
-    );
-    await api.fetchProfiles(
-      host,
-      cwd: '/repo',
-      agentProvider: 'copilot',
-    );
+      await api.fetchSkills(
+        host,
+        cwd: '/repo',
+        forceReload: true,
+        agentProvider: 'copilot',
+      );
+      await api.fetchProfiles(host, cwd: '/repo', agentProvider: 'copilot');
 
-    expect(requests, hasLength(2));
-    expect(
-      requests.first.queryParameters,
-      containsPair('agentProvider', 'copilot'),
-    );
-    expect(requests.first.queryParameters, containsPair('cwd', '/repo'));
-    expect(requests.first.queryParameters, containsPair('forceReload', 'true'));
-    expect(
-      requests.last.queryParameters,
-      containsPair('agentProvider', 'copilot'),
-    );
-    expect(requests.last.queryParameters, containsPair('cwd', '/repo'));
-  });
+      expect(requests, hasLength(2));
+      expect(
+        requests.first.queryParameters,
+        containsPair('agentProvider', 'copilot'),
+      );
+      expect(requests.first.queryParameters, containsPair('cwd', '/repo'));
+      expect(
+        requests.first.queryParameters,
+        containsPair('forceReload', 'true'),
+      );
+      expect(
+        requests.last.queryParameters,
+        containsPair('agentProvider', 'copilot'),
+      );
+      expect(requests.last.queryParameters, containsPair('cwd', '/repo'));
+    },
+  );
 
-  test('ApiClient scopes filesystem helpers by agent provider', () async {
+  test('ApiClient keeps filesystem helpers host-scoped', () async {
     final requests = <Uri>[];
     final api = ApiClient(
       client: MockClient((request) async {
@@ -91,19 +93,22 @@ void main() {
 
     await api.listDirectory(host, '/repo', agentProvider: 'codex');
     await api.readFile(host, '/repo/README.md', agentProvider: 'codex');
-    final blobUri =
-        api.fsBlobUri(host, '/repo/image.png', agentProvider: 'codex');
+    final blobUri = api.fsBlobUri(
+      host,
+      '/repo/image.png',
+      agentProvider: 'codex',
+    );
     final blobBytes = await api.fetchFsBlob(
       host,
       '/repo/image.png',
       agentProvider: 'codex',
     );
 
-    expect(blobUri.queryParameters, containsPair('agentProvider', 'codex'));
+    expect(blobUri.queryParameters.containsKey('agentProvider'), isFalse);
     expect(blobBytes, [1, 2, 3]);
     expect(requests, hasLength(3));
     for (final uri in requests) {
-      expect(uri.queryParameters, containsPair('agentProvider', 'codex'));
+      expect(uri.queryParameters.containsKey('agentProvider'), isFalse);
     }
   });
 }
