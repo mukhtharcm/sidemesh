@@ -7,6 +7,8 @@ import nodePath from "node:path";
 import {
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
+  type AgentSkillConfigWriteRequest,
+  type AgentSkillListOptions,
   type AgentModelListOptions,
   type AgentPendingAction,
   type AgentProvider,
@@ -43,6 +45,8 @@ import {
 import type {
   ModelSummary,
   SessionActivity,
+  SkillCatalogEntry,
+  SkillSummary,
   SessionLogSnapshot,
   SessionMessage,
   SessionMessageAttachment,
@@ -127,7 +131,7 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     text: true,
     imageUrl: true,
     localImage: true,
-    skills: false,
+    skills: true,
   },
   approvals: {
     command: true,
@@ -139,8 +143,8 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   configuration: {
     models: true,
     profiles: false,
-    skills: false,
-    skillManagement: false,
+    skills: true,
+    skillManagement: true,
   },
   runtimeControls: {
     model: true,
@@ -469,6 +473,79 @@ export class CopilotAgentProvider
       seen.add(sdkModel.id);
     }
     return summaries;
+  }
+
+  public async listSkills(
+    options: AgentSkillListOptions,
+  ): Promise<SkillCatalogEntry> {
+    if (options.forceReload) {
+      await this.reloadSkillsForWorkspace(options.cwd);
+    }
+    const discovered = await (await this.ensureSdkClient()).rpc?.skills.discover({
+      projectPaths: [options.cwd],
+    });
+    return {
+      cwd: options.cwd,
+      skills: (discovered?.skills ?? [])
+        .map((skill) => normalizeCopilotSkill(skill, options.cwd))
+        .filter((skill): skill is SkillSummary => skill !== null),
+      errors: [],
+    };
+  }
+
+  public async writeSkillConfig(
+    request: AgentSkillConfigWriteRequest,
+  ): Promise<unknown> {
+    const sdkClient = await this.ensureSdkClient();
+    const rpc = sdkClient.rpc?.skills;
+    if (!rpc) {
+      throw new Error("GitHub Copilot SDK skill configuration is unavailable.");
+    }
+    const discovered = await rpc.discover({});
+    const skillName = resolveCopilotSkillName(discovered.skills, request);
+    if (!skillName) {
+      throw new Error("Unable to resolve Copilot skill to update.");
+    }
+    const disabledSkills = new Set(
+      discovered.skills.filter((skill) => skill.enabled === false).map((skill) => skill.name),
+    );
+    if (request.enabled) {
+      disabledSkills.delete(skillName);
+    } else {
+      disabledSkills.add(skillName);
+    }
+    await rpc.config.setDisabledSkills({
+      disabledSkills: [...disabledSkills].sort((left, right) => left.localeCompare(right)),
+    });
+    await this.reloadSkillsForLoadedSessions();
+    this.emit("liveEvent", { type: "skills_changed" });
+    return {
+      ok: true,
+      path: request.path,
+      name: skillName,
+      enabled: request.enabled,
+    };
+  }
+
+  private async reloadSkillsForWorkspace(cwd: string): Promise<void> {
+    const sessions = [...this.sessions.values()].filter((session) => session.thread.cwd === cwd);
+    await Promise.all(
+      sessions.map(async (session) => {
+        const sdkSession = await this.ensureSdkSession(session);
+        await sdkSession.rpc?.skills.reload();
+      }),
+    );
+  }
+
+  private async reloadSkillsForLoadedSessions(): Promise<void> {
+    await Promise.all(
+      [...this.sessions.values()].map(async (session) => {
+        if (!session.sdkSession) {
+          return;
+        }
+        await session.sdkSession.rpc?.skills.reload();
+      }),
+    );
   }
 
   private createSessionState(
@@ -2075,6 +2152,71 @@ function normalizeStoredRuntime(
   };
 }
 
+function normalizeCopilotSkill(
+  skill: {
+    name: string;
+    description: string;
+    source: string;
+    enabled: boolean;
+    path?: string;
+    projectPath?: string;
+  },
+  cwd: string,
+): SkillSummary | null {
+  const name = skill.name.trim();
+  if (!name) {
+    return null;
+  }
+  const scope = copilotSkillScope(skill.source, skill.projectPath, cwd);
+  return {
+    name,
+    description: skill.description?.trim() || name,
+    shortDescription: null,
+    interface: null,
+    path: skill.path?.trim() || `${skill.source}:${name}`,
+    scope,
+    enabled: skill.enabled !== false,
+  };
+}
+
+function copilotSkillScope(
+  source: string,
+  projectPath: string | undefined,
+  cwd: string,
+): SkillSummary["scope"] {
+  const normalized = source.trim().toLowerCase();
+  if (
+    normalized === "project" ||
+    normalized === "inherited" ||
+    (projectPath != null && projectPath.length > 0 && projectPath === cwd)
+  ) {
+    return "repo";
+  }
+  if (normalized === "personal" || normalized === "personal-copilot") {
+    return "user";
+  }
+  if (normalized === "builtin" || normalized === "plugin") {
+    return "system";
+  }
+  return normalized || "system";
+}
+
+function resolveCopilotSkillName(
+  skills: Array<{ name: string; path?: string }>,
+  request: AgentSkillConfigWriteRequest,
+): string | null {
+  const requestedName = request.name?.trim();
+  if (requestedName) {
+    return requestedName;
+  }
+  const requestedPath = request.path?.trim();
+  if (!requestedPath) {
+    return null;
+  }
+  const match = skills.find((skill) => skill.path?.trim() === requestedPath);
+  return match?.name?.trim() || null;
+}
+
 function previewFromInput(input: AgentSessionInputItem[]): string {
   const text = inputDisplayText(input).trim();
   if (!text) {
@@ -2109,7 +2251,7 @@ function inputDisplayText(input: AgentSessionInputItem[]): string {
         case "localImage":
           return "";
         case "skill":
-          return `$${item.name}`;
+          return copilotSkillInvocation(item.name);
       }
     })
     .filter(Boolean)
@@ -2122,6 +2264,11 @@ function countImageInput(input: AgentSessionInputItem[]): number {
 
 function hasImageInput(input: AgentSessionInputItem[]): boolean {
   return countImageInput(input) > 0;
+}
+
+function copilotSkillInvocation(name: string): string {
+  const trimmed = name.trim();
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
 function inputAttachments(
