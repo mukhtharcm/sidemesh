@@ -89,8 +89,14 @@ describe("Copilot provider", () => {
       assert.equal(log.messages.length, 2);
       assert.equal(log.messages[0]?.text, "hello sdk");
       assert.equal(log.messages[1]?.text, "hello back");
-      assert.equal(log.activities.length, 1);
+      assert.equal(log.activities.length, 2);
       assert.equal(log.activities[0]?.type, "tool");
+      assert.equal(log.activities[0]?.toolAction, "mode_change");
+      assert.equal(log.activities[0]?.toolMode, "autopilot");
+      assert.equal(log.activities[1]?.type, "tool");
+      assert.equal(log.activities[1]?.toolCategory, "filesystem");
+      assert.equal(log.activities[1]?.toolAction, "read");
+      assert.equal(log.activities[1]?.toolTarget, "README.md");
       assert.equal(log.runtime?.model, "gpt-5.2");
       assert.equal(log.runtime?.mode, "autopilot");
 
@@ -752,6 +758,9 @@ describe("Copilot provider", () => {
       assert.equal(log.activities[0]?.type, "tool");
       assert.equal(log.activities[0]?.status, "completed");
       assert.match(log.activities[0]?.output ?? "", /tool output/);
+      assert.equal(log.activities[0]?.toolCategory, "filesystem");
+      assert.equal(log.activities[0]?.toolAction, "read");
+      assert.equal(log.activities[0]?.toolTarget, "README.md");
     } finally {
       await settleProviderWrites();
       await rm(dir, { recursive: true, force: true });
