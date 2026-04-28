@@ -9,6 +9,7 @@ import {
   buildImageGenerationActivityFromRolloutEvent,
   buildWebSearchActivityFromRolloutEvent,
   mergeActivity,
+  normalizeStoredSessionActivity,
 } from "./activity.js";
 
 describe("Codex activity compatibility", () => {
@@ -158,10 +159,11 @@ describe("Codex activity compatibility", () => {
         toolName: "view",
         title: "Read README.md",
         args: { path: "README.md" },
-        toolCategory: "filesystem",
-        toolAction: "read",
-        toolTarget: "README.md",
-        toolTargets: ["README.md"],
+        semantic: {
+          category: "filesystem",
+          action: "read",
+          targets: [{ type: "file", path: "README.md", access: "read" }],
+        },
       },
       { turnId: "turn-1", createdAt: 1000, seq: 3 },
     );
@@ -178,18 +180,106 @@ describe("Codex activity compatibility", () => {
     );
 
     assert.equal(existing?.type, "tool");
-    assert.equal(existing?.toolCategory, "filesystem");
-    assert.equal(existing?.toolAction, "read");
-    assert.equal(existing?.toolTarget, "README.md");
-    assert.deepEqual(existing?.toolTargets, ["README.md"]);
+    assert.equal(existing?.semantic?.category, "filesystem");
+    assert.equal(existing?.semantic?.action, "read");
+    assert.deepEqual(existing?.semantic?.targets, [
+      { type: "file", path: "README.md", access: "read" },
+    ]);
     assert.equal(incoming?.type, "tool");
 
     const merged = mergeActivity(existing, incoming);
     assert.equal(merged.type, "tool");
-    assert.equal(merged.toolCategory, "filesystem");
-    assert.equal(merged.toolAction, "read");
-    assert.equal(merged.toolTarget, "README.md");
-    assert.deepEqual(merged.toolTargets, ["README.md"]);
+    assert.equal(merged.semantic?.category, "filesystem");
+    assert.equal(merged.semantic?.action, "read");
+    assert.deepEqual(merged.semantic?.targets, [
+      { type: "file", path: "README.md", access: "read" },
+    ]);
     assert.equal(merged.output, "README contents");
+  });
+
+  it("normalizes legacy stored tool fields into typed semantic targets", () => {
+    const modeActivity = normalizeStoredSessionActivity({
+      id: "tool-mode",
+      turnId: "turn-1",
+      createdAt: 1000,
+      seq: 1,
+      type: "tool",
+      status: "completed",
+      toolName: "session.mode",
+      title: "Switched mode",
+      args: null,
+      output: null,
+      result: null,
+      isError: false,
+      toolCategory: "session",
+      toolAction: "mode_change",
+      toolTarget: "autopilot",
+      toolTargets: [],
+      toolUrl: null,
+      toolQuery: null,
+      toolMode: "autopilot",
+    } as unknown as Parameters<typeof normalizeStoredSessionActivity>[0]);
+    assert.equal(modeActivity.type, "tool");
+    assert.deepEqual(modeActivity.semantic, {
+      category: "session",
+      action: "mode_change",
+      targets: [{ type: "mode", value: "autopilot" }],
+    });
+
+    const urlActivity = normalizeStoredSessionActivity({
+      id: "tool-url",
+      turnId: "turn-1",
+      createdAt: 1001,
+      seq: 2,
+      type: "tool",
+      status: "completed",
+      toolName: "browse",
+      title: "Fetched page",
+      args: null,
+      output: null,
+      result: null,
+      isError: false,
+      toolCategory: "network",
+      toolAction: "fetch",
+      toolTarget: "https://example.com",
+      toolTargets: [],
+      toolUrl: "https://example.com",
+      toolQuery: null,
+      toolMode: null,
+    } as unknown as Parameters<typeof normalizeStoredSessionActivity>[0]);
+    assert.equal(urlActivity.type, "tool");
+    assert.deepEqual(urlActivity.semantic, {
+      category: "network",
+      action: "fetch",
+      targets: [{ type: "url", url: "https://example.com", role: "target" }],
+    });
+
+    const commandActivity = normalizeStoredSessionActivity({
+      id: "tool-command",
+      turnId: "turn-1",
+      createdAt: 1002,
+      seq: 3,
+      type: "tool",
+      status: "completed",
+      toolName: "run_command",
+      title: "Executed command",
+      args: null,
+      output: null,
+      result: null,
+      isError: false,
+      toolCategory: "command",
+      toolAction: "invoke",
+      toolTarget: "npm test",
+      toolTargets: [],
+      toolUrl: null,
+      toolQuery: null,
+      toolMode: null,
+    } as unknown as Parameters<typeof normalizeStoredSessionActivity>[0]);
+    assert.equal(commandActivity.type, "tool");
+    assert.deepEqual(commandActivity.semantic, {
+      category: "command",
+      action: "invoke",
+      targets: [{ type: "command", command: "npm test" }],
+    });
   });
 });

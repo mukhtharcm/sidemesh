@@ -50,6 +50,7 @@ import {
   type CopilotSdkUserInputRequest,
   type CopilotSdkUserInputResponse,
 } from "./copilot-sdk-client.js";
+import { normalizeStoredSessionActivity } from "./activity.js";
 import type {
   ModelSummary,
   PendingActionElicitationField,
@@ -60,6 +61,8 @@ import type {
   SessionMessage,
   SessionMessageAttachment,
   SessionRuntimeSummary,
+  ToolActivitySemantic,
+  ToolActivitySemanticTarget,
   ToolActivity,
   ThreadRecord,
   TurnRecord,
@@ -988,7 +991,7 @@ export class CopilotAgentProvider
         output: null,
         result: null,
         isError: null,
-        ...inferCopilotToolSemantics(
+        semantic: inferCopilotToolSemantic(
           event.data.toolName,
           event.data.arguments,
           null,
@@ -1042,9 +1045,9 @@ export class CopilotAgentProvider
         output,
         result: event.data.result ?? event.data.error ?? null,
         isError: event.data.success ? false : true,
-        ...mergeCopilotToolSemantics(
+        semantic: mergeCopilotToolSemantic(
           existingTool,
-          inferCopilotToolSemantics(
+          inferCopilotToolSemantic(
             completeData.toolName,
             existingTool?.args ?? completeData.arguments,
             event.data.result ?? event.data.error ?? null,
@@ -1433,7 +1436,10 @@ export class CopilotAgentProvider
           thread: item.thread,
           messages: item.messages ?? [],
           activities: new Map(
-            (item.activities ?? []).map((activity) => [activity.id, activity]),
+            (item.activities ?? []).map((activity) => [
+              activity.id,
+              normalizeStoredSessionActivity(activity),
+            ]),
           ),
           turns: item.turns ?? [],
           runtime: normalizeStoredRuntime(item.runtime ?? null),
@@ -2614,7 +2620,7 @@ function parseSdkSessionEvents(
         output: null,
         result: null,
         isError: null,
-        ...inferCopilotToolSemantics(data.toolName, data.arguments, null),
+        semantic: inferCopilotToolSemantic(data.toolName, data.arguments, null),
       });
       continue;
     }
@@ -2650,9 +2656,9 @@ function parseSdkSessionEvents(
         output,
         result: data.result ?? data.error ?? null,
         isError: data.success === false,
-        ...mergeCopilotToolSemantics(
+        semantic: mergeCopilotToolSemantic(
           existingTool,
-          inferCopilotToolSemantics(
+          inferCopilotToolSemantic(
             data.toolName,
             existingTool?.args ?? data.arguments,
             data.result ?? data.error ?? null,
@@ -2696,17 +2702,6 @@ function extractCopilotToolOutput(result: unknown): string | null {
   return typeof content === "string" ? content : JSON.stringify(result);
 }
 
-type CopilotToolSemanticFields = Pick<
-  ToolActivity,
-  | "toolCategory"
-  | "toolAction"
-  | "toolTarget"
-  | "toolTargets"
-  | "toolUrl"
-  | "toolQuery"
-  | "toolMode"
->;
-
 function copilotModeActivityId(
   event: CopilotSdkSessionEvent,
   fallbackSeq?: number,
@@ -2744,26 +2739,23 @@ function buildCopilotModeChangeActivity(options: {
       mode: options.newMode,
     },
     isError: false,
-    toolCategory: "session",
-    toolAction: "mode_change",
-    toolTarget: options.newMode,
-    toolTargets: [],
-    toolUrl: null,
-    toolQuery: null,
-    toolMode: options.newMode,
+    semantic: {
+      category: "session",
+      action: "mode_change",
+      targets: [{ type: "mode", value: options.newMode }],
+    },
   };
 }
 
-function inferCopilotToolSemantics(
+function inferCopilotToolSemantic(
   toolName: unknown,
   args: unknown,
   result: unknown,
-): CopilotToolSemanticFields {
+): ToolActivitySemantic {
   const normalizedName = copilotToolName(toolName).toLowerCase();
   const typedArgs = asRecord(args);
   const typedResult = asRecord(result);
-  const targets = collectToolTargets(typedArgs, typedResult);
-  const primaryTarget = targets[0] ?? null;
+  const fileTargets = collectFileTargets(typedArgs, typedResult);
   const url = readFirstString(
     typedArgs,
     ["url", "uri", "href", "targetUrl"],
@@ -2788,13 +2780,14 @@ function inferCopilotToolSemantics(
     normalizedName === "read_file"
   ) {
     return {
-      toolCategory: "filesystem",
-      toolAction: "read",
-      toolTarget: primaryTarget,
-      toolTargets: targets,
-      toolUrl: null,
-      toolQuery: null,
-      toolMode: null,
+      category: "filesystem",
+      action: "read",
+      targets: fileTargets.map((path) => ({
+        type: "file",
+        path,
+        access: "read",
+        role: "target",
+      })),
     };
   }
 
@@ -2806,13 +2799,16 @@ function inferCopilotToolSemantics(
     normalizedName === "find"
   ) {
     return {
-      toolCategory: "filesystem",
-      toolAction: "list",
-      toolTarget: primaryTarget,
-      toolTargets: targets,
-      toolUrl: null,
-      toolQuery: query,
-      toolMode: null,
+      category: "filesystem",
+      action: "list",
+      targets: [
+        ...fileTargets.map((path) => ({
+          type: "file" as const,
+          path,
+          role: "target" as const,
+        })),
+        ...(query ? [{ type: "query" as const, value: query }] : []),
+      ],
     };
   }
 
@@ -2823,13 +2819,16 @@ function inferCopilotToolSemantics(
     normalizedName === "find_in_files"
   ) {
     return {
-      toolCategory: "filesystem",
-      toolAction: "search",
-      toolTarget: primaryTarget,
-      toolTargets: targets,
-      toolUrl: null,
-      toolQuery: query,
-      toolMode: null,
+      category: "filesystem",
+      action: "search",
+      targets: [
+        ...(query ? [{ type: "query" as const, value: query }] : []),
+        ...fileTargets.map((path) => ({
+          type: "file" as const,
+          path,
+          role: "target" as const,
+        })),
+      ],
     };
   }
 
@@ -2844,13 +2843,14 @@ function inferCopilotToolSemantics(
     normalizedName === "apply_patch"
   ) {
     return {
-      toolCategory: "filesystem",
-      toolAction: "write",
-      toolTarget: primaryTarget,
-      toolTargets: targets,
-      toolUrl: null,
-      toolQuery: null,
-      toolMode: null,
+      category: "filesystem",
+      action: "write",
+      targets: fileTargets.map((path) => ({
+        type: "file",
+        path,
+        access: "write",
+        role: "target",
+      })),
     };
   }
 
@@ -2862,25 +2862,20 @@ function inferCopilotToolSemantics(
     normalizedName === "browse"
   ) {
     return {
-      toolCategory: "network",
-      toolAction: "fetch",
-      toolTarget: url ?? primaryTarget,
-      toolTargets: targets,
-      toolUrl: url,
-      toolQuery: null,
-      toolMode: null,
+      category: "network",
+      action: "fetch",
+      targets: url ? [{ type: "url", url, role: "target" }] : [],
     };
   }
 
   if (normalizedName === "web_search" || normalizedName === "search_web") {
     return {
-      toolCategory: "network",
-      toolAction: "search",
-      toolTarget: query ?? primaryTarget,
-      toolTargets: targets,
-      toolUrl: url,
-      toolQuery: query,
-      toolMode: null,
+      category: "network",
+      action: "search",
+      targets: [
+        ...(query ? [{ type: "query" as const, value: query }] : []),
+        ...(url ? [{ type: "url" as const, url, role: "target" as const }] : []),
+      ],
     };
   }
 
@@ -2893,52 +2888,45 @@ function inferCopilotToolSemantics(
     normalizedName === "command"
   ) {
     return {
-      toolCategory: "command",
-      toolAction: "invoke",
-      toolTarget: command ?? primaryTarget,
-      toolTargets: targets,
-      toolUrl: null,
-      toolQuery: null,
-      toolMode: null,
+      category: "command",
+      action: "invoke",
+      targets: command ? [{ type: "command", command }] : [],
     };
   }
 
   return {
-    toolCategory: "unknown",
-    toolAction: "invoke",
-    toolTarget: primaryTarget,
-    toolTargets: targets,
-    toolUrl: url,
-    toolQuery: query,
-    toolMode: null,
+    category: "unknown",
+    action: "invoke",
+    targets: [
+      ...(query ? [{ type: "query" as const, value: query }] : []),
+      ...(url ? [{ type: "url" as const, url, role: "target" as const }] : []),
+      ...fileTargets.map((path) => ({
+        type: "file" as const,
+        path,
+        role: "target" as const,
+      })),
+    ],
   };
 }
 
-function mergeCopilotToolSemantics(
+function mergeCopilotToolSemantic(
   existing: ToolActivity | null,
-  inferred: CopilotToolSemanticFields,
-): CopilotToolSemanticFields {
+  inferred: ToolActivitySemantic,
+): ToolActivitySemantic {
   const inferredCategory =
-    inferred.toolCategory === "unknown" && existing?.toolCategory
-      ? existing.toolCategory
-      : inferred.toolCategory;
+    inferred.category === "unknown" && existing?.semantic
+      ? existing.semantic.category
+      : inferred.category;
   const inferredAction =
-    inferred.toolCategory === "unknown" &&
-    inferred.toolAction === "invoke" &&
-    existing?.toolAction
-      ? existing.toolAction
-      : inferred.toolAction;
+    inferred.category === "unknown" &&
+    inferred.action === "invoke" &&
+    existing?.semantic
+      ? existing.semantic.action
+      : inferred.action;
   return {
-    toolCategory: inferredCategory ?? existing?.toolCategory ?? null,
-    toolAction: inferredAction ?? existing?.toolAction ?? null,
-    toolTarget: inferred.toolTarget ?? existing?.toolTarget ?? null,
-    toolTargets:
-      inferred.toolTargets.length > 0
-        ? inferred.toolTargets
-        : existing?.toolTargets ?? [],
-    toolUrl: inferred.toolUrl ?? existing?.toolUrl ?? null,
-    toolQuery: inferred.toolQuery ?? existing?.toolQuery ?? null,
-    toolMode: inferred.toolMode ?? existing?.toolMode ?? null,
+    category: inferredCategory,
+    action: inferredAction,
+    targets: mergeSemanticTargets(existing?.semantic?.targets ?? [], inferred.targets),
   };
 }
 
@@ -2960,7 +2948,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function collectToolTargets(
+function collectFileTargets(
   args: Record<string, unknown> | null,
   result: Record<string, unknown> | null,
 ): string[] {
@@ -3014,6 +3002,71 @@ function readFirstString(
     }
   }
   return null;
+}
+
+function mergeSemanticTargets(
+  existing: ToolActivitySemanticTarget[],
+  incoming: ToolActivitySemanticTarget[],
+): ToolActivitySemanticTarget[] {
+  if (incoming.length === 0) {
+    return existing;
+  }
+  const merged = new Map<string, ToolActivitySemanticTarget>();
+  for (const target of existing) {
+    merged.set(semanticTargetKey(target), target);
+  }
+  for (const target of incoming) {
+    const key = semanticTargetKey(target);
+    merged.set(key, mergeSemanticTarget(merged.get(key), target));
+  }
+  return [...merged.values()];
+}
+
+function mergeSemanticTarget(
+  existing: ToolActivitySemanticTarget | undefined,
+  incoming: ToolActivitySemanticTarget,
+): ToolActivitySemanticTarget {
+  if (!existing || existing.type !== incoming.type) {
+    return incoming;
+  }
+  switch (incoming.type) {
+    case "file":
+      if (existing.type !== "file") {
+        return incoming;
+      }
+      return {
+        ...incoming,
+        access: incoming.access ?? existing.access,
+        role: incoming.role ?? existing.role,
+      };
+    case "url":
+      if (existing.type !== "url") {
+        return incoming;
+      }
+      return {
+        ...incoming,
+        role: incoming.role ?? existing.role,
+      };
+    default:
+      return incoming;
+  }
+}
+
+function semanticTargetKey(target: ToolActivitySemanticTarget): string {
+  switch (target.type) {
+    case "file":
+      return `file:${target.path}`;
+    case "url":
+      return `url:${target.url}`;
+    case "query":
+      return `query:${target.value}`;
+    case "mode":
+      return `mode:${target.value}`;
+    case "command":
+      return `command:${target.command}`;
+    case "unknown":
+      return `unknown:${target.label}`;
+  }
 }
 
 function secondsFromDate(
