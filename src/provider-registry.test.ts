@@ -18,6 +18,7 @@ import {
   createAgentProviderFromConfig,
   isAgentProviderKind,
   listAgentProviderDefinitionSummaries,
+  listSetupAgentProviderDefinitionSummaries,
   loadAgentProviderConfig,
   summarizeAgentProviderConfig,
   supportedAgentProviderKinds,
@@ -53,6 +54,7 @@ describe("provider registry", () => {
           "never",
         ],
         capabilities: CODEX_PROVIDER_CAPABILITIES,
+        setupAudience: "public",
       },
       {
         kind: "fake",
@@ -71,6 +73,7 @@ describe("provider registry", () => {
           "never",
         ],
         capabilities: FAKE_PROVIDER_CAPABILITIES,
+        setupAudience: "dev",
       },
       {
         kind: "copilot",
@@ -88,8 +91,28 @@ describe("provider registry", () => {
         ],
         supportedApprovalPolicies: ["on-request", "never"],
         capabilities: COPILOT_PROVIDER_CAPABILITIES,
+        setupAudience: "public",
       },
     ]);
+  });
+
+  it("hides dev-only providers from the normal setup wizard", () => {
+    assert.deepEqual(
+      listSetupAgentProviderDefinitionSummaries().map((summary) => summary.kind),
+      ["codex", "copilot"],
+    );
+    assert.deepEqual(
+      listSetupAgentProviderDefinitionSummaries({
+        includeKinds: ["fake"],
+      }).map((summary) => summary.kind),
+      ["codex", "fake", "copilot"],
+    );
+    assert.deepEqual(
+      listSetupAgentProviderDefinitionSummaries({
+        includeDev: true,
+      }).map((summary) => summary.kind),
+      ["codex", "fake", "copilot"],
+    );
   });
 
   it("loads Codex command overrides in provider-specific priority order", () => {
