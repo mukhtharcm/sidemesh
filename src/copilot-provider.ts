@@ -434,12 +434,18 @@ export class CopilotAgentProvider
       this.allowAll,
     );
 
-    if (this.activeTurns.has(session.thread.id)) {
-      // Copilot's non-interactive prompt mode cannot accept steering input
-      // mid-turn, so acknowledge the steer without adding unprocessed history.
+    const active = this.activeTurns.get(session.thread.id);
+    if (active) {
+      await active.sdkSession.send({
+        prompt: inputPromptText(request.input),
+        attachments: await sdkAttachments(request.input),
+        mode: "immediate",
+      });
+      this.appendUserMessage(session, request.input);
+      await this.persistSoon();
       return {
         mode: "steer",
-        turnId: this.activeTurns.get(session.thread.id)?.turnId ?? null,
+        turnId: active.turnId,
       };
     }
 
