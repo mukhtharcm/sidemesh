@@ -157,6 +157,113 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("lists and toggles Copilot skills through SDK discovery", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-skills-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient({
+        skills: [
+          {
+            name: "frontend-design",
+            description: "Responsive UI patterns.",
+            source: "project",
+            enabled: true,
+            userInvocable: true,
+            path: nodePath.join(dir, ".github/skills/frontend-design/SKILL.md"),
+            projectPath: dir,
+          },
+          {
+            name: "release-checks",
+            description: "Pre-release validation steps.",
+            source: "personal-copilot",
+            enabled: false,
+            userInvocable: true,
+            path: nodePath.join(process.env.HOME ?? dir, ".copilot/skills/release-checks/SKILL.md"),
+          },
+        ],
+      });
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const catalog = await provider.listSkills!({ cwd: dir, forceReload: false });
+      assert.deepEqual(
+        catalog.skills.map((skill) => ({
+          name: skill.name,
+          scope: skill.scope,
+          enabled: skill.enabled,
+        })),
+        [
+          { name: "frontend-design", scope: "repo", enabled: true },
+          { name: "release-checks", scope: "user", enabled: false },
+        ],
+      );
+
+      const liveEvents: string[] = [];
+      provider.on("liveEvent", (event) => {
+        if (event.type === "skills_changed") {
+          liveEvents.push(event.type);
+        }
+      });
+
+      await provider.writeSkillConfig!({
+        name: "release-checks",
+        path: null,
+        enabled: true,
+      });
+      assert.deepEqual([...sdk.disabledSkills], []);
+      assert.deepEqual(liveEvents, ["skills_changed"]);
+
+      await provider.writeSkillConfig!({
+        name: null,
+        path: nodePath.join(dir, ".github/skills/frontend-design/SKILL.md"),
+        enabled: false,
+      });
+      assert.deepEqual([...sdk.disabledSkills], ["frontend-design"]);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("formats Copilot skill inputs as slash invocations", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-skill-input-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [
+          { type: "text", text: "Use this skill", text_elements: [] },
+          { type: "skill", name: "frontend-design", path: "/tmp/skill/SKILL.md" },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      assert.equal(
+        sdk.created[0]?.session.sent[0]?.prompt,
+        "Use this skill\n/frontend-design",
+      );
+      const log = await provider.readSessionLog!(created.thread);
+      assert.equal(log.messages[0]?.text, "Use this skill\n/frontend-design");
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("sends inline and local image attachments through the SDK", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-image-input-"),
@@ -596,9 +703,19 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
     config: CopilotSdkResumeSessionConfig;
     session: FakeCopilotSdkSession;
   }> = [];
+  public readonly disabledSkills = new Set<string>();
   private readonly sessions = new Map<string, FakeCopilotSdkSession>();
   private readonly models: CopilotSdkModelInfo[];
   private readonly createSessionError: Error | null;
+  private readonly discoveredSkills: Array<{
+    name: string;
+    description: string;
+    source: string;
+    enabled: boolean;
+    userInvocable: boolean;
+    path?: string;
+    projectPath?: string;
+  }>;
   private readonly sessionMetadata = new Map<string, CopilotSdkSessionMetadata>();
   private readonly sessionEvents = new Map<string, CopilotSdkSessionEvent[]>();
 
@@ -606,6 +723,15 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
     options: {
       models?: CopilotSdkModelInfo[];
       createSessionError?: Error;
+      skills?: Array<{
+        name: string;
+        description: string;
+        source: string;
+        enabled: boolean;
+        userInvocable: boolean;
+        path?: string;
+        projectPath?: string;
+      }>;
       sessions?: Array<{
         metadata: CopilotSdkSessionMetadata;
         events: CopilotSdkSessionEvent[];
@@ -614,11 +740,67 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
   ) {
     this.models = options.models ?? [];
     this.createSessionError = options.createSessionError ?? null;
+    this.discoveredSkills = options.skills ?? [];
+    for (const skill of this.discoveredSkills) {
+      if (skill.enabled === false) {
+        this.disabledSkills.add(skill.name);
+      }
+    }
     for (const session of options.sessions ?? []) {
       this.sessionMetadata.set(session.metadata.sessionId, session.metadata);
       this.sessionEvents.set(session.metadata.sessionId, session.events);
     }
   }
+
+  public readonly rpc = {
+    skills: {
+      config: {
+        setDisabledSkills: async ({
+          disabledSkills,
+        }: {
+          disabledSkills: string[];
+        }): Promise<void> => {
+          this.disabledSkills.clear();
+          for (const skill of disabledSkills) {
+            this.disabledSkills.add(skill);
+          }
+        },
+      },
+      discover: async ({
+        projectPaths,
+      }: {
+        projectPaths?: string[];
+        skillDirectories?: string[];
+      }): Promise<{
+        skills: Array<{
+          name: string;
+          description: string;
+          source: string;
+          enabled: boolean;
+          userInvocable: boolean;
+          path?: string;
+          projectPath?: string;
+        }>;
+      }> => {
+        const projectFilter = new Set(projectPaths ?? []);
+        return {
+          skills: this.discoveredSkills
+            .filter((skill) => {
+              if (projectFilter.size === 0) {
+                return true;
+              }
+              return (
+                !skill.projectPath || projectFilter.has(skill.projectPath)
+              );
+            })
+            .map((skill) => ({
+              ...skill,
+              enabled: !this.disabledSkills.has(skill.name),
+            })),
+        };
+      },
+    },
+  };
 
   public async start(): Promise<void> {
     /* fake */
@@ -649,6 +831,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
       throw this.createSessionError;
     }
     const session = new FakeCopilotSdkSession(
+      this,
       config.sessionId ?? `sdk-session-${this.created.length + 1}`,
       config,
       false,
@@ -671,6 +854,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
     config: CopilotSdkResumeSessionConfig,
   ): Promise<CopilotSdkSession> {
     const session = new FakeCopilotSdkSession(
+      this,
       sessionId,
       config,
       true,
@@ -684,13 +868,50 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
 
 class FakeCopilotSdkSession implements CopilotSdkSession {
   public readonly sent: CopilotSdkMessageOptions[] = [];
+  public readonly rpc = {
+    skills: {
+      list: async (): Promise<{
+        skills: Array<{
+          name: string;
+          description: string;
+          source: string;
+          enabled: boolean;
+          userInvocable: boolean;
+          path?: string;
+        }>;
+      }> => {
+        const discovered = await this.client.rpc.skills.discover({});
+        return {
+          skills: discovered.skills.map((skill) => ({
+            name: skill.name,
+            description: skill.description,
+            source: skill.source,
+            enabled: skill.enabled,
+            userInvocable: skill.userInvocable,
+            path: skill.path,
+          })),
+        };
+      },
+      enable: async ({ name }: { name: string }): Promise<void> => {
+        this.client.disabledSkills.delete(name);
+      },
+      disable: async ({ name }: { name: string }): Promise<void> => {
+        this.client.disabledSkills.add(name);
+      },
+      reload: async (): Promise<void> => {
+        this.skillReloadCount += 1;
+      },
+    },
+  };
   public readonly selectedModels: Array<{
     model: string;
     reasoningEffort: string | undefined;
   }> = [];
   public aborted = false;
+  public skillReloadCount = 0;
 
   public constructor(
+    private readonly client: FakeCopilotSdkClient,
     public readonly sessionId: string,
     private readonly config:
       | CopilotSdkSessionConfig

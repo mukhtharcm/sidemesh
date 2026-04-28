@@ -24,6 +24,30 @@ export type CopilotSdkResumeSessionConfig = ResumeSessionConfig;
 export type CopilotSdkSessionEvent = SessionEvent;
 export type CopilotSdkSessionListFilter = SessionListFilter;
 export type CopilotSdkSessionMetadata = SessionMetadata;
+export interface CopilotSdkServerSkill {
+  name: string;
+  description: string;
+  source: string;
+  userInvocable: boolean;
+  enabled: boolean;
+  path?: string;
+  projectPath?: string;
+}
+
+export interface CopilotSdkSkillListResult {
+  skills: Array<{
+    name: string;
+    description: string;
+    source: string;
+    userInvocable: boolean;
+    enabled: boolean;
+    path?: string;
+  }>;
+}
+
+export interface CopilotSdkServerSkillListResult {
+  skills: CopilotSdkServerSkill[];
+}
 
 export interface CopilotSdkSession {
   readonly sessionId: string;
@@ -38,6 +62,14 @@ export interface CopilotSdkSession {
       modelCapabilities?: unknown;
     },
   ): Promise<void>;
+  readonly rpc?: {
+    skills: {
+      list(): Promise<CopilotSdkSkillListResult>;
+      enable(params: { name: string }): Promise<void>;
+      disable(params: { name: string }): Promise<void>;
+      reload(): Promise<void>;
+    };
+  };
 }
 
 export interface CopilotSdkClient {
@@ -52,6 +84,17 @@ export interface CopilotSdkClient {
   getSessionMetadata?(
     sessionId: string,
   ): Promise<CopilotSdkSessionMetadata | undefined>;
+  readonly rpc?: {
+    skills: {
+      config: {
+        setDisabledSkills(params: { disabledSkills: string[] }): Promise<void>;
+      };
+      discover(params: {
+        projectPaths?: string[];
+        skillDirectories?: string[];
+      }): Promise<CopilotSdkServerSkillListResult>;
+    };
+  };
   createSession(config: CopilotSdkSessionConfig): Promise<CopilotSdkSession>;
   resumeSession(
     sessionId: string,
