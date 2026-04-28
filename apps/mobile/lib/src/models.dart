@@ -359,6 +359,7 @@ class SessionRuntimeSummary {
   const SessionRuntimeSummary({
     this.model,
     this.modelProvider,
+    this.mode,
     this.serviceTier,
     this.reasoningEffort,
     this.approvalPolicy,
@@ -371,6 +372,7 @@ class SessionRuntimeSummary {
 
   final String? model;
   final String? modelProvider;
+  final String? mode;
   final String? serviceTier;
   final String? reasoningEffort;
   final String? approvalPolicy;
@@ -384,6 +386,7 @@ class SessionRuntimeSummary {
       SessionRuntimeSummary(
         model: json['model'] as String?,
         modelProvider: json['modelProvider'] as String?,
+        mode: json['mode'] as String?,
         serviceTier: json['serviceTier'] as String?,
         reasoningEffort: json['reasoningEffort'] as String?,
         approvalPolicy: json['approvalPolicy'] as String?,
@@ -399,6 +402,7 @@ class SessionRuntimeSummary {
   Map<String, dynamic> toJson() => {
     'model': model,
     'modelProvider': modelProvider,
+    'mode': mode,
     'serviceTier': serviceTier,
     'reasoningEffort': reasoningEffort,
     'approvalPolicy': approvalPolicy,
@@ -407,6 +411,17 @@ class SessionRuntimeSummary {
     'summaryMode': summaryMode,
     'personality': personality,
     'updatedAt': updatedAt?.millisecondsSinceEpoch,
+  };
+}
+
+const List<String> kSessionModes = <String>['interactive', 'plan', 'autopilot'];
+
+String sessionModeLabel(String value) {
+  return switch (value) {
+    'interactive' => 'Interactive',
+    'plan' => 'Plan',
+    'autopilot' => 'Autopilot',
+    _ => value,
   };
 }
 

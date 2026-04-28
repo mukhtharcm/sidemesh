@@ -7,9 +7,15 @@ import 'models.dart';
 
 @immutable
 class SessionTurnConfig {
-  const SessionTurnConfig({this.model, this.reasoningEffort, this.fastMode});
+  const SessionTurnConfig({
+    this.model,
+    this.mode,
+    this.reasoningEffort,
+    this.fastMode,
+  });
 
   final String? model;
+  final String? mode;
   final String? reasoningEffort;
 
   /// `true` requests Fast mode, `false` clears it, `null` leaves the current
@@ -18,16 +24,19 @@ class SessionTurnConfig {
 
   bool get isEmpty =>
       (model == null || model!.trim().isEmpty) &&
+      (mode == null || mode!.trim().isEmpty) &&
       (reasoningEffort == null || reasoningEffort!.trim().isEmpty) &&
       fastMode == null;
 
   SessionTurnConfig copyWith({
     Object? model = _sentinel,
+    Object? mode = _sentinel,
     Object? reasoningEffort = _sentinel,
     Object? fastMode = _sentinel,
   }) {
     return SessionTurnConfig(
       model: identical(model, _sentinel) ? this.model : model as String?,
+      mode: identical(mode, _sentinel) ? this.mode : mode as String?,
       reasoningEffort: identical(reasoningEffort, _sentinel)
           ? this.reasoningEffort
           : reasoningEffort as String?,
@@ -39,6 +48,7 @@ class SessionTurnConfig {
 
   Map<String, Object?> toJson() => {
     if ((model ?? '').trim().isNotEmpty) 'model': model,
+    if ((mode ?? '').trim().isNotEmpty) 'mode': mode,
     if ((reasoningEffort ?? '').trim().isNotEmpty)
       'reasoningEffort': reasoningEffort,
     if (fastMode != null) 'fastMode': fastMode,
@@ -47,6 +57,7 @@ class SessionTurnConfig {
   factory SessionTurnConfig.fromJson(Map<String, dynamic> json) =>
       SessionTurnConfig(
         model: json['model'] as String?,
+        mode: json['mode'] as String?,
         reasoningEffort: json['reasoningEffort'] as String?,
         fastMode: json['fastMode'] as bool?,
       );
