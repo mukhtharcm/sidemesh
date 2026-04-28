@@ -179,7 +179,8 @@ describe("provider registry", () => {
     assert.equal(provider.kind, "copilot");
     assert.equal(provider.displayName, "GitHub Copilot");
     assert.equal(provider.capabilities.input.text, true);
-    assert.equal(provider.capabilities.input.localImage, false);
+    assert.equal(provider.capabilities.input.imageUrl, true);
+    assert.equal(provider.capabilities.input.localImage, true);
     assert.equal(provider.capabilities.configuration.models, true);
     assert.equal(provider.capabilities.runtimeControls.model, true);
   });

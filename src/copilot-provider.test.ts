@@ -157,6 +157,107 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("sends inline and local image attachments through the SDK", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-image-input-"),
+    );
+    try {
+      const localImagePath = nodePath.join(dir, "screenshot.png");
+      await writeFile(localImagePath, "fake image");
+
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [
+          { type: "text", text: "describe this", text_elements: [] },
+          { type: "image", url: "data:image/png;base64,ZmFrZQ==" },
+          { type: "localImage", path: localImagePath },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      assert.equal(sdk.created[0]?.session.sent[0]?.prompt, "describe this");
+      assert.deepEqual(sdk.created[0]?.session.sent[0]?.attachments, [
+        {
+          type: "blob",
+          data: "ZmFrZQ==",
+          mimeType: "image/png",
+          displayName: "pasted-image.png",
+        },
+        {
+          type: "file",
+          path: localImagePath,
+          displayName: "screenshot.png",
+        },
+      ]);
+
+      const log = await provider.readSessionLog!(created.thread);
+      assert.equal(log.messages[0]?.text, "describe this");
+      assert.deepEqual(log.messages[0]?.attachments, [
+        { type: "image", url: "data:image/png;base64,ZmFrZQ==" },
+        { type: "localImage", path: localImagePath },
+      ]);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fetches remote image URLs into SDK blob attachments", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-remote-image-"),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request) => {
+      assert.equal(String(input), "https://example.com/cat.png");
+      return new Response(Uint8Array.from([1, 2, 3]), {
+        status: 200,
+        headers: { "content-type": "image/png; charset=binary" },
+      });
+    };
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [{ type: "image", url: "https://example.com/cat.png" }],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      assert.equal(
+        sdk.created[0]?.session.sent[0]?.prompt,
+        "Please inspect the attached image.",
+      );
+      assert.deepEqual(sdk.created[0]?.session.sent[0]?.attachments, [
+        {
+          type: "blob",
+          data: "AQID",
+          mimeType: "image/png",
+          displayName: "cat.png",
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("lists SDK model metadata and filters disabled models", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-model-test-"),
