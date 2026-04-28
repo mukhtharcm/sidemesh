@@ -41,6 +41,7 @@ export interface AgentProviderConfigSummary {
 
 export interface HostCapabilities {
   workspace: {
+    filesystem: boolean;
     gitStatus: boolean;
     gitDiff: boolean;
   };

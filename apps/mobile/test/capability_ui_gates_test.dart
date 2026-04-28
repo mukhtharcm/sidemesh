@@ -46,7 +46,7 @@ void main() {
     await tester.tap(find.byTooltip('Session actions'));
     await _pumpFrames(tester);
 
-    expect(find.text('Browse files'), findsNothing);
+    expect(find.text('Browse files'), findsOneWidget);
     expect(find.text('Rename'), findsNothing);
     expect(find.text('Archive'), findsNothing);
 
@@ -334,7 +334,7 @@ NodeInfo _nodeForCapabilities(
   'providerConfig': {'kind': 'fake', 'command': 'builtin'},
   'providerCapabilities': capabilities,
   'hostCapabilities': {
-    'workspace': {'gitStatus': false, 'gitDiff': false},
+    'workspace': {'filesystem': true, 'gitStatus': false, 'gitDiff': false},
   },
   'supportedProviders': supportedProviders
       .map(

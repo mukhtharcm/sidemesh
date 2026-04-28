@@ -85,6 +85,7 @@ const RECENT_SESSIONS_CACHE_TTL_MS = 1_500;
 const RECENT_SESSION_RUNTIME_CONCURRENCY = 4;
 const HOST_CAPABILITIES: HostCapabilities = {
   workspace: {
+    filesystem: true,
     gitStatus: true,
     gitDiff: true,
   },
@@ -260,7 +261,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
     sendEvent(socket, { type: "snapshot", sessions });
   }
 
-  async function loadRecentSessions(limitOverride: number | null = null): Promise<SessionSummary[]> {
+  async function loadRecentSessions(
+    limitOverride: number | null = null,
+  ): Promise<SessionSummary[]> {
     const limit = normalizedSessionListLimit(limitOverride);
     const now = Date.now();
     const cached = recentSessionsCache;
@@ -350,12 +353,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     process.stderr.write(line);
   });
 
-  const fsWatchRegistries = new Map(
-    providerRuntime.providers.map((entry) => [
-      entry.kind,
-      new FsWatchRegistry(entry.provider),
-    ]),
-  );
+  const fsWatchRegistry = new FsWatchRegistry();
 
   async function listSessionsForProvider(
     kind: string | null | undefined,
@@ -512,18 +510,6 @@ export async function startServer(config: NodeConfig): Promise<void> {
   });
 
   for (const entry of providerRuntime.providers) {
-    entry.provider.on("liveEvent", (event) => {
-      if (event.type !== "fs_changed") {
-        return;
-      }
-      fsWatchRegistries.get(entry.kind)?.deliver({
-        watchId: event.watchId,
-        changedPaths: event.changedPaths,
-      });
-    });
-  }
-
-  for (const entry of providerRuntime.providers) {
     providerVersions.set(
       entry.kind,
       await entry.provider.getVersion().catch(() => "unknown"),
@@ -563,7 +549,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
       platform: platform(),
       codexVersion: providerVersion,
       provider: config.defaultProviderKind,
-      providerName: supportedProviders.find((item) => item.isDefault)?.displayName ?? provider.displayName,
+      providerName:
+        supportedProviders.find((item) => item.isDefault)?.displayName ??
+        provider.displayName,
       providerVersion,
       providerConfig: summarizeProviderConfig(config.provider),
       providerCapabilities: provider.capabilities,
@@ -628,14 +616,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
   );
 
   registerFsRoutes(app, {
-    defaultProvider: providerEntriesByKind.get(config.defaultProviderKind)?.provider ?? provider,
-    providerForKind: (kind) => {
-      const selected = providerEntryForKind(kind);
-      return selected
-        ? { kind: selected.kind, provider: selected.provider }
-        : null;
-    },
-    listSessionsForProvider,
+    listSessions: () => listSessions(provider, runtimeCache),
   });
 
   app.get(
@@ -1548,30 +1529,15 @@ export async function startServer(config: NodeConfig): Promise<void> {
     }
 
     if (pathOnly === "/api/fs/live") {
-      const query = new URLSearchParams(queryString || "");
-      const agentProvider = query.get("agentProvider");
-      const selectedProvider = providerEntryForKind(agentProvider);
-      if (
-        !selectedProvider ||
-        !selectedProvider.provider.capabilities.workspace.filesystem
-      ) {
-        socket.destroy();
-        return;
-      }
       wsServer.handleUpgrade(request, socket, head, (ws) => {
         try {
           ws.send(JSON.stringify({ type: "hello" }));
         } catch {
           /* noop */
         }
-        attachFsLiveSocket(
-          ws,
-          fsWatchRegistries.get(selectedProvider.kind)!,
-          {
-            provider: selectedProvider.provider,
-            listSessions: () => listSessionsForProvider(selectedProvider.kind),
-          },
-        );
+        attachFsLiveSocket(ws, fsWatchRegistry, {
+          listSessions: () => listSessions(provider, runtimeCache),
+        });
       });
       return;
     }
