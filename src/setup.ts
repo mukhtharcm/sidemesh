@@ -204,6 +204,7 @@ async function promptCopilotProvider(
     message: "Default Copilot model (leave blank for auto)",
     defaultValue:
       current?.kind === "copilot" ? (current.configuredModel ?? "") : "",
+    fallbackToDefaultOnEmpty: false,
   });
   return {
     kind: "copilot",
@@ -241,6 +242,7 @@ async function promptFakeProvider(
     message: "Fake workspace root (optional)",
     defaultValue:
       current?.kind === "fake" ? (current.workspaceRoot ?? "") : "",
+    fallbackToDefaultOnEmpty: false,
   });
   const latency = await promptText({
     message: "Fake latency in milliseconds",
@@ -272,11 +274,32 @@ async function promptFakeProvider(
 async function promptText(options: {
   message: string;
   defaultValue?: string;
+  fallbackToDefaultOnEmpty?: boolean;
   validate?: (value: string) => string | Error | undefined;
 }): Promise<string> {
   const value = await text(options);
   if (isCancel(value)) {
     throw new Error("Setup cancelled.");
   }
-  return String(value);
+  return normalizePromptTextValue(String(value), {
+    defaultValue: options.defaultValue,
+    fallbackToDefaultOnEmpty: options.fallbackToDefaultOnEmpty,
+  });
+}
+
+export function normalizePromptTextValue(
+  value: string,
+  options: {
+    defaultValue?: string;
+    fallbackToDefaultOnEmpty?: boolean;
+  } = {},
+): string {
+  const shouldFallback =
+    options.fallbackToDefaultOnEmpty !== false &&
+    options.defaultValue !== undefined &&
+    value.trim() === "";
+  if (shouldFallback) {
+    return options.defaultValue!;
+  }
+  return value;
 }
