@@ -767,6 +767,54 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("uses SDK immediate mode for active-turn steering", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-steer-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient({ holdResponses: true });
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "initial task", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await waitFor(() => sdk.created[0]?.session.sent.length === 1);
+
+      const steer = await provider.submitInput({
+        sessionId: created.thread.id,
+        input: [{ type: "text", text: "course correct", text_elements: [] }],
+        activeTurnId: created.activeTurnId,
+        overrides: emptyOverrides(),
+      });
+
+      assert.equal(steer.mode, "steer");
+      assert.equal(steer.turnId, created.activeTurnId);
+      assert.equal(sdk.created[0]?.session.sent.length, 2);
+      assert.equal(sdk.created[0]?.session.sent[1]?.mode, "immediate");
+      assert.equal(
+        sdk.created[0]?.session.sent[1]?.prompt,
+        "course correct",
+      );
+
+      const completed = waitForTurnCompleted(provider);
+      sdk.flushHeldResponses();
+      await completed;
+
+      const log = await provider.readSessionLog!(created.thread);
+      assert.equal(log.messages[0]?.text, "initial task");
+      assert.equal(log.messages[1]?.text, "course correct");
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not send reasoning effort when Copilot auto model is selected", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-auto-test-"),
@@ -942,6 +990,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
     options: {
       models?: CopilotSdkModelInfo[];
       createSessionError?: Error;
+      holdResponses?: boolean;
       skills?: Array<{
         name: string;
         description: string;
@@ -959,6 +1008,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
   ) {
     this.models = options.models ?? [];
     this.createSessionError = options.createSessionError ?? null;
+    this.holdResponses = options.holdResponses === true;
     this.discoveredSkills = options.skills ?? [];
     for (const skill of this.discoveredSkills) {
       if (skill.enabled === false) {
@@ -970,6 +1020,8 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
       this.sessionEvents.set(session.metadata.sessionId, session.events);
     }
   }
+
+  private readonly holdResponses: boolean;
 
   public readonly rpc = {
     skills: {
@@ -1056,6 +1108,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
       config,
       false,
       [],
+      this.holdResponses,
     );
     this.sessionMetadata.set(session.sessionId, {
       sessionId: session.sessionId,
@@ -1079,10 +1132,17 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
       config,
       true,
       this.sessionEvents.get(sessionId) ?? [],
+      this.holdResponses,
     );
     this.resumed.push({ sessionId, config, session });
     this.sessions.set(sessionId, session);
     return session;
+  }
+
+  public flushHeldResponses(): void {
+    for (const session of this.sessions.values()) {
+      session.flushHeldResponses();
+    }
   }
 }
 
@@ -1142,6 +1202,8 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
   public aborted = false;
   public skillReloadCount = 0;
   private currentMode: CopilotSdkSessionMode = "interactive";
+  private readonly holdResponses: boolean;
+  private readonly heldResponses: Array<() => void> = [];
 
   public constructor(
     private readonly client: FakeCopilotSdkClient,
@@ -1151,7 +1213,10 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
       | CopilotSdkResumeSessionConfig,
     private readonly resumed: boolean,
     private readonly historyEvents: CopilotSdkSessionEvent[],
-  ) {}
+    holdResponses = false,
+  ) {
+    this.holdResponses = holdResponses;
+  }
 
   public async getMessages(): Promise<CopilotSdkSessionEvent[]> {
     return this.historyEvents;
@@ -1159,6 +1224,7 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
 
   public async send(options: CopilotSdkMessageOptions): Promise<string> {
     this.sent.push(options);
+    const sendIndex = this.sent.length;
     let userInputResult:
       | {
           answer: string;
@@ -1193,7 +1259,7 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
             message: "Permission rejected",
           }),
         );
-        return `message-${this.sent.length}`;
+        return `message-${sendIndex}`;
       }
     }
     if (options.prompt.includes("ask user")) {
@@ -1234,11 +1300,11 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
       });
     }
 
-    queueMicrotask(() => {
+    const emitResponse = () => {
       if (this.aborted) {
         return;
       }
-      const messageId = `assistant-${this.sent.length}`;
+      const messageId = `assistant-${sendIndex}`;
       if (options.prompt.includes("tool")) {
         this.emit(
           event("tool.execution_start", {
@@ -1288,8 +1354,13 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
       );
       this.emit(event("assistant.turn_end", { turnId: "sdk-turn-1" }));
       this.emit(event("session.idle", {}));
-    });
-    return `message-${this.sent.length}`;
+    };
+    if (this.holdResponses) {
+      this.heldResponses.push(emitResponse);
+    } else {
+      queueMicrotask(emitResponse);
+    }
+    return `message-${sendIndex}`;
   }
 
   public async abort(): Promise<void> {
@@ -1308,6 +1379,13 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
 
   private emit(event: CopilotSdkSessionEvent): void {
     this.config.onEvent?.(event);
+  }
+
+  public flushHeldResponses(): void {
+    while (this.heldResponses.length > 0) {
+      const next = this.heldResponses.shift();
+      next?.();
+    }
   }
 }
 
@@ -1395,6 +1473,19 @@ function waitForActionOpened(
 
 async function settleProviderWrites(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 500,
+): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("Timed out waiting for test condition.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 function event(
