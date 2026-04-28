@@ -26,7 +26,11 @@ import {
 describe("provider registry", () => {
   it("reports Codex as the default supported provider", () => {
     assert.equal(DEFAULT_AGENT_PROVIDER_KIND, "codex");
-    assert.deepEqual(supportedAgentProviderKinds(), ["codex", "fake", "copilot"]);
+    assert.deepEqual(supportedAgentProviderKinds(), [
+      "codex",
+      "fake",
+      "copilot",
+    ]);
     assert.equal(isAgentProviderKind("codex"), true);
     assert.equal(isAgentProviderKind("fake"), true);
     assert.equal(isAgentProviderKind("copilot"), true);
@@ -42,6 +46,12 @@ describe("provider registry", () => {
           "SIDEMESH_CODEX_BIN",
           "SIDEMESH_PROVIDER_COMMAND",
         ],
+        supportedApprovalPolicies: [
+          "untrusted",
+          "on-failure",
+          "on-request",
+          "never",
+        ],
         capabilities: CODEX_PROVIDER_CAPABILITIES,
       },
       {
@@ -53,6 +63,12 @@ describe("provider registry", () => {
           "SIDEMESH_FAKE_SEED",
           "SIDEMESH_FAKE_WORKSPACE_ROOT",
           "SIDEMESH_FAKE_CAPABILITY_PROFILE",
+        ],
+        supportedApprovalPolicies: [
+          "untrusted",
+          "on-failure",
+          "on-request",
+          "never",
         ],
         capabilities: FAKE_PROVIDER_CAPABILITIES,
       },
@@ -70,6 +86,7 @@ describe("provider registry", () => {
           "COPILOT_PROVIDER_MODEL_ID",
           "COPILOT_PROVIDER_WIRE_MODEL",
         ],
+        supportedApprovalPolicies: ["on-request", "never"],
         capabilities: COPILOT_PROVIDER_CAPABILITIES,
       },
     ]);

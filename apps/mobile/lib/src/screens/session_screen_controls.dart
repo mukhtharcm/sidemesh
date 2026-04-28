@@ -97,8 +97,27 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         .supports(section, feature);
   }
 
+  ProviderDefinitionSummary get _providerSummary {
+    final node = _nodeInfo;
+    if (node == null) {
+      return ProviderDefinitionSummary.empty;
+    }
+    return node.providerSummary(_providerKind);
+  }
+
+  List<ApprovalPolicy> get _approvalOptions {
+    final supported = _providerSummary.supportedApprovalPolicies;
+    if (supported.isEmpty) {
+      return ApprovalPolicy.values;
+    }
+    final options = ApprovalPolicy.values
+        .where((policy) => supported.contains(policy.wire))
+        .toList(growable: false);
+    return options.isEmpty ? ApprovalPolicy.values : options;
+  }
+
   ApprovalPolicy get _effectiveApproval =>
-      _policy.approval ?? widget.runtimeApproval ?? ApprovalPolicy.untrusted;
+      _resolvedApprovalPolicy(_policy.approval ?? widget.runtimeApproval);
 
   SandboxMode get _effectiveSandbox =>
       _policy.sandbox ?? widget.runtimeSandbox ?? SandboxMode.workspaceWrite;
@@ -114,6 +133,15 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   bool get _isAutopilot =>
       _effectiveApproval == ApprovalPolicy.never &&
       _effectiveSandbox == SandboxMode.dangerFullAccess;
+
+  ApprovalPolicy _resolvedApprovalPolicy(ApprovalPolicy? value) {
+    if (_approvalOptions.contains(value)) {
+      return value!;
+    }
+    return _approvalOptions.isEmpty
+        ? ApprovalPolicy.untrusted
+        : _approvalOptions.first;
+  }
 
   String? get _effectiveModelValue {
     final local = _trimmedOrNull(_turnConfig.model);
@@ -266,6 +294,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   void _coerceForProviderCapabilities() {
     var nextPolicy = _policy;
     if (!_supportsApprovalPolicy) {
+      nextPolicy = nextPolicy.copyWith(approval: null);
+    } else if (nextPolicy.approval != null &&
+        !_approvalOptions.contains(nextPolicy.approval)) {
       nextPolicy = nextPolicy.copyWith(approval: null);
     }
     if (!_supportsSandboxMode) {
@@ -486,7 +517,11 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   void _applyAutopilot() {
     setState(() {
       _policy = _policy.copyWith(
-        approval: _supportsApprovalPolicy ? ApprovalPolicy.never : null,
+        approval:
+            _supportsApprovalPolicy &&
+                _approvalOptions.contains(ApprovalPolicy.never)
+            ? ApprovalPolicy.never
+            : null,
         sandbox: _supportsSandboxMode ? SandboxMode.dangerFullAccess : null,
         networkAccess: _supportsNetworkAccess ? true : null,
       );
@@ -596,6 +631,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     final showReasoningControls = showModelControls && _supportsReasoningEffort;
     final showAutopilot =
         _supportsApprovalPolicy &&
+        _approvalOptions.contains(ApprovalPolicy.never) &&
         _supportsSandboxMode &&
         _supportsNetworkAccess;
     final showPolicyControls =
@@ -888,7 +924,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    for (final policy in ApprovalPolicy.values)
+                    for (final policy in _approvalOptions)
                       _PolicyRadioTile<ApprovalPolicy>(
                         value: policy,
                         groupValue: _effectiveApproval,
