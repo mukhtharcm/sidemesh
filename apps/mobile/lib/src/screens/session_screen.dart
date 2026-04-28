@@ -39,6 +39,7 @@ import '../session_policy_store.dart';
 import '../session_read_store.dart';
 import '../session_send_outbox_store.dart';
 import '../session_send_outbox_worker.dart';
+import '../session_send_overrides.dart';
 import '../session_turn_config_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
@@ -2503,23 +2504,40 @@ class _SessionScreenState extends State<SessionScreen>
       _schedulePendingSendRetry();
       return;
     }
+    final session = _session ?? widget.session;
 
     _retryingPendingSend = true;
     setState(() {});
     try {
+      final normalizedOverrides = normalizeSessionSendOverrides(
+        turnConfig: SessionTurnConfig(
+          model: pending.model,
+          mode: pending.mode,
+          reasoningEffort: pending.reasoningEffort,
+          fastMode: pending.fastMode,
+        ),
+        policy: SessionPolicy(
+          approval: ApprovalPolicy.fromWire(pending.approvalPolicy),
+          sandbox: SandboxMode.fromWire(pending.sandboxMode),
+          networkAccess: pending.networkAccess,
+        ),
+        runtime: session.runtime,
+        nodeInfo: _nodeInfo,
+        providerKind: session.provider,
+      );
       await widget.api.sendInput(
         widget.host,
         sessionId: pending.sessionId,
         text: pending.text,
         input: pending.inputItems,
         clientMessageId: pending.clientMessageId,
-        model: pending.model,
-        mode: pending.mode,
-        reasoningEffort: pending.reasoningEffort,
-        fastMode: pending.fastMode,
-        approvalPolicy: pending.approvalPolicy,
-        sandboxMode: pending.sandboxMode,
-        networkAccess: pending.networkAccess,
+        model: normalizedOverrides.model,
+        mode: normalizedOverrides.mode,
+        reasoningEffort: normalizedOverrides.reasoningEffort,
+        fastMode: normalizedOverrides.fastMode,
+        approvalPolicy: normalizedOverrides.approvalPolicy,
+        sandboxMode: normalizedOverrides.sandboxMode,
+        networkAccess: normalizedOverrides.networkAccess,
       );
       HostStatusStore.instance.markOnline(widget.host.id);
       await _sendOutbox.remove(pending);
@@ -2656,15 +2674,23 @@ class _SessionScreenState extends State<SessionScreen>
       widget.host,
       widget.session.id,
     );
+    final session = _session ?? widget.session;
+    final normalizedOverrides = normalizeSessionSendOverrides(
+      turnConfig: turnConfig,
+      policy: policy,
+      runtime: session.runtime,
+      nodeInfo: _nodeInfo,
+      providerKind: session.provider,
+    );
     final retrySignature = _buildSendRetrySignature(
       inputItems: inputItems,
-      model: turnConfig.model,
-      mode: turnConfig.mode,
-      reasoningEffort: turnConfig.reasoningEffort,
-      fastMode: turnConfig.fastMode,
-      approvalPolicy: policy.approval?.wire,
-      sandboxMode: policy.sandbox?.wire,
-      networkAccess: policy.networkAccess,
+      model: normalizedOverrides.model,
+      mode: normalizedOverrides.mode,
+      reasoningEffort: normalizedOverrides.reasoningEffort,
+      fastMode: normalizedOverrides.fastMode,
+      approvalPolicy: normalizedOverrides.approvalPolicy,
+      sandboxMode: normalizedOverrides.sandboxMode,
+      networkAccess: normalizedOverrides.networkAccess,
     );
     final clientMessageId = _clientMessageIdForSend(retrySignature);
     final optimisticMessage = SessionMessage(
@@ -2696,13 +2722,13 @@ class _SessionScreenState extends State<SessionScreen>
         text: text,
         input: inputItems,
         clientMessageId: optimisticMessage.id,
-        model: turnConfig.model,
-        mode: turnConfig.mode,
-        reasoningEffort: turnConfig.reasoningEffort,
-        fastMode: turnConfig.fastMode,
-        approvalPolicy: policy.approval?.wire,
-        sandboxMode: policy.sandbox?.wire,
-        networkAccess: policy.networkAccess,
+        model: normalizedOverrides.model,
+        mode: normalizedOverrides.mode,
+        reasoningEffort: normalizedOverrides.reasoningEffort,
+        fastMode: normalizedOverrides.fastMode,
+        approvalPolicy: normalizedOverrides.approvalPolicy,
+        sandboxMode: normalizedOverrides.sandboxMode,
+        networkAccess: normalizedOverrides.networkAccess,
       );
       if (!mounted) {
         return;
@@ -2728,13 +2754,13 @@ class _SessionScreenState extends State<SessionScreen>
           text: text,
           inputItems: inputItems,
           message: optimisticMessage,
-          model: turnConfig.model,
-          mode: turnConfig.mode,
-          reasoningEffort: turnConfig.reasoningEffort,
-          fastMode: turnConfig.fastMode,
-          approvalPolicy: policy.approval?.wire,
-          sandboxMode: policy.sandbox?.wire,
-          networkAccess: policy.networkAccess,
+          model: normalizedOverrides.model,
+          mode: normalizedOverrides.mode,
+          reasoningEffort: normalizedOverrides.reasoningEffort,
+          fastMode: normalizedOverrides.fastMode,
+          approvalPolicy: normalizedOverrides.approvalPolicy,
+          sandboxMode: normalizedOverrides.sandboxMode,
+          networkAccess: normalizedOverrides.networkAccess,
           error: error,
         );
         if (!mounted) {
