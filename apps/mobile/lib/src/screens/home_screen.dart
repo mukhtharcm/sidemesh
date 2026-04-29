@@ -3123,6 +3123,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
   late final TextEditingController _baseUrlController;
   late final TextEditingController _tokenController;
   late bool _enabled;
+  String? _error;
 
   @override
   void initState() {
@@ -3155,7 +3156,29 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
       _baseUrlController.text = payload.baseUrl;
       _tokenController.text = payload.token;
       _enabled = true;
+      _error = null;
     });
+  }
+
+  void _submit() {
+    final label = _labelController.text.trim();
+    final baseUrl = normalizeBaseUrl(_baseUrlController.text);
+    final token = _tokenController.text.trim();
+    if (label.isEmpty || baseUrl.isEmpty || token.isEmpty) {
+      setState(() {
+        _error = 'Label, base URL, and shared token are required.';
+      });
+      return;
+    }
+    Navigator.of(context).pop(
+      HostProfile(
+        id: widget.initialHost?.id ?? _randomId(),
+        label: label,
+        baseUrl: baseUrl,
+        token: token,
+        enabled: _enabled,
+      ),
+    );
   }
 
   @override
@@ -3163,116 +3186,594 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
     final colors = context.colors;
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     final isEditing = widget.initialHost != null;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 16, 16, bottom + 16),
-      child: MeshCard(
-        tone: MeshCardTone.surface,
-        padding: const EdgeInsets.all(22),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: colors.accentMuted,
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    isEditing ? Icons.edit_rounded : Icons.add_link_rounded,
-                    color: colors.accent,
-                    size: 18,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  isEditing ? 'Edit host' : 'Add host',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            if (canScanPairingQr) ...[
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _scanPairingQr,
-                  icon: const Icon(Icons.qr_code_scanner_rounded),
-                  label: Text(
-                    isEditing
-                        ? 'Replace details from QR'
-                        : 'Scan QR from sidemesh pair',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-            ],
-            TextField(
-              controller: _labelController,
-              decoration: const InputDecoration(
-                labelText: 'Label',
-                hintText: 'MacBook or VPS-1',
-              ),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: _baseUrlController,
-              decoration: const InputDecoration(
-                labelText: 'Base URL',
-                hintText: 'http://macbook.tailnet.ts.net:8787',
-              ),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: _tokenController,
-              decoration: const InputDecoration(labelText: 'Shared token'),
-            ),
-            const SizedBox(height: 14),
-            SwitchListTile(
-              value: _enabled,
-              onChanged: (value) => setState(() => _enabled = value),
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Enabled'),
-              subtitle: Text(
-                _enabled
-                    ? 'Include this host in sessions, inbox, and background sync.'
-                    : 'Keep this host saved, but skip automatic app traffic.',
-              ),
-            ),
-            const SizedBox(height: 18),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.icon(
-                onPressed: () {
-                  final label = _labelController.text.trim();
-                  final baseUrl = normalizeBaseUrl(_baseUrlController.text);
-                  final token = _tokenController.text.trim();
-                  if (label.isEmpty || baseUrl.isEmpty || token.isEmpty) {
-                    return;
-                  }
-                  Navigator.of(context).pop(
-                    HostProfile(
-                      id: widget.initialHost?.id ?? _randomId(),
-                      label: label,
-                      baseUrl: baseUrl,
-                      token: token,
-                      enabled: _enabled,
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(10, 8, 10, bottom + 10),
+          child: MeshCard(
+            tone: MeshCardTone.elevated,
+            padding: const EdgeInsets.all(14),
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: colors.surfaceMuted,
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: colors.accentMuted,
+                              borderRadius: BorderRadius.circular(15),
+                              border: Border.all(
+                                color: colors.accent.withValues(alpha: 0.28),
+                              ),
+                            ),
+                            alignment: Alignment.center,
+                            child: Icon(
+                              isEditing
+                                  ? Icons.edit_note_rounded
+                                  : Icons.add_link_rounded,
+                              color: colors.accent,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  isEditing
+                                      ? 'Edit connection'
+                                      : 'Add connection',
+                                  style: Theme.of(context).textTheme.titleLarge
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -0.4,
+                                      ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  isEditing
+                                      ? 'Update how Sidemesh reaches this agent node.'
+                                      : 'Pair a Mac, VPS, or local daemon with this app.',
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: colors.textSecondary,
+                                        height: 1.32,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          MeshIconButton(
+                            icon: Icons.close_rounded,
+                            tooltip: 'Close',
+                            color: colors.textSecondary,
+                            onTap: () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
                     ),
-                  );
-                },
-                icon: const Icon(Icons.check_rounded),
-                label: Text(isEditing ? 'Save changes' : 'Save host'),
+                    const SizedBox(height: 14),
+                    if (canScanPairingQr) ...[
+                      _HostEditorActionCard(
+                        icon: Icons.qr_code_scanner_rounded,
+                        title: isEditing
+                            ? 'Replace from pairing QR'
+                            : 'Scan sidemesh pair QR',
+                        subtitle:
+                            'Fastest path: run sidemesh pair on the host and scan its code.',
+                        actionLabel: 'Scan',
+                        onTap: _scanPairingQr,
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    MeshCard(
+                      tone: MeshCardTone.surface,
+                      padding: const EdgeInsets.all(14),
+                      accentStrip: colors.accent,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _HostEditorSectionHeading(
+                            icon: Icons.route_rounded,
+                            title: 'Connection route',
+                            subtitle:
+                                'These details stay on this device and are used for API calls.',
+                          ),
+                          const SizedBox(height: 14),
+                          _HostEditorFieldFrame(
+                            icon: Icons.label_rounded,
+                            label: 'Label',
+                            child: TextField(
+                              controller: _labelController,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                filled: false,
+                                isDense: true,
+                                hintText: 'MacBook or VPS-1',
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _HostEditorFieldFrame(
+                            icon: Icons.link_rounded,
+                            label: 'Base URL',
+                            child: TextField(
+                              controller: _baseUrlController,
+                              textInputAction: TextInputAction.next,
+                              style: monoStyle(
+                                color: colors.textPrimary,
+                                fontSize: 13.5,
+                              ),
+                              decoration: const InputDecoration(
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                filled: false,
+                                isDense: true,
+                                hintText: 'http://macbook.tailnet.ts.net:8787',
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _HostEditorFieldFrame(
+                            icon: Icons.key_rounded,
+                            label: 'Shared token',
+                            child: TextField(
+                              controller: _tokenController,
+                              textInputAction: TextInputAction.done,
+                              onSubmitted: (_) => _submit(),
+                              style: monoStyle(
+                                color: colors.textPrimary,
+                                fontSize: 13.5,
+                              ),
+                              decoration: const InputDecoration(
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                filled: false,
+                                isDense: true,
+                                hintText: 'Paste the daemon token',
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _HostEnabledCard(
+                      enabled: _enabled,
+                      onChanged: (value) => setState(() => _enabled = value),
+                    ),
+                    if (_error != null) ...[
+                      const SizedBox(height: 12),
+                      _HostEditorError(message: _error!),
+                    ],
+                    const SizedBox(height: 16),
+                    _HostEditorFooter(
+                      isEditing: isEditing,
+                      enabled: _enabled,
+                      onCancel: () => Navigator.of(context).pop(),
+                      onSubmit: _submit,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _HostEditorSectionHeading extends StatelessWidget {
+  const _HostEditorSectionHeading({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: colors.surface,
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(color: colors.border),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, color: colors.accent, size: 17),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: colors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HostEditorActionCard extends StatelessWidget {
+  const _HostEditorActionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.actionLabel,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String actionLabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: colors.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: colors.infoMuted,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: colors.info.withValues(alpha: 0.24),
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, color: colors.info, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              MeshPill(
+                label: actionLabel,
+                icon: Icons.center_focus_strong_rounded,
+                tone: MeshPillTone.info,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HostEditorFieldFrame extends StatelessWidget {
+  const _HostEditorFieldFrame({
+    required this.icon,
+    required this.label,
+    required this.child,
+  });
+
+  final IconData icon;
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(color: colors.border),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, color: colors.accent, size: 17),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colors.textSecondary,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                child,
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HostEnabledCard extends StatelessWidget {
+  const _HostEnabledCard({required this.enabled, required this.onChanged});
+
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => onChanged(!enabled),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+          decoration: BoxDecoration(
+            color: enabled
+                ? colors.accentMuted.withValues(alpha: 0.34)
+                : colors.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: enabled ? colors.accent : colors.border),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                enabled ? Icons.sensors_rounded : Icons.pause_circle_rounded,
+                color: enabled ? colors.accent : colors.textSecondary,
+                size: 20,
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      enabled ? 'Host traffic enabled' : 'Host traffic paused',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      enabled
+                          ? 'Include this host in sessions, inbox, and sync.'
+                          : 'Keep it saved, but skip automatic app traffic.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              _HostEditorToggle(value: enabled),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HostEditorToggle extends StatelessWidget {
+  const _HostEditorToggle({required this.value});
+
+  final bool value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      width: 52,
+      height: 30,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: value ? colors.accent : colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: value ? colors.accent : colors.borderStrong),
+      ),
+      child: AnimatedAlign(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: value ? colors.accentOn : colors.surface,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: value
+                  ? colors.accentOn.withValues(alpha: 0.7)
+                  : colors.border,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HostEditorError extends StatelessWidget {
+  const _HostEditorError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: colors.dangerMuted,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.danger.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline_rounded, color: colors.danger, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.danger,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HostEditorFooter extends StatelessWidget {
+  const _HostEditorFooter({
+    required this.isEditing,
+    required this.enabled,
+    required this.onCancel,
+    required this.onSubmit,
+  });
+
+  final bool isEditing;
+  final bool enabled;
+  final VoidCallback onCancel;
+  final VoidCallback onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 420;
+        final saveButton = FilledButton.icon(
+          onPressed: onSubmit,
+          icon: const Icon(Icons.check_rounded),
+          label: Text(isEditing ? 'Save changes' : 'Save host'),
+        );
+        if (compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              saveButton,
+              const SizedBox(height: 6),
+              TextButton(onPressed: onCancel, child: const Text('Cancel')),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            MeshPill(
+              label: enabled ? 'enabled' : 'paused',
+              icon: enabled ? Icons.sensors_rounded : Icons.pause_rounded,
+              tone: enabled ? MeshPillTone.success : MeshPillTone.neutral,
+            ),
+            const Spacer(),
+            TextButton(onPressed: onCancel, child: const Text('Cancel')),
+            const SizedBox(width: 8),
+            saveButton,
+          ],
+        );
+      },
     );
   }
 }

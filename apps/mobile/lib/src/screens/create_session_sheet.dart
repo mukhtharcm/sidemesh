@@ -1023,30 +1023,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     }
     final result = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.28),
+      showDragHandle: false,
       useSafeArea: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final provider in _availableProviders)
-              ListTile(
-                leading: Icon(
-                  provider.kind == _selectedProviderKindOrDefault
-                      ? Icons.radio_button_checked_rounded
-                      : Icons.radio_button_off_rounded,
-                ),
-                title: Text(provider.displayName),
-                subtitle: Text(
-                  provider.version.trim().isEmpty
-                      ? provider.kind
-                      : '${provider.kind} · ${provider.version}',
-                ),
-                onTap: () => Navigator.of(context).pop(provider.kind),
-              ),
-          ],
-        ),
+      isScrollControlled: true,
+      builder: (context) => _ProviderPickerSheet(
+        providers: _availableProviders,
+        selectedProvider: _selectedProviderKindOrDefault,
       ),
     );
     if (!mounted || result == null) {
@@ -1188,10 +1172,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return Padding(
       padding: isDialog
           ? EdgeInsets.zero
-          : EdgeInsets.fromLTRB(16, 12, 16, bottom + 16),
+          : EdgeInsets.fromLTRB(10, 8, 10, bottom + 10),
       child: MeshCard(
-        tone: MeshCardTone.surface,
-        padding: EdgeInsets.all(isDialog ? 20 : 16),
+        tone: MeshCardTone.elevated,
+        padding: EdgeInsets.all(isDialog ? 18 : 14),
         child: SafeArea(
           top: false,
           child: LayoutBuilder(
@@ -1244,66 +1228,89 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   Widget _buildHeader(BuildContext context) {
     final colors = context.colors;
     final theme = Theme.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(13),
-            border: Border.all(color: colors.accent.withValues(alpha: 0.35)),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: colors.accentMuted,
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.playlist_add_check_circle_rounded,
+              color: colors.accent,
+              size: 22,
+            ),
           ),
-          alignment: Alignment.center,
-          child: Icon(Icons.terminal_rounded, color: colors.accent, size: 21),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Launch $_providerName',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Launch $_providerName',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  MeshPill(
-                    label: widget.host.label,
-                    icon: Icons.dns_rounded,
-                    tone: MeshPillTone.accent,
+                const SizedBox(height: 3),
+                Text(
+                  'Set the route, brief the agent, then tune only what needs changing.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.32,
                   ),
-                  MeshPill(
-                    label: 'fresh session',
-                    icon: Icons.play_circle_outline_rounded,
-                    tone: MeshPillTone.neutral,
-                  ),
-                  MeshPill(
-                    label: _providerPillLabel,
-                    icon: Icons.smart_toy_rounded,
-                    tone: MeshPillTone.neutral,
-                  ),
-                ],
-              ),
-            ],
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: [
+                    MeshPill(
+                      label: widget.host.label,
+                      icon: Icons.dns_rounded,
+                      tone: MeshPillTone.accent,
+                    ),
+                    MeshPill(
+                      label: _providerPillLabel,
+                      icon: Icons.smart_toy_rounded,
+                      tone: MeshPillTone.neutral,
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+          const SizedBox(width: 8),
+          MeshIconButton(
+            icon: Icons.close_rounded,
+            tooltip: 'Close',
+            color: colors.textSecondary,
+            onTap: () => Navigator.of(context).pop(),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildPrimaryPanel(BuildContext context) {
     final colors = context.colors;
     return MeshCard(
-      tone: MeshCardTone.muted,
-      padding: const EdgeInsets.all(16),
+      tone: MeshCardTone.surface,
+      padding: const EdgeInsets.all(14),
+      accentStrip: colors.accent,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1313,34 +1320,54 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             subtitle: 'Where the agent starts and what it should do first.',
           ),
           const SizedBox(height: 14),
-          TextField(
-            controller: _cwdController,
-            textInputAction: TextInputAction.next,
-            style: monoStyle(color: colors.textPrimary, fontSize: 14),
-            decoration: const InputDecoration(
-              labelText: 'Working directory',
-              hintText: '/Users/you/src/project',
-              prefixIcon: Icon(Icons.folder_open_rounded),
+          _LaunchFieldFrame(
+            icon: Icons.folder_open_rounded,
+            label: 'Working directory',
+            child: TextField(
+              controller: _cwdController,
+              textInputAction: TextInputAction.next,
+              style: monoStyle(color: colors.textPrimary, fontSize: 14),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                filled: false,
+                isDense: true,
+                hintText: '/Users/you/src/project',
+                contentPadding: EdgeInsets.zero,
+              ),
             ),
           ),
           if (_availableProviders.length > 1) ...[
-            const SizedBox(height: 14),
-            OutlinedButton.icon(
-              onPressed: _submitting ? null : _chooseProvider,
-              icon: const Icon(Icons.smart_toy_rounded),
-              label: Text('Provider: $_providerName'),
+            const SizedBox(height: 12),
+            _LaunchSelectorRow(
+              key: const ValueKey('create-session-provider-selector'),
+              icon: Icons.smart_toy_rounded,
+              label: 'Provider',
+              value: _providerName,
+              detail: _providerPillLabel,
+              onTap: _submitting ? null : _chooseProvider,
             ),
           ],
-          const SizedBox(height: 14),
-          TextField(
-            controller: _promptController,
-            minLines: 5,
-            maxLines: 10,
-            decoration: const InputDecoration(
-              labelText: 'Prompt',
-              hintText: 'Ask the agent what to work on...',
-              alignLabelWithHint: true,
-              prefixIcon: Icon(Icons.keyboard_command_key_rounded),
+          const SizedBox(height: 12),
+          _LaunchFieldFrame(
+            icon: Icons.keyboard_command_key_rounded,
+            label: 'Prompt',
+            alignTop: true,
+            child: TextField(
+              key: const ValueKey('create-session-prompt-field'),
+              controller: _promptController,
+              minLines: 5,
+              maxLines: 10,
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                filled: false,
+                isDense: true,
+                hintText: 'Ask the agent what to work on...',
+                contentPadding: EdgeInsets.zero,
+              ),
             ),
           ),
         ],
@@ -1351,29 +1378,110 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   Widget _buildLaunchSummaryCard(BuildContext context) {
     final colors = context.colors;
     return MeshCard(
-      tone: MeshCardTone.muted,
-      padding: const EdgeInsets.all(16),
+      tone: MeshCardTone.surface,
+      padding: const EdgeInsets.all(14),
       onTap: _submitting ? null : _toggleAdvanced,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _PanelHeading(
-            icon: Icons.tune_rounded,
-            title: 'Launch profile',
-            subtitle:
-                'Defaults are ready. Tune model, speed and permissions if needed.',
-            trailing: Icon(
-              Icons.keyboard_arrow_down_rounded,
-              color: colors.textSecondary,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: _PanelHeading(
+                  icon: Icons.tune_rounded,
+                  title: 'Launch profile',
+                  subtitle: 'Defaults are ready. Adjust only when needed.',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: colors.accentMuted,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: colors.accent.withValues(alpha: 0.22),
+                  ),
+                ),
+                child: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: colors.accent,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 14),
-          Wrap(spacing: 8, runSpacing: 8, children: _launchPills()),
-          const SizedBox(height: 14),
-          TextButton.icon(
-            onPressed: _submitting ? null : _toggleAdvanced,
-            icon: const Icon(Icons.tune_rounded, size: 18),
-            label: const Text('Tune launch'),
+          _LaunchSummaryGrid(
+            items: [
+              _LaunchSummaryItem(
+                icon: Icons.smart_toy_rounded,
+                label: 'Provider',
+                value: _providerName,
+              ),
+              if (_supportsProfiles)
+                _LaunchSummaryItem(
+                  icon: Icons.badge_outlined,
+                  label: 'Profile',
+                  value: _profileLabel,
+                  active: _profileToSubmit != null,
+                ),
+              if (_supportsModels && _supportsModelOverride)
+                _LaunchSummaryItem(
+                  icon: Icons.memory_rounded,
+                  label: 'Model',
+                  value: _modelLabel,
+                  active: _selectedModel != null,
+                ),
+              if (_supportsApprovalPolicy)
+                _LaunchSummaryItem(
+                  icon: Icons.verified_user_rounded,
+                  label: 'Approval',
+                  value: _effectiveApproval.label,
+                ),
+              if (_supportsSandboxMode)
+                _LaunchSummaryItem(
+                  icon: _effectiveSandbox == SandboxMode.dangerFullAccess
+                      ? Icons.lock_open_rounded
+                      : Icons.folder_special_rounded,
+                  label: 'Sandbox',
+                  value: _effectiveSandbox.label,
+                  danger: _effectiveSandbox == SandboxMode.dangerFullAccess,
+                ),
+              if (_supportsWebSearch)
+                _LaunchSummaryItem(
+                  icon: Icons.public_rounded,
+                  label: 'Web',
+                  value: _effectiveWebSearch ? 'On' : 'Off',
+                  active: _effectiveWebSearch,
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: colors.surfaceMuted,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: colors.border),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.tune_rounded, size: 18, color: colors.accent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Tune launch',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: colors.textPrimary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Icon(Icons.arrow_forward_rounded, color: colors.textSecondary),
+              ],
+            ),
           ),
         ],
       ),
@@ -1393,14 +1501,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     }
 
     return MeshCard(
-      tone: MeshCardTone.muted,
-      padding: const EdgeInsets.all(16),
+      tone: MeshCardTone.surface,
+      padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _PanelHeading(
             icon: Icons.tune_rounded,
-            title: 'Launch controls',
+            title: 'Tune launch',
             subtitle:
                 'Only controls supported by $_providerName are shown here.',
             trailing: IconButton(
@@ -1632,29 +1740,70 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   Widget _buildFooter(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Wrap(spacing: 8, runSpacing: 8, children: _launchPills()),
-        ),
-        const SizedBox(width: 12),
-        TextButton(
-          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        const SizedBox(width: 8),
-        FilledButton.icon(
-          onPressed: _submitting ? null : _submit,
-          icon: _submitting
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.play_arrow_rounded),
-          label: const Text('Start'),
-        ),
-      ],
+    final colors = context.colors;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 560;
+        final actions = [
+          TextButton(
+            onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: _submitting ? null : _submit,
+            icon: _submitting
+                ? SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: colors.accentOn,
+                    ),
+                  )
+                : const Icon(Icons.play_arrow_rounded),
+            label: const Text('Start session'),
+          ),
+        ];
+        if (compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Wrap(spacing: 7, runSpacing: 7, children: _launchPills()),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: _submitting ? null : _submit,
+                icon: _submitting
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: colors.accentOn,
+                        ),
+                      )
+                    : const Icon(Icons.play_arrow_rounded),
+                label: const Text('Start session'),
+              ),
+              const SizedBox(height: 6),
+              TextButton(
+                onPressed: _submitting
+                    ? null
+                    : () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(
+              child: Wrap(spacing: 8, runSpacing: 8, children: _launchPills()),
+            ),
+            const SizedBox(width: 12),
+            ...actions.expand((action) => [action, const SizedBox(width: 8)]),
+          ]..removeLast(),
+        );
+      },
     );
   }
 
@@ -1832,6 +1981,267 @@ class _ErrorPanel extends StatelessWidget {
                 color: colors.danger,
                 height: 1.35,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LaunchFieldFrame extends StatelessWidget {
+  const _LaunchFieldFrame({
+    required this.icon,
+    required this.label,
+    required this.child,
+    this.alignTop = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final Widget child;
+  final bool alignTop;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: alignTop
+            ? CrossAxisAlignment.start
+            : CrossAxisAlignment.center,
+        children: [
+          Padding(
+            padding: EdgeInsets.only(top: alignTop ? 2 : 0),
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(color: colors.border),
+              ),
+              alignment: Alignment.center,
+              child: Icon(icon, color: colors.accent, size: 17),
+            ),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colors.textSecondary,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                child,
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LaunchSelectorRow extends StatelessWidget {
+  const _LaunchSelectorRow({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.detail,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final String detail;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+          decoration: BoxDecoration(
+            color: colors.surfaceMuted,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: colors.accentMuted,
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(
+                    color: colors.accent.withValues(alpha: 0.24),
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, color: colors.accent, size: 17),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: colors.textSecondary,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      value,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (detail.trim().isNotEmpty) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        detail,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: monoStyle(
+                          color: colors.textTertiary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Icon(Icons.keyboard_arrow_down_rounded, color: colors.accent),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LaunchSummaryItem {
+  const _LaunchSummaryItem({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.active = false,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool active;
+  final bool danger;
+}
+
+class _LaunchSummaryGrid extends StatelessWidget {
+  const _LaunchSummaryGrid({required this.items});
+
+  final List<_LaunchSummaryItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final twoColumn = constraints.maxWidth >= 360;
+        final itemWidth = twoColumn
+            ? (constraints.maxWidth - 8) / 2
+            : constraints.maxWidth;
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final item in items)
+              SizedBox(
+                width: itemWidth,
+                child: _LaunchSummaryTile(item: item),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _LaunchSummaryTile extends StatelessWidget {
+  const _LaunchSummaryTile({required this.item});
+
+  final _LaunchSummaryItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final tone = item.danger
+        ? colors.danger
+        : item.active
+        ? colors.accent
+        : colors.textSecondary;
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: item.active
+            ? colors.accentMuted.withValues(alpha: 0.3)
+            : colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: item.danger ? colors.danger : colors.border),
+      ),
+      child: Row(
+        children: [
+          Icon(item.icon, size: 16, color: tone),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colors.textTertiary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  item.value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -2191,6 +2601,288 @@ class _ProfilePickerResult {
   const _ProfilePickerResult(this.profileName);
 
   final String? profileName;
+}
+
+class _ProviderPickerSheet extends StatelessWidget {
+  const _ProviderPickerSheet({
+    required this.providers,
+    required this.selectedProvider,
+  });
+
+  final List<ProviderDefinitionSummary> providers;
+  final String selectedProvider;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final maxHeight = MediaQuery.sizeOf(context).height * 0.78;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight, maxWidth: 560),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.surfaceElevated,
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: colors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.textPrimary.withValues(alpha: 0.12),
+                    blurRadius: 32,
+                    offset: const Offset(0, 18),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(28),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 38,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: colors.borderStrong.withValues(alpha: 0.55),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: colors.accentMuted,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: colors.accent.withValues(alpha: 0.24),
+                              ),
+                            ),
+                            alignment: Alignment.center,
+                            child: Icon(
+                              Icons.account_tree_rounded,
+                              size: 19,
+                              color: colors.accent,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Choose provider',
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(
+                                        color: colors.textPrimary,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -0.2,
+                                      ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Pick the agent runtime for this launch.',
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: colors.textSecondary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          MeshIconButton(
+                            icon: Icons.close_rounded,
+                            tooltip: 'Close',
+                            color: colors.textSecondary,
+                            onTap: () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: colors.surface,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Column(
+                          children: [
+                            for (
+                              var index = 0;
+                              index < providers.length;
+                              index++
+                            ) ...[
+                              if (index > 0)
+                                Divider(
+                                  height: 1,
+                                  indent: 62,
+                                  color: colors.border.withValues(alpha: 0.72),
+                                ),
+                              _ProviderPickerTile(
+                                key: ValueKey(
+                                  'provider-picker-${providers[index].kind}',
+                                ),
+                                provider: providers[index],
+                                selected:
+                                    providers[index].kind == selectedProvider,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProviderPickerTile extends StatelessWidget {
+  const _ProviderPickerTile({
+    super.key,
+    required this.provider,
+    required this.selected,
+  });
+
+  final ProviderDefinitionSummary provider;
+  final bool selected;
+
+  String get _command {
+    final configured = provider.config.command?.trim();
+    if (configured != null && configured.isNotEmpty) return configured;
+    final fallback = provider.defaultCommand.trim();
+    return fallback.isEmpty ? provider.kind : fallback;
+  }
+
+  List<String> get _badges {
+    return [
+      if (provider.isDefault) 'default',
+      if (provider.capabilities.supports('configuration', 'models')) 'models',
+      if (provider.capabilities.supports('input', 'localImage')) 'images',
+      if (provider.capabilities.supports('approvals', 'permissions'))
+        'permissions',
+    ];
+  }
+
+  String get _displayName {
+    final name = provider.displayName.trim();
+    return name.isEmpty ? provider.kind : name;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final meta = [
+      provider.kind,
+      if (provider.version.trim().isNotEmpty) provider.version.trim(),
+    ].join(' · ');
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => Navigator.of(context).pop(provider.kind),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? colors.accentMuted
+                      : colors.surfaceMuted.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: selected
+                        ? colors.accent.withValues(alpha: 0.38)
+                        : colors.border,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  selected
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.smart_toy_rounded,
+                  size: 19,
+                  color: selected ? colors.accent : colors.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: colors.textPrimary,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                        ),
+                        if (selected)
+                          MeshPill(
+                            label: 'selected',
+                            icon: Icons.check_rounded,
+                            tone: MeshPillTone.accent,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      meta,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(
+                        color: colors.textSecondary,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Wrap(
+                      spacing: 7,
+                      runSpacing: 7,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _InlineBadge(label: _command),
+                        for (final badge in _badges) _InlineBadge(label: badge),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right_rounded, size: 18, color: colors.border),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ProfilePickerSheet extends StatefulWidget {
