@@ -137,6 +137,42 @@ void main() {
       expect(overrides.approvalPolicy, isNull);
     },
   );
+
+  test('does not treat runtime model provider as the agent provider', () {
+    final overrides = normalizeSessionSendOverrides(
+      turnConfig: const SessionTurnConfig(
+        model: 'gpt-5.1',
+        reasoningEffort: 'high',
+      ),
+      policy: const SessionPolicy(),
+      runtime: const SessionRuntimeSummary(
+        model: 'gpt-5',
+        modelProvider: 'openai',
+        reasoningEffort: 'medium',
+      ),
+      nodeInfo: _nodeForProvider(
+        kind: 'codex',
+        supportedApprovalPolicies: const <String>[
+          'untrusted',
+          'on-request',
+          'never',
+        ],
+        runtimeControls: const <String, bool>{
+          'model': true,
+          'mode': false,
+          'reasoningEffort': true,
+          'fastMode': true,
+          'approvalPolicy': true,
+          'sandboxMode': true,
+          'networkAccess': true,
+        },
+      ),
+      providerKind: null,
+    );
+
+    expect(overrides.model, 'gpt-5.1');
+    expect(overrides.reasoningEffort, 'high');
+  });
 }
 
 NodeInfo _nodeForProvider({

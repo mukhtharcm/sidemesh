@@ -230,9 +230,7 @@ class _SessionScreenState extends State<SessionScreen>
     final node = _nodeInfo;
     if (node == null) return true;
     return node
-        .capabilitiesForProvider(
-          widget.session.provider ?? widget.session.runtime?.modelProvider,
-        )
+        .capabilitiesForProvider(widget.session.provider)
         .supports(section, feature);
   }
 
