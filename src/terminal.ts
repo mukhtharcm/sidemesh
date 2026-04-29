@@ -3,9 +3,10 @@ import {
   spawn as spawnChild,
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
-import { existsSync } from "node:fs";
-import { basename } from "node:path";
-import { platform } from "node:os";
+import { createRequire } from "node:module";
+import { arch, platform } from "node:os";
+import { chmodSync, existsSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 import * as pty from "node-pty";
 import type { WebSocket } from "ws";
@@ -21,6 +22,7 @@ const DEFAULT_REPLAY_BYTES = 512 * 1024;
 const DEFAULT_IDLE_TTL_MS = 6 * 60 * 60 * 1000;
 const EXITED_TTL_MS = 5 * 60 * 1000;
 const MAX_WS_BUFFERED_AMOUNT = 4 * 1024 * 1024;
+const require = createRequire(import.meta.url);
 
 export interface TerminalRegistryOptions {
   enabled: boolean;
@@ -520,32 +522,15 @@ function spawnTerminalProcess(
   },
 ): TerminalProcess {
   try {
-    const ptyProcess = pty.spawn(shell, args, {
-      name: "xterm-256color",
-      cwd: options.cwd,
-      cols: options.cols,
-      rows: options.rows,
-      env: options.env,
-      handleFlowControl: true,
-    });
-    return {
-      backend: "direct-pty",
-      write: (data) => ptyProcess.write(data),
-      resize: (cols, rows) => ptyProcess.resize(cols, rows),
-      kill: () => ptyProcess.kill(),
-      onData: (callback) => {
-        ptyProcess.onData(callback);
-      },
-      onExit: (callback) => {
-        ptyProcess.onExit((event) =>
-          callback({
-            exitCode: event.exitCode ?? null,
-            signal: event.signal ?? null,
-          }),
-        );
-      },
-    };
+    return spawnPtyTerminalProcess(shell, args, options);
   } catch (error) {
+    if (repairNodePtySpawnHelper()) {
+      try {
+        return spawnPtyTerminalProcess(shell, args, options);
+      } catch {
+        // Fall through to the configured PTY failure behavior below.
+      }
+    }
     if (options.requirePty) {
       throw error;
     }
@@ -554,6 +539,64 @@ function spawnTerminalProcess(
       fallbackShellArgs(shell, args),
       options,
     );
+  }
+}
+
+function spawnPtyTerminalProcess(
+  shell: string,
+  args: string[],
+  options: {
+    cwd: string;
+    cols: number;
+    rows: number;
+    env: NodeJS.ProcessEnv;
+  },
+): TerminalProcess {
+  const ptyProcess = pty.spawn(shell, args, {
+    name: "xterm-256color",
+    cwd: options.cwd,
+    cols: options.cols,
+    rows: options.rows,
+    env: options.env,
+    handleFlowControl: true,
+  });
+  return {
+    backend: "direct-pty",
+    write: (data) => ptyProcess.write(data),
+    resize: (cols, rows) => ptyProcess.resize(cols, rows),
+    kill: () => ptyProcess.kill(),
+    onData: (callback) => {
+      ptyProcess.onData(callback);
+    },
+    onExit: (callback) => {
+      ptyProcess.onExit((event) =>
+        callback({
+          exitCode: event.exitCode ?? null,
+          signal: event.signal ?? null,
+        }),
+      );
+    },
+  };
+}
+
+function repairNodePtySpawnHelper(): boolean {
+  if (platform() !== "darwin") return false;
+  const cpu = arch();
+  if (cpu !== "arm64" && cpu !== "x64") return false;
+
+  try {
+    const packagePath = require.resolve("node-pty/package.json");
+    const helperPath = join(
+      dirname(packagePath),
+      "prebuilds",
+      `darwin-${cpu}`,
+      "spawn-helper",
+    );
+    if (!existsSync(helperPath)) return false;
+    chmodSync(helperPath, 0o755);
+    return true;
+  } catch {
+    return false;
   }
 }
 

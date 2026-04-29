@@ -94,9 +94,11 @@ temporary overrides, set `SIDEMESH_TERMINAL=1` to advertise the
 The daemon uses `node-pty` when available and falls back to a pipe-backed shell
 if PTY spawning fails; set `SIDEMESH_TERMINAL_REQUIRE_PTY=1` if you prefer hard
 failure over fallback. If `node-pty` installs but cannot spawn shells on a local
-Node runtime, run `npm rebuild node-pty`. Pipe fallback is intentionally labeled
-as limited in the app; it has no real PTY resize semantics, but the daemon still
-terminates the whole fallback process group when you stop the terminal.
+Node runtime, the daemon attempts to repair the known macOS `spawn-helper`
+execute-bit issue before falling back; if PTY startup still fails, run
+`npm rebuild node-pty`. Pipe fallback is intentionally labeled as limited in the
+app; it has no real PTY resize semantics, but the daemon still terminates the
+whole fallback process group when you stop the terminal.
 
 To run against GitHub Copilot CLI instead of Codex without using the setup
 wizard:
