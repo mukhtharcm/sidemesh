@@ -32,6 +32,66 @@ class TerminalScreen extends StatefulWidget {
 }
 
 class _TerminalScreenState extends State<TerminalScreen> {
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Scaffold(
+      backgroundColor: colors.canvas,
+      appBar: AppBar(
+        backgroundColor: colors.canvas,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.title ?? 'Terminal'),
+            Text(
+              widget.cwd,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: colors.textSecondary,
+                fontFamily: 'SpaceMono',
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: TerminalPane(
+        host: widget.host,
+        api: widget.api,
+        cwd: widget.cwd,
+        sessionId: widget.sessionId,
+        title: widget.title,
+        reuseExisting: true,
+      ),
+    );
+  }
+}
+
+class TerminalPane extends StatefulWidget {
+  const TerminalPane({
+    super.key,
+    required this.host,
+    required this.api,
+    required this.cwd,
+    this.sessionId,
+    this.title,
+    this.reuseExisting = true,
+    this.compact = false,
+  });
+
+  final HostProfile host;
+  final ApiClient api;
+  final String cwd;
+  final String? sessionId;
+  final String? title;
+  final bool reuseExisting;
+  final bool compact;
+
+  @override
+  State<TerminalPane> createState() => _TerminalPaneState();
+}
+
+class _TerminalPaneState extends State<TerminalPane> {
   late final xterm.Terminal _terminal;
   final FocusNode _focusNode = FocusNode();
   WebSocketChannel? _channel;
@@ -55,7 +115,29 @@ class _TerminalScreenState extends State<TerminalScreen> {
       onOutput: _sendInput,
       onResize: _handleResize,
     );
-    _terminal.write('Starting Sidemesh terminal...\r\n');
+    _terminal.write('Opening Sidemesh terminal...\r\n');
+    unawaited(_startTerminal());
+  }
+
+  @override
+  void didUpdateWidget(covariant TerminalPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.host.id == widget.host.id &&
+        oldWidget.host.baseUrl == widget.host.baseUrl &&
+        oldWidget.host.token == widget.host.token &&
+        oldWidget.cwd == widget.cwd &&
+        oldWidget.sessionId == widget.sessionId) {
+      return;
+    }
+    _subscription?.cancel();
+    _channel?.sink.close();
+    _reconnectTimer?.cancel();
+    _subscription = null;
+    _channel = null;
+    _terminalInfo = null;
+    _lastSeq = -1;
+    _reconnectAttempts = 0;
+    _terminal.write('Opening Sidemesh terminal...\r\n');
     unawaited(_startTerminal());
   }
 
@@ -74,14 +156,16 @@ class _TerminalScreenState extends State<TerminalScreen> {
       _error = null;
     });
     try {
-      final terminal = await widget.api.createTerminal(
-        widget.host,
-        cwd: widget.cwd,
-        sessionId: widget.sessionId,
-        title: widget.title,
-        cols: _terminal.viewWidth,
-        rows: _terminal.viewHeight,
-      );
+      final terminal =
+          await _findReusableTerminal() ??
+          await widget.api.createTerminal(
+            widget.host,
+            cwd: widget.cwd,
+            sessionId: widget.sessionId,
+            title: widget.title,
+            cols: _terminal.viewWidth,
+            rows: _terminal.viewHeight,
+          );
       if (!mounted) return;
       setState(() {
         _terminalInfo = terminal;
@@ -97,6 +181,22 @@ class _TerminalScreenState extends State<TerminalScreen> {
       });
       _terminal.write('\r\n[terminal error] $message\r\n');
     }
+  }
+
+  Future<HostTerminalInfo?> _findReusableTerminal() async {
+    if (!widget.reuseExisting) return null;
+    final terminals = await widget.api.fetchTerminals(widget.host);
+    for (final terminal in terminals) {
+      if (!terminal.isRunning) continue;
+      if (terminal.cwd != widget.cwd) continue;
+      final sessionId = widget.sessionId;
+      if (sessionId != null && sessionId.isNotEmpty) {
+        if (terminal.sessionId == sessionId) return terminal;
+        continue;
+      }
+      return terminal;
+    }
+    return null;
   }
 
   void _connectLive({bool resetAttempts = false}) {
@@ -273,94 +373,61 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final terminal = _terminalInfo;
-    final running = terminal?.isRunning == true;
-    return Scaffold(
-      backgroundColor: colors.canvas,
-      appBar: AppBar(
-        backgroundColor: colors.canvas,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.title ?? 'Terminal'),
-            Text(
-              widget.cwd,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: colors.textSecondary,
-                fontFamily: 'SpaceMono',
-              ),
-            ),
-          ],
+    return Column(
+      children: [
+        _TerminalStatusStrip(
+          starting: _starting,
+          connecting: _connecting,
+          stopping: _stopping,
+          error: _error,
+          terminal: terminal,
+          onStop: _stopTerminal,
         ),
-        actions: [
-          if (running)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: MeshIconButton(
-                icon: Icons.stop_circle_outlined,
-                tooltip: 'Stop terminal',
-                color: colors.danger,
-                onTap: _stopping ? () {} : _stopTerminal,
+        Expanded(
+          child: Container(
+            color: const Color(0xFF10120F),
+            child: xterm.TerminalView(
+              _terminal,
+              focusNode: _focusNode,
+              autofocus: true,
+              keyboardType: TextInputType.text,
+              deleteDetection: true,
+              theme: const xterm.TerminalTheme(
+                cursor: Color(0xFFE8D7A2),
+                selection: Color(0x664D8A57),
+                foreground: Color(0xFFEDE4C8),
+                background: Color(0xFF10120F),
+                black: Color(0xFF10120F),
+                red: Color(0xFFE06C75),
+                green: Color(0xFF7FB069),
+                yellow: Color(0xFFE5C07B),
+                blue: Color(0xFF61AFEF),
+                magenta: Color(0xFFC678DD),
+                cyan: Color(0xFF56B6C2),
+                white: Color(0xFFEDE4C8),
+                brightBlack: Color(0xFF5C6370),
+                brightRed: Color(0xFFFF7B85),
+                brightGreen: Color(0xFF98C379),
+                brightYellow: Color(0xFFFFD580),
+                brightBlue: Color(0xFF7DB7FF),
+                brightMagenta: Color(0xFFD7A1F9),
+                brightCyan: Color(0xFF70D6E0),
+                brightWhite: Color(0xFFFFFFFF),
+                searchHitBackground: Color(0xFFFFFF2B),
+                searchHitBackgroundCurrent: Color(0xFF31FF26),
+                searchHitForeground: Color(0xFF000000),
               ),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _TerminalStatusStrip(
-            starting: _starting,
-            connecting: _connecting,
-            error: _error,
-            terminal: terminal,
-          ),
-          Expanded(
-            child: Container(
-              color: const Color(0xFF10120F),
-              child: xterm.TerminalView(
-                _terminal,
-                focusNode: _focusNode,
-                autofocus: true,
-                keyboardType: TextInputType.text,
-                deleteDetection: true,
-                theme: const xterm.TerminalTheme(
-                  cursor: Color(0xFFE8D7A2),
-                  selection: Color(0x664D8A57),
-                  foreground: Color(0xFFEDE4C8),
-                  background: Color(0xFF10120F),
-                  black: Color(0xFF10120F),
-                  red: Color(0xFFE06C75),
-                  green: Color(0xFF7FB069),
-                  yellow: Color(0xFFE5C07B),
-                  blue: Color(0xFF61AFEF),
-                  magenta: Color(0xFFC678DD),
-                  cyan: Color(0xFF56B6C2),
-                  white: Color(0xFFEDE4C8),
-                  brightBlack: Color(0xFF5C6370),
-                  brightRed: Color(0xFFFF7B85),
-                  brightGreen: Color(0xFF98C379),
-                  brightYellow: Color(0xFFFFD580),
-                  brightBlue: Color(0xFF7DB7FF),
-                  brightMagenta: Color(0xFFD7A1F9),
-                  brightCyan: Color(0xFF70D6E0),
-                  brightWhite: Color(0xFFFFFFFF),
-                  searchHitBackground: Color(0xFFFFFF2B),
-                  searchHitBackgroundCurrent: Color(0xFF31FF26),
-                  searchHitForeground: Color(0xFF000000),
-                ),
-                textStyle: const xterm.TerminalStyle(
-                  fontSize: 13,
-                  height: 1.22,
-                ),
-                padding: const EdgeInsets.all(10),
+              textStyle: xterm.TerminalStyle(
+                fontSize: widget.compact ? 12 : 13,
+                height: 1.22,
               ),
+              padding: EdgeInsets.all(widget.compact ? 8 : 10),
             ),
           ),
-          _TerminalKeyBar(onInput: _sendInput),
-        ],
-      ),
+        ),
+        _TerminalKeyBar(onInput: _sendInput, compact: widget.compact),
+      ],
     );
   }
 }
@@ -369,14 +436,18 @@ class _TerminalStatusStrip extends StatelessWidget {
   const _TerminalStatusStrip({
     required this.starting,
     required this.connecting,
+    required this.stopping,
     required this.error,
     required this.terminal,
+    required this.onStop,
   });
 
   final bool starting;
   final bool connecting;
+  final bool stopping;
   final String? error;
   final HostTerminalInfo? terminal;
+  final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
@@ -436,6 +507,15 @@ class _TerminalStatusStrip extends StatelessWidget {
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
+          if (running) ...[
+            const SizedBox(width: 8),
+            MeshIconButton(
+              icon: Icons.stop_circle_outlined,
+              tooltip: 'Stop terminal',
+              color: colors.danger,
+              onTap: stopping ? () {} : onStop,
+            ),
+          ],
         ],
       ),
     );
@@ -443,9 +523,10 @@ class _TerminalStatusStrip extends StatelessWidget {
 }
 
 class _TerminalKeyBar extends StatelessWidget {
-  const _TerminalKeyBar({required this.onInput});
+  const _TerminalKeyBar({required this.onInput, required this.compact});
 
   final ValueChanged<String> onInput;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -463,8 +544,11 @@ class _TerminalKeyBar extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        height: 52,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        height: compact ? 46 : 52,
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 6 : 8,
+          vertical: compact ? 6 : 8,
+        ),
         decoration: BoxDecoration(
           color: colors.surface,
           border: Border(top: BorderSide(color: colors.border)),
@@ -478,12 +562,12 @@ class _TerminalKeyBar extends StatelessWidget {
               style: OutlinedButton.styleFrom(
                 foregroundColor: colors.textPrimary,
                 side: BorderSide(color: colors.border),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: EdgeInsets.symmetric(horizontal: compact ? 9 : 12),
               ),
               child: Text(key.label),
             );
           },
-          separatorBuilder: (_, _) => const SizedBox(width: 8),
+          separatorBuilder: (_, _) => SizedBox(width: compact ? 6 : 8),
           itemCount: keys.length,
         ),
       ),
