@@ -29,6 +29,13 @@ import { runDoctor } from "./doctor.js";
 import { buildPairInfo } from "./pair.js";
 import { startServer, type RunningServer } from "./server.js";
 import { runSetup } from "./setup.js";
+import {
+  installSystemdService,
+  isSystemdServiceActive,
+  restartSystemdService,
+  systemdServiceStatus,
+  DEFAULT_SERVICE_NAME,
+} from "./systemd-service.js";
 import type { NodeConfig } from "./types.js";
 
 export async function main(argv = process.argv): Promise<void> {
@@ -97,6 +104,88 @@ export async function main(argv = process.argv): Promise<void> {
         });
       }),
   );
+
+  const serviceCommand = program
+    .command("service")
+    .description("manage the host OS service wrapper");
+
+  withConfigOption(
+    serviceCommand
+      .command("install")
+      .description("install or update the Linux systemd service")
+      .option("--name <name>", "systemd service name", DEFAULT_SERVICE_NAME)
+      .option("--package-dir <path>", "Sidemesh package directory")
+      .option("--node-bin <path>", "Node binary used by the service")
+      .option("--unit-file <path>", "systemd unit path")
+      .option("--env-file <path>", "service environment file path")
+      .option("--launcher-file <path>", "service launcher script path")
+      .option("--no-start", "write service files without starting/restarting")
+      .option("-y, --yes", "do not prompt before overwriting/restarting")
+      .action(
+        async (options: {
+          config?: string;
+          name?: string;
+          packageDir?: string;
+          nodeBin?: string;
+          unitFile?: string;
+          envFile?: string;
+          launcherFile?: string;
+          start?: boolean;
+          yes?: boolean;
+        }) => {
+          const config = await loadConfig({
+            configPath: options.config,
+            persistGeneratedToken: true,
+          });
+          await confirmDanger(
+            `This will write a systemd service for Sidemesh and ${options.start === false ? "leave it stopped" : "restart it"}.`,
+            options.yes === true,
+          );
+          const paths = await installSystemdService(config, {
+            serviceName: options.name,
+            packageDir: nodePath.resolve(options.packageDir ?? packageRoot()),
+            nodeBin: nodePath.resolve(options.nodeBin ?? process.execPath),
+            unitPath: options.unitFile,
+            envPath: options.envFile,
+            launcherPath: options.launcherFile,
+            start: options.start !== false,
+          });
+          console.log(`Installed ${paths.serviceName}.service`);
+          console.log(`Unit: ${paths.unitPath}`);
+          console.log(`Environment: ${paths.envPath}`);
+          console.log(`Launcher: ${paths.launcherPath}`);
+          if (options.start !== false) {
+            const active = await isSystemdServiceActive(paths.serviceName);
+            console.log(`Service: ${active ? "active" : "not active"}`);
+          }
+        },
+      ),
+  );
+
+  serviceCommand
+    .command("status")
+    .description("show systemd service status")
+    .option("--name <name>", "systemd service name", DEFAULT_SERVICE_NAME)
+    .action(async (options: { name?: string }) => {
+      process.stdout.write(await systemdServiceStatus(options.name));
+    });
+
+  serviceCommand
+    .command("restart")
+    .description("restart the Linux systemd service")
+    .option("--name <name>", "systemd service name", DEFAULT_SERVICE_NAME)
+    .option("-y, --yes", "do not prompt before restarting")
+    .action(async (options: { name?: string; yes?: boolean }) => {
+      await confirmDanger(
+        `This will restart ${options.name ?? DEFAULT_SERVICE_NAME}.service. Active streams and integrated terminals will disconnect.`,
+        options.yes === true,
+      );
+      await restartSystemdService(options.name);
+      const active = await isSystemdServiceActive(options.name);
+      console.log(
+        `${options.name ?? DEFAULT_SERVICE_NAME}.service is ${active ? "active" : "not active"}.`,
+      );
+    });
 
   withConfigOption(
     program
@@ -493,6 +582,10 @@ function daemonInvocation(configPath: string): { command: string; args: string[]
       : [entry, "daemon"];
   args.push("--config", configPath);
   return { command: process.execPath, args };
+}
+
+function packageRoot(): string {
+  return nodePath.resolve(nodePath.dirname(fileURLToPath(import.meta.url)), "..");
 }
 
 async function waitForDaemonHealth(

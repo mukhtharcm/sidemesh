@@ -96,6 +96,22 @@ already healthy on the configured port, `sidemesh daemon` and `sidemesh start`
 refuse to launch a duplicate. If a daemon responds on the port but no managed
 state exists, Sidemesh warns instead of blindly killing an unknown process.
 
+On Linux hosts that should run Sidemesh as a boot service, install the systemd
+wrapper after `npm install` and `npm run build`:
+
+```bash
+sudo sidemesh service install
+sidemesh service status
+sudo sidemesh service restart --yes
+```
+
+`service install` writes a unit, private env file, and launcher script. The
+generated launcher runs the compiled CLI (`dist/cli.js daemon`) instead of
+`tsx`, which avoids esbuild optional-dependency runtime failures. The command
+currently targets systemd only; use `sidemesh start` on macOS until launchd
+support exists. Run setup/install against the config the service should use, or
+pass `--config /path/to/config.json` explicitly.
+
 Configuration resolution works like this:
 
 1. CLI `--config` picks which config file to read
