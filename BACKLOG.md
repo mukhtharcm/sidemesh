@@ -72,6 +72,8 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
 - [ ] Surface model reroutes and token usage updates while a turn is running.
 - [ ] Add quick shell utilities with `thread/shellCommand` or `command/exec`.
 - [ ] Add Git context cards on the host and session screens.
+- [ ] Move provider-leaky workspace intelligence host-side where possible,
+      starting with remote git diff so every provider gets the same git UI.
 
 ## Security And Onboarding
 
