@@ -70,7 +70,7 @@ class CodexRpcAudit {
     }
     const now = Date.now();
     const durationMs = Math.max(0, now - startedAt);
-    const stats = increment(this.requests, method, now);
+    const stats = ensureStats(this.requests, method, now);
     stats.totalDurationMs = (stats.totalDurationMs ?? 0) + durationMs;
     if (status === "error") {
       stats.errors = (stats.errors ?? 0) + 1;
@@ -178,6 +178,8 @@ function extractTokenUsageInner(
   const candidates = [
     record.tokenUsage,
     record.token_usage,
+    record.last,
+    record.total,
     record.totalTokenUsage,
     record.total_token_usage,
     record.lastTokenUsage,
@@ -234,9 +236,18 @@ function increment(
   method: string,
   now: number,
 ): CodexRpcMethodStats {
-  const current = map.get(method) ?? { count: 0, lastAt: now };
+  const current = ensureStats(map, method, now);
   current.count += 1;
   current.lastAt = now;
+  return current;
+}
+
+function ensureStats(
+  map: Map<string, CodexRpcMethodStats>,
+  method: string,
+  now: number,
+): CodexRpcMethodStats {
+  const current = map.get(method) ?? { count: 0, lastAt: now };
   map.set(method, current);
   return current;
 }
