@@ -330,7 +330,11 @@ void main() {
 
       await tester.tap(find.text('Tune launch'));
       await _pumpFrames(tester);
+      await tester.ensureVisible(find.text('Never ask').first);
+      await _pumpFrames(tester);
       await tester.tap(find.text('Never ask').first);
+      await _pumpFrames(tester);
+      await tester.ensureVisible(find.text('Full access (danger)').first);
       await _pumpFrames(tester);
       await tester.tap(find.text('Full access (danger)').first);
       await _pumpFrames(tester);
