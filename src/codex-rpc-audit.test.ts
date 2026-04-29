@@ -7,11 +7,13 @@ test("extractTokenUsage reads camelCase token usage", () => {
   assert.deepEqual(
     extractTokenUsage({
       tokenUsage: {
-        inputTokens: 10,
-        cachedInputTokens: 4,
-        outputTokens: 3,
-        reasoningOutputTokens: 1,
-        totalTokens: 13,
+        total: {
+          inputTokens: 10,
+          cachedInputTokens: 4,
+          outputTokens: 3,
+          reasoningOutputTokens: 1,
+          totalTokens: 13,
+        },
       },
     }),
     {
@@ -20,6 +22,36 @@ test("extractTokenUsage reads camelCase token usage", () => {
       outputTokens: 3,
       reasoningOutputTokens: 1,
       totalTokens: 13,
+    },
+  );
+});
+
+test("extractTokenUsage prefers last turn usage when present", () => {
+  assert.deepEqual(
+    extractTokenUsage({
+      tokenUsage: {
+        total: {
+          inputTokens: 1000,
+          cachedInputTokens: 800,
+          outputTokens: 200,
+          reasoningOutputTokens: 50,
+          totalTokens: 1200,
+        },
+        last: {
+          inputTokens: 20,
+          cachedInputTokens: 10,
+          outputTokens: 5,
+          reasoningOutputTokens: 1,
+          totalTokens: 25,
+        },
+      },
+    }),
+    {
+      inputTokens: 20,
+      cachedInputTokens: 10,
+      outputTokens: 5,
+      reasoningOutputTokens: 1,
+      totalTokens: 25,
     },
   );
 });
