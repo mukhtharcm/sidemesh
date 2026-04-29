@@ -142,6 +142,15 @@ describe("fake test provider", () => {
       "Renamed fake session",
     );
 
+    const compacted = await provider.compactSession(created.thread.id);
+    assert.deepEqual(compacted, {
+      compacted: true,
+      tokensRemoved: 0,
+      messagesRemoved: 0,
+    });
+    const runtime = await provider.readSessionRuntime(created.thread);
+    assert.equal(runtime?.telemetry?.compaction?.status, "completed");
+
     await provider.archiveSession(created.thread.id);
     assert.deepEqual(await provider.listSessionThreads({ limit: 10, archived: false }), []);
     assert.equal(
@@ -394,6 +403,7 @@ describe("fake test provider", () => {
     assert.equal(minimal.capabilities.sessions.resume, false);
     assert.equal(minimal.capabilities.sessions.rename, false);
     assert.equal(minimal.capabilities.sessions.archive, false);
+    assert.equal(minimal.capabilities.sessions.compact, false);
     assert.equal(minimal.capabilities.sessions.interrupt, false);
     assert.equal(minimal.capabilities.sessions.eventReplay, false);
     assert.equal(minimal.capabilities.input.text, true);

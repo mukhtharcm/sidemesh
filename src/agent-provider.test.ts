@@ -15,6 +15,7 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
     resume: false,
     rename: false,
     archive: false,
+    compact: false,
     interrupt: false,
     history: false,
     eventReplay: false,

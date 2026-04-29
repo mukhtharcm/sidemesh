@@ -1372,6 +1372,60 @@ export async function startServer(config: NodeConfig): Promise<void> {
   );
 
   app.post(
+    "/api/sessions/:sessionId/compact",
+    asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
+      if (
+        !requireProviderCapability(
+          response,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.compact,
+          "session compaction",
+          "compactSession",
+        )
+      ) {
+        return;
+      }
+      const state = await loadRunState(provider, sessionId, activeTurns);
+      if (state.turnId) {
+        response.status(409).json({
+          error: "Cannot compact while a turn is running",
+          turnId: state.turnId,
+        });
+        return;
+      }
+      if (
+        hasProviderMethod(provider, "listLoadedSessionIds") &&
+        !(await isThreadLoaded(provider, sessionId))
+      ) {
+        if (
+          !requireProviderCapability(
+            response,
+            sessionProvider.provider,
+            sessionProvider.provider.capabilities.sessions.resume,
+            "session resume",
+            "resumeSessionThread",
+          )
+        ) {
+          return;
+        }
+        await provider.resumeSessionThread!(sessionId, {
+          persistExtendedHistory: true,
+        });
+      }
+      const result = await provider.compactSession!(sessionId);
+      clearSessionLogCache(logCache, sessionId);
+      response.json({ compacted: true, result: result ?? null });
+      void broadcastRecentSessionUpsert(sessionId);
+    }),
+  );
+
+  app.post(
     "/api/sessions/:sessionId/name",
     asyncRoute(async (request, response) => {
       const sessionId = pathParam(request.params.sessionId);

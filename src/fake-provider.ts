@@ -96,6 +96,7 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     resume: true,
     rename: true,
     archive: true,
+    compact: true,
     interrupt: true,
     history: true,
     eventReplay: true,
@@ -174,6 +175,7 @@ function capabilitiesForFakeProfile(
       capabilities.sessions.resume = false;
       capabilities.sessions.rename = false;
       capabilities.sessions.archive = false;
+      capabilities.sessions.compact = false;
       capabilities.sessions.interrupt = false;
       capabilities.sessions.eventReplay = false;
       capabilities.sessions.recentFallback = false;
@@ -362,6 +364,39 @@ export class FakeAgentProvider
     session.archived = false;
     this.touch(session);
     return { unarchived: true };
+  }
+
+  public async compactSession(threadId: string): Promise<unknown> {
+    const session = this.requireSession(threadId);
+    const startedAt = Date.now();
+    const messagesRemoved = Math.max(0, session.messages.length - 4);
+    const tokensRemoved = messagesRemoved * 128;
+    session.runtime = {
+      ...(session.runtime ?? buildRuntime(emptyOverrides())),
+      telemetry: {
+        ...(session.runtime?.telemetry ?? {}),
+        compaction: {
+          status: "completed",
+          startedAt,
+          completedAt: startedAt,
+          updatedAt: startedAt,
+          preCompactionTokens: session.messages.length * 128,
+          postCompactionTokens: Math.min(session.messages.length, 4) * 128,
+          tokensRemoved,
+          messagesRemoved,
+          durationMs: 0,
+          model: session.runtime?.model ?? "fake-balanced",
+        },
+      },
+      updatedAt: startedAt,
+    };
+    this.touch(session);
+    this.emit("liveEvent", {
+      type: "runtime_updated",
+      sessionId: session.thread.id,
+      runtime: { ...session.runtime },
+    });
+    return { compacted: true, tokensRemoved, messagesRemoved };
   }
 
   public async createSession(
@@ -1321,22 +1356,26 @@ function buildRuntime(
   };
 }
 
+function emptyOverrides(): AgentCreateSessionRequest["overrides"] {
+  return {
+    model: null,
+    mode: null,
+    reasoningEffort: null,
+    fastMode: null,
+    approvalPolicy: null,
+    sandboxMode: null,
+    networkAccess: null,
+    webSearch: null,
+    profile: null,
+  };
+}
+
 function mergeRuntime(
   runtime: SessionRuntimeSummary | null,
   overrides: AgentSubmitInputRequest["overrides"],
 ): SessionRuntimeSummary {
   return {
-    ...(runtime ?? buildRuntime({
-      model: null,
-      mode: null,
-      reasoningEffort: null,
-      fastMode: null,
-      approvalPolicy: null,
-      sandboxMode: null,
-      networkAccess: null,
-      webSearch: null,
-      profile: null,
-    })),
+    ...(runtime ?? buildRuntime(emptyOverrides())),
     model: overrides.model ?? runtime?.model ?? "fake-balanced",
     serviceTier:
       overrides.fastMode === null

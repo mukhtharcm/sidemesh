@@ -168,6 +168,7 @@ class StubProvider
       resume: true,
       rename: true,
       archive: true,
+      compact: true,
       interrupt: true,
       history: true,
       eventReplay: true,
