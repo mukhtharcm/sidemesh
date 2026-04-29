@@ -44,6 +44,8 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 
 - [ ] Show account/auth state from `account/read`.
 - [ ] Show model choices from `model/list`.
+- [ ] Add a temporary Codex resume compatibility shim that restores persisted `modelProvider` for unloaded sessions, then remove it once Codex app-server natively restores provider/profile state on `thread/resume`.
+- [ ] Track `ollama-launch` `/v1/responses` flakiness separately from Sidemesh resume bugs; simple `ollama run` can work while multi-step Codex Responses payloads intermittently fail upstream with `502`/TLS transport errors.
 - [ ] Add activity cards for review mode and reconnecting.
 - [ ] Add activity cards for plan updates, reasoning summaries, web search, MCP calls, and context compaction.
 - [ ] Surface model reroutes and token usage updates while a turn is running.

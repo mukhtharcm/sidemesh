@@ -105,6 +105,12 @@ does not support a provider-owned route should produce a `501` instead of
 forcing every adapter to implement Codex-only methods. Daemon-owned features
 such as local git status are exposed through `hostCapabilities`.
 
+Compatibility shims are acceptable only when a provider already exposes a
+native concept but its current server/runtime integration fails to restore or
+surface it correctly. Track those shims in `BACKLOG.md`, keep them narrow, and
+prefer migrating back to the provider's native solution once it becomes
+reliable upstream.
+
 Compatibility endpoints:
 
 - `/api/node` exposes the active provider, provider version,

@@ -245,9 +245,10 @@ export class CodexAgentProvider
     }
 
     if (!(await this.isSessionThreadLoaded(request.sessionId))) {
-      await this.resumeSessionThread(request.sessionId, {
-        persistExtendedHistory: true,
-      });
+      await this.resumeSessionThread(
+        request.sessionId,
+        await this.buildResumeOptionsForSubmit(request),
+      );
     }
 
     const turn = (await this.bridge.request(
@@ -390,6 +391,64 @@ export class CodexAgentProvider
   private async isSessionThreadLoaded(sessionId: string): Promise<boolean> {
     const data = await this.listLoadedSessionIds();
     return data.includes(sessionId);
+  }
+
+  private async buildResumeOptionsForSubmit(
+    request: AgentSubmitInputRequest,
+  ): Promise<AgentSessionResumeOptions> {
+    const options: AgentSessionResumeOptions = {
+      persistExtendedHistory: true,
+    };
+    const thread = await this.readSessionThread(request.sessionId, false).catch(() => null);
+    if (!thread) {
+      return options;
+    }
+    const runtime = await this.readSessionRuntime(thread).catch(() => null);
+    if (!runtime) {
+      return options;
+    }
+
+    const model = request.overrides.model || runtime.model || null;
+    if (model) {
+      options.model = model;
+    }
+
+    if (runtime.modelProvider) {
+      options.modelProvider = runtime.modelProvider;
+    }
+
+    if (request.overrides.fastMode !== null) {
+      options.serviceTier = request.overrides.fastMode ? "fast" : null;
+    } else if (runtime.serviceTier) {
+      options.serviceTier = runtime.serviceTier;
+    }
+
+    const approvalPolicy = parseCodexApprovalPolicy(
+      request.overrides.approvalPolicy ?? runtime.approvalPolicy ?? null,
+    );
+    if (approvalPolicy) {
+      options.approvalPolicy = approvalPolicy;
+    }
+
+    const sandboxMode = parseCodexSandboxMode(
+      request.overrides.sandboxMode ?? runtime.sandboxMode ?? null,
+    );
+    if (sandboxMode) {
+      options.sandbox = sandboxMode;
+    }
+
+    const config: Record<string, unknown> = {};
+    const reasoningEffort = parseCodexReasoningEffort(
+      request.overrides.reasoningEffort ?? runtime.reasoningEffort ?? null,
+    );
+    if (reasoningEffort) {
+      config.model_reasoning_effort = reasoningEffort;
+    }
+    if (Object.keys(config).length > 0) {
+      options.config = config;
+    }
+
+    return options;
   }
 
   private emitCodexNotification(method: string, params: unknown): void {
