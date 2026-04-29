@@ -5,10 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 
+import { codexRpcAudit } from "./codex-rpc-audit.js";
 import type { JsonRpcMessage } from "./types.js";
 
 interface PendingRequest {
   method: string;
+  startedAt: number;
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
 }
@@ -259,13 +261,16 @@ export class CodexBridge extends EventEmitter<{
   public async request<T>(method: string, params: unknown): Promise<T> {
     const id = this.requestId++;
     const payload: JsonRpcMessage = { id, method, params };
+    const startedAt = Date.now();
     const promise = new Promise<T>((resolve, reject) => {
       this.pending.set(id, {
         method,
+        startedAt,
         resolve: resolve as (value: unknown) => void,
         reject,
       });
     });
+    codexRpcAudit.recordRequest(method);
     this.send(payload);
     return promise;
   }
@@ -300,9 +305,17 @@ export class CodexBridge extends EventEmitter<{
       }
       this.pending.delete(parsed.id);
       if (parsed.error) {
-        pending.reject(new Error(parsed.error.message || `Request failed: ${pending.method}`));
+        const message = parsed.error.message || `Request failed: ${pending.method}`;
+        codexRpcAudit.recordResponse(
+          pending.method,
+          pending.startedAt,
+          "error",
+          message,
+        );
+        pending.reject(new Error(message));
         return;
       }
+      codexRpcAudit.recordResponse(pending.method, pending.startedAt, "ok");
       pending.resolve(parsed.result);
       return;
     }
@@ -317,6 +330,7 @@ export class CodexBridge extends EventEmitter<{
     }
 
     if (parsed.method) {
+      codexRpcAudit.recordNotification(parsed.method, parsed.params);
       this.emit("notification", {
         method: parsed.method,
         params: parsed.params,
