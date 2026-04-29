@@ -215,6 +215,26 @@ export async function startServer(config: NodeConfig): Promise<void> {
     return providerEntryForKind(null);
   }
 
+  function mergeRuntimeSummary(
+    previous: SessionRuntimeSummary | null,
+    next: SessionRuntimeSummary | null,
+  ): SessionRuntimeSummary | null {
+    if (!previous) {
+      return next;
+    }
+    if (!next) {
+      return previous;
+    }
+    return {
+      ...previous,
+      ...next,
+      telemetry: {
+        ...(previous.telemetry ?? {}),
+        ...(next.telemetry ?? {}),
+      },
+    };
+  }
+
   function pruneSessionInputDedupe(now = Date.now()): void {
     for (const [key, entry] of sessionInputDedupe) {
       if (
@@ -470,18 +490,23 @@ export async function startServer(config: NodeConfig): Promise<void> {
         return;
       }
       case "runtime_updated": {
+        const previousRuntime =
+          runtimeCache.get(event.sessionId)?.runtime ??
+          logCache.get(event.sessionId)?.runtime ??
+          null;
+        const runtime = mergeRuntimeSummary(previousRuntime, event.runtime);
         runtimeCache.set(event.sessionId, {
           threadUpdatedAt: Date.now() / 1000,
-          runtime: event.runtime,
+          runtime,
         });
         const cachedLog = logCache.get(event.sessionId);
         if (cachedLog) {
-          cachedLog.runtime = event.runtime;
+          cachedLog.runtime = runtime;
         }
         broadcastLive(event.sessionId, {
           type: "runtime_updated",
           sessionId: event.sessionId,
-          runtime: event.runtime ?? undefined,
+          runtime: runtime ?? undefined,
         });
         scheduleRecentSessionUpsert(event.sessionId, 0);
         return;

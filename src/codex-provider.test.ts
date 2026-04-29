@@ -46,6 +46,59 @@ function createThread(): ThreadRecord {
 }
 
 describe("codex provider resume runtime restore", () => {
+  it("emits runtime telemetry from Codex token usage notifications", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const events: unknown[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexNotification("thread/tokenUsage/updated", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      tokenUsage: {
+        modelContextWindow: 128000,
+        total: {
+          inputTokens: 9000,
+          cachedInputTokens: 3000,
+          outputTokens: 200,
+          reasoningOutputTokens: 50,
+          totalTokens: 9200,
+        },
+        last: {
+          inputTokens: 64000,
+          cachedInputTokens: 12000,
+          outputTokens: 800,
+          reasoningOutputTokens: 300,
+          totalTokens: 64800,
+        },
+      },
+    });
+
+    assert.equal(events.length, 1);
+    assert.deepEqual(events[0], {
+      type: "runtime_updated",
+      sessionId: "thread-1",
+      runtime: {
+        telemetry: {
+          contextWindow: {
+            currentTokens: 64800,
+            tokenLimit: 128000,
+            messagesLength: 0,
+            updatedAt: (events[0] as any).runtime.telemetry.contextWindow.updatedAt,
+          },
+          lastUsage: {
+            inputTokens: 64000,
+            outputTokens: 800,
+            reasoningTokens: 300,
+            cacheReadTokens: 12000,
+            updatedAt: (events[0] as any).runtime.telemetry.lastUsage.updatedAt,
+          },
+        },
+        updatedAt: (events[0] as any).runtime.updatedAt,
+        turnId: "turn-1",
+      },
+    });
+  });
+
   it("restores persisted runtime when resuming an unloaded session", async () => {
     const provider = new CodexAgentProvider("codex") as any;
     const thread = createThread();

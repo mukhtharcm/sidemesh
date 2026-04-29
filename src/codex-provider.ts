@@ -475,6 +475,18 @@ export class CodexAgentProvider
       return;
     }
 
+    if (method === "thread/tokenUsage/updated") {
+      const runtime = buildRuntimeFromCodexTokenUsage(params);
+      if (runtime) {
+        this.emit("liveEvent", {
+          type: "runtime_updated",
+          sessionId: runtime.sessionId,
+          runtime: runtime.runtime,
+        });
+      }
+      return;
+    }
+
     const sessionId = extractSessionId(method, params);
     if (!sessionId) {
       return;
@@ -656,6 +668,58 @@ export class CodexAgentProvider
       action: buildCodexPendingAction(method, params, id, sessionId),
     });
   }
+}
+
+function buildRuntimeFromCodexTokenUsage(
+  params: unknown,
+): { sessionId: string; runtime: SessionRuntimeSummary } | null {
+  const typed = params && typeof params === "object"
+    ? (params as Record<string, unknown>)
+    : null;
+  const sessionId = asString(typed?.threadId);
+  if (!typed || !sessionId) {
+    return null;
+  }
+
+  const usage = typed.tokenUsage && typeof typed.tokenUsage === "object"
+    ? (typed.tokenUsage as Record<string, unknown>)
+    : null;
+  if (!usage) {
+    return null;
+  }
+
+  const last = usage.last && typeof usage.last === "object"
+    ? (usage.last as Record<string, unknown>)
+    : null;
+  const total = usage.total && typeof usage.total === "object"
+    ? (usage.total as Record<string, unknown>)
+    : null;
+  const tokenLimit = asNumber(usage.modelContextWindow) ?? 0;
+  const currentTokens = asNumber(last?.totalTokens) ?? asNumber(total?.totalTokens) ?? 0;
+  const updatedAt = Date.now();
+
+  return {
+    sessionId,
+    runtime: {
+      telemetry: {
+        contextWindow: {
+          currentTokens,
+          tokenLimit,
+          messagesLength: 0,
+          updatedAt,
+        },
+        lastUsage: {
+          inputTokens: asNumber(last?.inputTokens) ?? undefined,
+          outputTokens: asNumber(last?.outputTokens) ?? undefined,
+          reasoningTokens: asNumber(last?.reasoningOutputTokens) ?? undefined,
+          cacheReadTokens: asNumber(last?.cachedInputTokens) ?? undefined,
+          updatedAt,
+        },
+      },
+      updatedAt,
+      turnId: asString(typed.turnId) ?? undefined,
+    },
+  };
 }
 
 function buildCodexAssistantMessageDraft(

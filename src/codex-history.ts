@@ -490,6 +490,45 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
     return runtime.modelProvider ? runtime : null;
   }
 
+  if (parsed.type === "event_msg" && parsed.payload?.type === "token_count") {
+    const info = parsed.payload.info;
+    if (!info || typeof info !== "object") {
+      return null;
+    }
+    const typed = info as Record<string, any>;
+    const last = typed.last_token_usage && typeof typed.last_token_usage === "object"
+      ? (typed.last_token_usage as Record<string, any>)
+      : null;
+    const total = typed.total_token_usage && typeof typed.total_token_usage === "object"
+      ? (typed.total_token_usage as Record<string, any>)
+      : null;
+    const currentTokens =
+      asOptionalNumber(last?.total_tokens) ?? asOptionalNumber(total?.total_tokens);
+    if (currentTokens == null) {
+      return null;
+    }
+    const updatedAt = parseTimestamp(parsed.timestamp);
+    return {
+      telemetry: {
+        contextWindow: {
+          currentTokens,
+          tokenLimit: asOptionalNumber(typed.model_context_window) ?? 0,
+          messagesLength: 0,
+          updatedAt,
+        },
+        lastUsage: {
+          inputTokens: asOptionalNumber(last?.input_tokens),
+          outputTokens: asOptionalNumber(last?.output_tokens),
+          reasoningTokens: asOptionalNumber(last?.reasoning_output_tokens),
+          cacheReadTokens: asOptionalNumber(last?.cached_input_tokens),
+          updatedAt,
+        },
+      },
+      updatedAt,
+      turnId: undefined,
+    };
+  }
+
   if (parsed.type !== "turn_context") {
     return null;
   }
@@ -548,6 +587,7 @@ function mergeRuntime(
     return next;
   }
 
+  const telemetry = mergeTelemetry(previous.telemetry, next.telemetry);
   return {
     model: next.model ?? previous.model,
     modelProvider: next.modelProvider ?? previous.modelProvider,
@@ -558,8 +598,26 @@ function mergeRuntime(
     networkAccess: next.networkAccess ?? previous.networkAccess,
     summaryMode: next.summaryMode ?? previous.summaryMode,
     personality: next.personality ?? previous.personality,
+    ...(telemetry ? { telemetry } : {}),
     updatedAt: next.updatedAt ?? previous.updatedAt,
     turnId: next.turnId ?? previous.turnId,
+  };
+}
+
+function mergeTelemetry(
+  previous: SessionRuntimeSummary["telemetry"],
+  next: SessionRuntimeSummary["telemetry"],
+): SessionRuntimeSummary["telemetry"] {
+  if (!previous) {
+    return next;
+  }
+  if (!next) {
+    return previous;
+  }
+  return {
+    contextWindow: next.contextWindow ?? previous.contextWindow,
+    lastUsage: next.lastUsage ?? previous.lastUsage,
+    compaction: next.compaction ?? previous.compaction,
   };
 }
 
@@ -652,4 +710,8 @@ function asOptionalString(value: unknown): string | undefined {
 
 function asOptionalBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function asOptionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
