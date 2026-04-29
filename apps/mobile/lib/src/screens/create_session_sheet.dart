@@ -1168,57 +1168,50 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   Widget build(BuildContext context) {
     final isDialog = widget.presentation == CreateSessionPresentation.dialog;
     final bottom = isDialog ? 0.0 : MediaQuery.viewInsetsOf(context).bottom;
+    final maxHeight = (MediaQuery.sizeOf(context).height - 80)
+        .clamp(360.0, 820.0)
+        .toDouble();
 
     return Padding(
       padding: isDialog
           ? EdgeInsets.zero
           : EdgeInsets.fromLTRB(10, 8, 10, bottom + 10),
-      child: MeshCard(
-        tone: MeshCardTone.elevated,
-        padding: EdgeInsets.all(isDialog ? 18 : 14),
-        child: SafeArea(
-          top: false,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final wide = constraints.maxWidth >= 760;
-              return SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildHeader(context),
-                    const SizedBox(height: 18),
-                    if (wide)
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(flex: 5, child: _buildPrimaryPanel(context)),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            flex: 4,
-                            child: _showAdvanced
-                                ? _buildAdvancedPanel(context)
-                                : _buildLaunchSummaryCard(context),
-                          ),
+      child: ConstrainedBox(
+        constraints: isDialog
+            ? BoxConstraints.tightFor(height: maxHeight)
+            : const BoxConstraints(),
+        child: MeshCard(
+          tone: MeshCardTone.elevated,
+          padding: EdgeInsets.all(isDialog ? 18 : 14),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildHeader(context),
+                        const SizedBox(height: 16),
+                        _buildPrimaryPanel(context),
+                        const SizedBox(height: 12),
+                        _showAdvanced
+                            ? _buildAdvancedPanel(context)
+                            : _buildLaunchSummaryCard(context),
+                        if (_error != null) ...[
+                          const SizedBox(height: 12),
+                          _ErrorPanel(message: _error!),
                         ],
-                      )
-                    else ...[
-                      _buildPrimaryPanel(context),
-                      const SizedBox(height: 14),
-                      _showAdvanced
-                          ? _buildAdvancedPanel(context)
-                          : _buildLaunchSummaryCard(context),
-                    ],
-                    if (_error != null) ...[
-                      const SizedBox(height: 12),
-                      _ErrorPanel(message: _error!),
-                    ],
-                    const SizedBox(height: 18),
-                    _buildFooter(context),
-                  ],
+                      ],
+                    ),
+                  ),
                 ),
-              );
-            },
+                const SizedBox(height: 14),
+                _buildFooter(context),
+              ],
+            ),
           ),
         ),
       ),
@@ -1228,264 +1221,175 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   Widget _buildHeader(BuildContext context) {
     final colors = context.colors;
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: colors.accentMuted,
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.playlist_add_check_circle_rounded,
-              color: colors.accent,
-              size: 22,
-            ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: colors.accentMuted,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: colors.accent.withValues(alpha: 0.24)),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Launch $_providerName',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.4,
-                  ),
+          alignment: Alignment.center,
+          child: Icon(Icons.play_arrow_rounded, color: colors.accent, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'New $_providerName session',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.4,
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  'Set the route, brief the agent, then tune only what needs changing.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.32,
-                  ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                widget.host.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary,
+                  fontWeight: FontWeight.w600,
                 ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
-                  children: [
-                    MeshPill(
-                      label: widget.host.label,
-                      icon: Icons.dns_rounded,
-                      tone: MeshPillTone.accent,
-                    ),
-                    MeshPill(
-                      label: _providerPillLabel,
-                      icon: Icons.smart_toy_rounded,
-                      tone: MeshPillTone.neutral,
-                    ),
-                  ],
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          MeshIconButton(
-            icon: Icons.close_rounded,
-            tooltip: 'Close',
-            color: colors.textSecondary,
-            onTap: () => Navigator.of(context).pop(),
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(width: 8),
+        MeshIconButton(
+          icon: Icons.close_rounded,
+          tooltip: 'Close',
+          color: colors.textSecondary,
+          onTap: () => Navigator.of(context).pop(),
+        ),
+      ],
     );
   }
 
   Widget _buildPrimaryPanel(BuildContext context) {
     final colors = context.colors;
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      padding: const EdgeInsets.all(14),
-      accentStrip: colors.accent,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _PanelHeading(
-            icon: Icons.route_rounded,
-            title: 'Session route',
-            subtitle: 'Where the agent starts and what it should do first.',
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_availableProviders.length > 1) ...[
+          _LaunchSelectorRow(
+            key: const ValueKey('create-session-provider-selector'),
+            icon: Icons.smart_toy_rounded,
+            label: 'Provider',
+            value: _providerName,
+            detail: _providerPillLabel,
+            onTap: _submitting ? null : _chooseProvider,
           ),
-          const SizedBox(height: 14),
-          _LaunchFieldFrame(
-            icon: Icons.folder_open_rounded,
-            label: 'Working directory',
-            child: TextField(
-              controller: _cwdController,
-              textInputAction: TextInputAction.next,
-              style: monoStyle(color: colors.textPrimary, fontSize: 14),
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                filled: false,
-                isDense: true,
-                hintText: '/Users/you/src/project',
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-          ),
-          if (_availableProviders.length > 1) ...[
-            const SizedBox(height: 12),
-            _LaunchSelectorRow(
-              key: const ValueKey('create-session-provider-selector'),
-              icon: Icons.smart_toy_rounded,
-              label: 'Provider',
-              value: _providerName,
-              detail: _providerPillLabel,
-              onTap: _submitting ? null : _chooseProvider,
-            ),
-          ],
-          const SizedBox(height: 12),
-          _LaunchFieldFrame(
-            icon: Icons.keyboard_command_key_rounded,
-            label: 'Prompt',
-            alignTop: true,
-            child: TextField(
-              key: const ValueKey('create-session-prompt-field'),
-              controller: _promptController,
-              minLines: 5,
-              maxLines: 10,
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                filled: false,
-                isDense: true,
-                hintText: 'Ask the agent what to work on...',
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-          ),
+          const SizedBox(height: 10),
         ],
-      ),
+        _LaunchFieldFrame(
+          icon: Icons.folder_open_rounded,
+          label: 'Working directory',
+          child: TextField(
+            controller: _cwdController,
+            textInputAction: TextInputAction.next,
+            style: monoStyle(color: colors.textPrimary, fontSize: 14),
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              filled: false,
+              isDense: true,
+              hintText: '/Users/you/src/project',
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        _LaunchFieldFrame(
+          icon: Icons.keyboard_command_key_rounded,
+          label: 'Prompt',
+          alignTop: true,
+          child: TextField(
+            key: const ValueKey('create-session-prompt-field'),
+            controller: _promptController,
+            minLines: 5,
+            maxLines: 10,
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              filled: false,
+              isDense: true,
+              hintText: 'Ask the agent what to work on...',
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildLaunchSummaryCard(BuildContext context) {
     final colors = context.colors;
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      padding: const EdgeInsets.all(14),
-      onTap: _submitting ? null : _toggleAdvanced,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: _submitting ? null : _toggleAdvanced,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+          decoration: BoxDecoration(
+            color: colors.surfaceMuted,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
             children: [
+              Icon(Icons.tune_rounded, size: 18, color: colors.accent),
+              const SizedBox(width: 10),
               Expanded(
-                child: _PanelHeading(
-                  icon: Icons.tune_rounded,
-                  title: 'Launch profile',
-                  subtitle: 'Defaults are ready. Adjust only when needed.',
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: colors.accentMuted,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: colors.accent.withValues(alpha: 0.22),
-                  ),
-                ),
-                child: Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  color: colors.accent,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          _LaunchSummaryGrid(
-            items: [
-              _LaunchSummaryItem(
-                icon: Icons.smart_toy_rounded,
-                label: 'Provider',
-                value: _providerName,
-              ),
-              if (_supportsProfiles)
-                _LaunchSummaryItem(
-                  icon: Icons.badge_outlined,
-                  label: 'Profile',
-                  value: _profileLabel,
-                  active: _profileToSubmit != null,
-                ),
-              if (_supportsModels && _supportsModelOverride)
-                _LaunchSummaryItem(
-                  icon: Icons.memory_rounded,
-                  label: 'Model',
-                  value: _modelLabel,
-                  active: _selectedModel != null,
-                ),
-              if (_supportsApprovalPolicy)
-                _LaunchSummaryItem(
-                  icon: Icons.verified_user_rounded,
-                  label: 'Approval',
-                  value: _effectiveApproval.label,
-                ),
-              if (_supportsSandboxMode)
-                _LaunchSummaryItem(
-                  icon: _effectiveSandbox == SandboxMode.dangerFullAccess
-                      ? Icons.lock_open_rounded
-                      : Icons.folder_special_rounded,
-                  label: 'Sandbox',
-                  value: _effectiveSandbox.label,
-                  danger: _effectiveSandbox == SandboxMode.dangerFullAccess,
-                ),
-              if (_supportsWebSearch)
-                _LaunchSummaryItem(
-                  icon: Icons.public_rounded,
-                  label: 'Web',
-                  value: _effectiveWebSearch ? 'On' : 'Off',
-                  active: _effectiveWebSearch,
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: colors.border),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.tune_rounded, size: 18, color: colors.accent),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Tune launch',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: colors.textPrimary,
-                      fontWeight: FontWeight.w800,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Tune launch',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _launchSummaryText(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
-                Icon(Icons.arrow_forward_rounded, color: colors.textSecondary),
-              ],
-            ),
+              ),
+              Icon(Icons.keyboard_arrow_down_rounded, color: colors.accent),
+            ],
           ),
-        ],
+        ),
       ),
     );
+  }
+
+  String _launchSummaryText() {
+    final parts = <String>[
+      _providerName,
+      if (_supportsProfiles) _profileLabel,
+      if (_supportsModels && _supportsModelOverride) _modelLabel,
+      if (_supportsApprovalPolicy) _effectiveApproval.label,
+      if (_supportsSandboxMode) _effectiveSandbox.label,
+      if (_supportsWebSearch && _effectiveWebSearch) 'web search',
+    ];
+    return parts.join(' · ');
   }
 
   Widget _buildAdvancedPanel(BuildContext context) {
@@ -1500,9 +1404,13 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       }
     }
 
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      padding: const EdgeInsets.all(14),
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2142,109 +2050,6 @@ class _LaunchSelectorRow extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _LaunchSummaryItem {
-  const _LaunchSummaryItem({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.active = false,
-    this.danger = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final bool active;
-  final bool danger;
-}
-
-class _LaunchSummaryGrid extends StatelessWidget {
-  const _LaunchSummaryGrid({required this.items});
-
-  final List<_LaunchSummaryItem> items;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final twoColumn = constraints.maxWidth >= 360;
-        final itemWidth = twoColumn
-            ? (constraints.maxWidth - 8) / 2
-            : constraints.maxWidth;
-        return Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final item in items)
-              SizedBox(
-                width: itemWidth,
-                child: _LaunchSummaryTile(item: item),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _LaunchSummaryTile extends StatelessWidget {
-  const _LaunchSummaryTile({required this.item});
-
-  final _LaunchSummaryItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final tone = item.danger
-        ? colors.danger
-        : item.active
-        ? colors.accent
-        : colors.textSecondary;
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: item.active
-            ? colors.accentMuted.withValues(alpha: 0.3)
-            : colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: item.danger ? colors.danger : colors.border),
-      ),
-      child: Row(
-        children: [
-          Icon(item.icon, size: 16, color: tone),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: colors.textTertiary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  item.value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: colors.textPrimary,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }

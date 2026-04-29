@@ -3202,73 +3202,63 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: colors.surfaceMuted,
-                        borderRadius: BorderRadius.circular(22),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: colors.accentMuted,
-                              borderRadius: BorderRadius.circular(15),
-                              border: Border.all(
-                                color: colors.accent.withValues(alpha: 0.28),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: colors.accentMuted,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: colors.accent.withValues(alpha: 0.24),
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            isEditing
+                                ? Icons.edit_note_rounded
+                                : Icons.add_link_rounded,
+                            color: colors.accent,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                isEditing ? 'Edit host' : 'Add host',
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.4,
+                                    ),
                               ),
-                            ),
-                            alignment: Alignment.center,
-                            child: Icon(
-                              isEditing
-                                  ? Icons.edit_note_rounded
-                                  : Icons.add_link_rounded,
-                              color: colors.accent,
-                              size: 22,
-                            ),
+                              const SizedBox(height: 3),
+                              Text(
+                                isEditing
+                                    ? 'Update this connection.'
+                                    : 'Pair a Mac, VPS, or local daemon.',
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: colors.textSecondary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  isEditing
-                                      ? 'Edit connection'
-                                      : 'Add connection',
-                                  style: Theme.of(context).textTheme.titleLarge
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.w900,
-                                        letterSpacing: -0.4,
-                                      ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  isEditing
-                                      ? 'Update how Sidemesh reaches this agent node.'
-                                      : 'Pair a Mac, VPS, or local daemon with this app.',
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: colors.textSecondary,
-                                        height: 1.32,
-                                      ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          MeshIconButton(
-                            icon: Icons.close_rounded,
-                            tooltip: 'Close',
-                            color: colors.textSecondary,
-                            onTap: () => Navigator.of(context).pop(),
-                          ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: 8),
+                        MeshIconButton(
+                          icon: Icons.close_rounded,
+                          tooltip: 'Close',
+                          color: colors.textSecondary,
+                          onTap: () => Navigator.of(context).pop(),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 14),
                     if (canScanPairingQr) ...[
@@ -3284,83 +3274,66 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                       ),
                       const SizedBox(height: 12),
                     ],
-                    MeshCard(
-                      tone: MeshCardTone.surface,
-                      padding: const EdgeInsets.all(14),
-                      accentStrip: colors.accent,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _HostEditorSectionHeading(
-                            icon: Icons.route_rounded,
-                            title: 'Connection route',
-                            subtitle:
-                                'These details stay on this device and are used for API calls.',
-                          ),
-                          const SizedBox(height: 14),
-                          _HostEditorFieldFrame(
-                            icon: Icons.label_rounded,
-                            label: 'Label',
-                            child: TextField(
-                              controller: _labelController,
-                              textInputAction: TextInputAction.next,
-                              decoration: const InputDecoration(
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                filled: false,
-                                isDense: true,
-                                hintText: 'MacBook or VPS-1',
-                                contentPadding: EdgeInsets.zero,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          _HostEditorFieldFrame(
-                            icon: Icons.link_rounded,
-                            label: 'Base URL',
-                            child: TextField(
-                              controller: _baseUrlController,
-                              textInputAction: TextInputAction.next,
-                              style: monoStyle(
-                                color: colors.textPrimary,
-                                fontSize: 13.5,
-                              ),
-                              decoration: const InputDecoration(
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                filled: false,
-                                isDense: true,
-                                hintText: 'http://macbook.tailnet.ts.net:8787',
-                                contentPadding: EdgeInsets.zero,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          _HostEditorFieldFrame(
-                            icon: Icons.key_rounded,
-                            label: 'Shared token',
-                            child: TextField(
-                              controller: _tokenController,
-                              textInputAction: TextInputAction.done,
-                              onSubmitted: (_) => _submit(),
-                              style: monoStyle(
-                                color: colors.textPrimary,
-                                fontSize: 13.5,
-                              ),
-                              decoration: const InputDecoration(
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                filled: false,
-                                isDense: true,
-                                hintText: 'Paste the daemon token',
-                                contentPadding: EdgeInsets.zero,
-                              ),
-                            ),
-                          ),
-                        ],
+                    _HostEditorFieldFrame(
+                      icon: Icons.label_rounded,
+                      label: 'Label',
+                      child: TextField(
+                        controller: _labelController,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          filled: false,
+                          isDense: true,
+                          hintText: 'MacBook or VPS-1',
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _HostEditorFieldFrame(
+                      icon: Icons.link_rounded,
+                      label: 'Base URL',
+                      child: TextField(
+                        controller: _baseUrlController,
+                        textInputAction: TextInputAction.next,
+                        style: monoStyle(
+                          color: colors.textPrimary,
+                          fontSize: 13.5,
+                        ),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          filled: false,
+                          isDense: true,
+                          hintText: 'http://macbook.tailnet.ts.net:8787',
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _HostEditorFieldFrame(
+                      icon: Icons.key_rounded,
+                      label: 'Shared token',
+                      child: TextField(
+                        controller: _tokenController,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => _submit(),
+                        style: monoStyle(
+                          color: colors.textPrimary,
+                          fontSize: 13.5,
+                        ),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          filled: false,
+                          isDense: true,
+                          hintText: 'Paste the daemon token',
+                          contentPadding: EdgeInsets.zero,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -3390,62 +3363,6 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
   }
 }
 
-class _HostEditorSectionHeading extends StatelessWidget {
-  const _HostEditorSectionHeading({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(9),
-            border: Border.all(color: colors.border),
-          ),
-          alignment: Alignment.center,
-          child: Icon(icon, color: colors.accent, size: 17),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: colors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.35,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _HostEditorActionCard extends StatelessWidget {
   const _HostEditorActionCard({
     required this.icon,
@@ -3470,26 +3387,26 @@ class _HostEditorActionCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
           decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(18),
+            color: colors.surfaceMuted,
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(color: colors.border),
           ),
           child: Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
                   color: colors.infoMuted,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(11),
                   border: Border.all(
                     color: colors.info.withValues(alpha: 0.24),
                   ),
                 ),
                 alignment: Alignment.center,
-                child: Icon(icon, color: colors.info, size: 20),
+                child: Icon(icon, color: colors.info, size: 17),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -3498,27 +3415,30 @@ class _HostEditorActionCard extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: colors.textPrimary,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Text(
                       subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.textSecondary,
-                        height: 1.3,
                       ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 10),
-              MeshPill(
-                label: actionLabel,
-                icon: Icons.center_focus_strong_rounded,
-                tone: MeshPillTone.info,
+              Text(
+                actionLabel,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: colors.info,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ],
           ),
@@ -3598,44 +3518,43 @@ class _HostEnabledCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
         onTap: () => onChanged(!enabled),
         child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
           decoration: BoxDecoration(
-            color: enabled
-                ? colors.accentMuted.withValues(alpha: 0.34)
-                : colors.surface,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: enabled ? colors.accent : colors.border),
+            color: colors.surfaceMuted,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: colors.border),
           ),
           child: Row(
             children: [
               Icon(
-                enabled ? Icons.sensors_rounded : Icons.pause_circle_rounded,
+                enabled ? Icons.sensors_rounded : Icons.pause_rounded,
                 color: enabled ? colors.accent : colors.textSecondary,
-                size: 20,
+                size: 18,
               ),
-              const SizedBox(width: 11),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       enabled ? 'Host traffic enabled' : 'Host traffic paused',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: colors.textPrimary,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Text(
                       enabled
                           ? 'Include this host in sessions, inbox, and sync.'
                           : 'Keep it saved, but skip automatic app traffic.',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.textSecondary,
-                        height: 1.3,
                       ),
                     ),
                   ],
