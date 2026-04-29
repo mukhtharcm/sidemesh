@@ -324,6 +324,8 @@ GitHub Actions currently provide:
 - CI for focused Flutter tests and analysis.
 - A manual `Mobile Artifacts` workflow for unsigned Android, macOS, and iOS
   simulator builds.
+- A `Release macOS App` workflow for ZIP/DMG packaging, optional Developer ID
+  signing, optional notarization, and GitHub Release publishing from `v*` tags.
 - A manual `Secret Scan` workflow for a full-history gitleaks scan.
 
 Before changing repository visibility or distributing to untrusted users, run:

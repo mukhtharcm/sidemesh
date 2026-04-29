@@ -33,7 +33,7 @@
     "CONTRIBUTING.md",
     "TODO.md",
     "docs",
-    "scripts/secret-scan.sh"
+    "scripts/*.sh"
   ],
   "engines": {
     "node": ">=20.0.0"
@@ -67,6 +67,8 @@
     "mobile:ios:prod": "cd apps/mobile && flutter run --flavor prod -t lib/main.dart",
     "mobile:ios:build:dev": "cd apps/mobile && flutter build ios --flavor dev --debug",
     "mobile:ios:build:prod": "cd apps/mobile && flutter build ipa --flavor prod --release",
+    "macos:release:package": "bash scripts/package-macos-release.sh",
+    "macos:release:notarize": "bash scripts/notarize-macos-release.sh",
     "secret:scan": "bash scripts/secret-scan.sh"
   },
   "dependencies": {

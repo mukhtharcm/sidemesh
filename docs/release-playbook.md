@@ -99,11 +99,62 @@ Current workflows:
   tests and analysis on pull requests and `main`.
 - `Mobile Artifacts`: manual workflow that builds an Android debug APK, a macOS
   debug app, and an iOS simulator app. These are unsigned development artifacts.
+- `Release macOS App`: tag/manual workflow that builds the Flutter macOS app,
+  packages `.zip` and `.dmg` artifacts, optionally signs with Developer ID,
+  optionally notarizes/staples with Apple, and publishes a GitHub Release from
+  `v*` tags.
 - `Secret Scan`: manual gitleaks scan over full git history.
 
-Store deployment is intentionally not configured yet. Add TestFlight, signed
-macOS, and signed Android workflows only after the signing/provisioning story is
-stable.
+Store deployment is intentionally not configured yet. Add TestFlight and signed
+Android workflows only after the signing/provisioning story is stable.
+
+## macOS Release Workflow
+
+The macOS workflow uses the same secret names as the other macOS apps in
+`~/dev/experiments`:
+
+- `BUILD_CERTIFICATE_BASE64`: base64-encoded Developer ID Application `.p12`.
+- `P12_PASSWORD`: password for the `.p12`.
+- `KEYCHAIN_PASSWORD`: temporary CI keychain password.
+- `SIGNING_IDENTITY`: exact Developer ID identity, for example
+  `Developer ID Application: Example (TEAMID)`.
+- `APPLE_ID`: Apple ID used for notarization.
+- `APP_SPECIFIC_PASSWORD`: app-specific password for the Apple ID.
+- `TEAM_ID`: Apple Developer Team ID.
+
+Without signing secrets, the workflow still produces unsigned/ad-hoc artifacts
+for internal smoke testing. With signing secrets only, it produces signed
+artifacts. With signing and notary secrets, it notarizes and staples both the
+app and DMG.
+
+To create a release from a tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+To run manually without publishing a GitHub Release, use the
+`Release macOS App` workflow and leave `publish_release` disabled.
+
+To package locally:
+
+```bash
+VERSION=0.1.0 BUILD_NUMBER=1 npm run macos:release:package
+```
+
+For a signed local package:
+
+```bash
+VERSION=0.1.0 \
+BUILD_NUMBER=1 \
+SIGNING_IDENTITY="Developer ID Application: Example (TEAMID)" \
+npm run macos:release:package
+```
+
+Prerelease versions such as `0.1.0-beta.1` are allowed for artifact names and
+GitHub releases. The packaging script automatically uses the base `0.1.0` as
+the macOS bundle short version unless `FLUTTER_BUILD_NAME` is set explicitly.
 
 ## Security Caveats For Testers
 

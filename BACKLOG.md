@@ -44,6 +44,8 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
       macOS/LaunchAgent service files.
 - [x] Add private developer-preview release docs, CI, artifact builds, and
       secret-scan guidance.
+- [x] Add a macOS release workflow that packages ZIP/DMG artifacts, optionally
+      signs/notarizes them, and publishes GitHub Releases from tags.
 
 ## Current Wave
 
