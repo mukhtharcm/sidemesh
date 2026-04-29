@@ -245,20 +245,22 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Provider: Fake Test Provider'), findsOneWidget);
+    expect(find.text('Fake Test Provider'), findsWidgets);
 
-    await tester.tap(find.text('Provider: Fake Test Provider'));
+    await tester.tap(
+      find.byKey(const ValueKey('create-session-provider-selector')),
+    );
     await _pumpFrames(tester);
-    await tester.tap(find.widgetWithText(ListTile, 'GitHub Copilot'));
+    await tester.tap(find.byKey(const ValueKey('provider-picker-copilot')));
     await _pumpFrames(tester);
 
-    expect(find.text('Provider: GitHub Copilot'), findsOneWidget);
+    expect(find.text('GitHub Copilot'), findsWidgets);
 
     await tester.enterText(
-      find.widgetWithText(TextField, 'Prompt'),
+      find.byKey(const ValueKey('create-session-prompt-field')),
       'Start through Copilot.',
     );
-    await tester.tap(find.widgetWithText(FilledButton, 'Start'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
     await _pumpFrames(tester);
 
     expect(api.lastCreateRequest, isNotNull);
@@ -288,10 +290,10 @@ void main() {
       await _pumpFrames(tester);
 
       await tester.enterText(
-        find.widgetWithText(TextField, 'Prompt'),
+        find.byKey(const ValueKey('create-session-prompt-field')),
         'Use the profile defaults.',
       );
-      await tester.tap(find.widgetWithText(FilledButton, 'Start'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
       await _pumpFrames(tester);
 
       expect(api.lastCreateRequest, isNotNull);
@@ -333,12 +335,14 @@ void main() {
       await tester.tap(find.text('Full access (danger)').first);
       await _pumpFrames(tester);
       await tester.enterText(
-        find.widgetWithText(TextField, 'Prompt'),
+        find.byKey(const ValueKey('create-session-prompt-field')),
         'Override the profile defaults.',
       );
-      await tester.ensureVisible(find.widgetWithText(FilledButton, 'Start'));
+      await tester.ensureVisible(
+        find.widgetWithText(FilledButton, 'Start session'),
+      );
       await _pumpFrames(tester);
-      await tester.tap(find.widgetWithText(FilledButton, 'Start'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
       await _pumpFrames(tester);
 
       expect(api.lastCreateRequest, isNotNull);
