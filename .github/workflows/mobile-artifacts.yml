@@ -80,8 +80,13 @@ jobs:
       - name: Build macOS app
         working-directory: apps/mobile
         env:
+          FLAVOR: ${{ inputs.flavor }}
           BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
-        run: flutter build macos --debug --build-number "$BUILD_NUMBER"
+        run: |
+          flutter build macos \
+            --debug \
+            --flavor "$FLAVOR" \
+            --build-number "$BUILD_NUMBER"
 
       - name: Build iOS simulator app
         working-directory: apps/mobile
@@ -98,8 +103,8 @@ jobs:
       - name: Upload macOS app
         uses: actions/upload-artifact@v4
         with:
-          name: sidemesh-macos-debug-app
-          path: apps/mobile/build/macos/Build/Products/Debug/*.app
+          name: sidemesh-${{ inputs.flavor }}-macos-debug-app
+          path: apps/mobile/build/macos/Build/Products/Debug-${{ inputs.flavor }}/*.app
           if-no-files-found: error
 
       - name: Upload iOS simulator app

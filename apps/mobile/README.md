@@ -72,6 +72,40 @@ The two Android flavors use different application IDs, so Android treats them
 as separate apps. Local hosts, tokens, favorites, pins, theme, and other
 preferences are stored separately by default.
 
+## macOS Flavors
+
+The macOS project mirrors iOS with shared `dev` and `prod` schemes.
+
+| Flavor | Scheme | Display name | Bundle ID |
+| --- | --- | --- | --- |
+| Development | `dev` | `Sidemesh Dev` | `com.sidemesh.sidemeshMobile.dev` |
+| Production | `prod` | `Sidemesh` | `com.sidemesh.sidemeshMobile` |
+
+Run on macOS:
+
+```bash
+flutter run -d macos --flavor dev -t lib/main.dart
+flutter run -d macos --flavor prod -t lib/main.dart
+```
+
+From the repository root:
+
+```bash
+npm run mobile:macos:dev
+npm run mobile:macos:prod
+```
+
+Build checks:
+
+```bash
+flutter build macos --flavor dev --debug
+flutter build macos --flavor prod --release
+```
+
+Production macOS release packaging builds the `prod` flavor by default.
+The `dev` flavor uses a separate bundle ID and a separate macOS Keychain
+service name so local debug builds do not keep touching production tokens.
+
 ## Local iOS Signing
 
 The committed Xcode project does not store a personal Apple development team
