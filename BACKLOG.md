@@ -30,6 +30,7 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
       provider.
 - [x] Gate create-session, runtime controls, attachments, approvals, file
       browsing, and skills by provider and host capabilities.
+- [x] Add provider switching in the new-session flow for mixed-provider hosts.
 - [x] Surface provider identity in host details, recent sessions, and session
       headers.
 - [x] Add setup/doctor/status/pair CLI flows for local daemon onboarding.
@@ -48,8 +49,6 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
 
 ## Next Up
 
-- [ ] Add a provider-switching affordance in the new-session flow when a host
-      advertises multiple providers.
 - [ ] Add provider-aware filters/grouping in `Recent`, `Hosts`, and `Inbox`.
 - [ ] Expand the fake provider scenario harness so one automated flow can cover
       chat, images, tools, approvals, files, skills, and reconnect replay.
