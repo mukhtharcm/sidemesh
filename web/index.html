@@ -3,143 +3,401 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>sidemesh · coming soon</title>
-<meta name="description" content="Codex from your pocket. Pre-release." />
-<meta name="theme-color" content="#FAF7EF" />
+<title>Sidemesh - private preview</title>
+<meta name="description" content="A private-network control surface for Codex and other local coding agents." />
+<meta name="theme-color" content="#F5F0E4" />
 <link rel="icon" type="image/png" href="/assets/favicon.png" />
 <link rel="apple-touch-icon" href="/assets/favicon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
-  :root { --bg:#FAF7EF; --ink:#1A1B22; --muted:#7C7A73; --rust:#B8542A; --rule:#D4CCBA; }
-  *{box-sizing:border-box;} html,body{margin:0;padding:0;}
-  body{background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;flex-direction:column;}
-  .wrap{max-width:640px;margin:0 auto;padding:72px 28px;flex:1;}
-  .brand{display:flex;align-items:center;gap:12px;margin-bottom:56px;}
-  .brand img{width:28px;height:28px;border-radius:6px;}
-  .brand span{font-family:'JetBrains Mono',monospace;font-size:14px;letter-spacing:0.06em;font-weight:600;}
-  h1{font-size:44px;line-height:1.08;letter-spacing:-0.02em;font-weight:700;margin:0 0 20px;}
-  h1 em{font-style:normal;color:var(--rust);}
-  .lede{font-size:17px;color:#3E4151;max-width:48ch;margin:0 0 36px;}
-  .mono{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
-  form{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 32px;max-width:480px;}
-  input[type=email]{flex:1;min-width:220px;background:transparent;border:1px solid var(--ink);color:var(--ink);padding:12px 14px;font-family:'JetBrains Mono',monospace;font-size:13px;border-radius:4px;}
-  button{border:0;background:var(--ink);color:var(--bg);padding:12px 22px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;border-radius:4px;cursor:pointer;}
-  button:hover{background:var(--rust);}
-  .platforms{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--muted);letter-spacing:0.04em;}
-  footer{border-top:1px solid var(--rule);padding:22px 28px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:var(--muted);}
+  :root {
+    --paper: #f5f0e4;
+    --paper-strong: #fffaf0;
+    --ink: #171a1f;
+    --muted: #6d6b63;
+    --rule: #d6cbb7;
+    --blue: #225bd8;
+    --blue-ink: #15336f;
+    --clay: #b86035;
+    --sage: #677b4d;
+    --shadow: 0 24px 80px rgba(36, 31, 22, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 12% 10%, rgba(34, 91, 216, 0.13), transparent 28rem),
+      radial-gradient(circle at 86% 18%, rgba(184, 96, 53, 0.14), transparent 24rem),
+      linear-gradient(135deg, var(--paper), #ebe3d3 58%, #e1d7c3);
+    color: var(--ink);
+    font-family: "Space Grotesk", sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: inherit; text-decoration: none; }
+  .page { width: min(1120px, calc(100% - 36px)); margin: 0 auto; }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 28px 0;
+  }
+
+  .brand { display: inline-flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: -0.02em; }
+  .brand img { width: 34px; height: 34px; border-radius: 9px; box-shadow: 0 10px 30px rgba(34, 91, 216, 0.22); }
+  .nav { display: flex; align-items: center; gap: 10px; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+  .nav a { border: 1px solid rgba(23, 26, 31, 0.12); border-radius: 999px; padding: 9px 12px; background: rgba(255, 250, 240, 0.42); }
+  .nav a:hover { border-color: var(--blue); color: var(--blue); }
+
+  .hero {
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.8fr);
+    gap: 42px;
+    align-items: stretch;
+    margin-top: 20px;
+    padding: 46px;
+    border: 1px solid rgba(23, 26, 31, 0.12);
+    border-radius: 36px;
+    background: rgba(255, 250, 240, 0.72);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(20px);
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+    padding: 8px 12px;
+    border: 1px solid rgba(34, 91, 216, 0.24);
+    border-radius: 999px;
+    color: var(--blue-ink);
+    background: rgba(34, 91, 216, 0.08);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  h1 {
+    max-width: 12ch;
+    margin: 24px 0 20px;
+    font-size: clamp(52px, 8vw, 92px);
+    line-height: 0.92;
+    letter-spacing: -0.07em;
+  }
+
+  .lede {
+    max-width: 59ch;
+    margin: 0 0 28px;
+    color: #363a43;
+    font-size: clamp(18px, 2vw, 21px);
+  }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 30px 0 22px; }
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    border-radius: 15px;
+    padding: 13px 18px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    font-weight: 700;
+    transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  }
+  .button:hover { transform: translateY(-1px); }
+  .primary { color: #fffaf0; background: var(--blue); box-shadow: 0 16px 34px rgba(34, 91, 216, 0.24); }
+  .secondary { color: var(--ink); border: 1px solid rgba(23, 26, 31, 0.16); background: rgba(255, 250, 240, 0.58); }
+  .secondary:hover { border-color: rgba(34, 91, 216, 0.4); }
+
+  .platforms { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid rgba(23, 26, 31, 0.13);
+    border-radius: 999px;
+    padding: 7px 10px;
+    color: #565b65;
+    background: rgba(255, 250, 240, 0.58);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .terminal {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    border: 1px solid rgba(23, 26, 31, 0.16);
+    border-radius: 24px;
+    overflow: hidden;
+    background: #12161d;
+    color: #e9e1d2;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  .terminal-top { display: flex; gap: 7px; padding: 14px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+  .dot { width: 10px; height: 10px; border-radius: 999px; background: #e27652; }
+  .dot:nth-child(2) { background: #d8b25d; }
+  .dot:nth-child(3) { background: #6aa36b; }
+  pre {
+    flex: 1;
+    margin: 0;
+    padding: 22px;
+    overflow: auto;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+  .prompt { color: #86a8ff; }
+  .ok { color: #98d37b; }
+  .warn { color: #e6bd73; }
+
+  .section { padding: 68px 0 0; }
+  .section-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+  h2 { margin: 0; font-size: clamp(30px, 4vw, 52px); line-height: 1; letter-spacing: -0.05em; }
+  .section-head p { max-width: 42ch; margin: 0; color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .card {
+    min-height: 210px;
+    padding: 22px;
+    border: 1px solid rgba(23, 26, 31, 0.12);
+    border-radius: 24px;
+    background: rgba(255, 250, 240, 0.62);
+  }
+  .card strong { display: block; margin-bottom: 12px; font-size: 18px; line-height: 1.15; letter-spacing: -0.02em; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .step {
+    position: relative;
+    padding: 24px;
+    border-radius: 26px;
+    border: 1px solid rgba(23, 26, 31, 0.12);
+    background: rgba(255, 250, 240, 0.7);
+  }
+  .num {
+    display: inline-grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    margin-bottom: 32px;
+    border-radius: 12px;
+    color: var(--blue);
+    border: 1px solid rgba(34, 91, 216, 0.22);
+    background: rgba(34, 91, 216, 0.08);
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 700;
+  }
+  .step h3 { margin: 0 0 10px; font-size: 22px; letter-spacing: -0.03em; }
+  .step p { margin: 0; color: var(--muted); }
+  code {
+    display: inline-block;
+    margin-top: 14px;
+    padding: 10px 11px;
+    border-radius: 11px;
+    background: rgba(18, 22, 29, 0.92);
+    color: #e9e1d2;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .security {
+    display: grid;
+    grid-template-columns: 0.95fr 1.05fr;
+    gap: 16px;
+    align-items: stretch;
+    padding: 28px;
+    border-radius: 28px;
+    border: 1px solid rgba(23, 26, 31, 0.12);
+    background: rgba(23, 26, 31, 0.92);
+    color: #fffaf0;
+  }
+  .security p { margin: 0; color: rgba(255, 250, 240, 0.7); }
+  .security .pill { color: #fffaf0; background: rgba(255, 250, 240, 0.08); border-color: rgba(255, 250, 240, 0.16); }
+
+  footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    margin-top: 70px;
+    padding: 28px 0 38px;
+    border-top: 1px solid var(--rule);
+    color: var(--muted);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+  }
+
+  @media (max-width: 860px) {
+    .page { width: min(100% - 28px, 680px); }
+    header { align-items: flex-start; }
+    .nav { display: none; }
+    .hero { grid-template-columns: 1fr; padding: 28px; border-radius: 28px; }
+    h1 { max-width: 10ch; }
+    .grid, .steps, .security { grid-template-columns: 1fr; }
+    .section-head { display: block; }
+    .section-head p { margin-top: 12px; }
+    footer { flex-direction: column; }
+  }
+
+  @media (max-width: 520px) {
+    .hero { padding: 22px; }
+    .button { width: 100%; }
+    pre { font-size: 12px; padding: 18px; }
+    .card, .step { min-height: auto; }
+  }
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <a class="brand" href="/">
-      <img src="/assets/app-icon.png" alt="" />
-      <span>sidemesh</span>
-    </a>
+  <div class="page">
+    <header>
+      <a class="brand" href="/" aria-label="Sidemesh home">
+        <img src="/assets/app-icon.png" alt="" />
+        <span>Sidemesh</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="#install">Install</a>
+        <a href="#features">Features</a>
+        <a href="#install">Release</a>
+      </nav>
+    </header>
 
-    <p class="mono">pre-release</p>
-    <h1>Codex, from your pocket. <em>Almost.</em></h1>
-    <p class="lede">Sidemesh is a mobile control surface for Codex &mdash; a lightweight app in your hand, a small companion on every machine you code on. No cloud broker. No account. No middleman.</p>
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Private preview is live</p>
+          <h1>Your coding agents, wherever you are.</h1>
+          <p class="lede">Sidemesh connects your phone, desktop, VPS, and MacBook to the agent sessions already running on your own machines. No cloud broker. No shared account. Best on Tailscale or a trusted private LAN.</p>
 
-    <p class="mono">get notified</p>
-    <form id="wl">
-      <input type="email" name="email" required placeholder="you@wherever.dev" />
-      <button type="submit">Notify me</button>
-      <div id="ts-widget" data-sitekey="0x4AAAAAADCSzV2LR8P47G_e"></div>
-    </form>
-    <p id="wl-msg" class="platforms" style="display:none;margin-top:-20px;margin-bottom:32px;"></p>
+          <div class="actions">
+            <a class="button primary" href="#install">Download macOS v0.1.0</a>
+            <a class="button secondary" href="#install">Set up daemon</a>
+          </div>
 
-    <p class="platforms">iOS · Android · macOS</p>
+          <div class="platforms" aria-label="Supported platforms">
+            <span class="pill">macOS preview build</span>
+            <span class="pill">iOS internal builds</span>
+            <span class="pill">Android internal builds</span>
+            <span class="pill">Node daemon</span>
+          </div>
+        </div>
+
+        <div class="terminal" aria-label="Sidemesh install preview">
+          <div class="terminal-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+          <pre><span class="prompt">$</span> sidemesh setup
+<span class="ok">providers</span> codex, copilot
+<span class="ok">network</span> private host token
+<span class="ok">terminal</span> optional shell access
+
+<span class="prompt">$</span> sidemesh pair
+<span class="warn">scan this from the app</span>
+http://macbook.local:8899
+
+<span class="prompt">$</span> sidemesh service install
+<span class="ok">daemon ready</span></pre>
+        </div>
+      </section>
+
+      <section class="section" id="features">
+        <div class="section-head">
+          <h2>Built for real sessions.</h2>
+          <p>Not a toy chat wrapper. Sidemesh tracks the things that matter when an agent is actually changing a codebase.</p>
+        </div>
+
+        <div class="grid">
+          <article class="card">
+            <strong>Multi-host control</strong>
+            <p>Keep recent sessions from your MacBook and VPS machines in one app, with explicit host pairing.</p>
+          </article>
+          <article class="card">
+            <strong>Approvals and inbox</strong>
+            <p>Surface pending tool permissions quickly instead of hunting across terminals.</p>
+          </article>
+          <article class="card">
+            <strong>Files, git, terminal</strong>
+            <p>Inspect workspace files, branch state, and optional host terminals without switching apps.</p>
+          </article>
+          <article class="card">
+            <strong>Provider-ready</strong>
+            <p>Codex is primary today. Copilot support and the provider contract are actively evolving.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="install">
+        <div class="section-head">
+          <h2>Install path.</h2>
+          <p>This is still private preview software. Use it only on machines you control.</p>
+        </div>
+
+        <div class="steps">
+          <article class="step">
+            <span class="num">1</span>
+            <h3>Install the daemon</h3>
+            <p>Use the private GitHub package on each trusted host.</p>
+            <code>npm install -g sidemesh-private-package</code>
+          </article>
+          <article class="step">
+            <span class="num">2</span>
+            <h3>Configure providers</h3>
+            <p>Pick Codex, Copilot, port, token, and optional terminal access.</p>
+            <code>sidemesh setup<br />sidemesh doctor</code>
+          </article>
+          <article class="step">
+            <span class="num">3</span>
+            <h3>Pair the app</h3>
+            <p>Start the daemon as a service, then add the host from your app.</p>
+            <code>sidemesh service install<br />sidemesh pair</code>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="security">
+          <div>
+            <p class="eyebrow">Security posture</p>
+            <h2>Private network first.</h2>
+          </div>
+          <div>
+            <p>Sidemesh exposes powerful host abilities: agent chat, filesystem reads, approval actions, and optional terminals. Run it behind Tailscale or a trusted LAN, protect the bearer token, and avoid exposing it directly to the public internet.</p>
+            <div class="platforms">
+              <span class="pill">No cloud relay</span>
+              <span class="pill">Static token today</span>
+              <span class="pill">Revocation planned</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>&copy; <span id="y"></span> Sidemesh</span>
+      <span>Private preview for trusted machines.</span>
+    </footer>
   </div>
-  <footer>© <span id="y"></span> sidemesh</footer>
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+
   <script>
-    document.getElementById('y').textContent = new Date().getFullYear();
-    const f = document.getElementById('wl');
-    const msg = document.getElementById('wl-msg');
-    let tsWidgetId = null;
-    let tsResolver = null;
-    function ensureTurnstile() {
-      if (!window.turnstile) return null;
-      if (tsWidgetId === null) {
-        tsWidgetId = window.turnstile.render('#ts-widget', {
-          sitekey: document.getElementById('ts-widget').dataset.sitekey,
-          size: 'invisible',
-          callback: (t) => { if (tsResolver) { tsResolver.resolve(t); tsResolver = null; } },
-          'error-callback': () => { if (tsResolver) { tsResolver.reject(new Error('captcha_error')); tsResolver = null; } },
-          'timeout-callback': () => { if (tsResolver) { tsResolver.reject(new Error('captcha_timeout')); tsResolver = null; } },
-        });
-      }
-      return tsWidgetId;
-    }
-
-    f.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const input = f.querySelector('input');
-      const btn = f.querySelector('button');
-      const email = input.value.trim();
-      btn.disabled = true; input.disabled = true;
-      btn.textContent = 'sending…';
-
-      let tsToken = null;
-      const wid = ensureTurnstile();
-      if (wid !== null) {
-        try {
-          tsToken = await new Promise((resolve, reject) => {
-            const to = setTimeout(() => { tsResolver = null; reject(new Error('captcha_slow')); }, 15000);
-            tsResolver = {
-              resolve: (t) => { clearTimeout(to); resolve(t); },
-              reject: (e) => { clearTimeout(to); reject(e); },
-            };
-            window.turnstile.execute(wid);
-          });
-          window.turnstile.reset(wid);
-        } catch {
-          btn.textContent = 'try again';
-          btn.disabled = false; input.disabled = false;
-          msg.textContent = "captcha didn't load. try once more?";
-          msg.style.display = 'block';
-          return;
-        }
-      }
-
-      const qs = new URLSearchParams(location.search);
-      const payload = {
-        email,
-        ts_token: tsToken,
-        screen: `${screen.width}x${screen.height}`,
-        dpr: window.devicePixelRatio || 1,
-        tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-        utm_source: qs.get('utm_source'),
-        utm_medium: qs.get('utm_medium'),
-        utm_campaign: qs.get('utm_campaign'),
-      };
-
-      try {
-        const r = await fetch('/api/waitlist', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (r.ok && j.ok) {
-          btn.textContent = 'queued ✓';
-          msg.textContent = "you're on the list. one email when it ships.";
-          msg.style.display = 'block';
-        } else {
-          btn.textContent = 'try again';
-          btn.disabled = false; input.disabled = false;
-          msg.textContent = j.error === 'invalid_email' ? 'that address looks off — double-check?' : 'something broke on our end. try once more?';
-          msg.style.display = 'block';
-        }
-      } catch {
-        btn.textContent = 'try again';
-        btn.disabled = false; input.disabled = false;
-        msg.textContent = 'no network. try once more?';
-        msg.style.display = 'block';
-      }
-    });
+    document.getElementById("y").textContent = new Date().getFullYear();
   </script>
 </body>
 </html>

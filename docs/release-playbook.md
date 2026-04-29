@@ -120,12 +120,9 @@ Required GitHub Actions secrets:
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-The waitlist/admin runtime secrets and bindings live in Cloudflare, not GitHub
-Actions:
-
-- `DB`: D1 binding configured in `web/wrangler.toml`.
-- `TURNSTILE_SECRET`: optional Turnstile verification secret.
-- `ADMIN_PASS`: required for `/admin/*`.
+The site is currently static-only. The old waitlist form and admin endpoint
+were removed when preview downloads became available, so the deploy should not
+require Pages Functions, D1 bindings, Turnstile, or admin runtime secrets.
 
 Manual deploy:
 
