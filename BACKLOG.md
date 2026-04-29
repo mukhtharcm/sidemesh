@@ -34,6 +34,8 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
 - [x] Surface provider identity in host details, recent sessions, and session
       headers.
 - [x] Add setup/doctor/status/pair CLI flows for local daemon onboarding.
+- [x] Add compiled global CLI packaging and managed daemon lifecycle commands
+      (`start`, `stop`, `restart`) with duplicate-instance guards.
 
 ## Current Wave
 
@@ -87,8 +89,10 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
 ## Ops And Handoff
 
 - [ ] Document a VPS-first maintainer workflow so Sidemesh can be updated and operated even when the primary Mac is offline.
-- [ ] Write a lightweight server release playbook for remote nodes: pull latest `main`, restart the daemon/service, and verify Codex + Sidemesh health.
+- [ ] Write a lightweight server release playbook for remote nodes: pull latest `main`, run `npm install` without omitting optional dependencies, build, restart the daemon/service, and verify Codex + Sidemesh health.
 - [ ] Bring the production launcher and deploy scaffolding into the repo so remote updates cannot delete `run-sidemesh.sh` and break `systemd`.
+- [ ] Add first-class `sidemesh service install|status|restart` helpers for
+      systemd and later macOS launchd.
 
 ## Later
 

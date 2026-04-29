@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import type { Server } from "node:http";
 import { hostname, platform } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import nodePath from "node:path";
@@ -140,7 +141,11 @@ interface SessionInputDedupeEntry {
   receipt?: SessionInputReceipt;
 }
 
-export async function startServer(config: NodeConfig): Promise<void> {
+export interface RunningServer {
+  close(): Promise<void>;
+}
+
+export async function startServer(config: NodeConfig): Promise<RunningServer> {
   const providerRuntime = createAgentProviderRuntime(config);
   const provider = providerRuntime.provider;
   await provider.start();
@@ -1861,14 +1866,74 @@ export async function startServer(config: NodeConfig): Promise<void> {
     },
   );
 
-  server.listen(config.port, () => {
-    for (const line of startupSummaryLines({
-      config,
-      providerDisplayName: provider.displayName,
-      providerKinds: providerRuntime.providers.map((entry) => entry.kind),
-    })) {
-      console.log(line);
-    }
+  await listen(server, config.port);
+  for (const line of startupSummaryLines({
+    config,
+    providerDisplayName: provider.displayName,
+    providerKinds: providerRuntime.providers.map((entry) => entry.kind),
+  })) {
+    console.log(line);
+  }
+
+  return {
+    close: async () => {
+      terminalRegistry.dispose();
+      for (const socket of approvalSockets) socket.close();
+      for (const socket of recentSessionsSockets) socket.close();
+      for (const sockets of socketsBySession.values()) {
+        for (const socket of sockets) socket.close();
+      }
+      await closeWebSocketServer(wsServer);
+      await closeHttpServer(server);
+    },
+  };
+}
+
+async function listen(server: Server, port: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: NodeJS.ErrnoException) => {
+      server.off("listening", onListening);
+      if (error.code === "EADDRINUSE") {
+        reject(
+          new Error(
+            `Port ${port} is already in use. Run \`sidemesh status\` to inspect the active daemon or choose another SIDEMESH_PORT.`,
+          ),
+        );
+        return;
+      }
+      reject(error);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port);
+  });
+}
+
+async function closeHttpServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
   });
 }
 

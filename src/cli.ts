@@ -1,6 +1,14 @@
-import { Command } from "commander";
+#!/usr/bin/env node
+
+import { closeSync, openSync, realpathSync, writeSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import nodePath from "node:path";
+import { createInterface } from "node:readline/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+
+import { Command } from "commander";
 
 import {
   loadConfig,
@@ -11,10 +19,17 @@ import {
   persistedConfigFromNodeConfig,
   redactPersistedConfig,
 } from "./config-store.js";
+import {
+  inspectDaemon,
+  isPidAlive,
+  removeDaemonState,
+  writeDaemonState,
+} from "./daemon-lifecycle.js";
 import { runDoctor } from "./doctor.js";
 import { buildPairInfo } from "./pair.js";
-import { startServer } from "./server.js";
+import { startServer, type RunningServer } from "./server.js";
 import { runSetup } from "./setup.js";
+import type { NodeConfig } from "./types.js";
 
 export async function main(argv = process.argv): Promise<void> {
   const program = new Command();
@@ -29,13 +44,57 @@ export async function main(argv = process.argv): Promise<void> {
   withConfigOption(
     program
       .command("daemon")
-      .description("start the Sidemesh daemon")
+      .description("start the Sidemesh daemon in the foreground")
+      .option("--allow-duplicate", "skip the local duplicate-daemon guard")
+      .action(async (options: { config?: string; allowDuplicate?: boolean }) => {
+        await runDaemonCommand({
+          configPath: options.config,
+          allowDuplicate: options.allowDuplicate === true,
+        });
+      }),
+  );
+
+  withConfigOption(
+    program
+      .command("start")
+      .description("start the Sidemesh daemon in the background")
       .action(async (options: { config?: string }) => {
         const config = await loadConfig({
           configPath: options.config,
           persistGeneratedToken: true,
         });
-        await startServer(config);
+        await startDaemon(config, { configPath: options.config ?? null });
+      }),
+  );
+
+  withConfigOption(
+    program
+      .command("stop")
+      .description("stop the managed Sidemesh daemon")
+      .option("-y, --yes", "do not prompt before stopping")
+      .action(async (options: { config?: string; yes?: boolean }) => {
+        const config = await loadConfig({
+          configPath: options.config,
+          persistGeneratedToken: false,
+        });
+        await stopDaemon(config, { yes: options.yes === true });
+      }),
+  );
+
+  withConfigOption(
+    program
+      .command("restart")
+      .description("restart the managed Sidemesh daemon")
+      .option("-y, --yes", "do not prompt before restarting")
+      .action(async (options: { config?: string; yes?: boolean }) => {
+        const config = await loadConfig({
+          configPath: options.config,
+          persistGeneratedToken: true,
+        });
+        await restartDaemon(config, {
+          configPath: options.config ?? null,
+          yes: options.yes === true,
+        });
       }),
   );
 
@@ -82,9 +141,7 @@ export async function main(argv = process.argv): Promise<void> {
           persistGeneratedToken: false,
         });
         const pairInfo = buildPairInfo(config);
-        const daemonReachable = await checkHealth(
-          `http://127.0.0.1:${config.port}/healthz`,
-        );
+        const daemon = await inspectDaemon(config);
         const payload = {
           configPath: config.configPath,
           configExists: config.configExists,
@@ -96,7 +153,10 @@ export async function main(argv = process.argv): Promise<void> {
           providers: config.providers.map((provider) => provider.kind),
           tokenSource: config.tokenSource,
           tokenFingerprint: pairInfo.tokenFingerprint,
-          daemonReachable,
+          daemonReachable: daemon.healthReachable,
+          daemonStatePath: daemon.statePath,
+          daemonState: daemon.state,
+          daemonPidAlive: daemon.pidAlive,
           pairAddresses: pairInfo.addresses,
         };
         if (options.json) {
@@ -118,6 +178,13 @@ export async function main(argv = process.argv): Promise<void> {
         console.log(
           `Daemon: ${payload.daemonReachable ? "reachable" : "not reachable"} on http://127.0.0.1:${payload.port}/healthz`,
         );
+        if (daemon.state) {
+          console.log(
+            `Managed daemon: pid ${daemon.state.pid} (${daemon.pidAlive ? "alive" : "stale"}), state ${daemon.statePath}`,
+          );
+        } else {
+          console.log(`Managed daemon: no state file at ${daemon.statePath}`);
+        }
         if (pairInfo.addresses.length > 0) {
           console.log("Pair addresses:");
           for (const entry of pairInfo.addresses) {
@@ -248,12 +315,28 @@ export async function main(argv = process.argv): Promise<void> {
 
 export async function runDaemonCommand(options: {
   configPath?: string | null;
+  allowDuplicate?: boolean;
 } = {}): Promise<void> {
   const config = await loadConfig({
     configPath: options.configPath ?? null,
     persistGeneratedToken: true,
   });
-  await startServer(config);
+  if (options.allowDuplicate !== true) {
+    await assertNoManagedDaemon(config);
+  }
+  let server: RunningServer | null = null;
+  const startedAt = Date.now();
+  server = await startServer(config);
+  await writeDaemonState(config, {
+    pid: process.pid,
+    port: config.port,
+    label: config.label,
+    configPath: config.configPath,
+    stateDir: config.stateDir,
+    startedAt,
+    command: process.argv,
+  });
+  registerShutdownHandlers(config, () => server);
 }
 
 function renderDoctorReport(report: Awaited<ReturnType<typeof runDoctor>>): void {
@@ -289,9 +372,203 @@ function glyph(severity: "ok" | "warn" | "error"): string {
   }
 }
 
+async function assertNoManagedDaemon(config: NodeConfig): Promise<void> {
+  const daemon = await inspectDaemon(config);
+  if (daemon.pidAlive && daemon.healthReachable) {
+    throw new Error(
+      `Sidemesh is already running on port ${config.port} as pid ${daemon.state?.pid}. Run \`sidemesh status\`, \`sidemesh restart\`, or use \`sidemesh daemon --allow-duplicate\` only if you know why.`,
+    );
+  }
+  if (daemon.pidAlive && daemon.state) {
+    throw new Error(
+      `Sidemesh state says pid ${daemon.state.pid} is still alive, but health did not respond. Refusing to start a second instance; run \`sidemesh stop --yes\` or inspect ${daemon.statePath}.`,
+    );
+  }
+  if (daemon.state) {
+    await removeDaemonState(config, daemon.state.pid);
+  }
+  if (daemon.healthReachable) {
+    throw new Error(
+      `Something is already responding on http://127.0.0.1:${config.port}/healthz. Refusing to start another daemon on the same port.`,
+    );
+  }
+}
+
+async function startDaemon(
+  config: NodeConfig,
+  options: { configPath?: string | null },
+): Promise<void> {
+  await assertNoManagedDaemon(config);
+  await mkdir(config.stateDir, { recursive: true });
+  const logPath = nodePath.join(config.stateDir, "daemon.log");
+  const logFd = openSync(logPath, "a");
+  try {
+    writeSync(logFd, `\n[sidemesh] starting at ${new Date().toISOString()}\n`);
+    const invocation = daemonInvocation(options.configPath ?? config.configPath);
+    const child = spawn(invocation.command, invocation.args, {
+      cwd: process.cwd(),
+      detached: true,
+      env: {
+        ...process.env,
+        SIDEMESH_CONFIG: options.configPath ?? config.configPath,
+      },
+      stdio: ["ignore", logFd, logFd],
+    });
+    child.unref();
+
+    const started = await waitForDaemonHealth(config.port, 12_000);
+    if (!started) {
+      throw new Error(
+        `Daemon did not become healthy on port ${config.port}. Check ${logPath}.`,
+      );
+    }
+    console.log(`Started Sidemesh daemon on port ${config.port} (pid ${child.pid}).`);
+    console.log(`Logs: ${logPath}`);
+  } finally {
+    closeSync(logFd);
+  }
+}
+
+async function stopDaemon(
+  config: NodeConfig,
+  options: { yes?: boolean },
+): Promise<boolean> {
+  const daemon = await inspectDaemon(config);
+  if (!daemon.state) {
+    if (daemon.healthReachable) {
+      throw new Error(
+        `A daemon responds on port ${config.port}, but no managed state file exists. Stop it manually or inspect the process using that port.`,
+      );
+    }
+    console.log("Sidemesh daemon is not running.");
+    return false;
+  }
+  if (!daemon.pidAlive) {
+    await removeDaemonState(config, daemon.state.pid);
+    console.log("Removed stale daemon state; no running daemon was found.");
+    return false;
+  }
+  if (daemon.state.pid === process.pid) {
+    throw new Error("Refusing to stop the current CLI process.");
+  }
+  await confirmDanger(
+    `This will stop Sidemesh pid ${daemon.state.pid} on port ${daemon.state.port}. Active streams and integrated terminals will disconnect.`,
+    options.yes === true,
+  );
+  try {
+    process.kill(daemon.state.pid, "SIGTERM");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to stop daemon pid ${daemon.state.pid}: ${message}`);
+  }
+  const stopped = await waitForDaemonStop(config.port, daemon.state.pid, 10_000);
+  if (!stopped) {
+    throw new Error(
+      `Daemon pid ${daemon.state.pid} did not stop within 10s. Inspect it before forcing termination.`,
+    );
+  }
+  await removeDaemonState(config, daemon.state.pid);
+  console.log(`Stopped Sidemesh daemon pid ${daemon.state.pid}.`);
+  return true;
+}
+
+async function restartDaemon(
+  config: NodeConfig,
+  options: { configPath?: string | null; yes?: boolean },
+): Promise<void> {
+  const daemon = await inspectDaemon(config);
+  if (daemon.pidAlive || daemon.healthReachable) {
+    await stopDaemon(config, { yes: options.yes });
+  } else if (daemon.state) {
+    await removeDaemonState(config, daemon.state.pid);
+  }
+  await startDaemon(config, { configPath: options.configPath ?? config.configPath });
+}
+
+function daemonInvocation(configPath: string): { command: string; args: string[] } {
+  const entry = fileURLToPath(import.meta.url);
+  const args =
+    entry.endsWith(".ts")
+      ? ["--import", "tsx", entry, "daemon"]
+      : [entry, "daemon"];
+  args.push("--config", configPath);
+  return { command: process.execPath, args };
+}
+
+async function waitForDaemonHealth(
+  port: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await checkHealth(`http://127.0.0.1:${port}/healthz`)) {
+      return true;
+    }
+    await delay(250);
+  }
+  return false;
+}
+
+async function waitForDaemonStop(
+  port: number,
+  pid: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const alive = isPidAlive(pid);
+    const reachable = await checkHealth(`http://127.0.0.1:${port}/healthz`);
+    if (!alive && !reachable) {
+      return true;
+    }
+    await delay(250);
+  }
+  return false;
+}
+
+async function confirmDanger(message: string, yes: boolean): Promise<void> {
+  if (yes) return;
+  if (!process.stdin.isTTY) {
+    throw new Error(`${message} Pass --yes to confirm in a non-interactive shell.`);
+  }
+  const readline = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  try {
+    const answer = await readline.question(`${message}\nContinue? [y/N] `);
+    if (!["y", "yes"].includes(answer.trim().toLowerCase())) {
+      throw new Error("Cancelled.");
+    }
+  } finally {
+    readline.close();
+  }
+}
+
+function registerShutdownHandlers(
+  config: NodeConfig,
+  getServer: () => RunningServer | null,
+): void {
+  let shuttingDown = false;
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    void (async () => {
+      try {
+        await getServer()?.close();
+      } finally {
+        await removeDaemonState(config, process.pid).catch(() => undefined);
+        process.exit(signal === "SIGINT" ? 130 : 0);
+      }
+    })();
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+}
+
 async function checkHealth(url: string): Promise<boolean> {
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
     return response.ok;
   } catch {
     return false;
@@ -311,5 +588,13 @@ function isDirectExecution(): boolean {
   if (!entry) {
     return false;
   }
-  return nodePath.resolve(entry) === fileURLToPath(import.meta.url);
+  return realPathOrResolve(entry) === realPathOrResolve(fileURLToPath(import.meta.url));
+}
+
+function realPathOrResolve(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return nodePath.resolve(path);
+  }
 }

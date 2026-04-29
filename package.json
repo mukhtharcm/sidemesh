@@ -4,11 +4,25 @@
   "private": true,
   "description": "Fleet-first coding-agent session node and Flutter client.",
   "type": "module",
+  "bin": {
+    "sidemesh": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "!dist/**/*.test.js",
+    "README.md",
+    "docs"
+  ],
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc",
+    "prepare": "npm run build",
     "daemon": "tsx src/cli.ts daemon",
+    "daemon:compiled": "node dist/cli.js daemon",
     "daemon:dev": "tsx watch src/cli.ts daemon",
     "setup": "tsx src/cli.ts setup",
     "doctor": "tsx src/cli.ts doctor",
