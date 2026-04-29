@@ -49,4 +49,20 @@ describe("systemd service rendering", () => {
     assert.match(env, /SIDEMESH_TERMINAL_SHELL=\/bin\/zsh/);
     assert.match(env, /SIDEMESH_LABEL="Lab Node"/);
   });
+
+  it("resolves custom uninstall paths without needing package metadata", () => {
+    const paths = resolveServicePaths({
+      serviceName: "sidemesh-custom.service",
+      packageDir: "",
+      nodeBin: "",
+      unitPath: "/tmp/sidemesh/custom.service",
+      envPath: "/tmp/sidemesh/custom.env",
+      launcherPath: "/tmp/sidemesh/custom.sh",
+    });
+
+    assert.equal(paths.serviceName, "sidemesh-custom");
+    assert.equal(paths.unitPath, "/tmp/sidemesh/custom.service");
+    assert.equal(paths.envPath, "/tmp/sidemesh/custom.env");
+    assert.equal(paths.launcherPath, "/tmp/sidemesh/custom.sh");
+  });
 });

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .DS_Store
+pnpm-lock.yaml
 
 apps/mobile/.dart_tool/
 apps/mobile/.flutter-plugins
