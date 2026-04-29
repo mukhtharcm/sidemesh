@@ -7,6 +7,7 @@ import 'package:xterm/xterm.dart' as xterm;
 
 import '../api_client.dart';
 import '../models.dart';
+import '../terminal_input_filter.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
@@ -336,9 +337,13 @@ class _TerminalPaneState extends State<TerminalPane> {
 
   void _sendInput(String data) {
     if (data.isEmpty || _terminalInfo?.isRunning != true) return;
+    final input = _terminal.isUsingAltBuffer
+        ? data
+        : stripGeneratedTerminalResponses(data);
+    if (input.isEmpty) return;
     final channel = _channel;
     if (channel == null) return;
-    channel.sink.add(jsonEncode({'type': 'input', 'data': data}));
+    channel.sink.add(jsonEncode({'type': 'input', 'data': input}));
   }
 
   void _handleResize(int cols, int rows, int pixelWidth, int pixelHeight) {
