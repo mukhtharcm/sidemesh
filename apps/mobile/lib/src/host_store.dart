@@ -1,9 +1,15 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
+
+const _defaultAppleKeychainService = 'flutter_secure_storage_service';
+const _macOsKeychainService = appFlavor == 'dev'
+    ? 'sidemesh_dev_secure_storage_service'
+    : _defaultAppleKeychainService;
 
 /// Persists the list of known Sidemesh hosts.
 ///
@@ -25,7 +31,10 @@ class HostStore {
             // `com.apple.application-identifier` entitlement, which ad-hoc
             // signed dev builds don't carry; using the legacy file-based
             // keychain works without any signing setup.
-            mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+            mOptions: MacOsOptions(
+              accountName: _macOsKeychainService,
+              useDataProtectionKeyChain: false,
+            ),
           );
 
   static const _legacyHostsKey = 'sidemesh_hosts_v1';

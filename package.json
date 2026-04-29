@@ -67,6 +67,10 @@
     "mobile:ios:prod": "cd apps/mobile && flutter run --flavor prod -t lib/main.dart",
     "mobile:ios:build:dev": "cd apps/mobile && flutter build ios --flavor dev --debug",
     "mobile:ios:build:prod": "cd apps/mobile && flutter build ipa --flavor prod --release",
+    "mobile:macos:dev": "cd apps/mobile && flutter run -d macos --flavor dev -t lib/main.dart",
+    "mobile:macos:prod": "cd apps/mobile && flutter run -d macos --flavor prod -t lib/main.dart",
+    "mobile:macos:build:dev": "cd apps/mobile && flutter build macos --flavor dev --debug",
+    "mobile:macos:build:prod": "cd apps/mobile && flutter build macos --flavor prod --release",
     "macos:release:package": "bash scripts/package-macos-release.sh",
     "macos:release:notarize": "bash scripts/notarize-macos-release.sh",
     "secret:scan": "bash scripts/secret-scan.sh"

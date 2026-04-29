@@ -4,15 +4,28 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MOBILE_DIR="$ROOT_DIR/apps/mobile"
 
-APP_NAME="${APP_NAME:-Sidemesh}"
-BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-com.sidemesh.sidemeshMobile}"
+FLAVOR="${FLAVOR:-prod}"
+case "$FLAVOR" in
+  dev)
+    APP_NAME="${APP_NAME:-Sidemesh Dev}"
+    BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-com.sidemesh.sidemeshMobile.dev}"
+    ;;
+  prod)
+    APP_NAME="${APP_NAME:-Sidemesh}"
+    BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-com.sidemesh.sidemeshMobile}"
+    ;;
+  *)
+    echo "Unsupported FLAVOR: $FLAVOR (expected dev or prod)" >&2
+    exit 1
+    ;;
+esac
 VERSION="${VERSION:-1.0.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 FLUTTER_BUILD_NAME="${FLUTTER_BUILD_NAME:-${VERSION%%-*}}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
 ENTITLEMENTS_PATH="${ENTITLEMENTS_PATH:-$MOBILE_DIR/macos/Runner/Release.entitlements}"
 
-BUILD_PRODUCTS_DIR="$MOBILE_DIR/build/macos/Build/Products/Release"
+BUILD_PRODUCTS_DIR="$MOBILE_DIR/build/macos/Build/Products/Release-$FLAVOR"
 BUILT_APP_PATH="$BUILD_PRODUCTS_DIR/$APP_NAME.app"
 DIST_DIR="$ROOT_DIR/artifacts/macos/$VERSION"
 DIST_APP_PATH="$DIST_DIR/$APP_NAME.app"
@@ -23,6 +36,7 @@ DMG_STAGE="$DIST_DIR/dmg-stage"
 echo "Sidemesh macOS release"
 echo "App: $APP_NAME"
 echo "Version: $VERSION ($BUILD_NUMBER)"
+echo "Flavor: $FLAVOR"
 echo "Bundle version: $FLUTTER_BUILD_NAME"
 echo "Bundle: $BUNDLE_IDENTIFIER"
 echo "Signing: ${SIGNING_IDENTITY:-unsigned/ad-hoc}"
@@ -31,6 +45,7 @@ cd "$MOBILE_DIR"
 flutter pub get
 flutter build macos \
   --release \
+  --flavor "$FLAVOR" \
   --build-name "$FLUTTER_BUILD_NAME" \
   --build-number "$BUILD_NUMBER"
 

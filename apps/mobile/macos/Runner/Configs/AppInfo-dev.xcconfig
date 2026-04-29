@@ -1,0 +1,4 @@
+#include "AppInfo.xcconfig"
+
+PRODUCT_NAME = Sidemesh Dev
+PRODUCT_BUNDLE_IDENTIFIER = com.sidemesh.sidemeshMobile.dev
