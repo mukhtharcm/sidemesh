@@ -62,6 +62,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         cwd: widget.cwd,
         sessionId: widget.sessionId,
         title: widget.title,
+        reuseExisting: true,
       ),
     );
   }
@@ -75,7 +76,7 @@ class TerminalPane extends StatefulWidget {
     required this.cwd,
     this.sessionId,
     this.title,
-    this.reuseExisting = false,
+    this.reuseExisting = true,
     this.compact = false,
   });
 
