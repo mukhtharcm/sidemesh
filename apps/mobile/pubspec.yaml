@@ -49,6 +49,7 @@ dependencies:
   background_fetch: ^1.6.2
   wakelock_plus: ^1.5.2
   desktop_multi_window: ^0.3.0
+  xterm: ^4.0.0
 
 dev_dependencies:
   flutter_test:

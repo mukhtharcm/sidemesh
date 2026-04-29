@@ -266,6 +266,63 @@ class ProviderCapabilities {
   }
 }
 
+class HostTerminalInfo {
+  const HostTerminalInfo({
+    required this.id,
+    required this.title,
+    required this.cwd,
+    required this.sessionId,
+    required this.status,
+    required this.backend,
+    required this.shell,
+    required this.rows,
+    required this.cols,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.exitCode,
+    required this.signal,
+    required this.nextSeq,
+    required this.clients,
+  });
+
+  final String id;
+  final String title;
+  final String cwd;
+  final String? sessionId;
+  final String status;
+  final String backend;
+  final String shell;
+  final int rows;
+  final int cols;
+  final int createdAt;
+  final int updatedAt;
+  final int? exitCode;
+  final int? signal;
+  final int nextSeq;
+  final int clients;
+
+  bool get isRunning => status == 'running';
+
+  factory HostTerminalInfo.fromJson(Map<String, dynamic> json) =>
+      HostTerminalInfo(
+        id: _stringValue(json['id']),
+        title: _stringValue(json['title']),
+        cwd: _stringValue(json['cwd']),
+        sessionId: _stringOrNull(json['sessionId']),
+        status: _stringValue(json['status']),
+        backend: _stringValue(json['backend']),
+        shell: _stringValue(json['shell']),
+        rows: _intValue(json['rows']),
+        cols: _intValue(json['cols']),
+        createdAt: _intValue(json['createdAt']),
+        updatedAt: _intValue(json['updatedAt']),
+        exitCode: _intOrNull(json['exitCode']),
+        signal: _intOrNull(json['signal']),
+        nextSeq: _intValue(json['nextSeq']),
+        clients: _intValue(json['clients']),
+      );
+}
+
 class GitInfoSummary {
   const GitInfoSummary({this.sha, this.branch, this.originUrl});
 
@@ -1470,17 +1527,18 @@ class SessionToolSemantic {
   final String action;
   final List<SessionToolSemanticTarget> targets;
 
-  factory SessionToolSemantic.fromJson(Map<String, dynamic> json) =>
-      SessionToolSemantic(
-        category: _stringValue(json['category']),
-        action: _stringValue(json['action']),
-        targets: (json['targets'] as List<dynamic>? ?? const <dynamic>[])
-            .map(
-              (item) =>
-                  SessionToolSemanticTarget.fromJson(item as Map<String, dynamic>),
-            )
-            .toList(),
-      );
+  factory SessionToolSemantic.fromJson(
+    Map<String, dynamic> json,
+  ) => SessionToolSemantic(
+    category: _stringValue(json['category']),
+    action: _stringValue(json['action']),
+    targets: (json['targets'] as List<dynamic>? ?? const <dynamic>[])
+        .map(
+          (item) =>
+              SessionToolSemanticTarget.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(),
+  );
 
   Map<String, dynamic> toJson() => {
     'category': category,
@@ -1575,65 +1633,66 @@ class SessionActivity {
     }
     return null;
   }
+
   List<String> get toolTargets => toolSemanticTargets
       .map(_semanticTargetPrimaryValue)
       .where((item) => item != null && item.isNotEmpty)
       .cast<String>()
       .toList(growable: false);
-  String? get toolUrl => _firstSemanticTargetOfType(toolSemanticTargets, 'url')?.url;
+  String? get toolUrl =>
+      _firstSemanticTargetOfType(toolSemanticTargets, 'url')?.url;
   String? get toolQuery =>
       _firstSemanticTargetOfType(toolSemanticTargets, 'query')?.value;
   String? get toolMode =>
       _firstSemanticTargetOfType(toolSemanticTargets, 'mode')?.value;
 
-  factory SessionActivity.fromJson(
-    Map<String, dynamic> json,
-  ) => SessionActivity(
-    id: _stringValue(json['id']),
-    type: _stringValue(json['type']),
-    createdAt: _dateValue(json['createdAt']),
-    seq: _intOrNull(json['seq']) ?? 0,
-    status: _stringValue(json['status']),
-    turnId: _stringOrNull(json['turnId']),
-    command: _stringOrNull(json['command']),
-    cwd: _stringOrNull(json['cwd']),
-    output: _stringOrNull(json['output']),
-    exitCode: _intOrNull(json['exitCode']),
-    durationMs: _intOrNull(json['durationMs']),
-    source: _stringOrNull(json['source']),
-    processId: _stringOrNull(json['processId']),
-    commandActions: (json['commandActions'] as List<dynamic>? ?? [])
-        .map(
-          (item) => SessionCommandActionSummary.fromJson(
-            item as Map<String, dynamic>,
-          ),
-        )
-        .toList(),
-    terminalStatus: _stringOrNull(json['terminalStatus']),
-    terminalInput: _stringOrNull(json['terminalInput']),
-    toolName: _stringOrNull(json['toolName']),
-    toolTitle: _stringOrNull(json['title']),
-    toolArgs: json['args'],
-    toolResult: json['result'],
-    toolError: json['isError'] is bool ? json['isError'] as bool : null,
-    toolSemantic: _toolSemanticFromActivityJson(json),
-    changes: (json['changes'] as List<dynamic>? ?? [])
-        .map(
-          (item) =>
-              SessionActivityChange.fromJson(item as Map<String, dynamic>),
-        )
-        .toList(),
-    diff: _stringOrNull(json['diff']),
-    query: _stringOrNull(json['query']),
-    queries: (json['queries'] as List<dynamic>? ?? const <dynamic>[])
-        .map((item) => _stringValue(item))
-        .where((item) => item.isNotEmpty)
-        .toList(),
-    targetUrl: _stringOrNull(json['targetUrl']),
-    pattern: _stringOrNull(json['pattern']),
-    revisedPrompt: _stringOrNull(json['revisedPrompt']),
-    savedPath: _stringOrNull(json['savedPath']),
-  );
+  factory SessionActivity.fromJson(Map<String, dynamic> json) =>
+      SessionActivity(
+        id: _stringValue(json['id']),
+        type: _stringValue(json['type']),
+        createdAt: _dateValue(json['createdAt']),
+        seq: _intOrNull(json['seq']) ?? 0,
+        status: _stringValue(json['status']),
+        turnId: _stringOrNull(json['turnId']),
+        command: _stringOrNull(json['command']),
+        cwd: _stringOrNull(json['cwd']),
+        output: _stringOrNull(json['output']),
+        exitCode: _intOrNull(json['exitCode']),
+        durationMs: _intOrNull(json['durationMs']),
+        source: _stringOrNull(json['source']),
+        processId: _stringOrNull(json['processId']),
+        commandActions: (json['commandActions'] as List<dynamic>? ?? [])
+            .map(
+              (item) => SessionCommandActionSummary.fromJson(
+                item as Map<String, dynamic>,
+              ),
+            )
+            .toList(),
+        terminalStatus: _stringOrNull(json['terminalStatus']),
+        terminalInput: _stringOrNull(json['terminalInput']),
+        toolName: _stringOrNull(json['toolName']),
+        toolTitle: _stringOrNull(json['title']),
+        toolArgs: json['args'],
+        toolResult: json['result'],
+        toolError: json['isError'] is bool ? json['isError'] as bool : null,
+        toolSemantic: _toolSemanticFromActivityJson(json),
+        changes: (json['changes'] as List<dynamic>? ?? [])
+            .map(
+              (item) =>
+                  SessionActivityChange.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(),
+        diff: _stringOrNull(json['diff']),
+        query: _stringOrNull(json['query']),
+        queries: (json['queries'] as List<dynamic>? ?? const <dynamic>[])
+            .map((item) => _stringValue(item))
+            .where((item) => item.isNotEmpty)
+            .toList(),
+        targetUrl: _stringOrNull(json['targetUrl']),
+        pattern: _stringOrNull(json['pattern']),
+        revisedPrompt: _stringOrNull(json['revisedPrompt']),
+        savedPath: _stringOrNull(json['savedPath']),
+      );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -1683,10 +1742,11 @@ SessionToolSemantic? _toolSemanticFromActivityJson(Map<String, dynamic> json) {
     return null;
   }
   final targets = <SessionToolSemanticTarget>[];
-  final legacyTargets = (json['toolTargets'] as List<dynamic>? ?? const <dynamic>[])
-      .map((item) => _stringValue(item))
-      .where((item) => item.isNotEmpty)
-      .toList();
+  final legacyTargets =
+      (json['toolTargets'] as List<dynamic>? ?? const <dynamic>[])
+          .map((item) => _stringValue(item))
+          .where((item) => item.isNotEmpty)
+          .toList();
   for (final path in legacyTargets) {
     targets.add(
       SessionToolSemanticTarget(type: 'file', path: path, role: 'target'),
@@ -1695,14 +1755,21 @@ SessionToolSemantic? _toolSemanticFromActivityJson(Map<String, dynamic> json) {
   final toolTarget = _stringOrNull(json['toolTarget']);
   if (toolTarget != null) {
     final toolUrl = _stringOrNull(json['toolUrl']);
-    final inferred =
-        category == 'command'
-            ? SessionToolSemanticTarget(type: 'command', command: toolTarget)
-            : category == 'session' || action == 'mode_change'
-            ? SessionToolSemanticTarget(type: 'mode', value: toolTarget)
-            : toolUrl == toolTarget || category == 'network'
-            ? SessionToolSemanticTarget(type: 'url', url: toolTarget, role: 'target')
-            : SessionToolSemanticTarget(type: 'file', path: toolTarget, role: 'target');
+    final inferred = category == 'command'
+        ? SessionToolSemanticTarget(type: 'command', command: toolTarget)
+        : category == 'session' || action == 'mode_change'
+        ? SessionToolSemanticTarget(type: 'mode', value: toolTarget)
+        : toolUrl == toolTarget || category == 'network'
+        ? SessionToolSemanticTarget(
+            type: 'url',
+            url: toolTarget,
+            role: 'target',
+          )
+        : SessionToolSemanticTarget(
+            type: 'file',
+            path: toolTarget,
+            role: 'target',
+          );
     final duplicate = targets.any((target) {
       if (target.type != inferred.type) return false;
       switch (target.type) {
@@ -1724,7 +1791,9 @@ SessionToolSemantic? _toolSemanticFromActivityJson(Map<String, dynamic> json) {
   }
   final toolUrl = _stringOrNull(json['toolUrl']);
   if (toolUrl != null) {
-    targets.add(SessionToolSemanticTarget(type: 'url', url: toolUrl, role: 'target'));
+    targets.add(
+      SessionToolSemanticTarget(type: 'url', url: toolUrl, role: 'target'),
+    );
   }
   final toolQuery = _stringOrNull(json['toolQuery']);
   if (toolQuery != null) {

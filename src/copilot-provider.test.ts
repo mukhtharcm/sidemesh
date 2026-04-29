@@ -1689,7 +1689,7 @@ function waitForActionOpened(
 }
 
 async function settleProviderWrites(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await new Promise((resolve) => setTimeout(resolve, 100));
 }
 
 async function waitFor(

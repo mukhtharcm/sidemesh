@@ -23,6 +23,7 @@ import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_screen.dart';
 import 'image_viewer_screen.dart';
+import 'terminal_screen.dart';
 import 'inspector/inspector_controller.dart';
 import 'inspector/inspector_file_browser.dart';
 import 'inspector/inspector_persistence.dart';
@@ -267,6 +268,9 @@ class _SessionScreenState extends State<SessionScreen>
 
   bool get _supportsGitStatus =>
       _supportsHostCapability('workspace', 'gitStatus');
+
+  bool get _supportsTerminal =>
+      _supportsHostCapability('workspace', 'terminal');
 
   bool _supportsGitDiffKind(String kind) {
     if (kind == 'remote') {
@@ -3392,6 +3396,25 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
+  Future<void> _openTerminal() async {
+    if (!_supportsTerminal) {
+      showAppSnackBar(context, 'This host does not expose terminals.');
+      return;
+    }
+    final session = _session ?? widget.session;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TerminalScreen(
+          host: widget.host,
+          api: widget.api,
+          cwd: session.cwd,
+          sessionId: session.id,
+          title: session.title,
+        ),
+      ),
+    );
+  }
+
   void _dismissKeyboard() {
     _restoreComposerFocusOnResume = false;
     FocusManager.instance.primaryFocus?.unfocus();
@@ -4046,12 +4069,22 @@ class _SessionScreenState extends State<SessionScreen>
           Padding(
             padding: const EdgeInsets.only(right: 6),
             child: MeshIconButton(
-              icon: Icons.terminal_rounded,
+              icon: Icons.add_circle_outline_rounded,
               tooltip: 'New session',
               color: colors.textSecondary,
               onTap: _startSessionFromCurrent,
             ),
           ),
+          if (_supportsTerminal)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: MeshIconButton(
+                icon: Icons.terminal_rounded,
+                tooltip: 'Open terminal',
+                color: colors.textSecondary,
+                onTap: () => unawaited(_openTerminal()),
+              ),
+            ),
           if (_supportsGitStatus &&
               _gitHeaderLabel(session, _gitStatus) != null &&
               (_gitStatus?.dirty ?? false))
