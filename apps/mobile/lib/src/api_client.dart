@@ -157,11 +157,13 @@ class ApiClient {
     String? title,
     int? cols,
     int? rows,
+    bool replaceExisting = false,
   }) async {
     final body = <String, dynamic>{
       'cwd': cwd,
       if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,
       if ((title ?? '').isNotEmpty) 'title': title,
+      if (replaceExisting) 'replaceExisting': true,
     };
     if (cols != null) {
       body['cols'] = cols;

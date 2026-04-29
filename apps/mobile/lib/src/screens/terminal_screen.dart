@@ -151,7 +151,10 @@ class _TerminalPaneState extends State<TerminalPane> {
     super.dispose();
   }
 
-  Future<void> _startTerminal({required bool reuseExisting}) async {
+  Future<void> _startTerminal({
+    required bool reuseExisting,
+    bool replaceExisting = false,
+  }) async {
     setState(() {
       _starting = true;
       _error = null;
@@ -166,6 +169,7 @@ class _TerminalPaneState extends State<TerminalPane> {
             title: widget.title,
             cols: _terminal.viewWidth,
             rows: _terminal.viewHeight,
+            replaceExisting: replaceExisting,
           );
       if (!mounted) return;
       setState(() {
@@ -327,6 +331,18 @@ class _TerminalPaneState extends State<TerminalPane> {
         });
         _terminal.write('\r\n[terminal exited]\r\n');
         return;
+      case 'replace':
+        final seq = _intOrNull(frame['seq']);
+        if (seq != null && seq > _lastSeq) {
+          _lastSeq = seq;
+        }
+        final replacement = frame['replacement'];
+        if (replacement is Map) {
+          _adoptReplacementTerminal(
+            HostTerminalInfo.fromJson(replacement.cast<String, dynamic>()),
+          );
+        }
+        return;
       case 'error':
         final message = frame['message']?.toString() ?? 'Terminal error';
         setState(() => _error = message);
@@ -344,6 +360,26 @@ class _TerminalPaneState extends State<TerminalPane> {
     final channel = _channel;
     if (channel == null) return;
     channel.sink.add(jsonEncode({'type': 'input', 'data': input}));
+  }
+
+  void _adoptReplacementTerminal(HostTerminalInfo replacement) {
+    if (!mounted || replacement.id == _terminalInfo?.id) return;
+    _reconnectTimer?.cancel();
+    unawaited(_subscription?.cancel());
+    unawaited(_channel?.sink.close());
+    _subscription = null;
+    _channel = null;
+    setState(() {
+      _terminalInfo = replacement;
+      _starting = false;
+      _stopping = false;
+      _connecting = false;
+      _lastSeq = -1;
+      _reconnectAttempts = 0;
+      _error = null;
+    });
+    _terminal.write('\r\n[terminal restarted from another device]\r\n');
+    _connectLive(resetAttempts: true);
   }
 
   void _handleResize(int cols, int rows, int pixelWidth, int pixelHeight) {
@@ -393,7 +429,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       _error = null;
     });
     _terminal.write('\r\nStarting a new Sidemesh terminal...\r\n');
-    await _startTerminal(reuseExisting: false);
+    await _startTerminal(reuseExisting: false, replaceExisting: true);
   }
 
   @override

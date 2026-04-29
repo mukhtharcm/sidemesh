@@ -40,6 +40,7 @@ export interface CreateTerminalRequest {
   sessionId?: string | null;
   rows?: number | null;
   cols?: number | null;
+  replaceExisting?: boolean | null;
 }
 
 export interface TerminalInfo {
@@ -73,6 +74,12 @@ type TerminalReplayFrame =
       seq: number;
       exitCode: number | null;
       signal: number | null;
+    }
+  | {
+      type: "replace";
+      terminalId: string;
+      seq: number;
+      replacement: TerminalInfo;
     };
 
 type TerminalBackend = "direct-pty" | "pipe";
@@ -220,6 +227,10 @@ export class TerminalRegistry {
       this.broadcast(terminal, frame);
     });
 
+    if (request.replaceExisting === true) {
+      this.broadcastReplacement(terminal);
+    }
+
     return this.info(terminal);
   }
 
@@ -252,10 +263,10 @@ export class TerminalRegistry {
 
   public attach(socket: WebSocket, id: string, since: number): void {
     if (!this.enabled) {
-    sendJson(socket, {
-      type: "error",
-      message: "terminal access is disabled",
-    });
+      sendJson(socket, {
+        type: "error",
+        message: "terminal access is disabled",
+      });
       socket.close();
       return;
     }
@@ -381,6 +392,22 @@ export class TerminalRegistry {
         continue;
       }
       sendJson(client, frame);
+    }
+  }
+
+  private broadcastReplacement(replacement: TerminalRecord): void {
+    const replacementInfo = this.info(replacement);
+    for (const terminal of this.terminals.values()) {
+      if (terminal.id === replacement.id) continue;
+      if (terminal.clients.size === 0) continue;
+      if (!sameLogicalTerminal(terminal, replacement)) continue;
+      const frame = this.pushFrame(terminal, {
+        type: "replace",
+        terminalId: terminal.id,
+        seq: terminal.nextSeq++,
+        replacement: replacementInfo,
+      });
+      this.broadcast(terminal, frame);
     }
   }
 
@@ -721,6 +748,17 @@ function clampInteger(
 
 function frameSize(frame: TerminalReplayFrame): number {
   return Buffer.byteLength(JSON.stringify(frame), "utf8");
+}
+
+function sameLogicalTerminal(
+  left: Pick<TerminalRecord, "cwd" | "sessionId">,
+  right: Pick<TerminalRecord, "cwd" | "sessionId">,
+): boolean {
+  if (left.cwd !== right.cwd) return false;
+  if (left.sessionId || right.sessionId) {
+    return left.sessionId !== null && left.sessionId === right.sessionId;
+  }
+  return true;
 }
 
 function sendJson(socket: WebSocket, payload: unknown): void {

@@ -727,6 +727,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
         sessionId: asString(request.body?.sessionId),
         cols: asInteger(request.body?.cols),
         rows: asInteger(request.body?.rows),
+        replaceExisting: request.body?.replaceExisting === true,
       });
       response.status(201).json(terminal);
     }),
