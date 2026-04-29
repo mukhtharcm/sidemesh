@@ -1,0 +1,199 @@
+name: Release macOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release. Defaults to tag name or pubspec version."
+        required: false
+        type: string
+      build_number:
+        description: "Build number override. Defaults to GitHub run number."
+        required: false
+        type: string
+      publish_release:
+        description: "Create/update a GitHub Release when run manually."
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: Sidemesh
+  BUNDLE_IDENTIFIER: com.sidemesh.sidemeshMobile
+  FLUTTER_VERSION: "3.41.7"
+  HAS_SIGNING_SECRETS: ${{ secrets.BUILD_CERTIFICATE_BASE64 != '' && secrets.P12_PASSWORD != '' && secrets.KEYCHAIN_PASSWORD != '' && secrets.SIGNING_IDENTITY != '' }}
+  HAS_NOTARY_SECRETS: ${{ secrets.APPLE_ID != '' && secrets.APP_SPECIFIC_PASSWORD != '' && secrets.TEAM_ID != '' }}
+
+jobs:
+  package-release:
+    name: Package macOS release
+    runs-on: macos-latest
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release metadata
+        id: meta
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          version="$INPUT_VERSION"
+
+          if [[ -z "$version" && "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+
+          if [[ -z "$version" ]]; then
+            version="$(grep '^version:' apps/mobile/pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)"
+          fi
+
+          build_number="$INPUT_BUILD_NUMBER"
+          if [[ -z "$build_number" ]]; then
+            build_number="${GITHUB_RUN_NUMBER}"
+          fi
+
+          release_tag="v$version"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            release_tag="$GITHUB_REF_NAME"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Import Developer ID certificate
+        if: env.HAS_SIGNING_SECRETS == 'true'
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          certificate_path="$RUNNER_TEMP/sidemesh-signing-certificate.p12"
+          keychain_path="$RUNNER_TEMP/sidemesh-signing.keychain-db"
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$certificate_path"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -P "$P12_PASSWORD" -A -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" login.keychain-db
+          security default-keychain -d user -s "$keychain_path"
+
+      - name: Package release artifacts
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          BUILD_NUMBER: ${{ steps.meta.outputs.build_number }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+        run: ./scripts/package-macos-release.sh
+
+      - name: Notarize release artifacts
+        if: env.HAS_SIGNING_SECRETS == 'true' && env.HAS_NOTARY_SECRETS == 'true'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APP_SPECIFIC_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: ./scripts/notarize-macos-release.sh
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sidemesh-macos-${{ steps.meta.outputs.version }}
+          path: |
+            artifacts/macos/${{ steps.meta.outputs.version }}/*.zip
+            artifacts/macos/${{ steps.meta.outputs.version }}/*.dmg
+            artifacts/macos/${{ steps.meta.outputs.version }}/notary-*.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Prepare release notes
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          ./scripts/extract-release-notes.sh CHANGELOG.md "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+
+          if [[ ! -s "$RUNNER_TEMP/release-notes.md" ]]; then
+            {
+              echo "## Sidemesh $VERSION"
+              echo
+              echo "Private developer-preview macOS build."
+              echo
+              echo "Security note: use Sidemesh only on trusted private networks such as Tailscale."
+            } > "$RUNNER_TEMP/release-notes.md"
+          fi
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+        run: |
+          release_args=()
+          if [[ "$VERSION" == *-* ]]; then
+            release_args+=(--prerelease)
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --title "Sidemesh $VERSION" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            gh release create "$RELEASE_TAG" \
+              --target "$GITHUB_SHA" \
+              --title "Sidemesh $VERSION" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              "${release_args[@]}"
+          fi
+
+          gh release upload "$RELEASE_TAG" \
+            "artifacts/macos/$VERSION/$APP_NAME-$VERSION-macos.zip" \
+            "artifacts/macos/$VERSION/$APP_NAME-$VERSION-macos.dmg" \
+            --clobber
+
+      - name: Write release summary
+        if: always()
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          if [[ "$HAS_SIGNING_SECRETS" == "true" && "$HAS_NOTARY_SECRETS" == "true" ]]; then
+            status="signed and notarized"
+          elif [[ "$HAS_SIGNING_SECRETS" == "true" ]]; then
+            status="signed but not notarized"
+          else
+            status="unsigned/ad-hoc"
+          fi
+
+          {
+            echo "## Sidemesh macOS release"
+            echo
+            echo "- Version: $VERSION"
+            echo "- Bundle identifier: $BUNDLE_IDENTIFIER"
+            echo "- Artifact status: $status"
+            echo "- Release tag: ${{ steps.meta.outputs.release_tag }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean up signing keychain
+        if: always() && env.HAS_SIGNING_SECRETS == 'true'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/sidemesh-signing.keychain-db" || true
