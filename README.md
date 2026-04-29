@@ -32,11 +32,13 @@ ledger for `clientMessageId` replay protection.
 Useful CLI commands:
 
 ```bash
+npm run build           # compile the daemon CLI into dist/
 npm run setup           # guided config wizard
 npm run doctor          # startup and provider diagnostics
 npm run status          # resolved config + local daemon health
 npm run pair            # host URL + token for the mobile app
-npm run daemon          # start the server
+npm run daemon          # start the foreground dev server through tsx
+npm run daemon:compiled # start the foreground compiled server
 ```
 
 `npm run setup` shows public providers by default. If you need the deterministic
@@ -50,6 +52,49 @@ npx tsx src/cli.ts setup
 npx tsx src/cli.ts doctor
 npx tsx src/cli.ts pair
 ```
+
+## Installing The Daemon CLI
+
+For day-to-day host operation, prefer the compiled `sidemesh` CLI instead of
+running `npm run daemon` from the repo. The compiled path does not depend on
+`tsx` at runtime, so it avoids optional esbuild package failures from
+production-style installs.
+
+For local development:
+
+```bash
+npm install
+npm link
+sidemesh setup
+sidemesh start
+sidemesh pair
+```
+
+For a machine that should consume the GitHub repo directly:
+
+```bash
+npm install -g github:your-org/sidemesh
+sidemesh setup
+sidemesh start
+sidemesh pair
+```
+
+Lifecycle commands:
+
+```bash
+sidemesh daemon          # foreground mode; useful under systemd or while debugging
+sidemesh start           # detached background daemon
+sidemesh stop            # warns before stopping the managed daemon
+sidemesh restart         # warns, then stop + start
+sidemesh restart --yes   # non-interactive restart for scripts
+sidemesh status          # config, health, and managed daemon pid/state
+```
+
+The lifecycle commands write managed process state to
+`~/.sidemesh/daemon-state-v1.json` by default. If another managed daemon is
+already healthy on the configured port, `sidemesh daemon` and `sidemesh start`
+refuse to launch a duplicate. If a daemon responds on the port but no managed
+state exists, Sidemesh warns instead of blindly killing an unknown process.
 
 Configuration resolution works like this:
 
@@ -172,18 +217,19 @@ Run one daemon per machine you want to reach from the phone. The recommended
 flow is:
 
 ```bash
-npm run setup
-npm run doctor
-npm run daemon
-npm run pair
+sidemesh setup
+sidemesh doctor
+sidemesh start
+sidemesh pair
 ```
 
-Run `npm run pair` from a second terminal after the daemon is up, since
-`npm run daemon` is a long-running process.
+Use `sidemesh daemon` instead of `sidemesh start` when you want a foreground
+process, for example inside `systemd` or during local debugging.
 
-Use `npm run status` when you are unsure which local daemon is active. It prints
-the resolved port, provider list, token fingerprint, terminal setting, and
-reachable local/Tailscale addresses without revealing the full token.
+Use `sidemesh status` when you are unsure which local daemon is active. It
+prints the resolved port, provider list, token fingerprint, terminal setting,
+managed daemon pid/state, and reachable local/Tailscale addresses without
+revealing the full token.
 
 If you prefer raw env vars, this still works:
 
@@ -191,7 +237,7 @@ If you prefer raw env vars, this still works:
 SIDEMESH_LABEL=mbp \
 SIDEMESH_PORT=8899 \
 SIDEMESH_TOKEN=replace-me \
-npm run daemon
+sidemesh daemon
 ```
 
 Then add that machine inside the mobile app with:
