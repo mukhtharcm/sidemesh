@@ -43,16 +43,37 @@ Future<void> main(List<String> args) async {
   }
   await CreateSessionDefaultsStore.instance.ensureLoaded();
   await ScreenAwakeSettingsStore.instance.ensureLoaded();
-  await WindowScreenAwakeCoordinator.instance.start();
-  if (launchState.shouldStartGlobalServices) {
-    await LocalNotificationService.instance.initialize();
-    await BackgroundSyncService.instance.initialize();
-    SessionSendOutboxWorker.instance.start();
-  }
   final themeController = await ThemeController.load();
   runApp(
     SidemeshApp(themeController: themeController, launchState: launchState),
   );
+  unawaited(_startPostLaunchServices(launchState));
+}
+
+Future<void> _startPostLaunchServices(
+  SidemeshWindowLaunchState launchState,
+) async {
+  try {
+    await WindowScreenAwakeCoordinator.instance.start();
+  } catch (_) {
+    // Keep-screen-awake is best-effort. It must never block app launch or
+    // secondary window startup.
+  }
+  if (!launchState.shouldStartGlobalServices) {
+    return;
+  }
+  try {
+    await LocalNotificationService.instance.initialize();
+  } catch (_) {
+    // Notifications are optional; the app must still be usable without them.
+  }
+  try {
+    await BackgroundSyncService.instance.initialize();
+  } catch (_) {
+    // Foreground usage and websocket updates still work if background sync
+    // cannot initialize on this platform/build.
+  }
+  SessionSendOutboxWorker.instance.start();
 }
 
 class SidemeshApp extends StatelessWidget {
