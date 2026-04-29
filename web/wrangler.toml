@@ -1,8 +1,3 @@
 name = "sidemesh"
 pages_build_output_dir = "."
 compatibility_date = "2025-04-24"
-
-[[d1_databases]]
-binding = "DB"
-database_name = "sidemesh-waitlist"
-database_id = "b31fed46-ed27-4d29-89ee-9651df09f42c"
