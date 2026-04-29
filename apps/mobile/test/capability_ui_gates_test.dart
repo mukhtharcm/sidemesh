@@ -194,6 +194,77 @@ void main() {
     expect(find.text('Live web search'), findsOneWidget);
   });
 
+  testWidgets('create session sheet sends selected provider for mixed hosts', (
+    tester,
+  ) async {
+    await CreateSessionDefaultsStore.instance.ensureLoaded();
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(
+        _fullCapabilities,
+        supportedProviders: const [
+          ProviderDefinitionSummary(
+            kind: 'fake',
+            displayName: 'Fake Test Provider',
+            defaultCommand: 'builtin',
+            commandEnvironmentVariables: ['SIDEMESH_FAKE_CAPABILITY_PROFILE'],
+            supportedApprovalPolicies: [
+              'untrusted',
+              'on-failure',
+              'on-request',
+              'never',
+            ],
+            capabilities: ProviderCapabilities(_fullCapabilities),
+            config: ProviderConfigSummary(kind: 'fake', command: 'builtin'),
+            version: 'fake-provider 1.0.0',
+            isDefault: true,
+          ),
+          ProviderDefinitionSummary(
+            kind: 'copilot',
+            displayName: 'GitHub Copilot',
+            defaultCommand: 'copilot',
+            commandEnvironmentVariables: ['SIDEMESH_COPILOT_BIN'],
+            supportedApprovalPolicies: ['on-request', 'never'],
+            capabilities: ProviderCapabilities(_copilotApprovalCapabilities),
+            config: ProviderConfigSummary(kind: 'copilot', command: 'copilot'),
+            version: 'GitHub Copilot SDK 9.9.9',
+            isDefault: false,
+          ),
+        ],
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      CreateSessionSheet(
+        host: _host('create-provider-switch'),
+        api: api,
+        initialCwd: '/repo',
+        presentation: CreateSessionPresentation.dialog,
+      ),
+      size: const Size(1600, 1100),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Provider: Fake Test Provider'), findsOneWidget);
+
+    await tester.tap(find.text('Provider: Fake Test Provider'));
+    await _pumpFrames(tester);
+    await tester.tap(find.widgetWithText(ListTile, 'GitHub Copilot'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Provider: GitHub Copilot'), findsOneWidget);
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Prompt'),
+      'Start through Copilot.',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Start'));
+    await _pumpFrames(tester);
+
+    expect(api.lastCreateRequest, isNotNull);
+    expect(api.lastCreateRequest!.provider, 'copilot');
+  });
+
   testWidgets(
     'create session sheet inherits default profile runtime settings until changed',
     (tester) async {
