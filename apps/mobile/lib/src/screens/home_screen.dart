@@ -24,6 +24,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/notification_permission_banner.dart';
+import '../widgets/provider_badge.dart';
 import 'create_session_sheet.dart';
 import 'host_detail_screen.dart';
 import 'settings_screen.dart';
@@ -1109,15 +1110,31 @@ class _SessionRowCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        session.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          height: 1.25,
-                          color: selected ? colors.accent : colors.textPrimary,
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              session.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.25,
+                                    color: selected
+                                        ? colors.accent
+                                        : colors.textPrimary,
+                                  ),
+                            ),
+                          ),
+                          if (session.provider != null) ...[
+                            const SizedBox(width: 6),
+                            AgentProviderBadge(
+                              providerKind: session.provider,
+                              compact: true,
+                            ),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 3),
                       Text(
@@ -1231,10 +1248,19 @@ class _SessionRowCard extends StatelessWidget {
             children: [
               Icon(Icons.dns_rounded, size: 13, color: colors.textTertiary),
               const SizedBox(width: 4),
-              Text(
-                host.label,
-                style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+              Flexible(
+                flex: 0,
+                child: Text(
+                  host.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+                ),
               ),
+              if (session.provider != null) ...[
+                const SizedBox(width: 8),
+                AgentProviderBadge(providerKind: session.provider),
+              ],
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
