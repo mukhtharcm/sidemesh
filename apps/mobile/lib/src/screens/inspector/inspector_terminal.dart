@@ -17,6 +17,7 @@ InspectorSurface buildInspectorTerminalSurface({
     title: 'Terminal',
     icon: Icons.terminal_rounded,
     bodyBuilder: (context) => TerminalPane(
+      key: ValueKey('terminal:${host.id}:${session.id}:${session.cwd}'),
       host: host,
       api: api,
       cwd: session.cwd,
