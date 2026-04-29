@@ -49,6 +49,285 @@ class _CachedTranscriptStrip extends StatelessWidget {
   }
 }
 
+enum _SessionActionTone { neutral, accent, warning, danger }
+
+class _SessionActionSpec {
+  const _SessionActionSpec({
+    required this.value,
+    required this.label,
+    required this.icon,
+    this.detail,
+    this.tone = _SessionActionTone.neutral,
+    this.active = false,
+  });
+
+  final String value;
+  final String label;
+  final String? detail;
+  final IconData icon;
+  final _SessionActionTone tone;
+  final bool active;
+}
+
+class _SessionActionGroup {
+  const _SessionActionGroup({required this.label, required this.actions});
+
+  final String label;
+  final List<_SessionActionSpec> actions;
+}
+
+class _SessionActionSheet extends StatelessWidget {
+  const _SessionActionSheet({required this.session, required this.groups});
+
+  final SessionSummary session;
+  final List<_SessionActionGroup> groups;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final maxHeight = MediaQuery.sizeOf(context).height * 0.84;
+    final visibleGroups = groups
+        .where((group) => group.actions.isNotEmpty)
+        .toList(growable: false);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.surfaceElevated,
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: colors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.textPrimary.withValues(alpha: 0.12),
+                    blurRadius: 32,
+                    offset: const Offset(0, 18),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(28),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 38,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: colors.borderStrong.withValues(alpha: 0.55),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: colors.accentMuted,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: colors.accent.withValues(alpha: 0.24),
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.auto_awesome_mosaic_rounded,
+                              size: 19,
+                              color: colors.accent,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Session actions',
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(
+                                        color: colors.textPrimary,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -0.2,
+                                      ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  session.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: colors.textSecondary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          MeshIconButton(
+                            icon: Icons.close_rounded,
+                            tooltip: 'Close',
+                            color: colors.textSecondary,
+                            onTap: () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      for (var index = 0; index < visibleGroups.length; index++)
+                        Padding(
+                          padding: EdgeInsets.only(
+                            bottom: index == visibleGroups.length - 1 ? 0 : 12,
+                          ),
+                          child: _SessionActionGroupCard(
+                            group: visibleGroups[index],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SessionActionGroupCard extends StatelessWidget {
+  const _SessionActionGroupCard({required this.group});
+
+  final _SessionActionGroup group;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 7),
+          child: Text(
+            group.label,
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+            ).copyWith(letterSpacing: 0.8),
+          ),
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            children: [
+              for (var index = 0; index < group.actions.length; index++) ...[
+                if (index > 0)
+                  Divider(
+                    height: 1,
+                    indent: 58,
+                    color: colors.border.withValues(alpha: 0.72),
+                  ),
+                _SessionActionRow(action: group.actions[index]),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SessionActionRow extends StatelessWidget {
+  const _SessionActionRow({required this.action});
+
+  final _SessionActionSpec action;
+
+  Color _toneColor(AppColors colors) {
+    return switch (action.tone) {
+      _SessionActionTone.accent => colors.accent,
+      _SessionActionTone.warning => colors.warning,
+      _SessionActionTone.danger => colors.danger,
+      _ => colors.textSecondary,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final tone = _toneColor(colors);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => Navigator.of(context).pop(action.value),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: tone.withValues(alpha: action.active ? 0.14 : 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: tone.withValues(alpha: 0.18)),
+                ),
+                child: Icon(action.icon, size: 18, color: tone),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      action.label,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: action.tone == _SessionActionTone.danger
+                            ? colors.danger
+                            : colors.textPrimary,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.1,
+                      ),
+                    ),
+                    if ((action.detail ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        action.detail!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right_rounded, size: 18, color: colors.border),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SessionHeader extends StatelessWidget {
   const _SessionHeader({
     required this.host,
