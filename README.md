@@ -76,11 +76,22 @@ SIDEMESH_FAKE_SEED=1
 SIDEMESH_FAKE_WORKSPACE_ROOT=/tmp/sidemesh-fake
 SIDEMESH_FAKE_CAPABILITY_PROFILE=full
 SIDEMESH_STATE_DIR=~/.sidemesh
+SIDEMESH_TERMINAL=0
+SIDEMESH_TERMINAL_SHELL=/bin/zsh
 ```
 
 `SIDEMESH_PROVIDER` defaults to `codex`. `SIDEMESH_PROVIDER_COMMAND` is a
 provider-neutral command override; provider-specific command variables such as
 `SIDEMESH_CODEX_BIN` and `SIDEMESH_COPILOT_BIN` take precedence.
+
+Integrated terminal access is host-side and provider-neutral. It is disabled by
+default because it exposes an interactive shell on the host. Set
+`SIDEMESH_TERMINAL=1` to advertise the `workspace.terminal` capability and
+enable `/api/terminals`. The daemon uses `node-pty` when available and falls
+back to a pipe-backed shell if PTY spawning fails; set
+`SIDEMESH_TERMINAL_REQUIRE_PTY=1` if you prefer hard failure over fallback.
+If `node-pty` installs but cannot spawn shells on a local Node runtime, run
+`npm rebuild node-pty`.
 
 To run against GitHub Copilot CLI instead of Codex without using the setup
 wizard:

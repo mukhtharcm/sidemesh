@@ -69,6 +69,17 @@ import {
   registerFsRoutes,
 } from "./fs-routes.js";
 import {
+  TerminalError,
+  TerminalRegistry,
+  terminalEnabledFromEnv,
+  terminalShellFromEnv,
+} from "./terminal.js";
+import {
+  WorkspaceAccessError,
+  collectWorkspaceRoots,
+  resolveWorkspacePath,
+} from "./workspace-scope.js";
+import {
   SessionInputDedupeStore,
   type StoredSessionInputDedupeEntry,
 } from "./session-input-dedupe-store.js";
@@ -90,6 +101,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
     filesystem: true,
     gitStatus: true,
     gitDiff: true,
+    terminal: terminalEnabledFromEnv(),
   },
 };
 
@@ -172,6 +184,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const providerEntriesByKind = new Map(
     providerRuntime.providers.map((entry) => [entry.kind, entry]),
   );
+  const terminalRegistry = new TerminalRegistry({
+    enabled: HOST_CAPABILITIES.workspace.terminal,
+    shell: terminalShellFromEnv(),
+    resolveCwd: (cwd, request) =>
+      resolveTerminalCwd(provider, runtimeCache, cwd, request.sessionId),
+  });
 
   function allocSeq(sessionId: string): number {
     const current = sessionSeqCursor.get(sessionId) ?? 0;
@@ -666,6 +684,86 @@ export async function startServer(config: NodeConfig): Promise<void> {
   registerFsRoutes(app, {
     listSessions: () => listSessions(provider, runtimeCache),
   });
+
+  app.get("/api/terminals", (_request, response) => {
+    if (
+      !requireHostCapability(
+        response,
+        HOST_CAPABILITIES.workspace.terminal,
+        "integrated terminal",
+      )
+    ) {
+      return;
+    }
+    response.json({ terminals: terminalRegistry.list() });
+  });
+
+  app.post(
+    "/api/terminals",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireHostCapability(
+          response,
+          HOST_CAPABILITIES.workspace.terminal,
+          "integrated terminal",
+        )
+      ) {
+        return;
+      }
+      const cwd = asString(request.body?.cwd);
+      if (!cwd) {
+        response.status(400).json({ error: "cwd is required" });
+        return;
+      }
+      const terminal = await terminalRegistry.create({
+        cwd,
+        title: asString(request.body?.title),
+        sessionId: asString(request.body?.sessionId),
+        cols: asInteger(request.body?.cols),
+        rows: asInteger(request.body?.rows),
+      });
+      response.status(201).json(terminal);
+    }),
+  );
+
+  app.post(
+    "/api/terminals/:terminalId/resize",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireHostCapability(
+          response,
+          HOST_CAPABILITIES.workspace.terminal,
+          "integrated terminal",
+        )
+      ) {
+        return;
+      }
+      const terminalId = pathParam(request.params.terminalId);
+      response.json(
+        terminalRegistry.resize(
+          terminalId,
+          asInteger(request.body?.cols),
+          asInteger(request.body?.rows),
+        ),
+      );
+    }),
+  );
+
+  app.post(
+    "/api/terminals/:terminalId/kill",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireHostCapability(
+          response,
+          HOST_CAPABILITIES.workspace.terminal,
+          "integrated terminal",
+        )
+      ) {
+        return;
+      }
+      response.json(terminalRegistry.kill(pathParam(request.params.terminalId)));
+    }),
+  );
 
   app.get(
     "/api/actions",
@@ -1615,11 +1713,15 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const wsServer = new WebSocketServer({ noServer: true });
   server.on("upgrade", (request, socket, head) => {
     const [pathOnly, queryString] = (request.url || "").split("?");
+    const terminalLiveMatch = /^\/api\/terminals\/([^/]+)\/live$/.exec(
+      pathOnly,
+    );
     if (
       pathOnly !== "/api/live" &&
       pathOnly !== "/api/sessions/live" &&
       pathOnly !== "/api/fs/live" &&
-      pathOnly !== "/api/actions/live"
+      pathOnly !== "/api/actions/live" &&
+      !terminalLiveMatch
     ) {
       socket.destroy();
       return;
@@ -1631,6 +1733,16 @@ export async function startServer(config: NodeConfig): Promise<void> {
       : "";
     if (token !== config.token) {
       socket.destroy();
+      return;
+    }
+
+    if (terminalLiveMatch) {
+      const terminalId = decodeURIComponent(terminalLiveMatch[1] || "");
+      const params = new URLSearchParams(queryString || "");
+      const since = asInteger(params.get("since")) ?? -1;
+      wsServer.handleUpgrade(request, socket, head, (ws) => {
+        terminalRegistry.attach(ws, terminalId, since);
+      });
       return;
     }
 
@@ -1734,7 +1846,11 @@ export async function startServer(config: NodeConfig): Promise<void> {
     ) => {
       const message =
         error instanceof Error ? error.message : "Internal server error";
-      response.status(500).json({ error: message });
+      const status =
+        error instanceof TerminalError || error instanceof WorkspaceAccessError
+          ? error.status
+          : 500;
+      response.status(status).json({ error: message });
     },
   );
 
@@ -1900,6 +2016,29 @@ function unsupportedOverrideCapability(
     return `${provider.displayName} does not support profile overrides`;
   }
   return null;
+}
+
+async function resolveTerminalCwd(
+  provider: AgentProvider,
+  runtimeCache: Map<string, SessionRuntimeCacheEntry>,
+  cwd: string,
+  sessionId: string | null | undefined,
+): Promise<string> {
+  if (sessionId?.trim() && hasProviderMethod(provider, "readSessionThread")) {
+    try {
+      const thread = await provider.readSessionThread(sessionId.trim(), false);
+      if (thread.cwd) {
+        return resolveWorkspacePath(cwd, [thread.cwd]);
+      }
+    } catch {
+      // Fallback keeps terminal startup usable if a provider cannot rehydrate a
+      // session thread but the cwd is still under a known workspace root.
+    }
+  }
+  return resolveWorkspacePath(
+    cwd,
+    await collectWorkspaceRoots(() => listSessions(provider, runtimeCache)),
+  );
 }
 
 async function listSessions(

@@ -1021,7 +1021,7 @@ export class CopilotAgentProvider
       }
       active.completedAssistantMessageIds.add(messageId);
       active.assistantBuffers.delete(messageId);
-      void this.persistSoon();
+      this.persistEventually();
       return;
     }
 
@@ -1159,7 +1159,7 @@ export class CopilotAgentProvider
       this.finishTurn(session, turn, status);
     }
     active.resolve(status);
-    void this.persistSoon();
+    this.persistEventually();
   }
 
   private failTurn(
@@ -1192,7 +1192,7 @@ export class CopilotAgentProvider
       `copilot-assistant-error-${turnId}`,
     );
     this.finishTurn(session, turn, "failed");
-    void this.persistSoon();
+    this.persistEventually();
   }
 
   private appendAndEmitAssistantMessage(
@@ -1238,7 +1238,7 @@ export class CopilotAgentProvider
     } as SessionActivity;
     session.activities.set(activity.id, next);
     this.touch(session);
-    void this.persistSoon();
+    this.persistEventually();
     return next;
   }
 
@@ -1255,7 +1255,7 @@ export class CopilotAgentProvider
         output: `${existing.output ?? ""}${delta}`,
       });
       this.touch(session);
-      void this.persistSoon();
+      this.persistEventually();
     }
     this.emit("liveEvent", {
       type: "activity_output_delta",
@@ -1280,7 +1280,7 @@ export class CopilotAgentProvider
       sessionId: session.thread.id,
       runtime: next ? { ...next } : null,
     });
-    void this.persistSoon();
+    this.persistEventually();
   }
 
   private async handlePermissionRequest(
@@ -1531,6 +1531,17 @@ export class CopilotAgentProvider
       .catch(() => undefined)
       .then(() => this.saveState());
     await this.saveChain;
+  }
+
+  private persistEventually(): void {
+    void this.persistSoon().catch((error: unknown) => {
+      this.emit(
+        "stderr",
+        error instanceof Error
+          ? `Copilot state persistence failed: ${error.message}`
+          : "Copilot state persistence failed.",
+      );
+    });
   }
 
   private async saveState(): Promise<void> {

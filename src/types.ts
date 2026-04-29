@@ -44,6 +44,7 @@ export interface HostCapabilities {
     filesystem: boolean;
     gitStatus: boolean;
     gitDiff: boolean;
+    terminal: boolean;
   };
 }
 

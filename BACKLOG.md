@@ -37,6 +37,9 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
 
 ## Current Wave
 
+- [ ] Add a provider-neutral integrated terminal: opt-in host capability,
+      PTY-backed live shell, reconnect replay, mobile key row, and later tmux
+      durability when available.
 - [ ] Bring Copilot provider UX up to Codex parity where the SDK supports it.
 - [ ] Harden provider-neutral approvals across command, tool, file-change,
       user-input, and elicitation requests.

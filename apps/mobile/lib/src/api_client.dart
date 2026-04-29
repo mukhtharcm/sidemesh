@@ -136,6 +136,79 @@ class ApiClient {
     return _decodeList(response).map(PendingAction.fromJson).toList();
   }
 
+  Future<List<HostTerminalInfo>> fetchTerminals(HostProfile host) async {
+    final response = await _get(
+      host,
+      '/api/terminals',
+      timeout: _quickReadTimeout,
+      operation: 'load terminals',
+    );
+    final decoded = _decodeObject(response);
+    return ((decoded['terminals'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((item) => HostTerminalInfo.fromJson(item.cast<String, dynamic>()))
+        .toList();
+  }
+
+  Future<HostTerminalInfo> createTerminal(
+    HostProfile host, {
+    required String cwd,
+    String? sessionId,
+    String? title,
+    int? cols,
+    int? rows,
+  }) async {
+    final body = <String, dynamic>{
+      'cwd': cwd,
+      if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,
+      if ((title ?? '').isNotEmpty) 'title': title,
+    };
+    if (cols != null) {
+      body['cols'] = cols;
+    }
+    if (rows != null) {
+      body['rows'] = rows;
+    }
+    final response = await _post(
+      host,
+      '/api/terminals',
+      body: body,
+      timeout: _standardReadTimeout,
+      operation: 'start terminal',
+    );
+    return HostTerminalInfo.fromJson(_decodeObject(response));
+  }
+
+  Future<HostTerminalInfo> resizeTerminal(
+    HostProfile host,
+    String terminalId, {
+    required int cols,
+    required int rows,
+  }) async {
+    final response = await _post(
+      host,
+      '/api/terminals/$terminalId/resize',
+      body: {'cols': cols, 'rows': rows},
+      timeout: _quickReadTimeout,
+      operation: 'resize terminal',
+    );
+    return HostTerminalInfo.fromJson(_decodeObject(response));
+  }
+
+  Future<HostTerminalInfo> killTerminal(
+    HostProfile host,
+    String terminalId,
+  ) async {
+    final response = await _post(
+      host,
+      '/api/terminals/$terminalId/kill',
+      body: const {},
+      timeout: _quickReadTimeout,
+      operation: 'stop terminal',
+    );
+    return HostTerminalInfo.fromJson(_decodeObject(response));
+  }
+
   Future<SessionLog> fetchLog(
     HostProfile host,
     String sessionId, {
@@ -428,6 +501,27 @@ class ApiClient {
     final wsUri = baseUri.replace(
       scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
       path: '/api/sessions/live',
+    );
+
+    return IOWebSocketChannel.connect(
+      wsUri,
+      headers: {'Authorization': 'Bearer ${host.token}'},
+      connectTimeout: _webSocketConnectTimeout,
+      pingInterval: _webSocketPingInterval,
+    );
+  }
+
+  WebSocketChannel openTerminalLive(
+    HostProfile host,
+    String terminalId, {
+    int since = -1,
+  }) {
+    _ensureHostEnabled(host);
+    final baseUri = Uri.parse(host.baseUrl);
+    final wsUri = baseUri.replace(
+      scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
+      path: '/api/terminals/$terminalId/live',
+      queryParameters: {'since': '$since'},
     );
 
     return IOWebSocketChannel.connect(
