@@ -97,6 +97,13 @@ export interface CopilotSdkSession {
       disable(params: { name: string }): Promise<void>;
       reload(): Promise<void>;
     };
+    compaction?: {
+      compact(): Promise<{
+        success: boolean;
+        tokensRemoved: number;
+        messagesRemoved: number;
+      }>;
+    };
   };
 }
 

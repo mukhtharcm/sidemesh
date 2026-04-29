@@ -25,6 +25,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "workspace.remoteGitDiff": true,
       "sessions.interrupt": true,
       "sessions.archive": true,
+      "sessions.compact": true,
     },
     routes: {
       models: 200,
@@ -50,6 +51,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "workspace.remoteGitDiff": false,
       "sessions.interrupt": true,
       "sessions.archive": true,
+      "sessions.compact": true,
     },
     routes: {
       models: 501,
@@ -75,6 +77,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "workspace.remoteGitDiff": false,
       "sessions.interrupt": true,
       "sessions.archive": true,
+      "sessions.compact": true,
     },
     routes: {
       models: 200,
@@ -100,6 +103,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "workspace.remoteGitDiff": true,
       "sessions.interrupt": true,
       "sessions.archive": true,
+      "sessions.compact": true,
     },
     routes: {
       models: 501,
@@ -125,6 +129,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "workspace.remoteGitDiff": true,
       "sessions.interrupt": true,
       "sessions.archive": true,
+      "sessions.compact": true,
     },
     routes: {
       models: 200,
@@ -150,6 +155,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "workspace.remoteGitDiff": false,
       "sessions.interrupt": false,
       "sessions.archive": false,
+      "sessions.compact": false,
     },
     routes: {
       models: 501,

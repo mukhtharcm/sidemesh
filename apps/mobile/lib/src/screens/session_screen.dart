@@ -259,6 +259,9 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsSessionArchive =>
       _supportsProviderCapability('sessions', 'archive');
 
+  bool get _supportsSessionCompact =>
+      _supportsProviderCapability('sessions', 'compact');
+
   bool get _supportsFilesystem =>
       _supportsHostCapability('workspace', 'filesystem');
 
@@ -2930,6 +2933,59 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
+  Future<void> _compactSession() async {
+    if (!_supportsSessionCompact) {
+      showAppSnackBar(context, 'This provider does not support compaction.');
+      return;
+    }
+    if (_running) {
+      showAppSnackBar(context, 'Wait for the current turn to finish first.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Compact session?'),
+        content: const Text(
+          'The provider will summarize older context so future turns can use fewer tokens. Recent messages remain visible in Sidemesh.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Compact'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    try {
+      await widget.api.compactSession(widget.host, widget.session.id);
+      if (!mounted) {
+        return;
+      }
+      showAppSnackBar(
+        context,
+        'Compaction started.',
+        duration: const Duration(seconds: 2),
+      );
+      _reloadSnapshot();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      showAppSnackBar(
+        context,
+        "Failed to compact session: ${friendlyError(error)}",
+      );
+    }
+  }
+
   Future<void> _renameSession() async {
     if (!_supportsSessionRename) {
       showAppSnackBar(context, 'This provider does not support renaming.');
@@ -4098,6 +4154,9 @@ class _SessionScreenState extends State<SessionScreen>
                     case 'git':
                       _showGitSheet(session);
                       break;
+                    case 'compact':
+                      unawaited(_compactSession());
+                      break;
                     case 'browse':
                       if (!_supportsFilesystem) {
                         break;
@@ -4192,6 +4251,17 @@ class _SessionScreenState extends State<SessionScreen>
                           Icon(Icons.account_tree_outlined, size: 18),
                           SizedBox(width: 10),
                           Text('Git details'),
+                        ],
+                      ),
+                    ),
+                  if (_supportsSessionCompact)
+                    const PopupMenuItem<String>(
+                      value: 'compact',
+                      child: Row(
+                        children: [
+                          Icon(Icons.compress_rounded, size: 18),
+                          SizedBox(width: 10),
+                          Text('Compact context'),
                         ],
                       ),
                     ),

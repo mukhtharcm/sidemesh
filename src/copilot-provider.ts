@@ -151,6 +151,7 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     resume: true,
     rename: true,
     archive: true,
+    compact: true,
     interrupt: true,
     history: true,
     eventReplay: true,
@@ -408,6 +409,75 @@ export class CopilotAgentProvider
     }
     await this.persistSoon();
     return { unarchived: true };
+  }
+
+  public async compactSession(threadId: string): Promise<unknown> {
+    const session = await this.getWritableSession(threadId);
+    const sdkSession = await this.ensureSdkSession(session);
+    if (!sdkSession.rpc?.compaction?.compact) {
+      throw new Error("Copilot SDK does not expose manual compaction.");
+    }
+    const startedAt = Date.now();
+    this.replaceRuntime(
+      session,
+      withRuntimeMetadata(session.runtime, {
+        telemetry: {
+          ...(session.runtime?.telemetry ?? {}),
+          compaction: {
+            ...(session.runtime?.telemetry?.compaction ?? {}),
+            status: "running",
+            startedAt,
+            updatedAt: startedAt,
+          },
+        },
+        updatedAt: startedAt,
+      }),
+    );
+    try {
+      const result = await sdkSession.rpc.compaction.compact();
+      const completedAt = Date.now();
+      this.replaceRuntime(
+        session,
+        withRuntimeMetadata(session.runtime, {
+          telemetry: {
+            ...(session.runtime?.telemetry ?? {}),
+            compaction: {
+              ...(session.runtime?.telemetry?.compaction ?? {}),
+              status: result.success ? "completed" : "failed",
+              completedAt,
+              updatedAt: completedAt,
+              tokensRemoved: result.tokensRemoved,
+              messagesRemoved: result.messagesRemoved,
+            },
+          },
+          updatedAt: completedAt,
+        }),
+      );
+      await this.persistSoon();
+      return result;
+    } catch (error) {
+      const completedAt = Date.now();
+      this.replaceRuntime(
+        session,
+        withRuntimeMetadata(session.runtime, {
+          telemetry: {
+            ...(session.runtime?.telemetry ?? {}),
+            compaction: {
+              ...(session.runtime?.telemetry?.compaction ?? {}),
+              status: "failed",
+              completedAt,
+              updatedAt: completedAt,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Copilot SDK compaction failed.",
+            },
+          },
+          updatedAt: completedAt,
+        }),
+      );
+      throw error;
+    }
   }
 
   public async createSession(

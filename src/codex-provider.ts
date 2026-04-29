@@ -169,6 +169,10 @@ export class CodexAgentProvider
     return this.bridge.request("thread/unarchive", { threadId });
   }
 
+  public compactSession(threadId: string): Promise<unknown> {
+    return this.bridge.request("thread/compact/start", { threadId });
+  }
+
   public async listRecentUnindexedSessionThreads(limit: number): Promise<ThreadRecord[]> {
     const summaries = await listRecentRolloutThreads(this.runtimeHome, limit);
     const threads: ThreadRecord[] = [];
@@ -1774,6 +1778,7 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     resume: true,
     rename: true,
     archive: true,
+    compact: true,
     interrupt: true,
     history: true,
     eventReplay: true,

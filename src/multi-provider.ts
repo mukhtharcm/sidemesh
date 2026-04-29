@@ -246,6 +246,15 @@ export class MultiAgentProvider
     ).call(resolved.provider, resolved.rawId);
   }
 
+  public async compactSession(threadId: string): Promise<unknown> {
+    const resolved = this.resolveSessionId(threadId);
+    return requireProviderMethod(
+      resolved.provider,
+      "compactSession",
+      "session compaction",
+    ).call(resolved.provider, resolved.rawId);
+  }
+
   public async createSession(
     request: AgentCreateSessionRequest,
   ): Promise<AgentCreateSessionResult> {
@@ -571,6 +580,7 @@ function mergeCapabilities(
       resume: any((caps) => caps.sessions.resume),
       rename: any((caps) => caps.sessions.rename),
       archive: any((caps) => caps.sessions.archive),
+      compact: any((caps) => caps.sessions.compact),
       interrupt: any((caps) => caps.sessions.interrupt),
       history: any((caps) => caps.sessions.history),
       eventReplay: any((caps) => caps.sessions.eventReplay),

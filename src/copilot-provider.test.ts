@@ -255,6 +255,44 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("runs manual compaction through the Copilot SDK", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-compact-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "hello", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const result = await provider.compactSession!(created.thread.id);
+      const runtime = await provider.readSessionRuntime!(created.thread);
+
+      assert.deepEqual(result, {
+        success: true,
+        tokensRemoved: 2048,
+        messagesRemoved: 8,
+      });
+      assert.equal(sdk.created[0]?.session.compactCallCount, 1);
+      assert.equal(runtime?.telemetry?.compaction?.status, "completed");
+      assert.equal(runtime?.telemetry?.compaction?.tokensRemoved, 2048);
+      assert.equal(runtime?.telemetry?.compaction?.messagesRemoved, 8);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("lists and toggles Copilot skills through SDK discovery", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-skills-test-"),
@@ -1282,6 +1320,36 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         this.skillReloadCount += 1;
       },
     },
+    compaction: {
+      compact: async (): Promise<{
+        success: boolean;
+        tokensRemoved: number;
+        messagesRemoved: number;
+      }> => {
+        this.compactCallCount += 1;
+        this.emit(
+          event("session.compaction_start", {
+            conversationTokens: 3600,
+            systemTokens: 320,
+            toolDefinitionsTokens: 176,
+          }),
+        );
+        this.emit(
+          event("session.compaction_complete", {
+            success: true,
+            preCompactionTokens: 4096,
+            postCompactionTokens: 2048,
+            tokensRemoved: 2048,
+            messagesRemoved: 8,
+          }),
+        );
+        return {
+          success: true,
+          tokensRemoved: 2048,
+          messagesRemoved: 8,
+        };
+      },
+    },
   };
   public readonly selectedModels: Array<{
     model: string;
@@ -1290,6 +1358,7 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
   public readonly selectedModes: CopilotSdkSessionMode[] = [];
   public aborted = false;
   public skillReloadCount = 0;
+  public compactCallCount = 0;
   private currentMode: CopilotSdkSessionMode = "interactive";
   private readonly holdResponses: boolean;
   private readonly heldResponses: Array<() => void> = [];

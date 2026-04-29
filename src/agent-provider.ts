@@ -180,6 +180,7 @@ export interface AgentProviderCapabilities {
     resume: boolean;
     rename: boolean;
     archive: boolean;
+    compact: boolean;
     interrupt: boolean;
     history: boolean;
     eventReplay: boolean;
@@ -316,6 +317,7 @@ export interface AgentSessionLifecycleProvider {
   setSessionName(threadId: string, name: string): Promise<unknown>;
   archiveSession(threadId: string): Promise<unknown>;
   unarchiveSession(threadId: string): Promise<unknown>;
+  compactSession(threadId: string): Promise<unknown>;
   createSession(request: AgentCreateSessionRequest): Promise<AgentCreateSessionResult>;
   submitInput(request: AgentSubmitInputRequest): Promise<AgentSubmitInputResult>;
   interruptTurn(threadId: string, turnId: string): Promise<unknown>;

@@ -334,6 +334,15 @@ class ApiClient {
     );
   }
 
+  Future<void> compactSession(HostProfile host, String sessionId) async {
+    await _post(
+      host,
+      '/api/sessions/$sessionId/compact',
+      body: const {},
+      operation: 'compact session',
+    );
+  }
+
   Future<SessionSummary> renameSession(
     HostProfile host, {
     required String sessionId,
