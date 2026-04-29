@@ -325,7 +325,7 @@ class _SessionScreenState extends State<SessionScreen>
       widget.session.id,
     );
     _scrollController.addListener(_onTranscriptScroll);
-    _markCurrentSessionSeen();
+    _scheduleMarkCurrentSessionSeen();
     unawaited(_loadPendingSends());
     unawaited(_loadCachedSnapshot());
     _loadSnapshot();
@@ -498,6 +498,15 @@ class _SessionScreenState extends State<SessionScreen>
     }
     final session = _session ?? widget.session;
     _readStore.markSeen(widget.host, session.id, session.updatedAt);
+  }
+
+  void _scheduleMarkCurrentSessionSeen() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _disposed) {
+        return;
+      }
+      _markCurrentSessionSeen();
+    });
   }
 
   @override
