@@ -2535,31 +2535,46 @@ class _SessionRuntimeDetails extends StatelessWidget {
 
     return MeshCard(
       tone: MeshCardTone.muted,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'RUNTIME',
-            style: monoStyle(
-              color: colors.accent,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w800,
-            ).copyWith(letterSpacing: 1.2),
+          Row(
+            children: [
+              Icon(Icons.memory_rounded, size: 16, color: colors.accent),
+              const SizedBox(width: 7),
+              Text(
+                'Runtime',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: colors.textPrimary,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
-          _RuntimeSection(title: 'Runtime', details: runtimeDetails),
+          _RuntimeSection(
+            title: 'Runtime',
+            details: runtimeDetails,
+            showTitle: false,
+          ),
           if (contextDetails.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            _RuntimeSection(title: 'Context', details: contextDetails),
+            const SizedBox(height: 6),
+            _RuntimeExpansionSection(title: 'Context', details: contextDetails),
           ],
           if (usageDetails.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            _RuntimeSection(title: 'Last usage', details: usageDetails),
+            const SizedBox(height: 4),
+            _RuntimeExpansionSection(
+              title: 'Last usage',
+              details: usageDetails,
+            ),
           ],
           if (compactionDetails.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            _RuntimeSection(title: 'Compaction', details: compactionDetails),
+            const SizedBox(height: 4),
+            _RuntimeExpansionSection(
+              title: 'Compaction',
+              details: compactionDetails,
+            ),
           ],
         ],
       ),
@@ -2568,10 +2583,15 @@ class _SessionRuntimeDetails extends StatelessWidget {
 }
 
 class _RuntimeSection extends StatelessWidget {
-  const _RuntimeSection({required this.title, required this.details});
+  const _RuntimeSection({
+    required this.title,
+    required this.details,
+    this.showTitle = true,
+  });
 
   final String title;
   final List<({String label, String value})> details;
+  final bool showTitle;
 
   @override
   Widget build(BuildContext context) {
@@ -2579,56 +2599,113 @@ class _RuntimeSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title.toUpperCase(),
-          style: monoStyle(
-            color: colors.textSecondary,
-            fontSize: 9.5,
-            fontWeight: FontWeight.w800,
-          ).copyWith(letterSpacing: 1.1),
-        ),
-        const SizedBox(height: 8),
+        if (showTitle) ...[
+          Text(
+            title.toUpperCase(),
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: 9.5,
+              fontWeight: FontWeight.w800,
+            ).copyWith(letterSpacing: 1.1),
+          ),
+          const SizedBox(height: 8),
+        ],
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: 6,
+          runSpacing: 6,
           children: details
-              .map(
-                (detail) => Container(
-                  constraints: const BoxConstraints(
-                    minWidth: 132,
-                    maxWidth: 220,
-                  ),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: colors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: colors.border),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        detail.label.toUpperCase(),
-                        style: monoStyle(
-                          color: colors.textSecondary,
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w800,
-                        ).copyWith(letterSpacing: 1.1),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        detail.value,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              )
+              .map((detail) => _RuntimeDetailChip(detail: detail))
               .toList(),
         ),
       ],
+    );
+  }
+}
+
+class _RuntimeExpansionSection extends StatelessWidget {
+  const _RuntimeExpansionSection({required this.title, required this.details});
+
+  final String title;
+  final List<({String label, String value})> details;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 6),
+        visualDensity: VisualDensity.compact,
+        iconColor: colors.textSecondary,
+        collapsedIconColor: colors.textSecondary,
+        title: Text(
+          title,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: colors.textPrimary,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        subtitle: Text(
+          '${details.length} ${details.length == 1 ? 'field' : 'fields'}',
+          style: monoStyle(color: colors.textSecondary, fontSize: 10.5),
+        ),
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _RuntimeSection(
+              title: title,
+              details: details,
+              showTitle: false,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RuntimeDetailChip extends StatelessWidget {
+  const _RuntimeDetailChip({required this.detail});
+
+  final ({String label, String value}) detail;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 240),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            detail.label,
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(width: 7),
+          Flexible(
+            child: Text(
+              detail.value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textPrimary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

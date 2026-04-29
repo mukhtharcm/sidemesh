@@ -3290,28 +3290,56 @@ class _SessionScreenState extends State<SessionScreen>
       backgroundColor: colors.surface,
       showDragHandle: true,
       useSafeArea: true,
+      isScrollControlled: true,
       builder: (context) => SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Session details',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 16),
-              _DetailRow(label: 'Host', value: widget.host.label),
-              _DetailRow(label: 'Working dir', value: session.cwd),
-              _DetailRow(label: 'Status', value: _running ? 'Running' : 'Idle'),
-              _DetailRow(label: 'Source', value: session.source),
-              if (gitLabel != null) ...[
-                _DetailRow(label: 'Git', value: gitLabel),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.86,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Session details',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                MeshCard(
+                  tone: MeshCardTone.muted,
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _DetailRow(label: 'Host', value: widget.host.label),
+                      _DetailRow(label: 'Working dir', value: session.cwd),
+                      _DetailRow(
+                        label: 'Status',
+                        value: _running ? 'Running' : 'Idle',
+                      ),
+                      _DetailRow(label: 'Source', value: session.source),
+                      if (gitLabel != null)
+                        _DetailRow(label: 'Git', value: gitLabel),
+                    ],
+                  ),
+                ),
+                if (gitLabel != null) ...[
+                  const SizedBox(height: 8),
+                  TextButton.icon(
                     onPressed: () {
                       Navigator.of(context).pop();
                       unawaited(_showGitSheet(session));
@@ -3319,14 +3347,13 @@ class _SessionScreenState extends State<SessionScreen>
                     icon: const Icon(Icons.account_tree_outlined, size: 18),
                     label: const Text('Open Git details'),
                   ),
-                ),
-                const SizedBox(height: 4),
+                ],
+                if (session.runtime != null) ...[
+                  const SizedBox(height: 14),
+                  _SessionRuntimeDetails(runtime: session.runtime!),
+                ],
               ],
-              if (session.runtime != null) ...[
-                const SizedBox(height: 14),
-                _SessionRuntimeDetails(runtime: session.runtime!),
-              ],
-            ],
+            ),
           ),
         ),
       ),
@@ -4084,31 +4111,46 @@ class _SessionScreenState extends State<SessionScreen>
           if (_running && _supportsSessionInterrupt)
             Padding(
               padding: const EdgeInsets.only(right: 6),
-              child: TextButton.icon(
-                onPressed: _stopSession,
-                icon: Icon(Icons.stop_circle_outlined, color: colors.danger),
-                label: Text('Stop', style: TextStyle(color: colors.danger)),
+              child: isCompact
+                  ? MeshIconButton(
+                      icon: Icons.stop_circle_outlined,
+                      tooltip: 'Stop session',
+                      color: colors.danger,
+                      onTap: _stopSession,
+                    )
+                  : TextButton.icon(
+                      onPressed: _stopSession,
+                      icon: Icon(
+                        Icons.stop_circle_outlined,
+                        color: colors.danger,
+                      ),
+                      label: Text(
+                        'Stop',
+                        style: TextStyle(color: colors.danger),
+                      ),
+                    ),
+            ),
+          if (!isCompact)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: MeshIconButton(
+                icon: Icons.refresh_rounded,
+                tooltip: 'Reload session',
+                color: colors.textSecondary,
+                onTap: _reloadSnapshot,
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: MeshIconButton(
-              icon: Icons.refresh_rounded,
-              tooltip: 'Reload session',
-              color: colors.textSecondary,
-              onTap: _reloadSnapshot,
+          if (!isCompact)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: MeshIconButton(
+                icon: Icons.add_circle_outline_rounded,
+                tooltip: 'New session',
+                color: colors.textSecondary,
+                onTap: _startSessionFromCurrent,
+              ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: MeshIconButton(
-              icon: Icons.add_circle_outline_rounded,
-              tooltip: 'New session',
-              color: colors.textSecondary,
-              onTap: _startSessionFromCurrent,
-            ),
-          ),
-          if (_supportsTerminal)
+          if (!isCompact && _supportsTerminal)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -4122,7 +4164,8 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: () => unawaited(_openTerminal()),
               ),
             ),
-          if (_supportsGitStatus &&
+          if (!isCompact &&
+              _supportsGitStatus &&
               _gitHeaderLabel(session, _gitStatus) != null &&
               (_gitStatus?.dirty ?? false))
             Padding(
@@ -4134,19 +4177,20 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: () => _showGitSheet(session),
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: MeshIconButton(
-              icon: searchOpenInInspector
-                  ? Icons.search_off_rounded
-                  : Icons.search_rounded,
-              tooltip: searchOpenInInspector ? 'Close search' : 'Search',
-              color: searchOpenInInspector
-                  ? colors.accent
-                  : colors.textSecondary,
-              onTap: _toggleSearchPanel,
+          if (!isCompact)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: MeshIconButton(
+                icon: searchOpenInInspector
+                    ? Icons.search_off_rounded
+                    : Icons.search_rounded,
+                tooltip: searchOpenInInspector ? 'Close search' : 'Search',
+                color: searchOpenInInspector
+                    ? colors.accent
+                    : colors.textSecondary,
+                onTap: _toggleSearchPanel,
+              ),
             ),
-          ),
           if (!isCompact && _supportsSessionResources)
             Padding(
               padding: const EdgeInsets.only(right: 6),
@@ -4207,6 +4251,17 @@ class _SessionScreenState extends State<SessionScreen>
                 icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
                 onSelected: (value) {
                   switch (value) {
+                    case 'reload':
+                      _reloadSnapshot();
+                      break;
+                    case 'new':
+                      _startSessionFromCurrent();
+                      break;
+                    case 'terminal':
+                      if (_supportsTerminal) {
+                        unawaited(_openTerminal());
+                      }
+                      break;
                     case 'search':
                       _toggleSearchPanel();
                       break;
@@ -4276,6 +4331,68 @@ class _SessionScreenState extends State<SessionScreen>
                   }
                 },
                 itemBuilder: (context) => [
+                  if (isCompact) ...[
+                    const PopupMenuItem<String>(
+                      value: 'reload',
+                      child: Row(
+                        children: [
+                          Icon(Icons.refresh_rounded, size: 18),
+                          SizedBox(width: 10),
+                          Text('Reload'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem<String>(
+                      value: 'new',
+                      child: Row(
+                        children: [
+                          Icon(Icons.add_circle_outline_rounded, size: 18),
+                          SizedBox(width: 10),
+                          Text('New session'),
+                        ],
+                      ),
+                    ),
+                    if (_supportsTerminal)
+                      PopupMenuItem<String>(
+                        value: 'terminal',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.terminal_rounded,
+                              size: 18,
+                              color: terminalOpenInInspector
+                                  ? colors.accent
+                                  : null,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              terminalOpenInInspector
+                                  ? 'Terminal is open'
+                                  : 'Open terminal',
+                            ),
+                          ],
+                        ),
+                      ),
+                    PopupMenuItem<String>(
+                      value: 'search',
+                      child: Row(
+                        children: [
+                          Icon(
+                            searchOpenInInspector
+                                ? Icons.search_off_rounded
+                                : Icons.search_rounded,
+                            size: 18,
+                            color: searchOpenInInspector ? colors.accent : null,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            searchOpenInInspector ? 'Close search' : 'Search',
+                          ),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuDivider(),
+                  ],
                   if (_supportsSessionResources)
                     const PopupMenuItem<String>(
                       value: 'resources',
