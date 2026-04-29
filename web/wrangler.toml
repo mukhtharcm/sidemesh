@@ -1,4 +1,4 @@
-name = "sidemesh-site"
+name = "sidemesh"
 pages_build_output_dir = "."
 compatibility_date = "2025-04-24"
 

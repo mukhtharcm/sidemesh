@@ -113,7 +113,7 @@ Android workflows only after the signing/provisioning story is stable.
 ## Website Deploy
 
 The marketing site lives in `web/` and deploys to Cloudflare Pages project
-`sidemesh-site`.
+`sidemesh`.
 
 Required GitHub Actions secrets:
 
