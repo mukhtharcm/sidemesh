@@ -108,9 +108,25 @@ sudo sidemesh service restart --yes
 `service install` writes a unit, private env file, and launcher script. The
 generated launcher runs the compiled CLI (`dist/cli.js daemon`) instead of
 `tsx`, which avoids esbuild optional-dependency runtime failures. The command
-currently targets systemd only; use `sidemesh start` on macOS until launchd
-support exists. Run setup/install against the config the service should use, or
-pass `--config /path/to/config.json` explicitly.
+uses the config resolved at install time, so run setup/install against the
+config the service should use, or pass `--config /path/to/config.json`
+explicitly.
+
+On macOS, the same command installs a user LaunchAgent instead of a root
+daemon. Do not use `sudo`; the agent needs your normal user config, token,
+keychain, and shell environment:
+
+```bash
+sidemesh service install
+sidemesh service status
+sidemesh service restart --yes
+```
+
+The default launchd label is `dev.sidemesh.daemon`, and generated files live
+under `~/Library/LaunchAgents` and `~/.sidemesh/launchd`. If a managed
+foreground/background Sidemesh daemon is already running, `service install`
+stops it before bootstrapping the LaunchAgent so launchd does not enter a
+duplicate-start loop.
 
 Configuration resolution works like this:
 

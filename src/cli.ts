@@ -26,6 +26,13 @@ import {
   writeDaemonState,
 } from "./daemon-lifecycle.js";
 import { runDoctor } from "./doctor.js";
+import {
+  DEFAULT_LAUNCHD_LABEL,
+  installLaunchdService,
+  isLaunchdServiceLoaded,
+  launchdServiceStatus,
+  restartLaunchdService,
+} from "./launchd-service.js";
 import { buildPairInfo } from "./pair.js";
 import { startServer, type RunningServer } from "./server.js";
 import { runSetup } from "./setup.js";
@@ -112,12 +119,17 @@ export async function main(argv = process.argv): Promise<void> {
   withConfigOption(
     serviceCommand
       .command("install")
-      .description("install or update the Linux systemd service")
-      .option("--name <name>", "systemd service name", DEFAULT_SERVICE_NAME)
+      .description("install or update the OS service")
+      .option(
+        "--name <name>",
+        "systemd service name or launchd label",
+        defaultServiceName(),
+      )
       .option("--package-dir <path>", "Sidemesh package directory")
       .option("--node-bin <path>", "Node binary used by the service")
       .option("--unit-file <path>", "systemd unit path")
-      .option("--env-file <path>", "service environment file path")
+      .option("--plist-file <path>", "macOS LaunchAgent plist path")
+      .option("--service-env-file <path>", "service environment file path")
       .option("--launcher-file <path>", "service launcher script path")
       .option("--no-start", "write service files without starting/restarting")
       .option("-y, --yes", "do not prompt before overwriting/restarting")
@@ -128,7 +140,8 @@ export async function main(argv = process.argv): Promise<void> {
           packageDir?: string;
           nodeBin?: string;
           unitFile?: string;
-          envFile?: string;
+          plistFile?: string;
+          serviceEnvFile?: string;
           launcherFile?: string;
           start?: boolean;
           yes?: boolean;
@@ -138,25 +151,48 @@ export async function main(argv = process.argv): Promise<void> {
             persistGeneratedToken: true,
           });
           await confirmDanger(
-            `This will write a systemd service for Sidemesh and ${options.start === false ? "leave it stopped" : "restart it"}.`,
+            `This will write a ${serviceBackendLabel()} service for Sidemesh and ${options.start === false ? "leave it stopped" : "restart it"}.`,
             options.yes === true,
           );
-          const paths = await installSystemdService(config, {
-            serviceName: options.name,
-            packageDir: nodePath.resolve(options.packageDir ?? packageRoot()),
-            nodeBin: nodePath.resolve(options.nodeBin ?? process.execPath),
-            unitPath: options.unitFile,
-            envPath: options.envFile,
-            launcherPath: options.launcherFile,
-            start: options.start !== false,
-          });
-          console.log(`Installed ${paths.serviceName}.service`);
-          console.log(`Unit: ${paths.unitPath}`);
-          console.log(`Environment: ${paths.envPath}`);
-          console.log(`Launcher: ${paths.launcherPath}`);
-          if (options.start !== false) {
-            const active = await isSystemdServiceActive(paths.serviceName);
-            console.log(`Service: ${active ? "active" : "not active"}`);
+          if (process.platform === "darwin" && options.start !== false) {
+            await prepareLaunchdInstall(config);
+          }
+          if (process.platform === "darwin") {
+            const paths = await installLaunchdService(config, {
+              label: options.name,
+              packageDir: nodePath.resolve(options.packageDir ?? packageRoot()),
+              nodeBin: nodePath.resolve(options.nodeBin ?? process.execPath),
+              plistPath: options.plistFile ?? options.unitFile,
+              envPath: options.serviceEnvFile,
+              launcherPath: options.launcherFile,
+              start: options.start !== false,
+            });
+            console.log(`Installed ${paths.label}`);
+            console.log(`Plist: ${paths.plistPath}`);
+            console.log(`Environment: ${paths.envPath}`);
+            console.log(`Launcher: ${paths.launcherPath}`);
+            if (options.start !== false) {
+              const loaded = await isLaunchdServiceLoaded(paths.label);
+              console.log(`Service: ${loaded ? "loaded" : "not loaded"}`);
+            }
+          } else {
+            const paths = await installSystemdService(config, {
+              serviceName: options.name,
+              packageDir: nodePath.resolve(options.packageDir ?? packageRoot()),
+              nodeBin: nodePath.resolve(options.nodeBin ?? process.execPath),
+              unitPath: options.unitFile,
+              envPath: options.serviceEnvFile,
+              launcherPath: options.launcherFile,
+              start: options.start !== false,
+            });
+            console.log(`Installed ${paths.serviceName}.service`);
+            console.log(`Unit: ${paths.unitPath}`);
+            console.log(`Environment: ${paths.envPath}`);
+            console.log(`Launcher: ${paths.launcherPath}`);
+            if (options.start !== false) {
+              const active = await isSystemdServiceActive(paths.serviceName);
+              console.log(`Service: ${active ? "active" : "not active"}`);
+            }
           }
         },
       ),
@@ -164,27 +200,45 @@ export async function main(argv = process.argv): Promise<void> {
 
   serviceCommand
     .command("status")
-    .description("show systemd service status")
-    .option("--name <name>", "systemd service name", DEFAULT_SERVICE_NAME)
+    .description("show service status")
+    .option(
+      "--name <name>",
+      "systemd service name or launchd label",
+      defaultServiceName(),
+    )
     .action(async (options: { name?: string }) => {
-      process.stdout.write(await systemdServiceStatus(options.name));
+      process.stdout.write(
+        process.platform === "darwin"
+          ? await launchdServiceStatus(options.name)
+          : await systemdServiceStatus(options.name),
+      );
     });
 
   serviceCommand
     .command("restart")
-    .description("restart the Linux systemd service")
-    .option("--name <name>", "systemd service name", DEFAULT_SERVICE_NAME)
+    .description("restart the OS service")
+    .option(
+      "--name <name>",
+      "systemd service name or launchd label",
+      defaultServiceName(),
+    )
     .option("-y, --yes", "do not prompt before restarting")
     .action(async (options: { name?: string; yes?: boolean }) => {
       await confirmDanger(
-        `This will restart ${options.name ?? DEFAULT_SERVICE_NAME}.service. Active streams and integrated terminals will disconnect.`,
+        `This will restart ${options.name ?? defaultServiceName()}. Active streams and integrated terminals will disconnect.`,
         options.yes === true,
       );
-      await restartSystemdService(options.name);
-      const active = await isSystemdServiceActive(options.name);
-      console.log(
-        `${options.name ?? DEFAULT_SERVICE_NAME}.service is ${active ? "active" : "not active"}.`,
-      );
+      if (process.platform === "darwin") {
+        await restartLaunchdService(options.name);
+        const loaded = await isLaunchdServiceLoaded(options.name);
+        console.log(`${options.name ?? defaultServiceName()} is ${loaded ? "loaded" : "not loaded"}.`);
+      } else {
+        await restartSystemdService(options.name);
+        const active = await isSystemdServiceActive(options.name);
+        console.log(
+          `${options.name ?? DEFAULT_SERVICE_NAME}.service is ${active ? "active" : "not active"}.`,
+        );
+      }
     });
 
   withConfigOption(
@@ -574,6 +628,22 @@ async function restartDaemon(
   await startDaemon(config, { configPath: options.configPath ?? config.configPath });
 }
 
+async function prepareLaunchdInstall(config: NodeConfig): Promise<void> {
+  const daemon = await inspectDaemon(config);
+  if (daemon.state && daemon.pidAlive) {
+    await stopDaemon(config, { yes: true });
+    return;
+  }
+  if (daemon.state) {
+    await removeDaemonState(config, daemon.state.pid);
+  }
+  if (daemon.healthReachable) {
+    throw new Error(
+      `A daemon already responds on port ${config.port}, but no managed state file exists. Stop it before installing the LaunchAgent.`,
+    );
+  }
+}
+
 function daemonInvocation(configPath: string): { command: string; args: string[] } {
   const entry = fileURLToPath(import.meta.url);
   const args =
@@ -586,6 +656,14 @@ function daemonInvocation(configPath: string): { command: string; args: string[]
 
 function packageRoot(): string {
   return nodePath.resolve(nodePath.dirname(fileURLToPath(import.meta.url)), "..");
+}
+
+function defaultServiceName(): string {
+  return process.platform === "darwin" ? DEFAULT_LAUNCHD_LABEL : DEFAULT_SERVICE_NAME;
+}
+
+function serviceBackendLabel(): string {
+  return process.platform === "darwin" ? "macOS LaunchAgent" : "Linux systemd";
 }
 
 async function waitForDaemonHealth(

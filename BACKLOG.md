@@ -38,6 +38,8 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
       (`start`, `stop`, `restart`) with duplicate-instance guards.
 - [x] Add Linux/systemd service helpers for installing, checking, and
       restarting the compiled daemon service.
+- [x] Add macOS LaunchAgent helpers for installing, checking, and restarting
+      the compiled daemon as the current user.
 
 ## Current Wave
 
@@ -93,7 +95,7 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
 - [ ] Document a VPS-first maintainer workflow so Sidemesh can be updated and operated even when the primary Mac is offline.
 - [ ] Write a lightweight server release playbook for remote nodes: pull latest `main`, run `npm install` without omitting optional dependencies, build, restart the daemon/service, and verify Codex + Sidemesh health.
 - [ ] Bring the production launcher and deploy scaffolding into the repo so remote updates cannot delete `run-sidemesh.sh` and break `systemd`.
-- [ ] Add macOS launchd helpers matching the Linux/systemd service workflow.
+- [ ] Add an uninstall path for generated systemd and launchd service files.
 
 ## Later
 
