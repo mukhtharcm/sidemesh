@@ -118,6 +118,13 @@ class _SessionHeader extends StatelessWidget {
                           fontSize: 10.5,
                         ),
                       ),
+                      if (session.provider != null) ...[
+                        const SizedBox(width: 6),
+                        AgentProviderBadge(
+                          providerKind: session.provider,
+                          compact: true,
+                        ),
+                      ],
                       if (favorite) ...[
                         const SizedBox(width: 6),
                         Icon(
@@ -366,6 +373,13 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                   ),
                 ),
               ),
+              if (session.provider != null) ...[
+                const SizedBox(width: 8),
+                AgentProviderBadge(
+                  providerKind: session.provider,
+                  compact: true,
+                ),
+              ],
               if (gitLabel != null) ...[
                 const SizedBox(width: 8),
                 GestureDetector(

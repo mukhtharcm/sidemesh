@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/models.dart';
+import 'package:sidemesh_mobile/src/widgets/provider_badge.dart';
 
 void main() {
   test('NodeInfo parses provider metadata from new daemons', () {
@@ -114,6 +115,35 @@ void main() {
     expect(metadata.providers.single.kind, 'codex');
     expect(metadata.providers.single.displayName, 'Codex');
     expect(metadata.providers.single.defaultCommand, 'codex');
+  });
+
+  test('agent provider labels use advertised metadata before fallbacks', () {
+    final node = NodeInfo.fromJson({
+      'label': 'Provider stack',
+      'hostname': 'macbook.local',
+      'platform': 'darwin',
+      'codexVersion': 'codex-cli 0.125.0',
+      'provider': 'copilot',
+      'providerName': 'GitHub Copilot',
+      'providerVersion': 'cli 0.0.350',
+      'providerConfig': {'kind': 'copilot', 'command': 'copilot'},
+      'supportedProviders': [
+        {
+          'kind': 'copilot',
+          'displayName': 'Copilot Agent',
+          'defaultCommand': 'copilot',
+        },
+      ],
+    });
+
+    expect(
+      agentProviderDisplayLabel('copilot', nodeInfo: node),
+      'Copilot Agent',
+    );
+    expect(agentProviderDisplayLabel('copilot'), 'GitHub Copilot');
+    expect(agentProviderDisplayLabel('open-claw'), 'Open Claw');
+    expect(agentProviderDisplayLabel(null), isNull);
+    expect(agentProviderDisplayLabel(''), isNull);
   });
 
   test('ModelCatalogEntry uses provider-neutral reasoning metadata', () {
