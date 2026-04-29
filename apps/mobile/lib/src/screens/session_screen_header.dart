@@ -262,9 +262,6 @@ class _PinnedSummaryPill extends StatelessWidget {
   }
 }
 
-/// Compact single-line header used on mobile. Everything that isn't
-/// immediately useful at a glance lives behind the tune button (session
-/// details sheet) so the chat surface gets maximum vertical real estate.
 class _JumpToLatestPill extends StatelessWidget {
   const _JumpToLatestPill({required this.onTap});
 
@@ -307,6 +304,8 @@ class _JumpToLatestPill extends StatelessWidget {
   }
 }
 
+/// Compact mobile header. It preserves orientation while keeping detailed
+/// session metadata behind the details and overflow surfaces.
 class _SessionAppBarSubtitle extends StatelessWidget {
   const _SessionAppBarSubtitle({
     required this.host,
@@ -345,44 +344,29 @@ class _SessionAppBarSubtitle extends StatelessWidget {
     final colors = context.colors;
     final folder = _shortFolder(session.cwd);
     final gitLabel = showGit ? _gitHeaderLabel(session, gitStatus) : null;
-    final contextLabel = _contextUsageLabel(session.runtime);
+    final contextLabel = _contextUsageShortLabel(session.runtime);
     final contextTone = _contextUsageTone(session.runtime);
+    final gitDirty = gitStatus?.dirty ?? false;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onDetails,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 8, 6),
+          padding: const EdgeInsets.fromLTRB(16, 0, 10, 6),
           child: Row(
             children: [
-              Icon(Icons.dns_rounded, size: 12, color: colors.textTertiary),
+              _HeaderStatusDot(
+                color: running ? colors.success : colors.textTertiary,
+              ),
               const SizedBox(width: 6),
-              Flexible(
+              Expanded(
                 child: Text(
-                  host.label,
+                  '${host.label} · $folder',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: colors.textSecondary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Text(
-                '  ·  ',
-                style: Theme.of(
-                  context,
-                ).textTheme.labelMedium?.copyWith(color: colors.textTertiary),
-              ),
-              Flexible(
-                child: Text(
-                  folder,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(
-                    color: colors.textSecondary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
@@ -393,41 +377,34 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                   compact: true,
                 ),
               ],
-              if (gitLabel != null) ...[
-                const SizedBox(width: 8),
-                GestureDetector(
+              if (gitLabel != null && gitDirty) ...[
+                const SizedBox(width: 6),
+                _CompactMetaChip(
+                  label: '${gitStatus?.changed ?? 0}',
+                  icon: Icons.account_tree_outlined,
+                  color: colors.warning,
                   onTap: onGitDetails,
-                  child: MeshPill(
-                    label: gitLabel,
-                    icon: Icons.account_tree_outlined,
-                    tone: (gitStatus?.dirty ?? false)
-                        ? MeshPillTone.warning
-                        : MeshPillTone.neutral,
-                    mono: true,
-                  ),
                 ),
               ],
               if (contextLabel != null) ...[
                 const SizedBox(width: 6),
-                MeshPill(
+                _CompactMetaChip(
                   label: contextLabel,
                   icon: Icons.data_usage_rounded,
-                  tone: contextTone,
-                  mono: true,
+                  color: switch (contextTone) {
+                    MeshPillTone.danger => colors.danger,
+                    MeshPillTone.warning => colors.warning,
+                    _ => colors.textSecondary,
+                  },
                 ),
               ],
               if (pinnedCount > 0) ...[
                 const SizedBox(width: 6),
-                GestureDetector(
+                _CompactMetaChip(
+                  label: '$pinnedCount',
+                  icon: Icons.push_pin_rounded,
+                  color: pinnedActive ? colors.accent : colors.textSecondary,
                   onTap: onPinnedTap,
-                  child: MeshPill(
-                    label: '$pinnedCount',
-                    icon: Icons.push_pin_rounded,
-                    tone: pinnedActive
-                        ? MeshPillTone.accent
-                        : MeshPillTone.neutral,
-                    mono: true,
-                  ),
                 ),
               ],
               const SizedBox(width: 6),
@@ -440,6 +417,55 @@ class _SessionAppBarSubtitle extends StatelessWidget {
   }
 }
 
+class _CompactMetaChip extends StatelessWidget {
+  const _CompactMetaChip({
+    required this.label,
+    required this.icon,
+    required this.color,
+    this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final content = Container(
+      height: 22,
+      padding: const EdgeInsets.symmetric(horizontal: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: monoStyle(
+              color: colors.textPrimary,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+    if (onTap == null) {
+      return content;
+    }
+    return GestureDetector(onTap: onTap, child: content);
+  }
+}
+
 String? _contextUsageLabel(SessionRuntimeSummary? runtime) {
   final context = runtime?.telemetry?.contextWindow;
   if (context == null || context.tokenLimit <= 0) {
@@ -449,6 +475,17 @@ String? _contextUsageLabel(SessionRuntimeSummary? runtime) {
       .clamp(0, 100)
       .round();
   return '$leftPercent% ctx left';
+}
+
+String? _contextUsageShortLabel(SessionRuntimeSummary? runtime) {
+  final context = runtime?.telemetry?.contextWindow;
+  if (context == null || context.tokenLimit <= 0) {
+    return null;
+  }
+  final leftPercent = ((1 - (context.currentTokens / context.tokenLimit)) * 100)
+      .clamp(0, 100)
+      .round();
+  return '$leftPercent%';
 }
 
 MeshPillTone _contextUsageTone(SessionRuntimeSummary? runtime) {
@@ -1104,16 +1141,16 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           break;
         case 'string[]':
           final defaults = field.defaultValue is List
-              ? (field.defaultValue as List)
-                    .whereType<String>()
-                    .toSet()
+              ? (field.defaultValue as List).whereType<String>().toSet()
               : <String>{};
           _multiValues[field.key] = defaults;
           break;
         case 'string':
         default:
           final controller = TextEditingController(
-            text: field.defaultValue is String ? field.defaultValue as String : '',
+            text: field.defaultValue is String
+                ? field.defaultValue as String
+                : '',
           );
           _textControllers[field.key] = controller;
           if ((field.options ?? const []).isNotEmpty) {
@@ -1384,7 +1421,8 @@ class _PendingActionCardState extends State<_PendingActionCard> {
         );
       case 'string':
       default:
-        final options = field.options ?? const <PendingActionElicitationOption>[];
+        final options =
+            field.options ?? const <PendingActionElicitationOption>[];
         if (options.isNotEmpty) {
           child = DropdownButtonFormField<String>(
             key: ValueKey('${field.key}:${_singleValues[field.key] ?? ''}'),
@@ -1421,10 +1459,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           );
         }
     }
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: child,
-    );
+    return Padding(padding: const EdgeInsets.only(bottom: 12), child: child);
   }
 
   InputDecoration _fieldDecoration(
@@ -1485,7 +1520,9 @@ class _PendingActionCardState extends State<_PendingActionCard> {
         FilledButton.icon(
           onPressed: _submitElicitation,
           icon: const Icon(Icons.check_rounded, size: 18),
-          label: Text(action.elicitation?.mode == 'url' ? 'Continue' : 'Submit'),
+          label: Text(
+            action.elicitation?.mode == 'url' ? 'Continue' : 'Submit',
+          ),
         ),
         if (action.canDecline)
           OutlinedButton.icon(
@@ -1497,10 +1534,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
               size: 18,
               color: colors.danger,
             ),
-            label: Text(
-              'Decline',
-              style: TextStyle(color: colors.danger),
-            ),
+            label: Text('Decline', style: TextStyle(color: colors.danger)),
             style: OutlinedButton.styleFrom(
               side: BorderSide(color: colors.danger.withValues(alpha: 0.5)),
             ),
@@ -1517,9 +1551,8 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     return [
       if (action.canApprove)
         FilledButton.icon(
-          onPressed: () => widget.onRespond(
-            PendingActionResponseDraft.approval('accept'),
-          ),
+          onPressed: () =>
+              widget.onRespond(PendingActionResponseDraft.approval('accept')),
           icon: const Icon(Icons.check_rounded, size: 18),
           label: const Text('Approve'),
         ),
@@ -1533,22 +1566,12 @@ class _PendingActionCardState extends State<_PendingActionCard> {
         ),
       if (action.canDecline)
         OutlinedButton.icon(
-          onPressed: () => widget.onRespond(
-            PendingActionResponseDraft.approval('decline'),
-          ),
-          icon: Icon(
-            Icons.close_rounded,
-            size: 18,
-            color: colors.danger,
-          ),
-          label: Text(
-            'Decline',
-            style: TextStyle(color: colors.danger),
-          ),
+          onPressed: () =>
+              widget.onRespond(PendingActionResponseDraft.approval('decline')),
+          icon: Icon(Icons.close_rounded, size: 18, color: colors.danger),
+          label: Text('Decline', style: TextStyle(color: colors.danger)),
           style: OutlinedButton.styleFrom(
-            side: BorderSide(
-              color: colors.danger.withValues(alpha: 0.5),
-            ),
+            side: BorderSide(color: colors.danger.withValues(alpha: 0.5)),
           ),
         ),
     ];
@@ -1595,7 +1618,10 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           }
           final parsed = field.integer ? int.tryParse(raw) : num.tryParse(raw);
           if (parsed == null) {
-            showAppSnackBar(context, 'Enter a valid number for ${field.title}.');
+            showAppSnackBar(
+              context,
+              'Enter a valid number for ${field.title}.',
+            );
             return;
           }
           content[field.key] = parsed;
@@ -1603,7 +1629,10 @@ class _PendingActionCardState extends State<_PendingActionCard> {
         case 'string[]':
           final values = (_multiValues[field.key] ?? <String>{}).toList();
           if (field.required && values.isEmpty) {
-            showAppSnackBar(context, 'Choose at least one value for ${field.title}.');
+            showAppSnackBar(
+              context,
+              'Choose at least one value for ${field.title}.',
+            );
             return;
           }
           if (values.isNotEmpty) {
