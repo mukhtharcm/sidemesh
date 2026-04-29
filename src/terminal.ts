@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { spawn as spawnChild } from "node:child_process";
+import {
+  spawn as spawnChild,
+  type ChildProcessWithoutNullStreams,
+} from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { platform } from "node:os";
@@ -562,9 +565,11 @@ function spawnPipeTerminalProcess(
     env: NodeJS.ProcessEnv;
   },
 ): TerminalProcess {
+  let exited = false;
   const child = spawnChild(shell, args, {
     cwd: options.cwd,
     env: options.env,
+    detached: platform() !== "win32",
     stdio: "pipe",
   });
   return {
@@ -576,16 +581,52 @@ function spawnPipeTerminalProcess(
       // Pipe fallback has no PTY resize support.
     },
     kill: () => {
-      child.kill();
+      terminatePipeProcess(child, () => exited);
     },
     onData: (callback) => {
       child.stdout.on("data", (data) => callback(data.toString()));
       child.stderr.on("data", (data) => callback(data.toString()));
     },
     onExit: (callback) => {
-      child.on("exit", (exitCode) => callback({ exitCode, signal: null }));
+      child.on("exit", (exitCode) => {
+        exited = true;
+        callback({ exitCode, signal: null });
+      });
     },
   };
+}
+
+function terminatePipeProcess(
+  child: ChildProcessWithoutNullStreams,
+  hasExited: () => boolean,
+): void {
+  child.stdin.end();
+  sendSignal(child, "SIGTERM");
+  setTimeout(() => {
+    if (!hasExited()) {
+      sendSignal(child, "SIGKILL");
+    }
+  }, 750).unref?.();
+}
+
+function sendSignal(
+  child: ChildProcessWithoutNullStreams,
+  signal: NodeJS.Signals,
+): void {
+  if (platform() !== "win32" && child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // Fall through to killing the direct child. This can happen if process
+      // group creation failed or the process already exited.
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // noop
+  }
 }
 
 function fallbackShellArgs(shell: string, args: string[]): string[] {
