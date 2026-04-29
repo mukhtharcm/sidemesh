@@ -103,10 +103,35 @@ Current workflows:
   packages `.zip` and `.dmg` artifacts, optionally signs with Developer ID,
   optionally notarizes/staples with Apple, and publishes a GitHub Release from
   `v*` tags.
+- `Deploy Website`: deploys the static `web/` marketing site and Pages
+  Functions to Cloudflare Pages when `web/**` changes on `main`.
 - `Secret Scan`: manual gitleaks scan over full git history.
 
 Store deployment is intentionally not configured yet. Add TestFlight and signed
 Android workflows only after the signing/provisioning story is stable.
+
+## Website Deploy
+
+The marketing site lives in `web/` and deploys to Cloudflare Pages project
+`sidemesh-site`.
+
+Required GitHub Actions secrets:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+The waitlist/admin runtime secrets and bindings live in Cloudflare, not GitHub
+Actions:
+
+- `DB`: D1 binding configured in `web/wrangler.toml`.
+- `TURNSTILE_SECRET`: optional Turnstile verification secret.
+- `ADMIN_PASS`: required for `/admin/*`.
+
+Manual deploy:
+
+```bash
+gh workflow run "Deploy Website"
+```
 
 ## macOS Release Workflow
 
