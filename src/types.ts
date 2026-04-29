@@ -675,6 +675,7 @@ export interface SessionRuntimeSummary {
   model?: string;
   modelProvider?: string;
   mode?: string;
+  turnId?: string;
   serviceTier?: string;
   reasoningEffort?: string;
   approvalPolicy?: string;

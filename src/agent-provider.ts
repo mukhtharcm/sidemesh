@@ -114,6 +114,12 @@ export interface AgentSessionListOptions {
 
 export interface AgentSessionResumeOptions {
   persistExtendedHistory: boolean;
+  model?: string;
+  modelProvider?: string;
+  serviceTier?: string | null;
+  approvalPolicy?: string;
+  sandbox?: string;
+  config?: Record<string, unknown>;
 }
 
 export interface AgentRemoteGitDiff {

@@ -166,6 +166,7 @@ async function scanRolloutFile(
   const messages: SessionMessage[] = [];
   const activities: SessionActivity[] = [];
   let runtime: SessionRuntimeSummary | null = null;
+  const pendingTurnRuntime = new Map<string, SessionRuntimeSummary>();
   let totalMessages = 0;
   let totalActivities = 0;
   let seq = 0;
@@ -180,7 +181,31 @@ async function scanRolloutFile(
 
     const nextRuntime = parseRuntime(parsed);
     if (nextRuntime) {
-      runtime = mergeRuntime(runtime, nextRuntime);
+      if (nextRuntime.turnId) {
+        pendingTurnRuntime.set(
+          nextRuntime.turnId,
+          mergeRuntime(pendingTurnRuntime.get(nextRuntime.turnId) ?? null, nextRuntime),
+        );
+      } else {
+        runtime = mergeRuntime(runtime, nextRuntime);
+      }
+    }
+
+    const committedTurnId = resolveCommittedTurnId(parsed);
+    if (committedTurnId) {
+      const committed = pendingTurnRuntime.get(committedTurnId);
+      if (committed) {
+        runtime = mergeRuntime(runtime, {
+          ...committed,
+          updatedAt: parseTimestamp(parsed.timestamp),
+        });
+      }
+      pendingTurnRuntime.delete(committedTurnId);
+    }
+
+    const discardedTurnId = resolveDiscardedTurnId(parsed);
+    if (discardedTurnId) {
+      pendingTurnRuntime.delete(discardedTurnId);
     }
 
     if (options.includeMessages) {
@@ -433,6 +458,7 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
       sandboxMode: asOptionalString(typed.sandbox_policy?.type),
       networkAccess: asOptionalBoolean(typed.sandbox_policy?.network_access),
       updatedAt: parseTimestamp(parsed.timestamp),
+      turnId: undefined,
     };
 
     if (
@@ -459,6 +485,7 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
     const runtime = {
       modelProvider: asOptionalString(typed.model_provider),
       updatedAt: parseTimestamp(parsed.timestamp),
+      turnId: undefined,
     };
     return runtime.modelProvider ? runtime : null;
   }
@@ -493,6 +520,7 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
     summaryMode: asOptionalString(typed.summary),
     personality: asOptionalString(typed.personality),
     updatedAt: parseTimestamp(parsed.timestamp),
+    turnId: asOptionalString(typed.turn_id) || asOptionalString(typed.turnId),
   };
 
   if (
@@ -531,7 +559,46 @@ function mergeRuntime(
     summaryMode: next.summaryMode ?? previous.summaryMode,
     personality: next.personality ?? previous.personality,
     updatedAt: next.updatedAt ?? previous.updatedAt,
+    turnId: next.turnId ?? previous.turnId,
   };
+}
+
+function resolveCommittedTurnId(parsed: any): string | null {
+  if (parsed?.type !== "event_msg") {
+    return null;
+  }
+
+  const payload = parsed.payload;
+  if (!payload || typeof payload !== "object" || payload.type !== "task_complete") {
+    return null;
+  }
+
+  if (payload.last_agent_message == null) {
+    return null;
+  }
+
+  return asOptionalString(payload.turn_id) || asOptionalString(payload.turnId) || null;
+}
+
+function resolveDiscardedTurnId(parsed: any): string | null {
+  if (parsed?.type !== "event_msg") {
+    return null;
+  }
+
+  const payload = parsed.payload;
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  if (payload.type === "turn_aborted") {
+    return asOptionalString(payload.turn_id) || asOptionalString(payload.turnId) || null;
+  }
+
+  if (payload.type === "task_complete" && payload.last_agent_message == null) {
+    return asOptionalString(payload.turn_id) || asOptionalString(payload.turnId) || null;
+  }
+
+  return null;
 }
 
 function appendBounded<T>(entries: T[], next: T, limit: number | null): void {
