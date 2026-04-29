@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/models.dart';
-import 'package:sidemesh_mobile/src/widgets/provider_badge.dart';
+import 'package:sidemesh_mobile/src/provider_labels.dart';
 
 void main() {
   test('NodeInfo parses provider metadata from new daemons', () {

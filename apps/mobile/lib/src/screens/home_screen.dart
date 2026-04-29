@@ -12,6 +12,7 @@ import '../local_notification_service.dart';
 import '../models.dart';
 import '../pending_send_recovery.dart';
 import '../recent_sessions_live_store.dart';
+import '../recent_session_filter.dart';
 import '../screen_awake_controller.dart';
 import '../session_favorites_store.dart';
 import '../session_cache_store.dart';
@@ -875,12 +876,7 @@ class _RecentPaneState extends State<RecentPane> {
     Iterable<RemoteSessionEntry> visible = overlaid;
     if (query.isNotEmpty) {
       visible = overlaid.where((entry) {
-        final session = entry.session;
-        final host = entry.host;
-        return session.title.toLowerCase().contains(query) ||
-            session.preview.toLowerCase().contains(query) ||
-            session.cwd.toLowerCase().contains(query) ||
-            host.label.toLowerCase().contains(query);
+        return recentSessionMatchesQuery(entry.host, entry.session, query);
       });
     }
     final sorted = visible.toList();
