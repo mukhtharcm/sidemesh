@@ -50,6 +50,7 @@ import '../widgets/composer_paste_text_action.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/diff_view.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/provider_badge.dart';
 import '../widgets/syntax_code_block.dart';
 
 part 'session_screen_header.dart';
