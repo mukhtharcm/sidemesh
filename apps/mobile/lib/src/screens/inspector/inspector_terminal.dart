@@ -22,7 +22,6 @@ InspectorSurface buildInspectorTerminalSurface({
       cwd: session.cwd,
       sessionId: session.id,
       title: session.title,
-      reuseExisting: true,
       compact: true,
     ),
   );
