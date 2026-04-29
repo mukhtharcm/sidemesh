@@ -62,7 +62,6 @@ class _TerminalScreenState extends State<TerminalScreen> {
         cwd: widget.cwd,
         sessionId: widget.sessionId,
         title: widget.title,
-        reuseExisting: true,
       ),
     );
   }
@@ -76,7 +75,7 @@ class TerminalPane extends StatefulWidget {
     required this.cwd,
     this.sessionId,
     this.title,
-    this.reuseExisting = true,
+    this.reuseExisting = false,
     this.compact = false,
   });
 
@@ -366,7 +365,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       final updated = await widget.api.killTerminal(widget.host, terminal.id);
       if (!mounted) return;
       setState(() {
-        _terminalInfo = updated;
+        _terminalInfo = _stoppedTerminal(updated);
         _stopping = false;
       });
     } catch (error) {
@@ -449,6 +448,27 @@ class _TerminalPaneState extends State<TerminalPane> {
       ],
     );
   }
+}
+
+HostTerminalInfo _stoppedTerminal(HostTerminalInfo terminal) {
+  if (!terminal.isRunning) return terminal;
+  return HostTerminalInfo(
+    id: terminal.id,
+    title: terminal.title,
+    cwd: terminal.cwd,
+    sessionId: terminal.sessionId,
+    status: 'exited',
+    backend: terminal.backend,
+    shell: terminal.shell,
+    rows: terminal.rows,
+    cols: terminal.cols,
+    createdAt: terminal.createdAt,
+    updatedAt: DateTime.now().millisecondsSinceEpoch,
+    exitCode: terminal.exitCode,
+    signal: terminal.signal,
+    nextSeq: terminal.nextSeq,
+    clients: terminal.clients,
+  );
 }
 
 xterm.TerminalTheme _terminalTheme(AppColors colors) {
