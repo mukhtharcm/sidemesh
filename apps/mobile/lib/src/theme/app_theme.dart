@@ -88,6 +88,43 @@ ThemeData _buildTheme(
       ),
       actionTextColor: palette.accent,
     ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: palette.surfaceElevated,
+      surfaceTintColor: Colors.transparent,
+      elevation: 10,
+      shadowColor: palette.textPrimary.withValues(alpha: 0.12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: palette.border),
+      ),
+      textStyle: textTheme.bodyMedium?.copyWith(
+        color: palette.textPrimary,
+        fontWeight: FontWeight.w600,
+      ),
+      labelTextStyle: WidgetStateProperty.all(
+        textTheme.bodyMedium?.copyWith(
+          color: palette.textPrimary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ),
+    menuTheme: MenuThemeData(
+      style: MenuStyle(
+        backgroundColor: WidgetStateProperty.all(palette.surfaceElevated),
+        surfaceTintColor: WidgetStateProperty.all(Colors.transparent),
+        shadowColor: WidgetStateProperty.all(
+          palette.textPrimary.withValues(alpha: 0.12),
+        ),
+        elevation: WidgetStateProperty.all(10),
+        shape: WidgetStateProperty.all(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: palette.border),
+          ),
+        ),
+        padding: WidgetStateProperty.all(const EdgeInsets.all(6)),
+      ),
+    ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: palette.surface,
       surfaceTintColor: Colors.transparent,

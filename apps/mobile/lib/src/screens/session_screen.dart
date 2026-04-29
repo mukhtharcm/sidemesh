@@ -3856,6 +3856,268 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
+  void _handleSessionAction(String value, SessionSummary session) {
+    switch (value) {
+      case 'reload':
+        _reloadSnapshot();
+        break;
+      case 'new':
+        _startSessionFromCurrent();
+        break;
+      case 'terminal':
+        if (_supportsTerminal) {
+          unawaited(_openTerminal());
+        }
+        break;
+      case 'search':
+        _toggleSearchPanel();
+        break;
+      case 'resources':
+        if (_supportsSessionResources) {
+          _openResourcesPanel();
+        }
+        break;
+      case 'favorite':
+        _toggleFavorite();
+        break;
+      case 'unread':
+        unawaited(_markSessionUnread());
+        break;
+      case 'git':
+        _showGitSheet(session);
+        break;
+      case 'compact':
+        unawaited(_compactSession());
+        break;
+      case 'browse':
+        if (!_supportsFilesystem) {
+          break;
+        }
+        final isDesktop = widget.desktopMode;
+        final scope = InspectorScope.maybeOf(context);
+        if (isDesktop && scope != null) {
+          scope.show(
+            buildInspectorWorkspaceBrowserSurface(
+              ownerKey: _inspectorOwnerKey(),
+              host: widget.host,
+              api: widget.api,
+              root: session.cwd,
+              agentProvider: session.provider,
+            ),
+          );
+        } else if (isDesktop) {
+          showWorkspaceBrowserDialog(
+            context,
+            host: widget.host,
+            api: widget.api,
+            root: session.cwd,
+            agentProvider: session.provider,
+          );
+        } else {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => FileBrowserScreen(
+                host: widget.host,
+                api: widget.api,
+                root: session.cwd,
+                agentProvider: session.provider,
+              ),
+            ),
+          );
+        }
+        break;
+      case 'popout':
+        unawaited(_openSessionInWindow());
+        break;
+      case 'rename':
+        _renameSession();
+        break;
+      case 'archive':
+        _archiveSession();
+        break;
+    }
+  }
+
+  List<_SessionActionGroup> _sessionActionGroups({
+    required bool favorite,
+    required bool gitAvailable,
+    required bool gitDirty,
+    required bool terminalOpen,
+    required bool searchOpen,
+    required bool resourcesOpen,
+  }) {
+    return [
+      _SessionActionGroup(
+        label: 'Quick moves',
+        actions: [
+          const _SessionActionSpec(
+            value: 'reload',
+            label: 'Reload',
+            detail: 'Refresh this transcript from the host.',
+            icon: Icons.refresh_rounded,
+          ),
+          const _SessionActionSpec(
+            value: 'new',
+            label: 'New session',
+            detail: 'Start beside this working directory.',
+            icon: Icons.add_circle_outline_rounded,
+          ),
+          if (_supportsTerminal)
+            _SessionActionSpec(
+              value: 'terminal',
+              label: terminalOpen ? 'Terminal is open' : 'Open terminal',
+              detail: terminalOpen
+                  ? 'Jump back to the active terminal surface.'
+                  : 'Open a shell for this workspace.',
+              icon: Icons.terminal_rounded,
+              tone: terminalOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: terminalOpen,
+            ),
+          _SessionActionSpec(
+            value: 'search',
+            label: searchOpen ? 'Close search' : 'Search transcript',
+            detail: searchOpen
+                ? 'Hide the current search panel.'
+                : 'Find text in loaded messages.',
+            icon: searchOpen ? Icons.search_off_rounded : Icons.search_rounded,
+            tone: searchOpen
+                ? _SessionActionTone.accent
+                : _SessionActionTone.neutral,
+            active: searchOpen,
+          ),
+          if (_supportsSessionResources)
+            _SessionActionSpec(
+              value: 'resources',
+              label: resourcesOpen ? 'Resources are open' : 'Open resources',
+              detail: 'View generated images and session assets.',
+              icon: resourcesOpen
+                  ? Icons.perm_media_rounded
+                  : Icons.perm_media_outlined,
+              tone: resourcesOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: resourcesOpen,
+            ),
+        ],
+      ),
+      _SessionActionGroup(
+        label: 'Session',
+        actions: [
+          _SessionActionSpec(
+            value: 'favorite',
+            label: favorite ? 'Remove favorite' : 'Add favorite',
+            detail: favorite
+                ? 'Take this session out of your shortcuts.'
+                : 'Keep this session easy to find.',
+            icon: favorite ? Icons.star_rounded : Icons.star_outline_rounded,
+            tone: favorite
+                ? _SessionActionTone.warning
+                : _SessionActionTone.neutral,
+            active: favorite,
+          ),
+          const _SessionActionSpec(
+            value: 'unread',
+            label: 'Mark unread',
+            detail: 'Return this thread to your attention queue.',
+            icon: Icons.mark_chat_unread_outlined,
+          ),
+          if (gitAvailable)
+            _SessionActionSpec(
+              value: 'git',
+              label: 'Git details',
+              detail: gitDirty
+                  ? 'Working tree has changes.'
+                  : 'Branch, upstream, and diff shortcuts.',
+              icon: Icons.account_tree_outlined,
+              tone: gitDirty
+                  ? _SessionActionTone.warning
+                  : _SessionActionTone.neutral,
+              active: gitDirty,
+            ),
+          if (_supportsSessionCompact)
+            const _SessionActionSpec(
+              value: 'compact',
+              label: 'Compact context',
+              detail: 'Ask the provider to compress this conversation.',
+              icon: Icons.compress_rounded,
+            ),
+          if (_supportsFilesystem)
+            const _SessionActionSpec(
+              value: 'browse',
+              label: 'Browse files',
+              detail: 'Open the workspace file browser.',
+              icon: Icons.folder_outlined,
+            ),
+          if (widget.topPadding != null &&
+              SidemeshSessionWindowManager.instance.isSupported)
+            const _SessionActionSpec(
+              value: 'popout',
+              label: 'Open in new window',
+              detail: 'Detach this session into its own macOS window.',
+              icon: Icons.open_in_new_rounded,
+            ),
+        ],
+      ),
+      if (_supportsSessionRename || _supportsSessionArchive)
+        _SessionActionGroup(
+          label: 'Manage',
+          actions: [
+            if (_supportsSessionRename)
+              const _SessionActionSpec(
+                value: 'rename',
+                label: 'Rename',
+                detail: 'Change the session title.',
+                icon: Icons.drive_file_rename_outline,
+              ),
+            if (_supportsSessionArchive)
+              const _SessionActionSpec(
+                value: 'archive',
+                label: 'Archive',
+                detail: 'Move this session out of recents.',
+                icon: Icons.archive_outlined,
+                tone: _SessionActionTone.danger,
+              ),
+          ],
+        ),
+    ];
+  }
+
+  Future<void> _showSessionActionsSheet({
+    required SessionSummary session,
+    required bool favorite,
+    required bool gitAvailable,
+    required bool gitDirty,
+    required bool terminalOpen,
+    required bool searchOpen,
+    required bool resourcesOpen,
+  }) async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.28),
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => _SessionActionSheet(
+        session: session,
+        groups: _sessionActionGroups(
+          favorite: favorite,
+          gitAvailable: gitAvailable,
+          gitDirty: gitDirty,
+          terminalOpen: terminalOpen,
+          searchOpen: searchOpen,
+          resourcesOpen: resourcesOpen,
+        ),
+      ),
+    );
+    if (!mounted || selected == null) {
+      return;
+    }
+    _handleSessionAction(selected, session);
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = _session ?? widget.session;
@@ -4246,153 +4508,29 @@ class _SessionScreenState extends State<SessionScreen>
               // icon (dirty state). Keep it hidden entirely if there is no
               // git info to show.
               final showGitInMenu = gitAvailable && !gitDirty;
+              if (isCompact) {
+                return MeshIconButton(
+                  icon: Icons.more_horiz_rounded,
+                  tooltip: 'Session actions',
+                  color: colors.textPrimary,
+                  onTap: () => unawaited(
+                    _showSessionActionsSheet(
+                      session: session,
+                      favorite: favorite,
+                      gitAvailable: gitAvailable,
+                      gitDirty: gitDirty,
+                      terminalOpen: terminalOpenInInspector,
+                      searchOpen: searchOpenInInspector,
+                      resourcesOpen: resourcesOpenInInspector,
+                    ),
+                  ),
+                );
+              }
               return PopupMenuButton<String>(
                 tooltip: 'Session actions',
                 icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
-                onSelected: (value) {
-                  switch (value) {
-                    case 'reload':
-                      _reloadSnapshot();
-                      break;
-                    case 'new':
-                      _startSessionFromCurrent();
-                      break;
-                    case 'terminal':
-                      if (_supportsTerminal) {
-                        unawaited(_openTerminal());
-                      }
-                      break;
-                    case 'search':
-                      _toggleSearchPanel();
-                      break;
-                    case 'resources':
-                      if (_supportsSessionResources) {
-                        _openResourcesPanel();
-                      }
-                      break;
-                    case 'favorite':
-                      _toggleFavorite();
-                      break;
-                    case 'unread':
-                      unawaited(_markSessionUnread());
-                      break;
-                    case 'git':
-                      _showGitSheet(session);
-                      break;
-                    case 'compact':
-                      unawaited(_compactSession());
-                      break;
-                    case 'browse':
-                      if (!_supportsFilesystem) {
-                        break;
-                      }
-                      final isDesktop = widget.desktopMode;
-                      final scope = InspectorScope.maybeOf(context);
-                      if (isDesktop && scope != null) {
-                        scope.show(
-                          buildInspectorWorkspaceBrowserSurface(
-                            ownerKey: _inspectorOwnerKey(),
-                            host: widget.host,
-                            api: widget.api,
-                            root: session.cwd,
-                            agentProvider: session.provider,
-                          ),
-                        );
-                      } else if (isDesktop) {
-                        showWorkspaceBrowserDialog(
-                          context,
-                          host: widget.host,
-                          api: widget.api,
-                          root: session.cwd,
-                          agentProvider: session.provider,
-                        );
-                      } else {
-                        Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => FileBrowserScreen(
-                              host: widget.host,
-                              api: widget.api,
-                              root: session.cwd,
-                              agentProvider: session.provider,
-                            ),
-                          ),
-                        );
-                      }
-                      break;
-                    case 'popout':
-                      unawaited(_openSessionInWindow());
-                      break;
-                    case 'rename':
-                      _renameSession();
-                      break;
-                    case 'archive':
-                      _archiveSession();
-                      break;
-                  }
-                },
+                onSelected: (value) => _handleSessionAction(value, session),
                 itemBuilder: (context) => [
-                  if (isCompact) ...[
-                    const PopupMenuItem<String>(
-                      value: 'reload',
-                      child: Row(
-                        children: [
-                          Icon(Icons.refresh_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Reload'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem<String>(
-                      value: 'new',
-                      child: Row(
-                        children: [
-                          Icon(Icons.add_circle_outline_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('New session'),
-                        ],
-                      ),
-                    ),
-                    if (_supportsTerminal)
-                      PopupMenuItem<String>(
-                        value: 'terminal',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.terminal_rounded,
-                              size: 18,
-                              color: terminalOpenInInspector
-                                  ? colors.accent
-                                  : null,
-                            ),
-                            const SizedBox(width: 10),
-                            Text(
-                              terminalOpenInInspector
-                                  ? 'Terminal is open'
-                                  : 'Open terminal',
-                            ),
-                          ],
-                        ),
-                      ),
-                    PopupMenuItem<String>(
-                      value: 'search',
-                      child: Row(
-                        children: [
-                          Icon(
-                            searchOpenInInspector
-                                ? Icons.search_off_rounded
-                                : Icons.search_rounded,
-                            size: 18,
-                            color: searchOpenInInspector ? colors.accent : null,
-                          ),
-                          const SizedBox(width: 10),
-                          Text(
-                            searchOpenInInspector ? 'Close search' : 'Search',
-                          ),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuDivider(),
-                  ],
                   if (_supportsSessionResources)
                     const PopupMenuItem<String>(
                       value: 'resources',
