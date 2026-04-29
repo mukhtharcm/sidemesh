@@ -6,6 +6,8 @@
 <title>Sidemesh Preview - Your coding agents, wherever you are</title>
 <meta name="description" content="Sidemesh keeps Codex and coding-agent sessions within reach from your phone or desktop." />
 <meta name="theme-color" content="#F7F5EF" />
+<link rel="icon" type="image/png" href="/assets/favicon.png" />
+<link rel="apple-touch-icon" href="/assets/app-icon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700;800&family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -63,17 +65,13 @@
     letter-spacing: -0.03em;
   }
 
-  .mark {
+  .brand-logo {
     width: 32px;
     height: 32px;
     border-radius: 11px;
-    background:
-      radial-gradient(circle at 50% 50%, var(--surface) 0 3px, transparent 4px),
-      radial-gradient(circle at 25% 28%, var(--surface) 0 2px, transparent 3px),
-      radial-gradient(circle at 75% 28%, var(--surface) 0 2px, transparent 3px),
-      radial-gradient(circle at 25% 74%, var(--surface) 0 2px, transparent 3px),
-      radial-gradient(circle at 75% 74%, var(--surface) 0 2px, transparent 3px),
-      var(--accent);
+    display: block;
+    object-fit: cover;
+    box-shadow: 0 8px 18px rgba(24, 27, 23, 0.12);
   }
 
   .nav-links {
@@ -512,7 +510,7 @@
 </head>
 <body>
   <header class="wrap nav">
-    <a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span>Sidemesh</span></a>
+    <a class="brand" href="/"><img class="brand-logo" src="/assets/app-icon.png" alt="" aria-hidden="true" /><span>Sidemesh</span></a>
     <nav class="nav-links" aria-label="Primary">
       <a href="#why">Why</a>
       <a href="#surface">Surface</a>
