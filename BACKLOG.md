@@ -1,6 +1,7 @@
 # Sidemesh Backlog
 
-This is the near-term Codex-only backlog for bringing the mobile client closer to full `codex app-server` parity.
+This is the near-term provider backlog for keeping Codex strong while bringing
+GitHub Copilot and future coding agents behind the same Sidemesh API.
 
 ## Recently Completed
 
@@ -20,19 +21,40 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 - [x] Add per-device unread indicators, favorites, host reachability, and background approval polling.
 - [x] Move host tokens from `SharedPreferences` to platform secure storage.
 - [x] Add provider-capability plumbing so the daemon and app can prepare for non-Codex adapters.
+- [x] Add a provider registry, provider factory, and documented adapter contract.
+- [x] Add a deterministic fake provider for capability/profile testing.
+- [x] Add a GitHub Copilot provider backed by the Copilot SDK for sessions,
+      transcript replay, model metadata, image input, skills, permissions, and
+      interactive prompts.
+- [x] Add multi-provider daemon support so one node can expose more than one
+      provider.
+- [x] Gate create-session, runtime controls, attachments, approvals, file
+      browsing, and skills by provider and host capabilities.
+- [x] Surface provider identity in host details, recent sessions, and session
+      headers.
+- [x] Add setup/doctor/status/pair CLI flows for local daemon onboarding.
 
 ## Current Wave
 
-- [ ] Add local notifications for approval-required and task-finished events.
-- [ ] Harden reconnect/background resume so approvals and final answers never disappear after a socket drop.
-- [ ] Surface blocked, running, and finished states more clearly across `Recent`, `Hosts`, and `Inbox`.
-- [ ] Tighten full approval parity.
-- [ ] Add first-class model/account discovery.
-- [ ] Add advanced thread lifecycle controls.
-- [ ] Improve active-run steering and queued follow-ups.
+- [ ] Bring Copilot provider UX up to Codex parity where the SDK supports it.
+- [ ] Harden provider-neutral approvals across command, tool, file-change,
+      user-input, and elicitation requests.
+- [ ] Make multi-provider hosts easier to scan and operate: provider filters,
+      provider-aware session creation, and clearer mixed-provider health states.
+- [ ] Harden reconnect/background resume so approvals and final answers never
+      disappear after a socket drop.
+- [ ] Improve active-run steering and queued follow-ups across providers.
+- [ ] Keep Codex-specific compatibility shims documented and easy to remove.
 
 ## Next Up
 
+- [ ] Add a provider-switching affordance in the new-session flow when a host
+      advertises multiple providers.
+- [ ] Add provider-aware filters/grouping in `Recent`, `Hosts`, and `Inbox`.
+- [ ] Expand the fake provider scenario harness so one automated flow can cover
+      chat, images, tools, approvals, files, skills, and reconnect replay.
+- [ ] Add provider-neutral settings for provider defaults where possible, and
+      hide provider-private controls unless the provider advertises them.
 - [ ] Fully support `item/permissions/requestApproval`, including partial grants and turn vs session scope.
 - [ ] Show richer approval detail: requested permissions, cwd, reason, and available decisions.
 - [ ] Add session fork via `thread/fork`.
@@ -68,7 +90,8 @@ This is the near-term Codex-only backlog for bringing the mobile client closer t
 
 - [ ] Expose Codex apps and plugins through `app/list` and related APIs.
 - [ ] Surface MCP server status and selected MCP tools.
-- [ ] Implement the first non-Codex provider adapter using `docs/provider-adapter-contract.md`.
-- [ ] Investigate GitHub Copilot local sessions via the Copilot SDK.
+- [ ] Investigate whether Copilot exposes more granular permission controls than
+      the current SDK-backed adapter reports.
 - [ ] Investigate OpenClaw Gateway as a provider.
-- [ ] Revisit multi-agent support once Codex parity is strong enough.
+- [ ] Add more real providers only after the provider contract and fake harness
+      stay stable across Codex and Copilot.
