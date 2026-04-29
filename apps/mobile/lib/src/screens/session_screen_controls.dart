@@ -57,8 +57,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     unawaited(_loadModels());
   }
 
-  String get _providerKind =>
-      widget.session.provider ?? widget.runtimeModelProvider ?? '';
+  String get _providerKind => widget.session.provider ?? '';
 
   String get _providerName {
     final node = _nodeInfo;
