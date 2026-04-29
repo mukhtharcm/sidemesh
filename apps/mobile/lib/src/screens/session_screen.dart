@@ -30,6 +30,7 @@ import 'inspector/inspector_persistence.dart';
 import 'inspector/inspector_pinned.dart';
 import 'inspector/inspector_resources.dart';
 import 'inspector/inspector_search.dart';
+import 'inspector/inspector_terminal.dart';
 import 'workspace_browser_dialog.dart';
 import '../session_favorites_store.dart';
 import '../session_cache_store.dart';
@@ -409,7 +410,9 @@ class _SessionScreenState extends State<SessionScreen>
     final unsupportedFiles =
         current.kind == InspectorSurfaceKind.fileBrowser &&
         !_supportsFilesystem;
-    if (unsupportedResources || unsupportedFiles) {
+    final unsupportedTerminal =
+        current.kind == InspectorSurfaceKind.terminal && !_supportsTerminal;
+    if (unsupportedResources || unsupportedFiles || unsupportedTerminal) {
       controller.closeForOwner(current.ownerKey);
     }
   }
@@ -591,6 +594,17 @@ class _SessionScreenState extends State<SessionScreen>
           ),
         );
         break;
+      case InspectorSurfaceKind.terminal:
+        if (!_supportsTerminal) return;
+        controller.show(
+          buildInspectorTerminalSurface(
+            ownerKey: ownerKey,
+            host: widget.host,
+            api: widget.api,
+            session: _session ?? widget.session,
+          ),
+        );
+        break;
       case InspectorSurfaceKind.debug:
       case InspectorSurfaceKind.gitDetails:
       case InspectorSurfaceKind.sessionDetails:
@@ -748,6 +762,14 @@ class _SessionScreenState extends State<SessionScreen>
     final cur = scope.current;
     return cur != null &&
         cur.kind == InspectorSurfaceKind.resources &&
+        cur.ownerKey == _inspectorOwnerKey();
+  }
+
+  bool _isTerminalInspectorOpen(InspectorController? scope) {
+    if (scope == null) return false;
+    final cur = scope.current;
+    return cur != null &&
+        cur.kind == InspectorSurfaceKind.terminal &&
         cur.ownerKey == _inspectorOwnerKey();
   }
 
@@ -3402,6 +3424,18 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     final session = _session ?? widget.session;
+    final scope = InspectorScope.maybeOf(context);
+    if (widget.desktopMode && scope != null) {
+      scope.show(
+        buildInspectorTerminalSurface(
+          ownerKey: _inspectorOwnerKey(),
+          host: widget.host,
+          api: widget.api,
+          session: session,
+        ),
+      );
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => TerminalScreen(
@@ -4013,6 +4047,7 @@ class _SessionScreenState extends State<SessionScreen>
     final searchOpenInInspector =
         inspectorScope != null && _isSearchInspectorOpen(inspectorScope);
     final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
+    final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -4080,8 +4115,12 @@ class _SessionScreenState extends State<SessionScreen>
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
                 icon: Icons.terminal_rounded,
-                tooltip: 'Open terminal',
-                color: colors.textSecondary,
+                tooltip: terminalOpenInInspector
+                    ? 'Terminal is open'
+                    : 'Open terminal',
+                color: terminalOpenInInspector
+                    ? colors.accent
+                    : colors.textSecondary,
                 onTap: () => unawaited(_openTerminal()),
               ),
             ),
