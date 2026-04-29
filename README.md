@@ -326,6 +326,8 @@ GitHub Actions currently provide:
   simulator builds.
 - A `Release macOS App` workflow for ZIP/DMG packaging, optional Developer ID
   signing, optional notarization, and GitHub Release publishing from `v*` tags.
+- A `Deploy Website` workflow for the Cloudflare Pages marketing site in
+  `web/`.
 - A manual `Secret Scan` workflow for a full-history gitleaks scan.
 
 Before changing repository visibility or distributing to untrusted users, run:
