@@ -26,6 +26,7 @@ export interface TerminalRegistryOptions {
   replayBytes?: number;
   idleTtlMs?: number;
   shell?: string | null;
+  requirePty?: boolean;
 }
 
 export interface CreateTerminalRequest {
@@ -118,6 +119,7 @@ export class TerminalRegistry {
   private readonly maxReplayBytes: number;
   private readonly idleTtlMs: number;
   private readonly shellOverride: string | null;
+  private readonly requirePty: boolean;
   private cleanupTimer: NodeJS.Timeout | null = null;
 
   public constructor(options: TerminalRegistryOptions) {
@@ -127,6 +129,7 @@ export class TerminalRegistry {
     this.maxReplayBytes = options.replayBytes ?? DEFAULT_REPLAY_BYTES;
     this.idleTtlMs = options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS;
     this.shellOverride = options.shell?.trim() || null;
+    this.requirePty = options.requirePty === true;
     if (this.enabled) {
       this.cleanupTimer = setInterval(() => this.cleanup(), 60_000);
       this.cleanupTimer.unref?.();
@@ -163,6 +166,7 @@ export class TerminalRegistry {
       cols: dimensions.cols,
       rows: dimensions.rows,
       env: terminalEnvironment(),
+      requirePty: this.requirePty,
     });
     const terminal: TerminalRecord = {
       id,
@@ -487,7 +491,13 @@ export function terminalEnabledFromEnv(
 export function terminalShellFromEnv(
   env: Record<string, string | undefined> = process.env,
 ): string | null {
-  const shell = env.SIDEMESH_TERMINAL_SHELL?.trim();
+  return normalizeTerminalShell(env.SIDEMESH_TERMINAL_SHELL);
+}
+
+export function normalizeTerminalShell(
+  value: string | null | undefined,
+): string | null {
+  const shell = value?.trim();
   if (!shell) return null;
   if (platform() !== "win32" && shell.startsWith("/") && !existsSync(shell)) {
     throw new TerminalError(`terminal shell does not exist: ${shell}`, 400);
@@ -503,6 +513,7 @@ function spawnTerminalProcess(
     cols: number;
     rows: number;
     env: NodeJS.ProcessEnv;
+    requirePty: boolean;
   },
 ): TerminalProcess {
   try {
@@ -532,7 +543,7 @@ function spawnTerminalProcess(
       },
     };
   } catch (error) {
-    if (process.env.SIDEMESH_TERMINAL_REQUIRE_PTY === "1") {
+    if (options.requirePty) {
       throw error;
     }
     return spawnPipeTerminalProcess(

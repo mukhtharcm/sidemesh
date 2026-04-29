@@ -91,6 +91,7 @@ export async function main(argv = process.argv): Promise<void> {
           label: config.label,
           port: config.port,
           stateDir: config.stateDir,
+          terminal: config.terminal,
           defaultProvider: config.defaultProviderKind,
           providers: config.providers.map((provider) => provider.kind),
           tokenSource: config.tokenSource,
@@ -106,6 +107,11 @@ export async function main(argv = process.argv): Promise<void> {
         console.log(`Label: ${payload.label}`);
         console.log(`Port: ${payload.port}`);
         console.log(`State dir: ${payload.stateDir}`);
+        console.log(
+          `Terminal: ${payload.terminal.enabled ? "enabled" : "disabled"}${
+            payload.terminal.shell ? ` (${payload.terminal.shell})` : ""
+          }`,
+        );
         console.log(`Default provider: ${payload.defaultProvider}`);
         console.log(`Providers: ${payload.providers.join(", ")}`);
         console.log(`Token: ${payload.tokenFingerprint} (${payload.tokenSource})`);

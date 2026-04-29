@@ -17,6 +17,7 @@ import { readResolvedPersistedConfig, saveConfig } from "./config.js";
 import type {
   AgentProviderConfig,
   AgentProviderKind,
+  HostTerminalConfig,
   NodeConfig,
 } from "./types.js";
 import { listSetupAgentProviderDefinitionSummaries } from "./provider-registry.js";
@@ -73,6 +74,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     validate: (value) =>
       value.trim() ? undefined : "State directory cannot be empty.",
   });
+  const terminal = await promptTerminalConfig(existing);
 
   const initialProviders =
     existing?.providers.map((provider) => provider.kind) ?? ["codex"];
@@ -151,6 +153,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     providers: resolvedProviders,
     defaultProviderKind: defaultProvider as AgentProviderKind,
     stateDir: stateDir.trim(),
+    terminal,
     configPath: persisted.path,
     configExists: true,
   };
@@ -163,6 +166,47 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     ].join("\n"),
   );
   return config;
+}
+
+async function promptTerminalConfig(
+  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
+): Promise<HostTerminalConfig> {
+  note(
+    "Terminal access exposes an interactive shell through authenticated Sidemesh clients. Enable it only on hosts you trust.",
+    "Integrated terminal",
+  );
+  const current = existing?.terminal;
+  const enabled = await confirm({
+    message: "Enable integrated terminal on this host?",
+    initialValue: current?.enabled ?? false,
+  });
+  if (isCancel(enabled)) {
+    throw new Error("Setup cancelled.");
+  }
+  if (!enabled) {
+    return {
+      enabled: false,
+      shell: current?.shell ?? null,
+      requirePty: current?.requirePty ?? false,
+    };
+  }
+  const shell = await promptText({
+    message: "Terminal shell (leave blank for login shell)",
+    defaultValue: current?.shell ?? process.env.SHELL ?? "",
+    fallbackToDefaultOnEmpty: false,
+  });
+  const requirePty = await confirm({
+    message: "Require a real PTY instead of falling back to pipes?",
+    initialValue: current?.requirePty ?? false,
+  });
+  if (isCancel(requirePty)) {
+    throw new Error("Setup cancelled.");
+  }
+  return {
+    enabled: true,
+    shell: shell.trim() || null,
+    requirePty,
+  };
 }
 
 async function promptCodexProvider(

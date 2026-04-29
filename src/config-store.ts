@@ -46,6 +46,12 @@ const fakeProviderConfigSchema = z.object({
   capabilityProfile: fakeCapabilityProfileSchema,
 });
 
+const terminalConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  shell: z.string().trim().min(1).nullable().default(null),
+  requirePty: z.boolean().default(false),
+});
+
 const persistedProviderConfigSchema = z.discriminatedUnion("kind", [
   codexProviderConfigSchema,
   copilotProviderConfigSchema,
@@ -58,6 +64,7 @@ const persistedNodeConfigSchema = z.object({
   port: z.number().int().min(1).max(65535).optional(),
   token: z.string().trim().min(1).optional(),
   stateDir: z.string().trim().min(1).optional(),
+  terminal: terminalConfigSchema.optional(),
   defaultProviderKind: z.enum(["codex", "copilot", "fake"]).optional(),
   providers: z.array(persistedProviderConfigSchema).default([]),
 });
@@ -139,6 +146,7 @@ export function persistedConfigFromNodeConfig(
     port: config.port,
     token: config.token,
     stateDir: config.stateDir,
+    terminal: config.terminal,
     defaultProviderKind: config.defaultProviderKind,
     providers: config.providers.map((provider) =>
       normalizePersistedProviderConfig(provider),
