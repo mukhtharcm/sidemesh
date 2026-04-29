@@ -94,7 +94,9 @@ temporary overrides, set `SIDEMESH_TERMINAL=1` to advertise the
 The daemon uses `node-pty` when available and falls back to a pipe-backed shell
 if PTY spawning fails; set `SIDEMESH_TERMINAL_REQUIRE_PTY=1` if you prefer hard
 failure over fallback. If `node-pty` installs but cannot spawn shells on a local
-Node runtime, run `npm rebuild node-pty`.
+Node runtime, run `npm rebuild node-pty`. Pipe fallback is intentionally labeled
+as limited in the app; it has no real PTY resize semantics, but the daemon still
+terminates the whole fallback process group when you stop the terminal.
 
 To run against GitHub Copilot CLI instead of Codex without using the setup
 wizard:
@@ -176,6 +178,10 @@ npm run pair
 
 Run `npm run pair` from a second terminal after the daemon is up, since
 `npm run daemon` is a long-running process.
+
+Use `npm run status` when you are unsure which local daemon is active. It prints
+the resolved port, provider list, token fingerprint, terminal setting, and
+reachable local/Tailscale addresses without revealing the full token.
 
 If you prefer raw env vars, this still works:
 

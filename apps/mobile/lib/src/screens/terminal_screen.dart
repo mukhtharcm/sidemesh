@@ -530,6 +530,7 @@ class _TerminalStatusStrip extends StatelessWidget {
         !starting &&
         !connecting &&
         (terminal != null || error != null);
+    final limitedBackend = terminal?.backend == 'pipe';
     final label =
         error ??
         (starting
@@ -537,7 +538,9 @@ class _TerminalStatusStrip extends StatelessWidget {
             : connecting
             ? 'Connecting'
             : running
-            ? 'Live terminal'
+            ? limitedBackend
+                  ? 'Live terminal (limited fallback)'
+                  : 'Live terminal'
             : 'Terminal stopped');
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -577,11 +580,18 @@ class _TerminalStatusStrip extends StatelessWidget {
             ),
           ),
           if (terminal != null)
-            Text(
-              '${terminal!.backend} ${terminal!.cols}x${terminal!.rows}',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: colors.textSecondary,
-                fontFeatures: const [FontFeature.tabularFigures()],
+            Flexible(
+              child: Tooltip(
+                message: terminal!.cwd,
+                child: Text(
+                  '${terminal!.backend} ${terminal!.cols}x${terminal!.rows} · ${_basename(terminal!.cwd)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colors.textSecondary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
               ),
             ),
           if (running) ...[
@@ -658,6 +668,16 @@ class _TerminalKeyBar extends StatelessWidget {
       ),
     );
   }
+}
+
+String _basename(String path) {
+  final trimmed = path.trim();
+  if (trimmed.isEmpty) return '';
+  final withoutTrailingSlash = trimmed.replaceFirst(RegExp(r'/+$'), '');
+  final index = withoutTrailingSlash.lastIndexOf('/');
+  return index >= 0
+      ? withoutTrailingSlash.substring(index + 1)
+      : withoutTrailingSlash;
 }
 
 class _TerminalKey {
