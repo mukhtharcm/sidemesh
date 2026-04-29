@@ -28,6 +28,7 @@ import '../widgets/notification_permission_banner.dart';
 import '../widgets/provider_badge.dart';
 import 'create_session_sheet.dart';
 import 'host_detail_screen.dart';
+import 'pair_scanner_sheet.dart';
 import 'settings_screen.dart';
 import 'session_screen.dart';
 
@@ -3146,6 +3147,17 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
     super.dispose();
   }
 
+  Future<void> _scanPairingQr() async {
+    final payload = await showPairScannerSheet(context);
+    if (!mounted || payload == null) return;
+    setState(() {
+      _labelController.text = payload.label;
+      _baseUrlController.text = payload.baseUrl;
+      _tokenController.text = payload.token;
+      _enabled = true;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -3186,6 +3198,21 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
               ],
             ),
             const SizedBox(height: 18),
+            if (canScanPairingQr) ...[
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _scanPairingQr,
+                  icon: const Icon(Icons.qr_code_scanner_rounded),
+                  label: Text(
+                    isEditing
+                        ? 'Replace details from QR'
+                        : 'Scan QR from sidemesh pair',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
             TextField(
               controller: _labelController,
               decoration: const InputDecoration(

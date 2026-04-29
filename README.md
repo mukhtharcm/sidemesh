@@ -283,7 +283,9 @@ SIDEMESH_TOKEN=replace-me \
 sidemesh daemon
 ```
 
-Then add that machine inside the mobile app with:
+Then add that machine inside the mobile app by scanning the QR code printed by
+`sidemesh pair` from the host editor. Manual entry still works with these
+fields:
 
 - `label`: any friendly name such as `MacBook`, `nyc-vps`, or `lab-box`
 - `base URL`: one of the addresses shown by `sidemesh pair`
@@ -294,7 +296,8 @@ Examples:
 - `http://100.94.10.20:8899`
 - `http://macbook.tailnet.ts.net:8899`
 
-That gives you a manual, fleet-first setup without any pairing server or browser client.
+The QR payload is still local-first: it contains the selected base URL and
+shared token, but there is no pairing server or browser relay.
 
 ## Running the mobile app
 
@@ -385,13 +388,15 @@ All `/api/*` routes and websocket endpoints require `Authorization: Bearer <toke
 
 ## Mobile app
 
-The Flutter app does manual host registration for fast dogfooding:
+The Flutter app supports QR and manual host registration for fast dogfooding:
 
 - label
 - base URL
 - shared token
 
-That makes it easy to point the phone at a MacBook or VPS over Tailscale without adding a pairing protocol yet.
+Run `sidemesh pair` on a host to print a QR code, then scan it from the host
+editor in the app. Manual entry still works for desktop clients or locked-down
+camera environments.
 
 The app currently supports:
 
@@ -409,7 +414,8 @@ The app currently supports:
 
 Current limits:
 
-- host tokens are stored in platform secure storage, but pairing/revocation is not implemented yet
+- host tokens are stored in platform secure storage, but token revocation is
+  not implemented yet
 - the iOS and Android builds allow plain `http://` traffic so Tailscale and private LAN nodes work immediately
 - Codex remains the fullest production provider; the Copilot adapter is an
   early text-first provider, and the fake provider is the deterministic contract

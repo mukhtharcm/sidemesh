@@ -9,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { Command } from "commander";
+import QRCode from "qrcode";
 
 import {
   loadConfig,
@@ -505,24 +506,41 @@ export async function main(argv = process.argv): Promise<void> {
       .command("pair")
       .description("show the host details needed to add this daemon in the app")
       .option("--json", "print JSON output")
-      .action(async (options: { config?: string; json?: boolean }) => {
-        const config = await loadConfig({
-          configPath: options.config,
-          persistGeneratedToken: true,
-        });
-        const pairInfo = buildPairInfo(config);
-        if (options.json) {
-          console.log(JSON.stringify(pairInfo, null, 2));
-          return;
-        }
-        console.log(`Label: ${pairInfo.label}`);
-        console.log(`Token: ${pairInfo.token}`);
-        console.log(`Config: ${pairInfo.configPath}`);
-        console.log("Base URLs:");
-        for (const entry of pairInfo.addresses) {
-          console.log(`- ${entry.url} [${entry.kind}]`);
-        }
-      }),
+      .option("--no-qr", "skip terminal QR output")
+      .action(
+        async (options: { config?: string; json?: boolean; qr?: boolean }) => {
+          const config = await loadConfig({
+            configPath: options.config,
+            persistGeneratedToken: true,
+          });
+          const pairInfo = buildPairInfo(config);
+          if (options.json) {
+            console.log(JSON.stringify(pairInfo, null, 2));
+            return;
+          }
+          console.log(`Label: ${pairInfo.label}`);
+          console.log(`Token: ${pairInfo.token}`);
+          console.log(`Config: ${pairInfo.configPath}`);
+          console.log("Base URLs:");
+          for (const entry of pairInfo.addresses) {
+            console.log(`- ${entry.url} [${entry.kind}]`);
+          }
+          if (pairInfo.pairUrl != null) {
+            console.log(
+              `\nScan to pair (${pairInfo.preferredAddress?.url ?? "preferred address"}):`,
+            );
+            if (options.qr !== false) {
+              console.log(
+                await QRCode.toString(pairInfo.pairUrl, {
+                  type: "terminal",
+                  small: true,
+                }),
+              );
+            }
+            console.log(pairInfo.pairUrl);
+          }
+        },
+      ),
   );
 
   if (argv.length <= 2) {

@@ -16,17 +16,54 @@ export interface PairInfo {
   tokenFingerprint: string;
   configPath: string;
   addresses: PairAddress[];
+  preferredAddress: PairAddress | null;
+  pairUrl: string | null;
 }
 
 export function buildPairInfo(config: NodeConfig): PairInfo {
+  const addresses = listPairAddresses(config.port);
+  const preferredAddress = selectPreferredPairAddress(addresses);
   return {
     label: config.label,
     port: config.port,
     token: config.token,
     tokenFingerprint: tokenFingerprint(config.token),
     configPath: config.configPath,
-    addresses: listPairAddresses(config.port),
+    addresses,
+    preferredAddress,
+    pairUrl:
+      preferredAddress == null
+        ? null
+        : buildPairUrl({
+            label: config.label,
+            baseUrl: preferredAddress.url,
+            token: config.token,
+          }),
   };
+}
+
+export function buildPairUrl(options: {
+  label: string;
+  baseUrl: string;
+  token: string;
+}): string {
+  const params = new URLSearchParams({
+    v: "1",
+    label: options.label,
+    baseUrl: options.baseUrl,
+    token: options.token,
+  });
+  return `sidemesh://pair?${params.toString()}`;
+}
+
+export function selectPreferredPairAddress(
+  addresses: PairAddress[],
+): PairAddress | null {
+  for (const kind of ["tailscale", "lan", "hostname", "loopback"] as const) {
+    const match = addresses.find((entry) => entry.kind === kind);
+    if (match != null) return match;
+  }
+  return null;
 }
 
 export function listPairAddresses(port: number): PairAddress[] {
