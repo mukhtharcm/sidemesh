@@ -116,7 +116,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       onResize: _handleResize,
     );
     _terminal.write('Opening Sidemesh terminal...\r\n');
-    unawaited(_startTerminal());
+    unawaited(_startTerminal(reuseExisting: widget.reuseExisting));
   }
 
   @override
@@ -137,8 +137,8 @@ class _TerminalPaneState extends State<TerminalPane> {
     _terminalInfo = null;
     _lastSeq = -1;
     _reconnectAttempts = 0;
-    _terminal.write('Opening Sidemesh terminal...\r\n');
-    unawaited(_startTerminal());
+    _terminal.write('\r\nOpening Sidemesh terminal...\r\n');
+    unawaited(_startTerminal(reuseExisting: widget.reuseExisting));
   }
 
   @override
@@ -150,14 +150,14 @@ class _TerminalPaneState extends State<TerminalPane> {
     super.dispose();
   }
 
-  Future<void> _startTerminal() async {
+  Future<void> _startTerminal({required bool reuseExisting}) async {
     setState(() {
       _starting = true;
       _error = null;
     });
     try {
       final terminal =
-          await _findReusableTerminal() ??
+          await _findReusableTerminal(reuseExisting) ??
           await widget.api.createTerminal(
             widget.host,
             cwd: widget.cwd,
@@ -183,8 +183,8 @@ class _TerminalPaneState extends State<TerminalPane> {
     }
   }
 
-  Future<HostTerminalInfo?> _findReusableTerminal() async {
-    if (!widget.reuseExisting) return null;
+  Future<HostTerminalInfo?> _findReusableTerminal(bool enabled) async {
+    if (!enabled) return null;
     final terminals = await widget.api.fetchTerminals(widget.host);
     for (final terminal in terminals) {
       if (!terminal.isRunning) continue;
@@ -371,9 +371,30 @@ class _TerminalPaneState extends State<TerminalPane> {
     }
   }
 
+  Future<void> _restartTerminal() async {
+    if (_starting) return;
+    _reconnectTimer?.cancel();
+    await _subscription?.cancel();
+    await _channel?.sink.close();
+    if (!mounted) return;
+    setState(() {
+      _subscription = null;
+      _channel = null;
+      _terminalInfo = null;
+      _stopping = false;
+      _connecting = false;
+      _lastSeq = -1;
+      _reconnectAttempts = 0;
+      _error = null;
+    });
+    _terminal.write('\r\nStarting a new Sidemesh terminal...\r\n');
+    await _startTerminal(reuseExisting: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final terminal = _terminalInfo;
+    final colors = context.colors;
     return Column(
       children: [
         _TerminalStatusStrip(
@@ -383,46 +404,39 @@ class _TerminalPaneState extends State<TerminalPane> {
           error: _error,
           terminal: terminal,
           onStop: _stopTerminal,
+          onRestart: _restartTerminal,
         ),
         Expanded(
           child: Container(
-            color: const Color(0xFF10120F),
-            child: xterm.TerminalView(
-              _terminal,
-              focusNode: _focusNode,
-              autofocus: true,
-              keyboardType: TextInputType.text,
-              deleteDetection: true,
-              theme: const xterm.TerminalTheme(
-                cursor: Color(0xFFE8D7A2),
-                selection: Color(0x664D8A57),
-                foreground: Color(0xFFEDE4C8),
-                background: Color(0xFF10120F),
-                black: Color(0xFF10120F),
-                red: Color(0xFFE06C75),
-                green: Color(0xFF7FB069),
-                yellow: Color(0xFFE5C07B),
-                blue: Color(0xFF61AFEF),
-                magenta: Color(0xFFC678DD),
-                cyan: Color(0xFF56B6C2),
-                white: Color(0xFFEDE4C8),
-                brightBlack: Color(0xFF5C6370),
-                brightRed: Color(0xFFFF7B85),
-                brightGreen: Color(0xFF98C379),
-                brightYellow: Color(0xFFFFD580),
-                brightBlue: Color(0xFF7DB7FF),
-                brightMagenta: Color(0xFFD7A1F9),
-                brightCyan: Color(0xFF70D6E0),
-                brightWhite: Color(0xFFFFFFFF),
-                searchHitBackground: Color(0xFFFFFF2B),
-                searchHitBackgroundCurrent: Color(0xFF31FF26),
-                searchHitForeground: Color(0xFF000000),
+            color: colors.codeBackground,
+            child: Container(
+              margin: EdgeInsets.all(widget.compact ? 6 : 10),
+              decoration: BoxDecoration(
+                color: colors.codeBackground,
+                border: Border.all(color: colors.codeBorder),
+                borderRadius: BorderRadius.circular(widget.compact ? 12 : 16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 18,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
               ),
-              textStyle: xterm.TerminalStyle(
-                fontSize: widget.compact ? 12 : 13,
-                height: 1.22,
+              clipBehavior: Clip.antiAlias,
+              child: xterm.TerminalView(
+                _terminal,
+                focusNode: _focusNode,
+                autofocus: true,
+                keyboardType: TextInputType.text,
+                deleteDetection: true,
+                theme: _terminalTheme(colors),
+                textStyle: xterm.TerminalStyle(
+                  fontSize: widget.compact ? 12 : 13,
+                  height: 1.22,
+                ),
+                padding: EdgeInsets.all(widget.compact ? 10 : 12),
               ),
-              padding: EdgeInsets.all(widget.compact ? 8 : 10),
             ),
           ),
         ),
@@ -432,6 +446,37 @@ class _TerminalPaneState extends State<TerminalPane> {
   }
 }
 
+xterm.TerminalTheme _terminalTheme(AppColors colors) {
+  return xterm.TerminalTheme(
+    cursor: colors.accent,
+    selection: colors.accentMuted.withValues(alpha: 0.7),
+    foreground: colors.codeForeground,
+    background: colors.codeBackground,
+    black: colors.textTertiary,
+    red: colors.danger,
+    green: colors.success,
+    yellow: colors.warning,
+    blue: colors.accent,
+    magenta: colors.info,
+    cyan: colors.info,
+    white: colors.codeForeground,
+    brightBlack: colors.textSecondary,
+    brightRed: _brightTerminalColor(colors.danger),
+    brightGreen: _brightTerminalColor(colors.success),
+    brightYellow: _brightTerminalColor(colors.warning),
+    brightBlue: _brightTerminalColor(colors.accent),
+    brightMagenta: _brightTerminalColor(colors.info),
+    brightCyan: _brightTerminalColor(colors.info),
+    brightWhite: colors.textPrimary,
+    searchHitBackground: colors.warningMuted,
+    searchHitBackgroundCurrent: colors.accentMuted,
+    searchHitForeground: colors.textPrimary,
+  );
+}
+
+Color _brightTerminalColor(Color color) =>
+    Color.lerp(color, Colors.white, 0.2)!;
+
 class _TerminalStatusStrip extends StatelessWidget {
   const _TerminalStatusStrip({
     required this.starting,
@@ -440,6 +485,7 @@ class _TerminalStatusStrip extends StatelessWidget {
     required this.error,
     required this.terminal,
     required this.onStop,
+    required this.onRestart,
   });
 
   final bool starting;
@@ -448,11 +494,17 @@ class _TerminalStatusStrip extends StatelessWidget {
   final String? error;
   final HostTerminalInfo? terminal;
   final VoidCallback onStop;
+  final VoidCallback onRestart;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final running = terminal?.isRunning == true;
+    final canRestart =
+        !running &&
+        !starting &&
+        !connecting &&
+        (terminal != null || error != null);
     final label =
         error ??
         (starting
@@ -465,7 +517,7 @@ class _TerminalStatusStrip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: colors.surface,
+        color: colors.surfaceElevated,
         border: Border(bottom: BorderSide(color: colors.border)),
       ),
       child: Row(
@@ -515,6 +567,14 @@ class _TerminalStatusStrip extends StatelessWidget {
               color: colors.danger,
               onTap: stopping ? () {} : onStop,
             ),
+          ] else if (canRestart) ...[
+            const SizedBox(width: 8),
+            MeshIconButton(
+              icon: Icons.restart_alt_rounded,
+              tooltip: 'Start new terminal',
+              color: colors.accent,
+              onTap: onRestart,
+            ),
           ],
         ],
       ),
@@ -550,7 +610,7 @@ class _TerminalKeyBar extends StatelessWidget {
           vertical: compact ? 6 : 8,
         ),
         decoration: BoxDecoration(
-          color: colors.surface,
+          color: colors.surfaceElevated,
           border: Border(top: BorderSide(color: colors.border)),
         ),
         child: ListView.separated(
