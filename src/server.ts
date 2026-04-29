@@ -73,6 +73,7 @@ import {
   type StoredSessionInputDedupeEntry,
 } from "./session-input-dedupe-store.js";
 import { startupSummaryLines } from "./startup-summary.js";
+import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 
 const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
@@ -590,6 +591,10 @@ export async function startServer(config: NodeConfig): Promise<void> {
         isDefault: entry.kind === config.defaultProviderKind,
       })),
     });
+  });
+
+  app.get("/api/debug/codex-rpc-audit", (_request, response) => {
+    response.json(getCodexRpcAuditSnapshot());
   });
 
   app.get(
