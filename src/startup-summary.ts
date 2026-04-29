@@ -17,6 +17,7 @@ export function startupSummaryLines(options: {
       options.config.configExists ? "" : " (not yet persisted)"
     }`,
     `[sidemesh] providers: ${options.providerDisplayName} (${options.providerKinds.join(", ")})`,
+    `[sidemesh] terminal: ${options.config.terminal.enabled ? "enabled" : "disabled"}`,
     `[sidemesh] token (${options.config.tokenSource}): ${pairInfo.tokenFingerprint}`,
     preferredAddress
       ? `[sidemesh] pair with: ${preferredAddress.url} (run \`sidemesh pair\` for the full token)`

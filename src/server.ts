@@ -71,8 +71,7 @@ import {
 import {
   TerminalError,
   TerminalRegistry,
-  terminalEnabledFromEnv,
-  terminalShellFromEnv,
+  normalizeTerminalShell,
 } from "./terminal.js";
 import {
   WorkspaceAccessError,
@@ -101,7 +100,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
     filesystem: true,
     gitStatus: true,
     gitDiff: true,
-    terminal: terminalEnabledFromEnv(),
+    terminal: false,
   },
 };
 
@@ -145,6 +144,12 @@ export async function startServer(config: NodeConfig): Promise<void> {
   const providerRuntime = createAgentProviderRuntime(config);
   const provider = providerRuntime.provider;
   await provider.start();
+  const hostCapabilities: HostCapabilities = {
+    workspace: {
+      ...HOST_CAPABILITIES.workspace,
+      terminal: config.terminal.enabled,
+    },
+  };
 
   const app = express();
   const server = createServer(app);
@@ -185,8 +190,9 @@ export async function startServer(config: NodeConfig): Promise<void> {
     providerRuntime.providers.map((entry) => [entry.kind, entry]),
   );
   const terminalRegistry = new TerminalRegistry({
-    enabled: HOST_CAPABILITIES.workspace.terminal,
-    shell: terminalShellFromEnv(),
+    enabled: hostCapabilities.workspace.terminal,
+    shell: normalizeTerminalShell(config.terminal.shell),
+    requirePty: config.terminal.requirePty,
     resolveCwd: (cwd, request) =>
       resolveTerminalCwd(provider, runtimeCache, cwd, request.sessionId),
   });
@@ -617,7 +623,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       providerVersion,
       providerConfig: summarizeProviderConfig(config.provider),
       providerCapabilities: provider.capabilities,
-      hostCapabilities: HOST_CAPABILITIES,
+      hostCapabilities,
       supportedProviders,
       startedAt: process.uptime(),
       tokenSource: config.tokenSource,
@@ -689,7 +695,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
     if (
       !requireHostCapability(
         response,
-        HOST_CAPABILITIES.workspace.terminal,
+        hostCapabilities.workspace.terminal,
         "integrated terminal",
       )
     ) {
@@ -704,7 +710,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       if (
         !requireHostCapability(
           response,
-          HOST_CAPABILITIES.workspace.terminal,
+          hostCapabilities.workspace.terminal,
           "integrated terminal",
         )
       ) {
@@ -732,7 +738,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       if (
         !requireHostCapability(
           response,
-          HOST_CAPABILITIES.workspace.terminal,
+          hostCapabilities.workspace.terminal,
           "integrated terminal",
         )
       ) {
@@ -755,7 +761,7 @@ export async function startServer(config: NodeConfig): Promise<void> {
       if (
         !requireHostCapability(
           response,
-          HOST_CAPABILITIES.workspace.terminal,
+          hostCapabilities.workspace.terminal,
           "integrated terminal",
         )
       ) {

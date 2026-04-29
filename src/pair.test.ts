@@ -15,6 +15,7 @@ describe("pairing helpers", () => {
       providers: [{ kind: "codex", bin: "codex" }],
       defaultProviderKind: "codex",
       stateDir: "/tmp/sidemesh",
+      terminal: { enabled: false, shell: null, requirePty: false },
       configPath: "/tmp/sidemesh/config.json",
       configExists: true,
     };

@@ -69,6 +69,48 @@ describe("loadConfig", () => {
     );
     assert.equal(config.token, "file-token");
     assert.equal(config.tokenSource, "file");
+    assert.deepEqual(config.terminal, {
+      enabled: false,
+      shell: null,
+      requirePty: false,
+    });
+  });
+
+  it("loads terminal settings from persisted config and env overrides", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        terminal: {
+          enabled: true,
+          shell: "/bin/zsh",
+          requirePty: false,
+        },
+        providers: [{ kind: "codex", bin: "codex" }],
+      }),
+    );
+
+    const persisted = await loadConfig({ configPath, env: {} });
+    assert.deepEqual(persisted.terminal, {
+      enabled: true,
+      shell: "/bin/zsh",
+      requirePty: false,
+    });
+
+    const overridden = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_TERMINAL: "0",
+        SIDEMESH_TERMINAL_SHELL: "/bin/bash",
+        SIDEMESH_TERMINAL_REQUIRE_PTY: "1",
+      },
+    });
+    assert.deepEqual(overridden.terminal, {
+      enabled: false,
+      shell: "/bin/bash",
+      requirePty: true,
+    });
   });
 
   it("lets env overrides win over persisted provider config", async () => {

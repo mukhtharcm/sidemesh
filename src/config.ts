@@ -6,6 +6,7 @@ import type {
   AgentProviderConfig,
   AgentProviderConfigSummary,
   AgentProviderKind,
+  HostTerminalConfig,
   NodeConfig,
 } from "./types.js";
 import {
@@ -58,6 +59,7 @@ export async function loadConfig(
     persisted.value,
     env,
   );
+  const terminal = resolveTerminalConfig(persisted.value, env);
   const provider =
     providers.find((candidate) => candidate.kind === defaultProviderKind) ??
     providers[0];
@@ -86,6 +88,7 @@ export async function loadConfig(
     providers,
     defaultProviderKind,
     stateDir,
+    terminal,
     configPath,
     configExists: persisted.exists,
   };
@@ -217,6 +220,35 @@ function dedupeProviderKinds(
     seen.add(kind);
     return true;
   });
+}
+
+function resolveTerminalConfig(
+  persisted: PersistedNodeConfig | null,
+  env: Environment,
+): HostTerminalConfig {
+  const terminal = persisted?.terminal;
+  const envEnabled = parseOptionalBoolean(
+    env.SIDEMESH_TERMINAL ?? env.SIDEMESH_ENABLE_TERMINAL,
+  );
+  const envRequirePty = parseOptionalBoolean(env.SIDEMESH_TERMINAL_REQUIRE_PTY);
+  const envShell = env.SIDEMESH_TERMINAL_SHELL?.trim();
+  return {
+    enabled: envEnabled ?? terminal?.enabled ?? false,
+    shell:
+      env.SIDEMESH_TERMINAL_SHELL !== undefined
+        ? envShell || null
+        : terminal?.shell ?? null,
+    requirePty: envRequirePty ?? terminal?.requirePty ?? false,
+  };
+}
+
+function parseOptionalBoolean(value: string | undefined): boolean | null {
+  if (value === undefined) return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return null;
 }
 
 function parseInteger(value: string | undefined, fallback: number): number {

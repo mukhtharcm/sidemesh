@@ -39,6 +39,12 @@ export interface AgentProviderConfigSummary {
   command: string | null;
 }
 
+export interface HostTerminalConfig {
+  enabled: boolean;
+  shell: string | null;
+  requirePty: boolean;
+}
+
 export interface HostCapabilities {
   workspace: {
     filesystem: boolean;
@@ -57,6 +63,7 @@ export interface NodeConfig {
   providers: AgentProviderConfig[];
   defaultProviderKind: AgentProviderKind;
   stateDir: string;
+  terminal: HostTerminalConfig;
   configPath: string;
   configExists: boolean;
 }
