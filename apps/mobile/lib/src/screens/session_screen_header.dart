@@ -80,6 +80,8 @@ class _SessionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final gitLabel = showGit ? _gitHeaderLabel(session, gitStatus) : null;
+    final contextLabel = _contextUsageLabel(session.runtime);
+    final contextTone = _contextUsageTone(session.runtime);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
       child: MeshCard(
@@ -142,12 +144,21 @@ class _SessionHeader extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: monoStyle(color: colors.textSecondary, fontSize: 11),
                   ),
-                  if (gitLabel != null || pinnedCount > 0) ...[
+                  if (gitLabel != null ||
+                      contextLabel != null ||
+                      pinnedCount > 0) ...[
                     const SizedBox(height: 7),
                     Wrap(
                       spacing: 6,
                       runSpacing: 6,
                       children: [
+                        if (contextLabel != null)
+                          MeshPill(
+                            label: contextLabel,
+                            icon: Icons.data_usage_rounded,
+                            tone: contextTone,
+                            mono: true,
+                          ),
                         if (gitLabel != null)
                           _GitSummaryPill(
                             label: gitLabel,
@@ -334,6 +345,8 @@ class _SessionAppBarSubtitle extends StatelessWidget {
     final colors = context.colors;
     final folder = _shortFolder(session.cwd);
     final gitLabel = showGit ? _gitHeaderLabel(session, gitStatus) : null;
+    final contextLabel = _contextUsageLabel(session.runtime);
+    final contextTone = _contextUsageTone(session.runtime);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -394,6 +407,15 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                   ),
                 ),
               ],
+              if (contextLabel != null) ...[
+                const SizedBox(width: 6),
+                MeshPill(
+                  label: contextLabel,
+                  icon: Icons.data_usage_rounded,
+                  tone: contextTone,
+                  mono: true,
+                ),
+              ],
               if (pinnedCount > 0) ...[
                 const SizedBox(width: 6),
                 GestureDetector(
@@ -416,6 +438,32 @@ class _SessionAppBarSubtitle extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _contextUsageLabel(SessionRuntimeSummary? runtime) {
+  final context = runtime?.telemetry?.contextWindow;
+  if (context == null || context.tokenLimit <= 0) {
+    return null;
+  }
+  final leftPercent = ((1 - (context.currentTokens / context.tokenLimit)) * 100)
+      .clamp(0, 100)
+      .round();
+  return '$leftPercent% ctx left';
+}
+
+MeshPillTone _contextUsageTone(SessionRuntimeSummary? runtime) {
+  final context = runtime?.telemetry?.contextWindow;
+  if (context == null || context.tokenLimit <= 0) {
+    return MeshPillTone.neutral;
+  }
+  final used = context.currentTokens / context.tokenLimit;
+  if (used >= 0.9) {
+    return MeshPillTone.danger;
+  }
+  if (used >= 0.75) {
+    return MeshPillTone.warning;
+  }
+  return MeshPillTone.neutral;
 }
 
 class _HeaderStatusDot extends StatelessWidget {
