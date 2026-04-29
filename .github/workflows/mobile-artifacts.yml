@@ -1,0 +1,110 @@
+name: Mobile Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: "Flutter flavor to build"
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+      build_number:
+        description: "Build number override"
+        required: false
+        type: string
+
+env:
+  FLUTTER_VERSION: "3.41.7"
+
+jobs:
+  android:
+    name: Android debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Build APK
+        working-directory: apps/mobile
+        env:
+          FLAVOR: ${{ inputs.flavor }}
+          BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
+        run: |
+          flutter build apk \
+            --flavor "$FLAVOR" \
+            --debug \
+            --build-number "$BUILD_NUMBER"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidemesh-${{ inputs.flavor }}-android-debug-apk
+          path: apps/mobile/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+
+  apple:
+    name: macOS and iOS simulator builds
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Build macOS app
+        working-directory: apps/mobile
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
+        run: flutter build macos --debug --build-number "$BUILD_NUMBER"
+
+      - name: Build iOS simulator app
+        working-directory: apps/mobile
+        env:
+          FLAVOR: ${{ inputs.flavor }}
+          BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
+        run: |
+          flutter build ios \
+            --simulator \
+            --flavor "$FLAVOR" \
+            --debug \
+            --build-number "$BUILD_NUMBER"
+
+      - name: Upload macOS app
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidemesh-macos-debug-app
+          path: apps/mobile/build/macos/Build/Products/Debug/*.app
+          if-no-files-found: error
+
+      - name: Upload iOS simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidemesh-${{ inputs.flavor }}-ios-simulator-debug-app
+          path: apps/mobile/build/ios/iphonesimulator/*.app
+          if-no-files-found: error

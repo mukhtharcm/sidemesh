@@ -5,6 +5,11 @@ ships with provider adapters for Codex, GitHub Copilot CLI, and a deterministic
 fake test provider, while the server/client boundaries are structured around
 provider capabilities so more coding agents can be added behind the same API.
 
+Sidemesh is currently a private developer-preview project. It does not have an
+open-source license yet, the npm package is intentionally marked private, and
+daemon access should stay on trusted networks such as Tailscale or a private
+LAN.
+
 This repo contains:
 
 - a Node daemon that can expose one or more local agent providers
@@ -39,6 +44,7 @@ npm run status          # resolved config + local daemon health
 npm run pair            # host URL + token for the mobile app
 npm run daemon          # start the foreground dev server through tsx
 npm run daemon:compiled # start the foreground compiled server
+npm run secret:scan     # scan the working tree with gitleaks when installed
 ```
 
 `npm run setup` shows public providers by default. If you need the deterministic
@@ -70,7 +76,7 @@ sidemesh start
 sidemesh pair
 ```
 
-For a machine that should consume the GitHub repo directly:
+For a trusted machine that should consume the private GitHub repo directly:
 
 ```bash
 npm install -g github:your-org/sidemesh
@@ -88,6 +94,9 @@ sidemesh stop            # warns before stopping the managed daemon
 sidemesh restart         # warns, then stop + start
 sidemesh restart --yes   # non-interactive restart for scripts
 sidemesh status          # config, health, and managed daemon pid/state
+sidemesh service install # install/update systemd or LaunchAgent wrapper
+sidemesh service restart # restart the OS service wrapper
+sidemesh service uninstall # stop and remove the OS service wrapper
 ```
 
 The lifecycle commands write managed process state to
@@ -103,6 +112,7 @@ wrapper after `npm install` and `npm run build`:
 sudo sidemesh service install
 sidemesh service status
 sudo sidemesh service restart --yes
+sudo sidemesh service uninstall --yes
 ```
 
 `service install` writes a unit, private env file, and launcher script. The
@@ -120,6 +130,7 @@ keychain, and shell environment:
 sidemesh service install
 sidemesh service status
 sidemesh service restart --yes
+sidemesh service uninstall --yes
 ```
 
 The default launchd label is `dev.sidemesh.daemon`, and generated files live
@@ -301,6 +312,29 @@ cd apps/mobile
 flutter build apk --debug
 flutter install --debug -d <device-id>
 ```
+
+## Release Hygiene
+
+Release tracking lives in `TODO.md`, and the private developer-preview release
+process lives in `docs/release-playbook.md`.
+
+GitHub Actions currently provide:
+
+- CI for server typecheck/tests/build/package dry-run.
+- CI for focused Flutter tests and analysis.
+- A manual `Mobile Artifacts` workflow for unsigned Android, macOS, and iOS
+  simulator builds.
+- A manual `Secret Scan` workflow for a full-history gitleaks scan.
+
+Before changing repository visibility or distributing to untrusted users, run:
+
+```bash
+npm run secret:scan
+scripts/secret-scan.sh --history
+```
+
+Do not expose a Sidemesh daemon directly to the public internet. The current
+auth model is a shared bearer token with no per-device revocation yet.
 
 ## Daemon API
 

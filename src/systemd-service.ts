@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -27,6 +27,14 @@ export interface InstallServiceOptions {
   envPath?: string | null;
   launcherPath?: string | null;
   start: boolean;
+}
+
+export interface UninstallServiceOptions {
+  serviceName?: string | null;
+  unitPath?: string | null;
+  envPath?: string | null;
+  launcherPath?: string | null;
+  removeFiles: boolean;
 }
 
 export function resolveServicePaths(options: {
@@ -137,6 +145,31 @@ export async function restartSystemdService(
 ): Promise<void> {
   assertSystemdHost({ requireRoot: true });
   await systemctl(["restart", `${normalizeServiceName(serviceName)}.service`]);
+}
+
+export async function uninstallSystemdService(
+  options: UninstallServiceOptions,
+): Promise<ServicePaths> {
+  assertSystemdHost({ requireRoot: true });
+  const paths = resolveServicePaths({
+    serviceName: options.serviceName,
+    packageDir: "",
+    nodeBin: "",
+    unitPath: options.unitPath,
+    envPath: options.envPath,
+    launcherPath: options.launcherPath,
+  });
+
+  await systemctl(["disable", "--now", `${paths.serviceName}.service`]).catch(
+    () => undefined,
+  );
+  if (options.removeFiles) {
+    await rm(paths.unitPath, { force: true });
+    await rm(paths.envPath, { force: true });
+    await rm(paths.launcherPath, { force: true });
+  }
+  await systemctl(["daemon-reload"]);
+  return paths;
 }
 
 export async function systemdServiceStatus(

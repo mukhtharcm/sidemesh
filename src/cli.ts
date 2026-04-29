@@ -32,6 +32,7 @@ import {
   isLaunchdServiceLoaded,
   launchdServiceStatus,
   restartLaunchdService,
+  uninstallLaunchdService,
 } from "./launchd-service.js";
 import { buildPairInfo } from "./pair.js";
 import { startServer, type RunningServer } from "./server.js";
@@ -42,6 +43,7 @@ import {
   restartSystemdService,
   systemdServiceStatus,
   DEFAULT_SERVICE_NAME,
+  uninstallSystemdService,
 } from "./systemd-service.js";
 import type { NodeConfig } from "./types.js";
 
@@ -240,6 +242,81 @@ export async function main(argv = process.argv): Promise<void> {
         );
       }
     });
+
+  withConfigOption(
+    serviceCommand
+      .command("uninstall")
+      .description("stop and remove the OS service wrapper")
+      .option(
+        "--name <name>",
+        "systemd service name or launchd label",
+        defaultServiceName(),
+      )
+      .option("--unit-file <path>", "systemd unit path")
+      .option("--plist-file <path>", "macOS LaunchAgent plist path")
+      .option("--service-env-file <path>", "service environment file path")
+      .option("--launcher-file <path>", "service launcher script path")
+      .option("--keep-files", "stop/disable the service without deleting generated files")
+      .option("-y, --yes", "do not prompt before uninstalling")
+      .action(
+        async (options: {
+          config?: string;
+          name?: string;
+          unitFile?: string;
+          plistFile?: string;
+          serviceEnvFile?: string;
+          launcherFile?: string;
+          keepFiles?: boolean;
+          yes?: boolean;
+        }) => {
+          const config = await loadConfig({
+            configPath: options.config,
+            persistGeneratedToken: false,
+          });
+          await confirmDanger(
+            `This will stop and uninstall ${options.name ?? defaultServiceName()}. Active streams and integrated terminals will disconnect.`,
+            options.yes === true,
+          );
+          if (process.platform === "darwin") {
+            const paths = await uninstallLaunchdService(config, {
+              label: options.name,
+              plistPath: options.plistFile ?? options.unitFile,
+              envPath: options.serviceEnvFile,
+              launcherPath: options.launcherFile,
+              removeFiles: options.keepFiles !== true,
+            });
+            console.log(`Uninstalled ${paths.label}`);
+            if (options.keepFiles === true) {
+              console.log(`Kept plist: ${paths.plistPath}`);
+              console.log(`Kept environment: ${paths.envPath}`);
+              console.log(`Kept launcher: ${paths.launcherPath}`);
+            } else {
+              console.log(`Removed plist: ${paths.plistPath}`);
+              console.log(`Removed environment: ${paths.envPath}`);
+              console.log(`Removed launcher: ${paths.launcherPath}`);
+            }
+          } else {
+            const paths = await uninstallSystemdService({
+              serviceName: options.name,
+              unitPath: options.unitFile,
+              envPath: options.serviceEnvFile,
+              launcherPath: options.launcherFile,
+              removeFiles: options.keepFiles !== true,
+            });
+            console.log(`Uninstalled ${paths.serviceName}.service`);
+            if (options.keepFiles === true) {
+              console.log(`Kept unit: ${paths.unitPath}`);
+              console.log(`Kept environment: ${paths.envPath}`);
+              console.log(`Kept launcher: ${paths.launcherPath}`);
+            } else {
+              console.log(`Removed unit: ${paths.unitPath}`);
+              console.log(`Removed environment: ${paths.envPath}`);
+              console.log(`Removed launcher: ${paths.launcherPath}`);
+            }
+          }
+        },
+      ),
+  );
 
   withConfigOption(
     program

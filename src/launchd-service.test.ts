@@ -55,4 +55,23 @@ describe("launchd service rendering", () => {
     assert.match(env, /SIDEMESH_TERMINAL=1/);
     assert.match(env, /SIDEMESH_LABEL="Mac Dev"/);
   });
+
+  it("resolves custom uninstall paths from the configured state dir", () => {
+    const paths = resolveLaunchdPaths(
+      { stateDir: "/Users/example/.sidemesh" },
+      {
+        label: "dev.sidemesh.custom",
+        packageDir: "",
+        nodeBin: "",
+        plistPath: "/tmp/dev.sidemesh.custom.plist",
+        envPath: "/tmp/dev.sidemesh.custom.env",
+        launcherPath: "/tmp/dev.sidemesh.custom.sh",
+      },
+    );
+
+    assert.equal(paths.label, "dev.sidemesh.custom");
+    assert.equal(paths.plistPath, "/tmp/dev.sidemesh.custom.plist");
+    assert.equal(paths.envPath, "/tmp/dev.sidemesh.custom.env");
+    assert.equal(paths.launcherPath, "/tmp/dev.sidemesh.custom.sh");
+  });
 });

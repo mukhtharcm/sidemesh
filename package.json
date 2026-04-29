@@ -3,7 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "description": "Fleet-first coding-agent session node and Flutter client.",
+  "license": "UNLICENSED",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-org/sidemesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/sidemesh/issues"
+  },
+  "homepage": "https://github.com/your-org/sidemesh#readme",
+  "keywords": [
+    "agents",
+    "codex",
+    "copilot",
+    "self-hosted",
+    "tailscale",
+    "terminal"
+  ],
   "bin": {
     "sidemesh": "./dist/cli.js"
   },
@@ -12,7 +29,11 @@
     "dist",
     "!dist/**/*.test.js",
     "README.md",
-    "docs"
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "TODO.md",
+    "docs",
+    "scripts/secret-scan.sh"
   ],
   "engines": {
     "node": ">=20.0.0"
@@ -45,7 +66,8 @@
     "mobile:ios:dev": "cd apps/mobile && flutter run --flavor dev -t lib/main.dart",
     "mobile:ios:prod": "cd apps/mobile && flutter run --flavor prod -t lib/main.dart",
     "mobile:ios:build:dev": "cd apps/mobile && flutter build ios --flavor dev --debug",
-    "mobile:ios:build:prod": "cd apps/mobile && flutter build ipa --flavor prod --release"
+    "mobile:ios:build:prod": "cd apps/mobile && flutter build ipa --flavor prod --release",
+    "secret:scan": "bash scripts/secret-scan.sh"
   },
   "dependencies": {
     "@clack/prompts": "^0.11.0",

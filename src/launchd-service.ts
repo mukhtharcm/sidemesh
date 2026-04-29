@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -29,6 +29,14 @@ export interface InstallLaunchdOptions {
   envPath?: string | null;
   launcherPath?: string | null;
   start: boolean;
+}
+
+export interface UninstallLaunchdOptions {
+  label?: string | null;
+  plistPath?: string | null;
+  envPath?: string | null;
+  launcherPath?: string | null;
+  removeFiles: boolean;
 }
 
 export function resolveLaunchdPaths(
@@ -157,6 +165,34 @@ export async function restartLaunchdService(
 ): Promise<void> {
   assertLaunchdHost();
   await launchctl(["kickstart", "-k", `${launchdTarget()}/${normalizeLaunchdLabel(label)}`]);
+}
+
+export async function uninstallLaunchdService(
+  config: Pick<NodeConfig, "stateDir">,
+  options: UninstallLaunchdOptions,
+): Promise<LaunchdPaths> {
+  assertLaunchdHost();
+  const paths = resolveLaunchdPaths(config, {
+    label: options.label,
+    packageDir: "",
+    nodeBin: "",
+    plistPath: options.plistPath,
+    envPath: options.envPath,
+    launcherPath: options.launcherPath,
+  });
+
+  await launchctl(["bootout", launchdTarget(), paths.plistPath]).catch(
+    () => undefined,
+  );
+  await launchctl(["disable", `${launchdTarget()}/${paths.label}`]).catch(
+    () => undefined,
+  );
+  if (options.removeFiles) {
+    await rm(paths.plistPath, { force: true });
+    await rm(paths.envPath, { force: true });
+    await rm(paths.launcherPath, { force: true });
+  }
+  return paths;
 }
 
 export async function launchdServiceStatus(

@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  server:
+    name: Server checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test server
+        run: npm run test:server
+
+      - name: Build package
+        run: npm run build
+
+      - name: Verify package contents
+        run: npm pack --dry-run
+
+  mobile:
+    name: Flutter checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.7"
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Run focused Flutter tests
+        working-directory: apps/mobile
+        run: |
+          flutter test test/provider_metadata_models_test.dart
+          flutter test test/api_client_provider_scoping_test.dart
+          flutter test test/capability_ui_gates_test.dart
+
+      - name: Analyze Flutter app
+        working-directory: apps/mobile
+        run: flutter analyze

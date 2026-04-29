@@ -40,10 +40,14 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
       restarting the compiled daemon service.
 - [x] Add macOS LaunchAgent helpers for installing, checking, and restarting
       the compiled daemon as the current user.
+- [x] Add service uninstall helpers for generated Linux/systemd and
+      macOS/LaunchAgent service files.
+- [x] Add private developer-preview release docs, CI, artifact builds, and
+      secret-scan guidance.
 
 ## Current Wave
 
-- [ ] Add a provider-neutral integrated terminal: opt-in host capability,
+- [ ] Polish the provider-neutral integrated terminal: opt-in host capability,
       PTY-backed live shell, reconnect replay, mobile key row, and later tmux
       durability when available.
 - [ ] Bring Copilot provider UX up to Codex parity where the SDK supports it.
@@ -93,9 +97,8 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
 ## Ops And Handoff
 
 - [ ] Document a VPS-first maintainer workflow so Sidemesh can be updated and operated even when the primary Mac is offline.
-- [ ] Write a lightweight server release playbook for remote nodes: pull latest `main`, run `npm install` without omitting optional dependencies, build, restart the daemon/service, and verify Codex + Sidemesh health.
+- [x] Write a lightweight server release playbook for remote nodes: pull latest `main`, run `npm install` without omitting optional dependencies, build, restart the daemon/service, and verify Codex + Sidemesh health.
 - [ ] Bring the production launcher and deploy scaffolding into the repo so remote updates cannot delete `run-sidemesh.sh` and break `systemd`.
-- [ ] Add an uninstall path for generated systemd and launchd service files.
 
 ## Later
 
