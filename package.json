@@ -40,7 +40,7 @@
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc",
+    "build": "npm run clean && tsc && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     "prepare": "npm run build",
     "daemon": "tsx src/cli.ts daemon",
     "daemon:compiled": "node dist/cli.js daemon",
