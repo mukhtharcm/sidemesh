@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { connect } from "node:net";
+import { connect, type Socket } from "node:net";
 
 import type { WebSocket } from "ws";
 
@@ -8,6 +8,7 @@ const DEFAULT_MAX_FORWARDS = 24;
 const DEFAULT_IDLE_TTL_MS = 12 * 60 * 60 * 1000;
 const TARGET_CONNECT_TIMEOUT_MS = 15_000;
 const MAX_WS_BUFFERED_AMOUNT = 8 * 1024 * 1024;
+const MAX_PENDING_CLIENT_BYTES = 1024 * 1024;
 
 export type PortForwardScheme = "http" | "https" | "tcp";
 export type PortForwardStatus = "running" | "stopped";
@@ -162,10 +163,10 @@ export class PortForwardRegistry {
       return;
     }
 
-    const target = connect({
-      host: forward.targetHost,
-      port: forward.targetPort,
-    });
+    let target: Socket | null = null;
+    let targetConnected = false;
+    const pendingClientChunks: Buffer[] = [];
+    let pendingClientBytes = 0;
     let closed = false;
     const connectTimer = setTimeout(() => {
       sendJson(socket, {
@@ -189,7 +190,7 @@ export class PortForwardRegistry {
       forward.activeConnections = Math.max(0, forward.activeConnections - 1);
       forward.updatedAt = Date.now();
       try {
-        target.destroy();
+        target?.destroy();
       } catch {
         // noop
       }
@@ -202,46 +203,116 @@ export class PortForwardRegistry {
     forward.activeClosers.add(closeBoth);
 
     socket.on("message", (raw) => {
-      if (closed || target.destroyed) return;
+      if (closed) return;
       if (typeof raw === "string") return;
       const payload = rawDataToBuffer(raw);
       if (payload.length === 0) return;
       forward.bytesFromClient += payload.length;
       forward.updatedAt = Date.now();
-      target.write(payload);
-    });
-    socket.on("close", closeBoth);
-    socket.on("error", closeBoth);
-
-    target.on("connect", () => {
-      clearTimeout(connectTimer);
-      sendJson(socket, {
-        type: "hello",
-        portForward: this.info(forward),
-      });
-    });
-    target.on("data", (chunk) => {
-      if (closed || socket.readyState !== socket.OPEN) return;
-      if (socket.bufferedAmount > MAX_WS_BUFFERED_AMOUNT) {
+      if (targetConnected && target && !target.destroyed) {
+        target.write(payload);
+        return;
+      }
+      pendingClientBytes += payload.length;
+      if (pendingClientBytes > MAX_PENDING_CLIENT_BYTES) {
         sendJson(socket, {
           type: "error",
-          message: "port forward client is too far behind; reconnecting",
+          message: "port forward target is not ready; request buffer exceeded",
         });
         closeBoth();
         return;
       }
-      forward.bytesFromTarget += chunk.length;
-      forward.updatedAt = Date.now();
-      socket.send(chunk);
+      pendingClientChunks.push(payload);
     });
-    target.on("close", closeBoth);
-    target.on("error", (error) => {
-      sendJson(socket, {
-        type: "error",
-        message: `target connection failed: ${error.message}`,
+    socket.on("close", closeBoth);
+    socket.on("error", closeBoth);
+
+    const targetHosts = loopbackTargetCandidates(forward.targetHost);
+    let targetHostIndex = 0;
+    const connectNextTarget = (lastError: Error | null = null): void => {
+      if (closed) return;
+      const host = targetHosts[targetHostIndex];
+      if (!host) {
+        sendJson(socket, {
+          type: "error",
+          message: `target connection failed: ${
+            lastError?.message ?? "no loopback target was reachable"
+          }`,
+        });
+        closeBoth();
+        return;
+      }
+      targetHostIndex += 1;
+      let attemptSettled = false;
+      const attempt = connect({
+        host,
+        port: forward.targetPort,
       });
-      closeBoth();
-    });
+      target = attempt;
+      let attemptDone = false;
+      const failAttempt = (error: Error | null) => {
+        if (attemptDone || closed) return;
+        attemptDone = true;
+        try {
+          attempt.destroy();
+        } catch {
+          // noop
+        }
+        connectNextTarget(error);
+      };
+      attempt.on("connect", () => {
+        if (closed) return;
+        attemptSettled = true;
+        attemptDone = true;
+        targetConnected = true;
+        clearTimeout(connectTimer);
+        sendJson(socket, {
+          type: "hello",
+          portForward: this.info(forward),
+        });
+        for (const chunk of pendingClientChunks.splice(0)) {
+          attempt.write(chunk);
+        }
+        pendingClientBytes = 0;
+      });
+      attempt.on("data", (chunk) => {
+        if (closed || socket.readyState !== socket.OPEN) return;
+        if (socket.bufferedAmount > MAX_WS_BUFFERED_AMOUNT) {
+          sendJson(socket, {
+            type: "error",
+            message: "port forward client is too far behind; reconnecting",
+          });
+          closeBoth();
+          return;
+        }
+        forward.bytesFromTarget += chunk.length;
+        forward.updatedAt = Date.now();
+        socket.send(chunk);
+      });
+      attempt.on("close", () => {
+        if (closed) return;
+        if (targetConnected) {
+          closeBoth();
+          return;
+        }
+        if (!attemptSettled && !attemptDone) {
+          failAttempt(new Error("target connection closed before it was ready"));
+        }
+      });
+      attempt.on("error", (error) => {
+        if (closed) return;
+        if (targetConnected) {
+          sendJson(socket, {
+            type: "error",
+            message: `target connection failed: ${error.message}`,
+          });
+          closeBoth();
+          return;
+        }
+        failAttempt(error);
+      });
+    };
+    connectNextTarget();
   }
 
   public dispose(): void {
@@ -345,6 +416,9 @@ function normalizeTargetHost(
   allowNonLoopbackTargets: boolean,
 ): string {
   const host = value?.trim() || DEFAULT_TARGET_HOST;
+  if (host === "[::1]") {
+    return "::1";
+  }
   if (allowNonLoopbackTargets || isLoopbackHost(host)) {
     return host;
   }
@@ -377,6 +451,24 @@ function isLoopbackHost(host: string): boolean {
     .split(".")
     .slice(1)
     .every((part) => Number(part) >= 0 && Number(part) <= 255);
+}
+
+function loopbackTargetCandidates(host: string): string[] {
+  if (!isLoopbackHost(host)) {
+    return [host];
+  }
+  const candidates = [host];
+  const normalized = host.toLowerCase();
+  if (normalized !== "::1") {
+    candidates.push("::1");
+  }
+  if (normalized !== "127.0.0.1") {
+    candidates.push("127.0.0.1");
+  }
+  if (normalized !== "localhost") {
+    candidates.push("localhost");
+  }
+  return [...new Set(candidates)];
 }
 
 function rawDataToBuffer(raw: WebSocket.RawData): Buffer {
