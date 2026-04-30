@@ -13,6 +13,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
+import 'browser_preview_screen.dart';
 
 class PortForwardScreen extends StatelessWidget {
   const PortForwardScreen({
@@ -80,6 +81,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
 
   List<HostPortForwardInfo> _ports = const [];
   _ActivePortPreview? _inlinePreview;
+  final Set<String> _startingBrowserPreviews = {};
   bool _loading = true;
   bool _creating = false;
   String _scheme = 'http';
@@ -217,6 +219,47 @@ class _PortForwardPaneState extends State<PortForwardPane> {
         context,
         'Could not stop forward: ${friendlyError(error)}',
       );
+    }
+  }
+
+  Future<void> _openRemoteBrowserPreview(HostPortForwardInfo forward) async {
+    if (forward.scheme == 'tcp') {
+      showAppSnackBar(context, 'TCP forwards do not have browser previews.');
+      return;
+    }
+    setState(() => _startingBrowserPreviews.add(forward.id));
+    try {
+      final preview = await widget.api.createBrowserPreview(
+        widget.host,
+        targetPort: forward.targetPort,
+        targetHost: forward.targetHost,
+        scheme: forward.scheme,
+        label: forward.label,
+        cwd: forward.cwd ?? widget.cwd,
+        sessionId: forward.sessionId ?? widget.sessionId,
+        width: MediaQuery.sizeOf(context).width.round().clamp(320, 1200),
+        height: MediaQuery.sizeOf(context).height.round().clamp(480, 1400),
+      );
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => BrowserPreviewScreen(
+            host: widget.host,
+            api: widget.api,
+            preview: preview,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        'Could not start remote browser: ${friendlyError(error)}',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _startingBrowserPreviews.remove(forward.id));
+      }
     }
   }
 
@@ -402,8 +445,13 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                 child: _PortForwardCard(
                   port: port,
                   localUri: uri,
+                  startingBrowserPreview: _startingBrowserPreviews.contains(
+                    port.id,
+                  ),
                   onConnect: () => unawaited(_connectLocal(port)),
                   onPreview: uri == null ? null : () => _openPreview(port, uri),
+                  onRemoteBrowserPreview: () =>
+                      unawaited(_openRemoteBrowserPreview(port)),
                   onExternal: uri == null
                       ? null
                       : () => unawaited(_openExternal(uri)),
@@ -440,8 +488,10 @@ class _PortForwardCard extends StatelessWidget {
   const _PortForwardCard({
     required this.port,
     required this.localUri,
+    required this.startingBrowserPreview,
     required this.onConnect,
     required this.onPreview,
+    required this.onRemoteBrowserPreview,
     required this.onExternal,
     required this.onCopy,
     required this.onStop,
@@ -449,8 +499,10 @@ class _PortForwardCard extends StatelessWidget {
 
   final HostPortForwardInfo port;
   final Uri? localUri;
+  final bool startingBrowserPreview;
   final VoidCallback onConnect;
   final VoidCallback? onPreview;
+  final VoidCallback onRemoteBrowserPreview;
   final VoidCallback? onExternal;
   final VoidCallback? onCopy;
   final VoidCallback onStop;
@@ -519,6 +571,19 @@ class _PortForwardCard extends StatelessWidget {
                   onPressed: onPreview,
                   icon: const Icon(Icons.preview_rounded),
                   label: const Text('Preview'),
+                ),
+              if (running && port.scheme != 'tcp')
+                OutlinedButton.icon(
+                  onPressed:
+                      startingBrowserPreview ? null : onRemoteBrowserPreview,
+                  icon: startingBrowserPreview
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cast_connected_rounded),
+                  label: const Text('Stream pixels'),
                 ),
               if (running && localUri != null)
                 OutlinedButton.icon(
