@@ -15,6 +15,7 @@ const DEFAULT_WIDTH = 390;
 const DEFAULT_HEIGHT = 844;
 const DEFAULT_QUALITY = 55;
 const CHROME_START_TIMEOUT_MS = 10_000;
+const CDP_COMMAND_TIMEOUT_MS = 15_000;
 const MAX_TEXT_INPUT_CHARS = 20_000;
 const MAX_CLIENT_BUFFERED_AMOUNT = 8 * 1024 * 1024;
 const SIDEMESH_BROWSER_PROFILE_DIR = "sidemesh";
@@ -103,6 +104,7 @@ interface BrowserPreviewRecord {
   targetId: string | null;
   ownsBrowser: boolean;
   nextFrameSeq: number;
+  lastFramePayload: Record<string, unknown> | null;
   frameTimer: NodeJS.Timeout | null;
   starting: Promise<void> | null;
   capturingFrame: boolean;
@@ -235,6 +237,7 @@ export class BrowserPreviewRegistry {
       targetId: null,
       ownsBrowser: false,
       nextFrameSeq: 1,
+      lastFramePayload: null,
       frameTimer: null,
       starting: null,
       capturingFrame: false,
@@ -273,6 +276,9 @@ export class BrowserPreviewRegistry {
     preview.lastClientAt = Date.now();
     preview.updatedAt = preview.lastClientAt;
     sendJson(socket, { type: "hello", preview: this.info(preview) });
+    if (preview.lastFramePayload) {
+      sendJson(socket, preview.lastFramePayload);
+    }
 
     const onClose = () => {
       preview.clients.delete(socket);
@@ -604,6 +610,7 @@ export class BrowserPreviewRegistry {
     preview.height = height;
     preview.updatedAt = Date.now();
     await setViewport(preview);
+    preview.lastFramePayload = null;
     this.broadcast(preview, { type: "preview", preview: this.info(preview) });
   }
 
@@ -644,7 +651,8 @@ export class BrowserPreviewRegistry {
       const data = stringField(response, "data");
       preview.lastFrameAt = Date.now();
       preview.updatedAt = preview.lastFrameAt;
-      this.broadcast(preview, {
+      preview.lastError = null;
+      const framePayload = {
         type: "frame",
         seq: preview.nextFrameSeq++,
         mimeType: "image/jpeg",
@@ -652,7 +660,9 @@ export class BrowserPreviewRegistry {
         height: preview.height,
         timestamp: preview.lastFrameAt,
         data,
-      });
+      };
+      preview.lastFramePayload = framePayload;
+      this.broadcast(preview, framePayload);
     } finally {
       preview.capturingFrame = false;
     }
@@ -952,11 +962,30 @@ class CdpConnection {
       ? { id, method, params, sessionId }
       : { id, method, params };
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(
+          new Error(
+            `CDP ${method} timed out after ${CDP_COMMAND_TIMEOUT_MS}ms`,
+          ),
+        );
+      }, CDP_COMMAND_TIMEOUT_MS);
+      timer.unref?.();
+      this.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
       this.socket.send(JSON.stringify(payload), (error) => {
         if (!error) return;
+        const pending = this.pending.get(id);
         this.pending.delete(id);
-        reject(error);
+        pending?.reject(error);
       });
     });
   }
