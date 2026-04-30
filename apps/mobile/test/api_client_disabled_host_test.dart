@@ -28,6 +28,10 @@ void main() {
     expect(() => api.openLive(disabledHost, 'session-1'), throwsStateError);
     expect(() => api.openActionsLive(disabledHost), throwsStateError);
     expect(() => api.openFsLive(disabledHost), throwsStateError);
+    expect(
+      () => api.openBrowserPreviewLive(disabledHost, 'preview-1'),
+      throwsStateError,
+    );
     expect(api.fetchFsBlob(disabledHost, '/tmp/file.png'), throwsStateError);
     expect(
       () => api.fsBlobUri(disabledHost, '/tmp/file.txt'),
