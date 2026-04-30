@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart' as smooth;
+import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/app_colors.dart';
@@ -23,227 +23,55 @@ class MarkdownContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = context.colors;
-    final baseBody =
-        theme.textTheme.bodyMedium?.copyWith(color: textColor, height: 1.5) ??
-        TextStyle(color: textColor, height: 1.5);
-    final markdownText = _normalizeTildeFencesForSmoothMarkdown(
-      _autoLinkBareUrlsForMarkdown(text),
+    final baseBody = theme.textTheme.bodyMedium?.copyWith(
+      color: textColor,
+      height: 1.5,
     );
-    final inlineCodeStyle = monoStyle(color: colors.accent, fontSize: 12.5)
-        .copyWith(
-          backgroundColor: colors.accentMuted.withValues(alpha: 0.22),
-          decorationColor: colors.accent,
-        );
+    final markdownText = _autoLinkBareUrlsForMarkdown(text);
 
-    return smooth.SmoothMarkdown(
-      data: markdownText,
-      styleSheet: _styleSheetFor(context, baseBody, inlineCodeStyle),
-      onTapLink: (href) {
-        if (href.trim().isEmpty) return;
+    return GptMarkdown(
+      markdownText,
+      style: baseBody,
+      followLinkColor: false,
+      onLinkTap: (href, title) {
+        if (href.isEmpty) return;
         _openLink(context, href);
       },
-      codeBuilder: (code, language) {
-        final normalizedLanguage = _normalizedCodeLanguage(language);
-        if (normalizedLanguage == 'mermaid') {
-          return _MermaidCodeBlock(
-            code: code.trimRight(),
-            textColor: textColor,
-          );
-        }
+      linkBuilder: (context, linkText, url, style) {
+        return Text.rich(
+          TextSpan(
+            children: [linkText],
+            style: style.copyWith(
+              color: colors.accent,
+              decoration: TextDecoration.underline,
+            ),
+          ),
+        );
+      },
+      codeBuilder: (context, name, code, closed) {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: SyntaxCodeBlock(
             text: code.trimRight(),
-            language: language?.trim().isEmpty ?? true
-                ? null
-                : language?.trim(),
+            language: name.isEmpty ? null : name,
           ),
         );
       },
-      builderRegistry: smooth.BuilderRegistry()
-        ..register(
-          'inline_code',
-          _SidemeshInlineCodeBuilder(
-            onOpenFile: onOpenFile,
-            style: inlineCodeStyle,
-          ),
-        ),
-    );
-  }
-}
-
-smooth.MarkdownStyleSheet _styleSheetFor(
-  BuildContext context,
-  TextStyle baseBody,
-  TextStyle inlineCodeStyle,
-) {
-  final theme = Theme.of(context);
-  final colors = context.colors;
-  final headerColor = baseBody.color ?? colors.textPrimary;
-  final codeStyle = monoStyle(color: colors.codeForeground, fontSize: 12.5);
-
-  return smooth.MarkdownStyleSheet.fromTheme(theme).copyWith(
-    textStyle: baseBody,
-    paragraphStyle: baseBody,
-    h1Style: baseBody.copyWith(
-      color: headerColor,
-      fontSize: 24,
-      fontWeight: FontWeight.w800,
-      height: 1.25,
-      letterSpacing: -0.35,
-    ),
-    h2Style: baseBody.copyWith(
-      color: headerColor,
-      fontSize: 21,
-      fontWeight: FontWeight.w800,
-      height: 1.28,
-      letterSpacing: -0.25,
-    ),
-    h3Style: baseBody.copyWith(
-      color: headerColor,
-      fontSize: 18,
-      fontWeight: FontWeight.w700,
-      height: 1.32,
-    ),
-    h4Style: baseBody.copyWith(
-      color: headerColor,
-      fontSize: 16,
-      fontWeight: FontWeight.w700,
-      height: 1.35,
-    ),
-    h5Style: baseBody.copyWith(
-      color: headerColor,
-      fontSize: 14.5,
-      fontWeight: FontWeight.w700,
-      height: 1.4,
-    ),
-    h6Style: baseBody.copyWith(
-      color: colors.textSecondary,
-      fontSize: 13,
-      fontWeight: FontWeight.w700,
-      height: 1.4,
-    ),
-    blockquoteStyle: baseBody.copyWith(color: colors.textSecondary),
-    codeBlockStyle: codeStyle,
-    inlineCodeStyle: inlineCodeStyle,
-    linkStyle: baseBody.copyWith(
-      color: colors.accent,
-      decoration: TextDecoration.underline,
-      decorationColor: colors.accent,
-    ),
-    boldStyle: baseBody.copyWith(fontWeight: FontWeight.w800),
-    italicStyle: baseBody.copyWith(fontStyle: FontStyle.italic),
-    strikethroughStyle: baseBody.copyWith(
-      decoration: TextDecoration.lineThrough,
-    ),
-    listBulletStyle: baseBody,
-    tableHeaderStyle: baseBody.copyWith(fontWeight: FontWeight.w800),
-    tableCellStyle: baseBody,
-    blockquoteDecoration: BoxDecoration(
-      color: colors.surfaceMuted.withValues(alpha: 0.55),
-      border: Border(left: BorderSide(color: colors.accent, width: 3)),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    codeBlockDecoration: BoxDecoration(
-      color: colors.codeBackground,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: colors.codeBorder),
-    ),
-    tableBorder: TableBorder.all(color: colors.border),
-    tableHeaderDecoration: BoxDecoration(color: colors.surfaceMuted),
-    tableOddRowDecoration: BoxDecoration(color: colors.surface),
-    tableEvenRowDecoration: BoxDecoration(color: colors.surfaceMuted),
-    horizontalRuleColor: colors.border,
-    horizontalRuleThickness: 1,
-    blockSpacing: 12,
-    listIndent: 22,
-    blockquotePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    codeBlockPadding: const EdgeInsets.all(12),
-    tableCellPadding: const EdgeInsets.all(8),
-  );
-}
-
-class _SidemeshInlineCodeBuilder extends smooth.MarkdownWidgetBuilder {
-  const _SidemeshInlineCodeBuilder({
-    required this.onOpenFile,
-    required this.style,
-  });
-
-  final void Function(String path)? onOpenFile;
-  final TextStyle style;
-
-  @override
-  bool canBuild(smooth.MarkdownNode node) => node is smooth.InlineCodeNode;
-
-  @override
-  Widget build(
-    smooth.MarkdownNode node,
-    smooth.MarkdownStyleSheet styleSheet,
-    smooth.MarkdownRenderContext context,
-  ) {
-    final code = (node as smooth.InlineCodeNode).code;
-    final isPath = onOpenFile != null && _looksLikeFilePath(code);
-    final displayStyle = style.copyWith(
-      decoration: isPath ? TextDecoration.underline : style.decoration,
-    );
-    final child = Text(code, style: displayStyle);
-    if (!isPath) return child;
-    return GestureDetector(onTap: () => onOpenFile!(code), child: child);
-  }
-}
-
-class _MermaidCodeBlock extends StatelessWidget {
-  const _MermaidCodeBlock({required this.code, required this.textColor});
-
-  final String code;
-  final Color textColor;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final diagramStyle = smooth.MermaidStyle(
-      backgroundColor: colors.surfaceElevated.toARGB32(),
-      defaultNodeStyle: smooth.NodeStyle(
-        fillColor: colors.surfaceMuted.toARGB32(),
-        strokeColor: colors.accent.toARGB32(),
-        textColor: colors.textPrimary.toARGB32(),
-      ),
-      defaultEdgeStyle: smooth.EdgeStyle(
-        strokeColor: colors.textSecondary.toARGB32(),
-      ),
-      fontFamily: 'SpaceGrotesk',
-      themeMode: Theme.of(context).brightness == Brightness.dark
-          ? smooth.MermaidThemeMode.dark
-          : smooth.MermaidThemeMode.light,
-      nodeSpacingX: 46,
-      nodeSpacingY: 46,
-      padding: 18,
-    );
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: colors.surfaceElevated,
-            border: Border.all(color: colors.border),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          padding: const EdgeInsets.all(12),
-          child: smooth.MermaidDiagram(
-            code: code,
-            style: diagramStyle,
-            errorBuilder: (context, error) =>
-                SyntaxCodeBlock(text: code, language: 'mermaid'),
-            loadingBuilder: (context) => Text(
-              'Rendering diagram...',
-              style: monoStyle(color: textColor, fontSize: 12),
-            ),
-          ),
-        ),
-      ),
+      highlightBuilder: (context, hlText, style) {
+        final isPath = onOpenFile != null && _looksLikeFilePath(hlText);
+        final displayStyle = monoStyle(color: colors.accent, fontSize: 12.5)
+            .copyWith(
+              decoration: isPath ? TextDecoration.underline : null,
+              decorationColor: isPath ? colors.accent : null,
+            );
+        if (isPath) {
+          return GestureDetector(
+            onTap: () => onOpenFile!(hlText),
+            child: Text(hlText, style: displayStyle),
+          );
+        }
+        return Text(hlText, style: displayStyle);
+      },
     );
   }
 }
@@ -281,41 +109,6 @@ String _autoLinkBareUrlsForMarkdown(String text) {
   }
 
   return output.toString();
-}
-
-String _normalizeTildeFencesForSmoothMarkdown(String text) {
-  if (text.isEmpty || !text.contains('~~~')) return text;
-
-  final lines = text.split('\n');
-  final output = <String>[];
-  var insideBacktickFence = false;
-  var insideTildeFence = false;
-
-  for (final line in lines) {
-    final trimmedLeft = line.trimLeft();
-    if (!insideTildeFence && trimmedLeft.startsWith('```')) {
-      insideBacktickFence = !insideBacktickFence;
-      output.add(line);
-      continue;
-    }
-
-    if (!insideBacktickFence && trimmedLeft.startsWith('~~~')) {
-      final indent = line.substring(0, line.length - trimmedLeft.length);
-      output.add('$indent```${trimmedLeft.substring(3)}');
-      insideTildeFence = !insideTildeFence;
-      continue;
-    }
-
-    output.add(line);
-  }
-
-  return output.join('\n');
-}
-
-String? _normalizedCodeLanguage(String? language) {
-  final trimmed = language?.trim().toLowerCase();
-  if (trimmed == null || trimmed.isEmpty) return null;
-  return trimmed.split(RegExp(r'\s+')).first;
 }
 
 String _autoLinkBareUrlsOutsideInlineCode(String text) {
