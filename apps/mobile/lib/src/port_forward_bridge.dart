@@ -89,7 +89,7 @@ class _PortForwardConnection {
 
   final Socket client;
   final WebSocketChannel channel;
-  final ValueChanged<_PortForwardConnection> onClose;
+  final void Function(_PortForwardConnection connection) onClose;
 
   StreamSubscription<Uint8List>? _clientSub;
   StreamSubscription<dynamic>? _channelSub;
@@ -163,5 +163,3 @@ String? _errorFromControlFrame(String payload) {
   }
   return null;
 }
-
-typedef ValueChanged<T> = void Function(T value);
