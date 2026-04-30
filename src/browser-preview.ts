@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import type { Readable } from "node:stream";
 
 import { WebSocket } from "ws";
@@ -308,6 +308,8 @@ export class BrowserPreviewRegistry {
       await setViewport(preview);
       await cdp.send("Page.enable", {}, sessionId);
       await cdp.send("Runtime.enable", {}, sessionId);
+      this.registerBrowserNavigationHandlers(preview, targetId, sessionId);
+      await cdp.send("Target.setDiscoverTargets", { discover: true });
       preview.url = await navigateToReachableTarget(cdp, sessionId, preview);
       preview.status = "running";
       preview.updatedAt = Date.now();
@@ -503,6 +505,87 @@ export class BrowserPreviewRegistry {
     });
   }
 
+  private registerBrowserNavigationHandlers(
+    preview: BrowserPreviewRecord,
+    primaryTargetId: string,
+    sessionId: string,
+  ): void {
+    const cdp = preview.cdp;
+    if (!cdp) return;
+
+    cdp.onSessionEvent(sessionId, "Page.frameNavigated", (params) => {
+      const frame = objectValue(params.frame);
+      if (!frame || stringValue(frame.parentId)) return;
+      const url = stringValue(frame.url);
+      if (!url) return;
+      this.updatePreviewUrl(preview, url);
+    });
+
+    cdp.onSessionEvent(sessionId, "Page.windowOpen", (params) => {
+      const url = stringValue(params.url);
+      if (!isBrowserNavigationUrl(url)) return;
+      void this.navigatePreviewToUrl(preview, url).catch((error: unknown) =>
+        this.handleCaptureError(preview, error),
+      );
+    });
+
+    const followedPopupTargets = new Set<string>();
+    const followTargetInfo = (targetInfo: Record<string, unknown> | null) => {
+      if (!targetInfo) return;
+      const targetId = stringValue(targetInfo.targetId);
+      if (!targetId || targetId === primaryTargetId) return;
+      if (followedPopupTargets.has(targetId)) return;
+      if (stringValue(targetInfo.type) !== "page") return;
+      const url = stringValue(targetInfo.url);
+      if (!isBrowserNavigationUrl(url)) return;
+      followedPopupTargets.add(targetId);
+      void this.followPopupTarget(preview, targetId, url).catch(
+        (error: unknown) => this.handleCaptureError(preview, error),
+      );
+    };
+
+    cdp.onEvent("Target.targetCreated", (event) => {
+      followTargetInfo(objectValue(event.params.targetInfo));
+    });
+
+    cdp.onEvent("Target.targetInfoChanged", (event) => {
+      followTargetInfo(objectValue(event.params.targetInfo));
+    });
+  }
+
+  private async followPopupTarget(
+    preview: BrowserPreviewRecord,
+    targetId: string,
+    url: string,
+  ): Promise<void> {
+    await this.navigatePreviewToUrl(preview, url);
+    await preview.cdp?.send("Target.closeTarget", { targetId }).catch(() => {});
+  }
+
+  private async navigatePreviewToUrl(
+    preview: BrowserPreviewRecord,
+    url: string,
+  ): Promise<void> {
+    if (!isBrowserNavigationUrl(url)) return;
+    const cdp = preview.cdp;
+    const sessionId = preview.sessionIdCdp;
+    if (!cdp || !sessionId || preview.status !== "running") return;
+    const result = await cdp.send("Page.navigate", { url }, sessionId);
+    const errorText = stringValue(result.errorText);
+    if (errorText) {
+      throw new BrowserPreviewError(`Could not open browser URL: ${errorText}`, 502);
+    }
+    this.updatePreviewUrl(preview, url);
+    await this.captureAndBroadcast(preview);
+  }
+
+  private updatePreviewUrl(preview: BrowserPreviewRecord, url: string): void {
+    if (preview.url === url) return;
+    preview.url = url;
+    preview.updatedAt = Date.now();
+    this.broadcast(preview, { type: "preview", preview: this.info(preview) });
+  }
+
   private broadcast(
     preview: BrowserPreviewRecord,
     payload: Record<string, unknown>,
@@ -625,6 +708,7 @@ export class BrowserPreviewError extends Error {
 
 class CdpConnection {
   private nextId = 1;
+  private readonly events = new EventEmitter();
   private readonly pending = new Map<
     number,
     {
@@ -664,6 +748,27 @@ class CdpConnection {
     });
   }
 
+  public onEvent(
+    method: string,
+    listener: (event: CdpEventPayload) => void,
+  ): () => void {
+    this.events.on(method, listener);
+    return () => this.events.off(method, listener);
+  }
+
+  public onSessionEvent(
+    sessionId: string,
+    method: string,
+    listener: (params: Record<string, unknown>) => void,
+  ): () => void {
+    const wrapped = (event: CdpEventPayload) => {
+      if (event.sessionId !== sessionId) return;
+      listener(event.params);
+    };
+    this.events.on(method, wrapped);
+    return () => this.events.off(method, wrapped);
+  }
+
   public close(): void {
     try {
       this.socket.close();
@@ -684,7 +789,16 @@ class CdpConnection {
     }
     const record = message as Record<string, unknown>;
     const id = typeof record.id === "number" ? record.id : null;
-    if (id == null) return;
+    if (id == null) {
+      const method = stringValue(record.method);
+      if (!method) return;
+      this.events.emit(method, {
+        method,
+        params: objectValue(record.params) ?? {},
+        sessionId: stringValue(record.sessionId) || null,
+      } satisfies CdpEventPayload);
+      return;
+    }
     const pending = this.pending.get(id);
     if (!pending) return;
     this.pending.delete(id);
@@ -709,6 +823,12 @@ class CdpConnection {
     }
     this.pending.clear();
   }
+}
+
+interface CdpEventPayload {
+  method: string;
+  params: Record<string, unknown>;
+  sessionId: string | null;
 }
 
 async function setViewport(preview: BrowserPreviewRecord): Promise<void> {
@@ -979,6 +1099,15 @@ export function browserPreviewReuseKey(
   ]);
 }
 
+export function isBrowserNavigationUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function loopbackTargetCandidates(targetHost: string): string[] {
   switch (targetHost) {
     case "localhost":
@@ -1009,6 +1138,12 @@ function stringField(record: Record<string, unknown>, field: string): string {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function numberValue(value: unknown, fallback: number): number {
