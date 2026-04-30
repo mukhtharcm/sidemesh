@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'api_client.dart';
@@ -73,6 +74,7 @@ class PortForwardBridge {
     final connection = _PortForwardConnection(
       client: client,
       channel: api.openPortForwardTunnel(host, portForward.id),
+      scheme: portForward.scheme,
       onClose: (connection) => _connections.remove(connection),
     );
     _connections.add(connection);
@@ -84,11 +86,13 @@ class _PortForwardConnection {
   _PortForwardConnection({
     required this.client,
     required this.channel,
+    required this.scheme,
     required this.onClose,
   });
 
   final Socket client;
   final WebSocketChannel channel;
+  final String scheme;
   final void Function(_PortForwardConnection connection) onClose;
 
   StreamSubscription<Uint8List>? _clientSub;
@@ -113,13 +117,13 @@ class _PortForwardConnection {
         } else if (message is String) {
           final error = _errorFromControlFrame(message);
           if (error != null) {
-            client.add(utf8.encode('Sidemesh port forward error: $error\n'));
-            unawaited(close());
+            _writeTunnelError(error);
+            unawaited(close(gracefulClient: scheme == 'http'));
           }
         }
       },
       onError: (_) => unawaited(close()),
-      onDone: () => unawaited(close()),
+      onDone: () => unawaited(close(gracefulClient: true)),
       cancelOnError: true,
     );
     unawaited(_resumeClientWhenReady());
@@ -136,7 +140,15 @@ class _PortForwardConnection {
     }
   }
 
-  Future<void> close() async {
+  void _writeTunnelError(String error) {
+    if (scheme == 'http') {
+      client.add(buildPortForwardHttpErrorResponse(error));
+      return;
+    }
+    client.add(utf8.encode('Sidemesh port forward error: $error\n'));
+  }
+
+  Future<void> close({bool gracefulClient = false}) async {
     if (_closed) return;
     _closed = true;
     onClose(this);
@@ -146,6 +158,15 @@ class _PortForwardConnection {
       await channel.sink.close();
     } catch (_) {
       // noop
+    }
+    if (gracefulClient) {
+      try {
+        await client.flush();
+        await client.close();
+        return;
+      } catch (_) {
+        // Fall through to the hard close below.
+      }
     }
     client.destroy();
   }
@@ -162,4 +183,19 @@ String? _errorFromControlFrame(String payload) {
     // Non-JSON text frames are ignored because the tunnel data itself is binary.
   }
   return null;
+}
+
+@visibleForTesting
+Uint8List buildPortForwardHttpErrorResponse(String message) {
+  final body = 'Sidemesh port forward error: $message\n';
+  final encodedBody = utf8.encode(body);
+  final header = utf8.encode(
+    'HTTP/1.1 502 Bad Gateway\r\n'
+    'Content-Type: text/plain; charset=utf-8\r\n'
+    'Content-Length: ${encodedBody.length}\r\n'
+    'Connection: close\r\n'
+    'Cache-Control: no-store\r\n'
+    '\r\n',
+  );
+  return Uint8List.fromList([...header, ...encodedBody]);
 }
