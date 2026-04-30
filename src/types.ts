@@ -50,6 +50,11 @@ export interface HostPortForwardingConfig {
   allowNonLoopbackTargets: boolean;
 }
 
+export interface HostBrowserPreviewConfig {
+  enabled: boolean;
+  chromePath: string | null;
+}
+
 export interface HostCapabilities {
   workspace: {
     filesystem: boolean;
@@ -57,6 +62,7 @@ export interface HostCapabilities {
     gitDiff: boolean;
     terminal: boolean;
     portForwarding: boolean;
+    browserPreview: boolean;
   };
 }
 
@@ -71,6 +77,7 @@ export interface NodeConfig {
   stateDir: string;
   terminal: HostTerminalConfig;
   portForwarding: HostPortForwardingConfig;
+  browserPreview: HostBrowserPreviewConfig;
   configPath: string;
   configExists: boolean;
 }

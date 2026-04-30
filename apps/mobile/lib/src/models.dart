@@ -382,6 +382,69 @@ class HostPortForwardInfo {
       );
 }
 
+class HostBrowserPreviewInfo {
+  const HostBrowserPreviewInfo({
+    required this.id,
+    required this.label,
+    required this.url,
+    required this.targetHost,
+    required this.targetPort,
+    required this.scheme,
+    required this.cwd,
+    required this.sessionId,
+    required this.status,
+    required this.width,
+    required this.height,
+    required this.clients,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.lastClientAt,
+    required this.lastFrameAt,
+    required this.lastError,
+  });
+
+  final String id;
+  final String label;
+  final String url;
+  final String targetHost;
+  final int targetPort;
+  final String scheme;
+  final String? cwd;
+  final String? sessionId;
+  final String status;
+  final int width;
+  final int height;
+  final int clients;
+  final int createdAt;
+  final int updatedAt;
+  final int? lastClientAt;
+  final int? lastFrameAt;
+  final String? lastError;
+
+  bool get isRunning => status == 'running';
+
+  factory HostBrowserPreviewInfo.fromJson(Map<String, dynamic> json) =>
+      HostBrowserPreviewInfo(
+        id: _stringValue(json['id']),
+        label: _stringValue(json['label']),
+        url: _stringValue(json['url']),
+        targetHost: _stringValue(json['targetHost']),
+        targetPort: _intValue(json['targetPort']),
+        scheme: _stringValue(json['scheme']),
+        cwd: _stringOrNull(json['cwd']),
+        sessionId: _stringOrNull(json['sessionId']),
+        status: _stringValue(json['status']),
+        width: _intValue(json['width']),
+        height: _intValue(json['height']),
+        clients: _intValue(json['clients']),
+        createdAt: _intValue(json['createdAt']),
+        updatedAt: _intValue(json['updatedAt']),
+        lastClientAt: _intOrNull(json['lastClientAt']),
+        lastFrameAt: _intOrNull(json['lastFrameAt']),
+        lastError: _stringOrNull(json['lastError']),
+      );
+}
+
 class GitInfoSummary {
   const GitInfoSummary({this.sha, this.branch, this.originUrl});
 
