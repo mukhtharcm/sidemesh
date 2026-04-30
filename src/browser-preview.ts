@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
@@ -16,6 +16,7 @@ const DEFAULT_HEIGHT = 844;
 const DEFAULT_QUALITY = 55;
 const CHROME_START_TIMEOUT_MS = 10_000;
 const MAX_TEXT_INPUT_CHARS = 20_000;
+const MAX_CLIENT_BUFFERED_AMOUNT = 8 * 1024 * 1024;
 
 type BrowserProcess = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -85,6 +86,7 @@ interface BrowserPreviewRecord {
   nextFrameSeq: number;
   frameTimer: NodeJS.Timeout | null;
   starting: Promise<void> | null;
+  capturingFrame: boolean;
 }
 
 export class BrowserPreviewRegistry {
@@ -156,6 +158,7 @@ export class BrowserPreviewRegistry {
       nextFrameSeq: 1,
       frameTimer: null,
       starting: null,
+      capturingFrame: false,
     };
     this.previews.set(preview.id, preview);
     preview.starting = this.startPreview(preview);
@@ -208,7 +211,9 @@ export class BrowserPreviewRegistry {
 
     if (preview.status === "running") {
       this.startFrameLoop(preview);
-      void this.captureAndBroadcast(preview);
+      void this.captureAndBroadcast(preview).catch((error: unknown) =>
+        this.handleCaptureError(preview, error),
+      );
       return;
     }
 
@@ -217,7 +222,9 @@ export class BrowserPreviewRegistry {
         if (socket.readyState !== socket.OPEN) return;
         sendJson(socket, { type: "ready", preview: this.info(preview) });
         this.startFrameLoop(preview);
-        void this.captureAndBroadcast(preview);
+        void this.captureAndBroadcast(preview).catch((error: unknown) =>
+          this.handleCaptureError(preview, error),
+        );
       })
       .catch((error: unknown) => {
         sendJson(socket, {
@@ -390,7 +397,9 @@ export class BrowserPreviewRegistry {
   private startFrameLoop(preview: BrowserPreviewRecord): void {
     if (preview.frameTimer || preview.clients.size === 0) return;
     preview.frameTimer = setInterval(() => {
-      void this.captureAndBroadcast(preview);
+      void this.captureAndBroadcast(preview).catch((error: unknown) =>
+        this.handleCaptureError(preview, error),
+      );
     }, DEFAULT_FRAME_INTERVAL_MS);
     preview.frameTimer.unref?.();
   }
@@ -403,30 +412,48 @@ export class BrowserPreviewRegistry {
 
   private async captureAndBroadcast(preview: BrowserPreviewRecord): Promise<void> {
     if (preview.clients.size === 0 || preview.status !== "running") return;
+    if (preview.capturingFrame) return;
     const cdp = preview.cdp;
     const sessionId = preview.sessionIdCdp;
     if (!cdp || !sessionId) return;
-    const response = await cdp.send(
-      "Page.captureScreenshot",
-      {
-        format: "jpeg",
-        quality: DEFAULT_QUALITY,
-        fromSurface: true,
-        optimizeForSpeed: true,
-      },
-      sessionId,
-    );
-    const data = stringField(response, "data");
-    preview.lastFrameAt = Date.now();
-    preview.updatedAt = preview.lastFrameAt;
+    preview.capturingFrame = true;
+    try {
+      const response = await cdp.send(
+        "Page.captureScreenshot",
+        {
+          format: "jpeg",
+          quality: DEFAULT_QUALITY,
+          fromSurface: true,
+          optimizeForSpeed: true,
+        },
+        sessionId,
+      );
+      const data = stringField(response, "data");
+      preview.lastFrameAt = Date.now();
+      preview.updatedAt = preview.lastFrameAt;
+      this.broadcast(preview, {
+        type: "frame",
+        seq: preview.nextFrameSeq++,
+        mimeType: "image/jpeg",
+        width: preview.width,
+        height: preview.height,
+        timestamp: preview.lastFrameAt,
+        data,
+      });
+    } finally {
+      preview.capturingFrame = false;
+    }
+  }
+
+  private handleCaptureError(
+    preview: BrowserPreviewRecord,
+    error: unknown,
+  ): void {
+    preview.lastError = error instanceof Error ? error.message : String(error);
+    preview.updatedAt = Date.now();
     this.broadcast(preview, {
-      type: "frame",
-      seq: preview.nextFrameSeq++,
-      mimeType: "image/jpeg",
-      width: preview.width,
-      height: preview.height,
-      timestamp: preview.lastFrameAt,
-      data,
+      type: "error",
+      message: preview.lastError,
     });
   }
 
@@ -480,6 +507,7 @@ export class BrowserPreviewRegistry {
     if (userDataDir) {
       await rm(userDataDir, { recursive: true, force: true }).catch(() => {});
     }
+    this.previews.delete(preview.id);
   }
 
   private requirePreview(id: string): BrowserPreviewRecord {
@@ -714,9 +742,11 @@ async function launchChrome(
   if (typeof process.getuid === "function" && process.getuid() === 0) {
     args.unshift("--no-sandbox");
   }
+  const env = { ...process.env };
+  delete env.SIDEMESH_TOKEN;
   const child = spawn(chromePath, args, {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, SIDEMESH_TOKEN: undefined },
+    env,
   });
   const browserWsUrl = await waitForDevToolsUrl(child);
   return { process: child, browserWsUrl };
@@ -725,20 +755,15 @@ async function launchChrome(
 async function waitForDevToolsUrl(
   child: BrowserProcess,
 ): Promise<string> {
-  let stderr = "";
-  let stdout = "";
+  let output = "";
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
       reject(new BrowserPreviewError("Timed out starting Chromium.", 500));
     }, CHROME_START_TIMEOUT_MS);
     const onData = (chunk: Buffer) => {
-      const text = chunk.toString("utf8");
-      if (thisStreamIsStderr(chunk, child)) stderr += text;
-      else stdout += text;
-      const match = /DevTools listening on (ws:\/\/[^\s]+)/.exec(
-        `${stderr}\n${stdout}`,
-      );
+      output += chunk.toString("utf8");
+      const match = /DevTools listening on (ws:\/\/[^\s]+)/.exec(output);
       if (!match) return;
       cleanup();
       resolve(match[1]);
@@ -747,7 +772,7 @@ async function waitForDevToolsUrl(
       cleanup();
       reject(
         new BrowserPreviewError(
-          `Chromium exited before opening DevTools. ${stderr || stdout}`.trim(),
+          `Chromium exited before opening DevTools. ${output}`.trim(),
           500,
         ),
       );
@@ -762,13 +787,6 @@ async function waitForDevToolsUrl(
     child.stdout.on("data", onData);
     child.once("exit", onExit);
   });
-}
-
-function thisStreamIsStderr(
-  _chunk: Buffer,
-  _child: BrowserProcess,
-): boolean {
-  return true;
 }
 
 async function resolveChromePath(explicit: string | null): Promise<string> {
@@ -788,7 +806,7 @@ async function resolveChromePath(explicit: string | null): Promise<string> {
   for (const candidate of candidates) {
     if (path.isAbsolute(candidate)) {
       try {
-        await import("node:fs/promises").then((fs) => fs.access(candidate));
+        await access(candidate);
         return candidate;
       } catch {
         continue;
@@ -876,5 +894,6 @@ function shellQuote(value: string): string {
 
 function sendJson(socket: WebSocket, payload: Record<string, unknown>): void {
   if (socket.readyState !== socket.OPEN) return;
+  if (socket.bufferedAmount > MAX_CLIENT_BUFFERED_AMOUNT) return;
   socket.send(JSON.stringify(payload));
 }
