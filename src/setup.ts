@@ -17,6 +17,7 @@ import { readResolvedPersistedConfig, saveConfig } from "./config.js";
 import type {
   AgentProviderConfig,
   AgentProviderKind,
+  HostPortForwardingConfig,
   HostTerminalConfig,
   NodeConfig,
 } from "./types.js";
@@ -75,6 +76,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
       value.trim() ? undefined : "State directory cannot be empty.",
   });
   const terminal = await promptTerminalConfig(existing);
+  const portForwarding = await promptPortForwardingConfig(existing);
 
   const initialProviders =
     existing?.providers.map((provider) => provider.kind) ?? ["codex"];
@@ -154,6 +156,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     defaultProviderKind: defaultProvider as AgentProviderKind,
     stateDir: stateDir.trim(),
     terminal,
+    portForwarding,
     configPath: persisted.path,
     configExists: true,
   };
@@ -206,6 +209,40 @@ async function promptTerminalConfig(
     enabled: true,
     shell: shell.trim() || null,
     requirePty,
+  };
+}
+
+async function promptPortForwardingConfig(
+  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
+): Promise<HostPortForwardingConfig> {
+  note(
+    "Port forwarding lets authenticated Sidemesh clients preview services running on this host. By default it can only reach this host's localhost ports.",
+    "Port forwarding",
+  );
+  const current = existing?.portForwarding;
+  const enabled = await confirm({
+    message: "Enable port forwarding on this host?",
+    initialValue: current?.enabled ?? false,
+  });
+  if (isCancel(enabled)) {
+    throw new Error("Setup cancelled.");
+  }
+  if (!enabled) {
+    return {
+      enabled: false,
+      allowNonLoopbackTargets: current?.allowNonLoopbackTargets ?? false,
+    };
+  }
+  const allowNonLoopbackTargets = await confirm({
+    message: "Allow forwarding to non-localhost targets from this host?",
+    initialValue: current?.allowNonLoopbackTargets ?? false,
+  });
+  if (isCancel(allowNonLoopbackTargets)) {
+    throw new Error("Setup cancelled.");
+  }
+  return {
+    enabled: true,
+    allowNonLoopbackTargets,
   };
 }
 
