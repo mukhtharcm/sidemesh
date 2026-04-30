@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { loadSessionRuntime } from "./codex-history.js";
+import { loadRolloutLog, loadSessionRuntime } from "./codex-history.js";
 
 describe("loadSessionRuntime", () => {
   let tempDir = "";
@@ -175,5 +175,39 @@ describe("loadSessionRuntime", () => {
     });
     assert.equal(runtime?.model, "gpt-5.4");
     assert.equal(runtime?.turnId, "turn-1");
+  });
+
+  it("surfaces Codex rollout errors as system messages", async () => {
+    const lines = [
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "user_message",
+          message: "continue",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:01.000Z",
+        type: "event_msg",
+        payload: {
+          type: "error",
+          message:
+            '{"error":"prompt too long; exceeded max context length by 12490 tokens"}',
+        },
+      }),
+    ];
+
+    await writeFile(rolloutPath, `${lines.join("\n")}\n`, "utf8");
+
+    const log = await loadRolloutLog("thread-1", rolloutPath, null);
+
+    assert.equal(log.messages.length, 2);
+    assert.equal(log.messages[0]?.role, "user");
+    assert.equal(log.messages[1]?.role, "system");
+    assert.equal(
+      log.messages[1]?.text,
+      "Error: prompt too long; exceeded max context length by 12490 tokens",
+    );
   });
 });

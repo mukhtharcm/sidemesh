@@ -378,6 +378,20 @@ function parseMessage(parsed: any, seq: number): SessionMessage | null {
         seq,
       };
     }
+    if (payloadType === "error") {
+      const message = formatCodexErrorMessage(parsed.payload?.message);
+      if (!message) {
+        return null;
+      }
+      return {
+        id: `${createdAt}-system-error`,
+        role: "system",
+        text: `Error: ${message}`,
+        attachments: [],
+        createdAt,
+        seq,
+      };
+    }
   }
 
   return null;
@@ -677,6 +691,24 @@ function parseJsonLine(line: string): any | null {
   } catch {
     return null;
   }
+}
+
+function formatCodexErrorMessage(raw: unknown): string | null {
+  const message = asOptionalString(raw);
+  if (!message) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(message);
+    if (parsed && typeof parsed === "object") {
+      return asOptionalString((parsed as Record<string, unknown>).error) ?? message;
+    }
+  } catch {
+    // Codex sometimes emits plain strings and sometimes JSON-encoded error envelopes.
+  }
+
+  return message;
 }
 
 function parseTimestamp(raw: unknown): number {
