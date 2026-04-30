@@ -6,6 +6,7 @@ import {
   BrowserPreviewRegistry,
   buildBrowserTargetUrlCandidates,
   browserPreviewReuseKey,
+  isBrowserNavigationUrl,
 } from "./browser-preview.js";
 
 describe("browser preview", () => {
@@ -86,5 +87,13 @@ describe("browser preview", () => {
       browserPreviewReuseKey(base),
       browserPreviewReuseKey({ ...base, cwd: "/other" }),
     );
+  });
+
+  it("only follows safe browser navigation URLs from popups", () => {
+    assert.equal(isBrowserNavigationUrl("https://accounts.google.com/"), true);
+    assert.equal(isBrowserNavigationUrl("http://localhost:3000/login"), true);
+    assert.equal(isBrowserNavigationUrl("file:///etc/passwd"), false);
+    assert.equal(isBrowserNavigationUrl("javascript:alert(1)"), false);
+    assert.equal(isBrowserNavigationUrl("not a url"), false);
   });
 });
