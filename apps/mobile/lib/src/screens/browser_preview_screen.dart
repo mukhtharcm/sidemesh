@@ -84,6 +84,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   Uint8List? _frameBytes;
   int _frameWidth = 390;
   int _frameHeight = 844;
+  Size? _lastPreviewBoxSize;
   String? _status = 'Connecting to remote browser...';
   String? _error;
   bool _inputRailConfigured = false;
@@ -291,6 +292,30 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _send({'type': 'key', 'key': key});
   }
 
+  void _sendNavigation(String action) {
+    _send({'type': 'navigation', 'action': action});
+  }
+
+  void _sendResize(int width, int height) {
+    _send({'type': 'resize', 'width': width, 'height': height});
+  }
+
+  Future<void> _showViewportSheet() async {
+    final selected = await showModalBottomSheet<_ViewportPreset>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      backgroundColor: context.colors.surface,
+      builder: (context) => _ViewportResizeSheet(
+        currentWidth: _frameWidth,
+        currentHeight: _frameHeight,
+        fitSize: _lastPreviewBoxSize,
+      ),
+    );
+    if (selected == null || !mounted) return;
+    _sendResize(selected.width, selected.height);
+  }
+
   void _toggleInputRail() {
     if (!_inputRailOpen) {
       _openInputRail();
@@ -419,11 +444,19 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             onResume: _resumeStream,
             onStop: () => unawaited(_stopRemoteBrowser()),
           ),
+        _BrowserControlStrip(
+          preview: _preview,
+          streamPaused: _clientPaused,
+          onBack: () => _sendNavigation('back'),
+          onForward: () => _sendNavigation('forward'),
+          onReload: () => _sendNavigation('reload'),
+          onResize: () => unawaited(_showViewportSheet()),
+        ),
         Expanded(
           child: Padding(
             padding: EdgeInsets.fromLTRB(
               widget.showHeader ? 10 : 12,
-              widget.showHeader ? 2 : 12,
+              widget.showHeader ? 0 : 12,
               widget.showHeader ? 10 : 12,
               10,
             ),
@@ -437,6 +470,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                       child: LayoutBuilder(
                         builder: (context, constraints) {
                           final size = constraints.biggest;
+                          _lastPreviewBoxSize = size;
                           return Focus(
                             focusNode: _browserFocusNode,
                             autofocus: desktopLike,
@@ -528,6 +562,391 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       fit: BoxFit.contain,
       width: double.infinity,
       height: double.infinity,
+    );
+  }
+}
+
+class _BrowserControlStrip extends StatelessWidget {
+  const _BrowserControlStrip({
+    required this.preview,
+    required this.streamPaused,
+    required this.onBack,
+    required this.onForward,
+    required this.onReload,
+    required this.onResize,
+  });
+
+  final HostBrowserPreviewInfo preview;
+  final bool streamPaused;
+  final VoidCallback onBack;
+  final VoidCallback onForward;
+  final VoidCallback onReload;
+  final VoidCallback onResize;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.surface.withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: colors.border.withValues(alpha: 0.72)),
+        ),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+          child: Row(
+            children: [
+              _BrowserBarButton(
+                icon: Icons.arrow_back_rounded,
+                label: 'Back',
+                onTap: streamPaused ? null : onBack,
+              ),
+              _BrowserBarButton(
+                icon: Icons.arrow_forward_rounded,
+                label: 'Forward',
+                onTap: streamPaused ? null : onForward,
+              ),
+              _BrowserBarButton(
+                icon: Icons.refresh_rounded,
+                label: 'Reload',
+                onTap: streamPaused ? null : onReload,
+              ),
+              Container(
+                width: 1,
+                height: 24,
+                margin: const EdgeInsets.symmetric(horizontal: 6),
+                color: colors.border.withValues(alpha: 0.72),
+              ),
+              _ViewportChip(
+                width: preview.width,
+                height: preview.height,
+                onTap: streamPaused ? null : onResize,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BrowserBarButton extends StatelessWidget {
+  const _BrowserBarButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final enabled = onTap != null;
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: Tooltip(
+        message: label,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 140),
+            opacity: enabled ? 1 : 0.42,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: enabled
+                    ? colors.canvas.withValues(alpha: 0.74)
+                    : colors.canvas.withValues(alpha: 0.36),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: colors.border.withValues(alpha: enabled ? 0.72 : 0.38),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 17, color: colors.textSecondary),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: colors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ViewportChip extends StatelessWidget {
+  const _ViewportChip({
+    required this.width,
+    required this.height,
+    required this.onTap,
+  });
+
+  final int width;
+  final int height;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: colors.accent.withValues(alpha: 0.11),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: colors.accent.withValues(alpha: 0.34)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.aspect_ratio_rounded, size: 16, color: colors.accent),
+            const SizedBox(width: 7),
+            Text(
+              '$width x $height',
+              style: monoStyle(
+                color: colors.accent,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ViewportPreset {
+  const _ViewportPreset(this.label, this.width, this.height, this.description);
+
+  final String label;
+  final int width;
+  final int height;
+  final String description;
+}
+
+class _ViewportResizeSheet extends StatefulWidget {
+  const _ViewportResizeSheet({
+    required this.currentWidth,
+    required this.currentHeight,
+    required this.fitSize,
+  });
+
+  final int currentWidth;
+  final int currentHeight;
+  final Size? fitSize;
+
+  @override
+  State<_ViewportResizeSheet> createState() => _ViewportResizeSheetState();
+}
+
+class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
+  late final TextEditingController _widthController;
+  late final TextEditingController _heightController;
+
+  @override
+  void initState() {
+    super.initState();
+    _widthController = TextEditingController(
+      text: widget.currentWidth.toString(),
+    );
+    _heightController = TextEditingController(
+      text: widget.currentHeight.toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _widthController.dispose();
+    _heightController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final presets = <_ViewportPreset>[
+      const _ViewportPreset('Phone', 390, 844, 'Mobile portrait'),
+      const _ViewportPreset('Phone wide', 844, 390, 'Mobile landscape'),
+      const _ViewportPreset('Tablet', 820, 1180, 'Tablet portrait'),
+      const _ViewportPreset('Desktop', 1440, 900, 'Laptop browser'),
+      if (widget.fitSize != null)
+        _ViewportPreset(
+          'Fit pane',
+          widget.fitSize!.width.clamp(320, 1920).round(),
+          widget.fitSize!.height.clamp(320, 1440).round(),
+          'Match this Sidemesh pane',
+        ),
+    ];
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(18, 0, 18, 18 + keyboardInset),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Resize browser viewport',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: colors.textPrimary,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'This changes the remote Chromium viewport, not just the local image scale.',
+              style: TextStyle(color: colors.textSecondary, height: 1.35),
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final preset in presets)
+                  _ViewportPresetButton(
+                    preset: preset,
+                    selected:
+                        preset.width == widget.currentWidth &&
+                        preset.height == widget.currentHeight,
+                    onTap: () => Navigator.of(context).pop(preset),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _widthController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(labelText: 'Width'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _heightController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(labelText: 'Height'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _submitCustom,
+                icon: const Icon(Icons.aspect_ratio_rounded),
+                label: const Text('Apply custom viewport'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _submitCustom() {
+    final width = int.tryParse(_widthController.text);
+    final height = int.tryParse(_heightController.text);
+    if (width == null || height == null) return;
+    Navigator.of(context).pop(
+      _ViewportPreset(
+        'Custom',
+        width.clamp(320, 3840).toInt(),
+        height.clamp(320, 2160).toInt(),
+        'Custom viewport',
+      ),
+    );
+  }
+}
+
+class _ViewportPresetButton extends StatelessWidget {
+  const _ViewportPresetButton({
+    required this.preset,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _ViewportPreset preset;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Container(
+        width: 150,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: selected
+              ? colors.accent.withValues(alpha: 0.14)
+              : colors.canvas.withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected
+                ? colors.accent.withValues(alpha: 0.52)
+                : colors.border.withValues(alpha: 0.82),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              preset.label,
+              style: TextStyle(
+                color: selected ? colors.accent : colors.textPrimary,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${preset.width} x ${preset.height}',
+              style: monoStyle(
+                color: colors.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              preset.description,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: colors.textSecondary, fontSize: 11),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
