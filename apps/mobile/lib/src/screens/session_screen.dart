@@ -134,6 +134,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
     required this.dockedPreview,
     required this.onExpand,
     required this.onMinimize,
+    required this.onFullPage,
     required this.onClose,
     required this.onStop,
     required this.onStopped,
@@ -144,6 +145,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
   final _DockedBrowserPreview dockedPreview;
   final VoidCallback onExpand;
   final VoidCallback onMinimize;
+  final VoidCallback onFullPage;
   final VoidCallback onClose;
   final VoidCallback onStop;
   final void Function(HostBrowserPreviewInfo preview) onStopped;
@@ -151,104 +153,336 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final target =
+        '${dockedPreview.forward.targetHost}:${dockedPreview.forward.targetPort}';
     if (!dockedPreview.expanded) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-        child: MeshCard(
-          tone: MeshCardTone.elevated,
-          onTap: onExpand,
-          padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-          child: Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: colors.accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: colors.accent.withValues(alpha: 0.28),
+      return _BrowserDockShell(
+        compact: true,
+        onTap: onExpand,
+        child: Row(
+          children: [
+            _BrowserDockGlyph(colors: colors, compact: true),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          dockedPreview.preview.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                color: colors.textPrimary,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.15,
+                              ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      MeshPill(
+                        label: 'parked',
+                        tone: MeshPillTone.warning,
+                        icon: Icons.pause_rounded,
+                        mono: true,
+                      ),
+                    ],
                   ),
-                ),
-                child: Icon(
-                  Icons.screenshot_monitor_rounded,
-                  color: colors.accent,
-                  size: 17,
-                ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Tap to resume · $target',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: monoStyle(color: colors.textSecondary, fontSize: 11),
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      dockedPreview.preview.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Paused locally · ${dockedPreview.forward.targetHost}:${dockedPreview.forward.targetPort}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: monoStyle(
-                        color: colors.textSecondary,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              MeshIconButton(
-                icon: Icons.open_in_full_rounded,
-                tooltip: 'Open preview',
-                color: colors.accent,
-                onTap: onExpand,
-              ),
-              const SizedBox(width: 6),
-              MeshIconButton(
-                icon: Icons.stop_circle_outlined,
-                tooltip: 'Stop remote browser',
-                color: colors.danger,
-                onTap: onStop,
-              ),
-              const SizedBox(width: 6),
-              MeshIconButton(
-                icon: Icons.close_rounded,
-                tooltip: 'Hide preview',
-                color: colors.textSecondary,
-                onTap: onClose,
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 8),
+            _BrowserDockAction(
+              icon: Icons.open_in_full_rounded,
+              tooltip: 'Full page',
+              color: colors.accent,
+              onTap: onFullPage,
+            ),
+            const SizedBox(width: 6),
+            _BrowserDockAction(
+              icon: Icons.close_rounded,
+              tooltip: 'Hide preview',
+              onTap: onClose,
+            ),
+          ],
         ),
       );
     }
 
     final screenHeight = MediaQuery.sizeOf(context).height;
-    final dockHeight = math.min(math.max(screenHeight * 0.42, 300.0), 480.0);
-    return Container(
+    final dockHeight = math.min(math.max(screenHeight * 0.48, 330.0), 520.0);
+    return _BrowserDockShell(
       height: dockHeight,
-      margin: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 10, 9),
+            child: Row(
+              children: [
+                _BrowserDockGlyph(colors: colors),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'Browser lens',
+                            style: Theme.of(context).textTheme.labelMedium
+                                ?.copyWith(
+                                  color: colors.textSecondary,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.35,
+                                ),
+                          ),
+                          const SizedBox(width: 8),
+                          MeshPill(
+                            label: 'live',
+                            tone: MeshPillTone.success,
+                            icon: Icons.bolt_rounded,
+                            mono: true,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        dockedPreview.preview.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: colors.textPrimary,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.35,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        target,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: monoStyle(
+                          color: colors.textSecondary,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _BrowserDockAction(
+                  icon: Icons.keyboard_arrow_down_rounded,
+                  tooltip: 'Minimize',
+                  onTap: onMinimize,
+                ),
+                const SizedBox(width: 6),
+                _BrowserDockAction(
+                  icon: Icons.fullscreen_rounded,
+                  tooltip: 'Full page',
+                  color: colors.accent,
+                  onTap: onFullPage,
+                ),
+                const SizedBox(width: 6),
+                _BrowserDockAction(
+                  icon: Icons.stop_circle_outlined,
+                  tooltip: 'Stop remote browser',
+                  color: colors.danger,
+                  onTap: onStop,
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                bottom: Radius.circular(24),
+              ),
+              child: BrowserPreviewPane(
+                key: ValueKey(
+                  'session-browser-preview:${dockedPreview.preview.id}',
+                ),
+                host: host,
+                api: api,
+                preview: dockedPreview.preview,
+                showHeader: false,
+                onStopped: onStopped,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BrowserDockShell extends StatelessWidget {
+  const _BrowserDockShell({
+    required this.child,
+    this.height,
+    this.compact = false,
+    this.onTap,
+  });
+
+  final Widget child;
+  final double? height;
+  final bool compact;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final radius = BorderRadius.circular(compact ? 22 : 28);
+    final content = Container(
+      height: height,
+      margin: EdgeInsets.fromLTRB(10, compact ? 6 : 4, 10, 8),
+      padding: compact ? const EdgeInsets.fromLTRB(11, 10, 8, 10) : null,
       decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: colors.border),
+        borderRadius: radius,
+        border: Border.all(color: colors.borderStrong.withValues(alpha: 0.7)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colors.surfaceElevated,
+            colors.surfaceMuted.withValues(alpha: 0.96),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: colors.accent.withValues(alpha: 0.10),
+            blurRadius: 30,
+            offset: const Offset(0, 14),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       clipBehavior: Clip.antiAlias,
-      child: BrowserPreviewPane(
-        key: ValueKey('session-browser-preview:${dockedPreview.preview.id}'),
-        host: host,
-        api: api,
-        preview: dockedPreview.preview,
-        onMinimize: onMinimize,
-        onStopped: onStopped,
+      child: Stack(
+        children: [
+          Positioned(
+            right: -42,
+            top: -54,
+            child: IgnorePointer(
+              child: Container(
+                width: 150,
+                height: 150,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colors.accent.withValues(alpha: 0.07),
+                ),
+              ),
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+    if (onTap == null) return content;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(borderRadius: radius, onTap: onTap, child: content),
+    );
+  }
+}
+
+class _BrowserDockGlyph extends StatelessWidget {
+  const _BrowserDockGlyph({required this.colors, this.compact = false});
+
+  final AppColors colors;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = compact ? 38.0 : 44.0;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: colors.codeBackground,
+        borderRadius: BorderRadius.circular(compact ? 14 : 16),
+        border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: compact ? 18 : 22,
+            height: compact ? 18 : 22,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(7),
+              border: Border.all(color: colors.accent, width: 1.5),
+            ),
+          ),
+          Positioned(
+            right: compact ? 8 : 9,
+            top: compact ? 8 : 9,
+            child: Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: colors.success,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BrowserDockAction extends StatelessWidget {
+  const _BrowserDockAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.color,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final fg = color ?? colors.textSecondary;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: fg.withValues(alpha: 0.09),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: fg.withValues(alpha: 0.20)),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 18, color: fg),
+          ),
+        ),
       ),
     );
   }
@@ -3729,6 +3963,27 @@ class _SessionScreenState extends State<SessionScreen>
     });
   }
 
+  Future<void> _openDockedBrowserFullPage() async {
+    final current = _dockedBrowserPreview;
+    if (current == null) return;
+    setState(() {
+      _dockedBrowserPreview = current.copyWith(expanded: false);
+    });
+    final stopped = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => BrowserPreviewScreen(
+          host: widget.host,
+          api: widget.api,
+          preview: current.preview,
+        ),
+      ),
+    );
+    if (!mounted || _disposed) return;
+    if (stopped ?? false) {
+      setState(() => _dockedBrowserPreview = null);
+    }
+  }
+
   void _closeDockedBrowserPreview() {
     if (_dockedBrowserPreview == null) return;
     setState(() => _dockedBrowserPreview = null);
@@ -4598,6 +4853,7 @@ class _SessionScreenState extends State<SessionScreen>
             dockedPreview: _dockedBrowserPreview!,
             onExpand: _expandDockedBrowserPreview,
             onMinimize: _minimizeDockedBrowserPreview,
+            onFullPage: () => unawaited(_openDockedBrowserFullPage()),
             onClose: _closeDockedBrowserPreview,
             onStop: () => unawaited(_stopDockedBrowserPreview()),
             onStopped: (_) => _closeDockedBrowserPreview(),
