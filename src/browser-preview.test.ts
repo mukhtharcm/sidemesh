@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   BrowserPreviewError,
   BrowserPreviewRegistry,
+  buildBrowserTargetUrl,
 } from "./browser-preview.js";
 
 describe("browser preview", () => {
@@ -33,6 +34,21 @@ describe("browser preview", () => {
     await assert.rejects(
       () => registry.create({ targetHost: "127.0.0.1", targetPort: 0 }),
       /targetPort must be between 1 and 65535/,
+    );
+  });
+
+  it("opens loopback browser targets through localhost", () => {
+    assert.equal(
+      buildBrowserTargetUrl("http", "127.0.0.1", 3000),
+      "http://localhost:3000/",
+    );
+    assert.equal(
+      buildBrowserTargetUrl("http", "::1", 3000),
+      "http://localhost:3000/",
+    );
+    assert.equal(
+      buildBrowserTargetUrl("https", "localhost", 8443),
+      "https://localhost:8443/",
     );
   });
 });

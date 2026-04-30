@@ -129,7 +129,7 @@ export class BrowserPreviewRegistry {
     const scheme = normalizeScheme(request.scheme);
     const width = normalizeViewportSize(request.width, DEFAULT_WIDTH);
     const height = normalizeViewportSize(request.height, DEFAULT_HEIGHT);
-    const url = `${scheme}://${targetHost}:${targetPort}/`;
+    const url = buildBrowserTargetUrl(scheme, targetHost, targetPort);
     const now = Date.now();
     const preview: BrowserPreviewRecord = {
       id: randomUUID(),
@@ -262,8 +262,6 @@ export class BrowserPreviewRegistry {
       const cdp = await CdpConnection.connect(browserWsUrl);
       const target = await cdp.send("Target.createTarget", {
         url: "about:blank",
-        width: preview.width,
-        height: preview.height,
       });
       const targetId = stringField(target, "targetId");
       const attached = await cdp.send("Target.attachToTarget", {
@@ -862,6 +860,19 @@ function normalizeScheme(value: string | null | undefined): BrowserPreviewScheme
   const scheme = value?.trim().toLowerCase() || "http";
   if (scheme === "http" || scheme === "https") return scheme;
   throw new BrowserPreviewError("browser preview scheme must be http or https");
+}
+
+export function buildBrowserTargetUrl(
+  scheme: BrowserPreviewScheme,
+  targetHost: string,
+  targetPort: number,
+): string {
+  // Browser previews run inside Chrome on the daemon host. Prefer the hostname
+  // form for loopback so dev servers that bind to localhost-only still work.
+  const host = ["127.0.0.1", "::1", "localhost"].includes(targetHost)
+    ? "localhost"
+    : targetHost;
+  return `${scheme}://${host}:${targetPort}/`;
 }
 
 function normalizeViewportSize(value: unknown, fallback: number): number {
