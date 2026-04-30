@@ -169,6 +169,12 @@ SIDEMESH_TERMINAL_SHELL=/bin/zsh
 SIDEMESH_TERMINAL_REQUIRE_PTY=0
 SIDEMESH_PORT_FORWARDING=0
 SIDEMESH_PORT_FORWARDING_ALLOW_NON_LOOPBACK=0
+SIDEMESH_BROWSER_PREVIEW=0
+SIDEMESH_BROWSER_PREVIEW_CHROME_PATH=
+SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS=8
+SIDEMESH_BROWSER_PREVIEW_IDLE_TTL_MS=3600000
+SIDEMESH_BROWSER_PREVIEW_FRAME_INTERVAL_MS=900
+SIDEMESH_BROWSER_PREVIEW_QUALITY=55
 ```
 
 `SIDEMESH_PROVIDER` defaults to `codex`. `SIDEMESH_PROVIDER_COMMAND` is a
@@ -197,6 +203,18 @@ default target policy only allows the daemon to connect to `localhost`/
 `127.0.0.1` on the host. Set
 `SIDEMESH_PORT_FORWARDING_ALLOW_NON_LOOPBACK=1` only if you intentionally want
 the daemon to bridge to other addresses reachable from that host.
+
+Remote browser preview is an optional layer on top of HTTP/HTTPS port
+forwards. It starts Chrome/Chromium on the host, captures compressed page
+frames, and streams those pixels to authenticated clients. Keep it disabled on
+hosts that should not run headless Chrome. When enabled, tune resource usage
+with `SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS`,
+`SIDEMESH_BROWSER_PREVIEW_IDLE_TTL_MS`,
+`SIDEMESH_BROWSER_PREVIEW_FRAME_INTERVAL_MS`, and
+`SIDEMESH_BROWSER_PREVIEW_QUALITY`; lower quality and slower frame intervals
+reduce CPU and bandwidth. The app closes its viewer socket when the preview
+route is not active or the app backgrounds, but the daemon-side browser remains
+available until it is stopped or idle-cleaned.
 
 To run against GitHub Copilot CLI instead of Codex without using the setup
 wizard:

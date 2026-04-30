@@ -131,6 +131,22 @@ export function renderLaunchdEnv(config: NodeConfig): string {
       config.browserPreview.enabled ? "1" : "0",
     ),
     envLine(
+      "SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS",
+      String(config.browserPreview.maxPreviews),
+    ),
+    envLine(
+      "SIDEMESH_BROWSER_PREVIEW_IDLE_TTL_MS",
+      String(config.browserPreview.idleTtlMs),
+    ),
+    envLine(
+      "SIDEMESH_BROWSER_PREVIEW_FRAME_INTERVAL_MS",
+      String(config.browserPreview.frameIntervalMs),
+    ),
+    envLine(
+      "SIDEMESH_BROWSER_PREVIEW_QUALITY",
+      String(config.browserPreview.quality),
+    ),
+    envLine(
       "SIDEMESH_TERMINAL_REQUIRE_PTY",
       config.terminal.requirePty ? "1" : "0",
     ),
