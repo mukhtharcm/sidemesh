@@ -6,12 +6,15 @@ void main() {
     const data =
         '\x1b[?1;2c'
         '\x1b[>0;0;0c'
-        '\x1b[0n'
-        '\x1b[12;34R'
         '\x1b[8;33;45t'
         '\x1bP!|00000000\x1b\\';
 
     expect(stripGeneratedTerminalResponses(data), isEmpty);
+  });
+
+  test('preserves status and cursor reports needed by interactive CLIs', () {
+    expect(stripGeneratedTerminalResponses('\x1b[0n'), '\x1b[0n');
+    expect(stripGeneratedTerminalResponses('\x1b[12;34R'), '\x1b[12;34R');
   });
 
   test('preserves normal terminal input', () {
