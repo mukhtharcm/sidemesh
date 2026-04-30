@@ -439,6 +439,10 @@ export class BrowserPreviewRegistry {
       await sendSpecialKey(cdp, sessionId, stringValue(message.key));
       return;
     }
+    if (type === "navigation") {
+      await this.applyNavigation(preview, stringValue(message.action));
+      return;
+    }
     if (type === "resize") {
       await this.updatePreviewViewport(
         preview,
@@ -446,6 +450,29 @@ export class BrowserPreviewRegistry {
         normalizeViewportSize(message.height, preview.height),
       );
     }
+  }
+
+  private async applyNavigation(
+    preview: BrowserPreviewRecord,
+    action: string,
+  ): Promise<void> {
+    const cdp = preview.cdp;
+    const sessionId = preview.sessionIdCdp;
+    if (!cdp || !sessionId || preview.status !== "running") return;
+    if (action === "reload") {
+      await cdp.send("Page.reload", { ignoreCache: false }, sessionId);
+      return;
+    }
+    if (action !== "back" && action !== "forward") return;
+    const history = await cdp.send("Page.getNavigationHistory", {}, sessionId);
+    const currentIndex = numberValue(history.currentIndex, -1);
+    const entries = Array.isArray(history.entries) ? history.entries : [];
+    const targetIndex = action === "back" ? currentIndex - 1 : currentIndex + 1;
+    const target = entries[targetIndex];
+    if (!target || typeof target !== "object" || Array.isArray(target)) return;
+    const entryId = numberValue((target as Record<string, unknown>).id, 0);
+    if (entryId <= 0) return;
+    await cdp.send("Page.navigateToHistoryEntry", { entryId }, sessionId);
   }
 
   private async updatePreviewViewport(
@@ -458,6 +485,7 @@ export class BrowserPreviewRegistry {
     preview.height = height;
     preview.updatedAt = Date.now();
     await setViewport(preview);
+    this.broadcast(preview, { type: "preview", preview: this.info(preview) });
   }
 
   private startFrameLoop(preview: BrowserPreviewRecord): void {
