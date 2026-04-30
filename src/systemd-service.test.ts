@@ -39,6 +39,9 @@ describe("systemd service rendering", () => {
     assert.match(unit, /EnvironmentFile=\/etc\/sidemesh\/sidemesh-test\.env/);
     assert.match(unit, /ExecStart=\/etc\/sidemesh\/sidemesh-test\.sh/);
     assert.match(unit, /Restart=always/);
+    assert.match(unit, /KillMode=mixed/);
+    assert.match(unit, /TimeoutStopSec=15s/);
+    assert.match(unit, /MemoryAccounting=yes/);
 
     const launcher = renderServiceLauncher(paths, config);
     assert.match(launcher, /dist\/cli\.js' daemon --config/);
@@ -66,5 +69,21 @@ describe("systemd service rendering", () => {
     assert.equal(paths.unitPath, "/tmp/sidemesh/custom.service");
     assert.equal(paths.envPath, "/tmp/sidemesh/custom.env");
     assert.equal(paths.launcherPath, "/tmp/sidemesh/custom.sh");
+  });
+
+  it("renders optional memory pressure and hard cap limits", () => {
+    const paths = resolveServicePaths({
+      serviceName: "sidemesh-test",
+      packageDir: "/opt/sidemesh",
+      nodeBin: "/usr/bin/node",
+    });
+
+    const unit = renderSystemdUnit(paths, {
+      memoryHigh: "2G",
+      memoryMax: "3G",
+    });
+
+    assert.match(unit, /MemoryHigh=2G/);
+    assert.match(unit, /MemoryMax=3G/);
   });
 });
