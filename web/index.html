@@ -3,26 +3,39 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Sidemesh Preview - Your coding agents, wherever you are</title>
-<meta name="description" content="Sidemesh keeps Codex and coding-agent sessions within reach from your phone or desktop." />
-<meta name="theme-color" content="#F7F5EF" />
+<title>Sidemesh - Your coding agents, from anywhere</title>
+<meta name="description" content="Sidemesh turns your own Mac, VPS, and workstations into reachable coding-agent hosts with chat, approvals, files, terminals, port forwarding, and previews." />
+<meta name="theme-color" content="#e9edf0" />
+<meta property="og:title" content="Sidemesh - Your coding agents, from anywhere" />
+<meta property="og:description" content="Run coding agents on your own machines. Control the full remote workstation stack from your phone or desktop." />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="/assets/app-icon.png" />
+<meta name="twitter:card" content="summary" />
 <link rel="icon" type="image/png" href="/assets/favicon.png" />
 <link rel="apple-touch-icon" href="/assets/app-icon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700;800&family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --paper: #f7f5ef;
-    --surface: #fffdf8;
-    --ink: #181b17;
-    --muted: #72776d;
-    --line: rgba(24, 27, 23, 0.12);
-    --line-strong: rgba(24, 27, 23, 0.28);
-    --accent: #2e6b5c;
-    --accent-soft: rgba(46, 107, 92, 0.1);
-    --charcoal: #20241f;
+    --paper: #e9edf0;
+    --paper-2: #dce4e7;
+    --paper-3: #c9d4d7;
+    --ink: #101616;
+    --ink-soft: #323d3c;
+    --muted: #65706f;
+    --line: rgba(16, 22, 22, 0.14);
+    --line-strong: rgba(16, 22, 22, 0.3);
+    --surface: rgba(250, 252, 247, 0.72);
+    --surface-solid: #fafcf7;
+    --sage: #2e7666;
+    --sage-2: #195c51;
+    --clay: #9d6b35;
+    --clay-soft: rgba(157, 107, 53, 0.13);
+    --blueprint: #172b34;
+    --shadow: 0 28px 90px -60px rgba(16, 33, 36, 0.76);
     --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    --wrap: min(1220px, calc(100% - 40px));
   }
 
   * { box-sizing: border-box; }
@@ -33,350 +46,784 @@
   }
 
   body {
+    min-height: 100dvh;
     margin: 0;
+    overflow-x: hidden;
     color: var(--ink);
     background:
-      radial-gradient(circle at 10% 0%, rgba(46, 107, 92, 0.09), transparent 30rem),
-      radial-gradient(circle at 84% 12%, rgba(46, 107, 92, 0.07), transparent 26rem),
-      var(--paper);
-    font-family: "Geist", sans-serif;
-    line-height: 1.45;
+      radial-gradient(circle at 12% -12%, rgba(46, 118, 102, 0.22), transparent 34rem),
+      radial-gradient(circle at 95% 8%, rgba(157, 107, 53, 0.14), transparent 32rem),
+      linear-gradient(180deg, var(--paper) 0%, #f5f7f2 42%, var(--paper) 100%);
+    font-family: "Manrope", sans-serif;
+    line-height: 1.48;
     -webkit-font-smoothing: antialiased;
   }
 
-  a { color: inherit; text-decoration: none; }
-  .mono { font-family: "Geist Mono", monospace; }
-  .wrap { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
+  body::before {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    content: "";
+    opacity: 0.36;
+    background-image:
+      linear-gradient(rgba(16, 22, 22, 0.052) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(16, 22, 22, 0.042) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: linear-gradient(to bottom, black, transparent 72%);
+  }
+
+  body::after {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    content: "";
+    opacity: 0.13;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  .wrap {
+    width: var(--wrap);
+    margin: 0 auto;
+  }
+
+  .mono {
+    font-family: "Geist Mono", monospace;
+  }
+
+  .skip-link {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 20;
+    padding: 10px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    background: var(--surface-solid);
+    transform: translateY(-160%);
+    transition: transform 180ms var(--ease);
+  }
+
+  .skip-link:focus {
+    transform: translateY(0);
+  }
 
   .nav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(18px);
+    background: rgba(233, 237, 240, 0.78);
+    border-bottom: 1px solid rgba(16, 22, 22, 0.08);
+  }
+
+  .nav-inner {
     display: grid;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    gap: 16px;
-    padding: 22px 0;
+    gap: 22px;
+    min-height: 76px;
   }
 
   .brand {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 11px;
     width: max-content;
     font-weight: 800;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.045em;
   }
 
   .brand-logo {
-    width: 32px;
-    height: 32px;
-    border-radius: 11px;
+    width: 34px;
+    height: 34px;
     display: block;
     object-fit: cover;
-    box-shadow: 0 8px 18px rgba(24, 27, 23, 0.12);
+    border-radius: 12px;
+    box-shadow: 0 12px 24px rgba(16, 22, 22, 0.12);
   }
 
   .nav-links {
     display: inline-flex;
-    gap: 18px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     color: var(--muted);
     font-family: "Geist Mono", monospace;
     font-size: 12px;
   }
 
   .nav-links a {
-    transition: color 220ms var(--ease);
+    padding: 9px 10px;
+    border-radius: 999px;
+    transition: color 180ms var(--ease), background 180ms var(--ease);
   }
 
-  .nav-links a:hover {
+  .nav-links a:hover,
+  .nav-links a:focus-visible {
     color: var(--ink);
+    background: rgba(250, 252, 247, 0.56);
   }
 
-  .button {
+  .nav-cta {
+    justify-self: end;
+  }
+
+  .button,
+  .text-link {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     min-height: 44px;
-    padding: 11px 15px;
-    border: 1px solid var(--ink);
     border-radius: 999px;
-    background: var(--ink);
-    color: var(--surface);
     font-family: "Geist Mono", monospace;
     font-size: 12px;
     font-weight: 700;
-    transition: transform 240ms var(--ease), background 240ms var(--ease), border-color 240ms var(--ease);
+    transition: transform 220ms var(--ease), color 220ms var(--ease), background 220ms var(--ease), border-color 220ms var(--ease);
   }
 
-  .button:hover {
-    background: var(--accent);
-    border-color: var(--accent);
+  .button {
+    padding: 11px 16px;
+    border: 1px solid var(--ink);
+    background: var(--ink);
+    color: #fffaf0;
+  }
+
+  .button:hover,
+  .button:focus-visible {
+    border-color: var(--sage-2);
+    background: var(--sage-2);
     transform: translateY(-1px);
   }
 
-  .button:active {
+  .button:active,
+  .text-link:active {
     transform: translateY(1px) scale(0.99);
   }
 
   .button.secondary {
-    background: transparent;
     color: var(--ink);
+    background: rgba(250, 252, 247, 0.58);
     border-color: var(--line-strong);
   }
 
-  .nav .button {
-    justify-self: end;
+  .button.secondary:hover,
+  .button.secondary:focus-visible {
+    border-color: var(--ink);
+    background: var(--surface-solid);
+  }
+
+  .text-link {
+    min-height: auto;
+    color: var(--sage-2);
+    border-bottom: 1px solid rgba(46, 87, 75, 0.35);
+    border-radius: 0;
   }
 
   .hero {
     display: grid;
-    grid-template-columns: minmax(0, 0.9fr) minmax(360px, 0.72fr);
-    gap: clamp(34px, 7vw, 100px);
+    grid-template-columns: minmax(0, 0.92fr) minmax(360px, 0.78fr);
+    gap: clamp(36px, 6vw, 92px);
     align-items: center;
-    min-height: calc(100dvh - 88px);
-    padding: clamp(50px, 7vw, 96px) 0 74px;
+    min-height: min(820px, calc(100dvh - 76px));
+    padding: clamp(54px, 7vw, 98px) 0 clamp(70px, 8vw, 118px);
+  }
+
+  .hero > *,
+  .section-head > *,
+  .split-story > *,
+  .loop-grid > *,
+  .wide-panel > *,
+  .install-grid > * {
+    min-width: 0;
   }
 
   .eyebrow {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
-    color: var(--accent);
+    gap: 12px;
+    color: var(--sage-2);
     font-family: "Geist Mono", monospace;
     font-size: 12px;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
   }
 
   .eyebrow::before {
-    content: "";
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 999px;
-    background: var(--accent);
-    animation: breathe 2.4s var(--ease) infinite;
+    background: var(--sage);
+    box-shadow: 0 0 0 7px rgba(46, 118, 102, 0.11);
+    content: "";
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
   }
 
   h1 {
-    max-width: 10.8ch;
-    margin: 22px 0 20px;
-    font-size: clamp(54px, 7.5vw, 108px);
-    line-height: 0.9;
-    letter-spacing: -0.08em;
+    max-width: 13.6ch;
+    margin: 22px 0 24px;
+    font-family: "Instrument Serif", serif;
+    font-size: clamp(70px, 9.2vw, 132px);
+    font-weight: 400;
+    line-height: 0.82;
+    letter-spacing: -0.075em;
   }
 
   .lede {
-    max-width: 63ch;
+    max-width: 64ch;
     margin: 0;
-    color: #3d433a;
-    font-size: clamp(18px, 1.8vw, 22px);
+    color: var(--ink-soft);
+    font-size: clamp(18px, 1.6vw, 22px);
   }
 
-  .actions {
+  .hero-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
-    margin-top: 30px;
+    margin-top: 32px;
   }
 
-  .fine {
-    max-width: 62ch;
-    margin: 20px 0 0;
-    color: var(--muted);
-    font-family: "Geist Mono", monospace;
-    font-size: 12px;
-    line-height: 1.7;
-  }
-
-  .phone {
-    position: relative;
-    width: min(100%, 390px);
-    margin-left: auto;
-    padding: 12px;
-    border: 1px solid var(--line-strong);
-    border-radius: 42px;
-    background: var(--charcoal);
-    box-shadow: 0 28px 78px -58px rgba(24, 27, 23, 0.82);
-  }
-
-  .notch {
-    width: 104px;
-    height: 20px;
-    margin: 0 auto 12px;
-    border-radius: 0 0 16px 16px;
-    background: #11140f;
-  }
-
-  .screen {
-    min-height: 580px;
-    overflow: hidden;
-    border-radius: 30px;
-    background: #f2f0ea;
-  }
-
-  .screen-head {
-    padding: 20px;
-    border-bottom: 1px solid var(--line);
-    background: var(--surface);
-  }
-
-  .screen-head span {
-    color: var(--muted);
-    font-family: "Geist Mono", monospace;
-    font-size: 11px;
-  }
-
-  .screen-head strong {
-    display: block;
-    margin-top: 6px;
-    font-size: 25px;
-    line-height: 1;
-    letter-spacing: -0.055em;
-  }
-
-  .items {
-    display: grid;
-    gap: 10px;
-    padding: 14px;
-  }
-
-  .item {
-    padding: 14px;
-    border: 1px solid var(--line);
-    border-radius: 22px;
-    background: rgba(255, 253, 248, 0.86);
-    animation: rise 700ms var(--ease) both;
-    animation-delay: calc(var(--i) * 80ms);
-  }
-
-  .item.ask {
-    border-color: rgba(46, 107, 92, 0.26);
-    background: var(--accent-soft);
-  }
-
-  .meta {
+  .trust-line {
     display: flex;
-    justify-content: space-between;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 9px;
+    margin-top: 26px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 8px 11px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(250, 252, 247, 0.52);
     color: var(--muted);
     font-family: "Geist Mono", monospace;
     font-size: 11px;
+    font-weight: 600;
   }
 
-  .item strong {
+  .chip::before {
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: currentColor;
+    content: "";
+  }
+
+  .console-card {
+    position: relative;
+    width: min(100%, 510px);
+    margin-left: auto;
+  }
+
+  .console-card::before {
+    position: absolute;
+    inset: -24px -18px auto auto;
+    width: 170px;
+    height: 170px;
+    border: 1px solid rgba(16, 22, 22, 0.18);
+    border-radius: 40px;
+    transform: rotate(8deg);
+    content: "";
+  }
+
+  .device-shell {
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+    border: 1px solid var(--line-strong);
+    border-radius: 34px;
+    background: rgba(250, 252, 247, 0.94);
+    box-shadow: var(--shadow);
+  }
+
+  .device-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 18px 18px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .traffic {
+    display: inline-flex;
+    gap: 7px;
+  }
+
+  .traffic i {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(16, 22, 22, 0.18);
+  }
+
+  .status {
+    color: var(--sage-2);
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .work-pane {
+    display: grid;
+    grid-template-columns: 0.74fr 1fr;
+    min-height: 476px;
+  }
+
+  .session-list {
+    padding: 16px;
+    border-right: 1px solid var(--line);
+    background: rgba(220, 228, 231, 0.62);
+  }
+
+  .session-list h2,
+  .chat-pane h2 {
+    margin: 0 0 14px;
+    color: var(--muted);
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .session-pill {
     display: block;
-    margin: 10px 0 6px;
-    font-size: 17px;
+    padding: 13px;
+    border: 1px solid transparent;
+    border-radius: 18px;
+    color: var(--muted);
+  }
+
+  .session-pill + .session-pill {
+    margin-top: 8px;
+  }
+
+  .session-pill.active {
+    border-color: rgba(46, 118, 102, 0.32);
+    background: rgba(46, 118, 102, 0.11);
+    color: var(--ink);
+  }
+
+  .session-pill strong {
+    display: block;
+    color: var(--ink);
+    font-size: 14px;
     letter-spacing: -0.03em;
   }
 
-  .item p {
+  .session-pill span {
+    display: block;
+    margin-top: 4px;
+    font-family: "Geist Mono", monospace;
+    font-size: 10px;
+  }
+
+  .chat-pane {
+    padding: 16px;
+  }
+
+  .message {
+    padding: 14px;
+    border-radius: 18px;
+    background: rgba(250, 252, 247, 0.86);
+  }
+
+  .message + .message {
+    margin-top: 10px;
+  }
+
+  .message.approval {
+    border: 1px solid rgba(157, 107, 53, 0.28);
+    background: var(--clay-soft);
+  }
+
+  .message .meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+    font-family: "Geist Mono", monospace;
+    font-size: 10px;
+  }
+
+  .message strong {
+    display: block;
+    margin: 9px 0 5px;
+    letter-spacing: -0.035em;
+  }
+
+  .message p {
     margin: 0;
     color: var(--muted);
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .composer {
-    margin: 0 14px 14px;
-    padding: 13px;
+    margin-top: 12px;
+    padding: 12px 13px;
     border: 1px solid var(--line);
-    border-radius: 20px;
-    background: var(--surface);
+    border-radius: 18px;
+    background: rgba(250, 252, 247, 0.78);
     color: var(--muted);
     font-family: "Geist Mono", monospace;
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .section {
-    padding: clamp(56px, 8vw, 118px) 0;
+    padding: clamp(70px, 10vw, 138px) 0;
     border-top: 1px solid var(--line);
+  }
+
+  .section.tight {
+    padding-top: clamp(44px, 7vw, 96px);
   }
 
   .section-head {
     display: grid;
-    grid-template-columns: minmax(0, 0.74fr) minmax(320px, 0.64fr);
-    gap: 28px;
+    grid-template-columns: minmax(0, 0.78fr) minmax(320px, 0.62fr);
+    gap: 32px;
     align-items: end;
-    margin-bottom: 32px;
+    margin-bottom: clamp(34px, 5vw, 58px);
   }
 
-  .label {
-    color: var(--accent);
+  .kicker {
+    display: block;
+    margin-bottom: 10px;
+    color: var(--sage-2);
     font-family: "Geist Mono", monospace;
     font-size: 12px;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
   }
 
   .section h2 {
-    max-width: 11.6ch;
-    margin: 8px 0 0;
-    font-size: clamp(38px, 5vw, 72px);
-    line-height: 0.92;
-    letter-spacing: -0.07em;
+    max-width: 12ch;
+    margin: 0;
+    font-family: "Instrument Serif", serif;
+    font-size: clamp(48px, 7vw, 94px);
+    font-weight: 400;
+    line-height: 0.88;
+    letter-spacing: -0.064em;
   }
 
   .section-head p {
+    max-width: 58ch;
     margin: 0;
     color: var(--muted);
     font-size: 18px;
   }
 
-  .rows {
-    border-top: 1px solid var(--line);
+  .split-story {
+    display: grid;
+    grid-template-columns: minmax(0, 0.78fr) minmax(0, 1fr);
+    gap: clamp(22px, 4vw, 58px);
   }
 
-  .row {
+  .story-rail {
+    position: sticky;
+    top: 108px;
+    align-self: start;
+    padding: 22px;
+    border: 1px solid var(--line);
+    border-radius: 30px;
+    background: rgba(250, 252, 247, 0.54);
+  }
+
+  .story-rail p {
+    margin: 14px 0 0;
+    color: var(--muted);
+  }
+
+  .metric {
     display: grid;
-    grid-template-columns: 170px 1fr;
-    gap: 28px;
-    padding: 26px 0;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: center;
+    padding: 14px 0;
     border-bottom: 1px solid var(--line);
   }
 
-  .row b {
-    color: var(--accent);
+  .metric:last-child {
+    border-bottom: 0;
+  }
+
+  .metric b {
+    font-family: "Instrument Serif", serif;
+    font-size: 44px;
+    font-weight: 400;
+    line-height: 0.88;
+    letter-spacing: -0.05em;
+  }
+
+  .metric span {
+    color: var(--muted);
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+  }
+
+  .steps {
+    counter-reset: step;
+    display: grid;
+    gap: 14px;
+  }
+
+  .step {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 72px 1fr;
+    gap: 18px;
+    padding: 24px;
+    border: 1px solid var(--line);
+    border-radius: 30px;
+    background: rgba(250, 252, 247, 0.58);
+  }
+
+  .step::before {
+    display: grid;
+    place-items: center;
+    width: 50px;
+    height: 50px;
+    border: 1px solid var(--line-strong);
+    border-radius: 18px;
+    color: var(--sage-2);
     font-family: "Geist Mono", monospace;
     font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-weight: 700;
+    content: "0" counter(step);
   }
 
-  .row strong {
-    display: block;
-    margin-bottom: 7px;
-    font-size: 25px;
-    line-height: 1.03;
-    letter-spacing: -0.045em;
+  .step h3 {
+    margin: 0 0 9px;
+    font-size: clamp(24px, 3vw, 34px);
+    line-height: 0.98;
+    letter-spacing: -0.06em;
   }
 
-  .row p {
-    max-width: 72ch;
+  .step p {
+    max-width: 68ch;
     margin: 0;
     color: var(--muted);
   }
 
-  .two-col {
+  .feature-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.75fr);
-    gap: 18px;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 14px;
   }
 
-  .panel {
-    padding: 28px;
+  .loop-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: stretch;
+  }
+
+  .loop-lead,
+  .loop-card {
+    border: 1px solid var(--line);
+    border-radius: 32px;
+    background: rgba(250, 252, 247, 0.58);
+  }
+
+  .loop-lead {
+    display: grid;
+    align-content: end;
+    min-height: 420px;
+    padding: 30px;
+  }
+
+  .loop-lead h2 {
+    max-width: 10.6ch;
+    margin: 0 0 18px;
+    font-family: "Instrument Serif", serif;
+    font-size: clamp(48px, 7vw, 90px);
+    font-weight: 400;
+    line-height: 0.88;
+    letter-spacing: -0.064em;
+  }
+
+  .loop-lead p {
+    max-width: 54ch;
+    margin: 0;
+    color: var(--muted);
+  }
+
+  .loop-stack {
+    display: grid;
+    gap: 14px;
+  }
+
+  .loop-card {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    gap: 18px;
+    padding: 24px;
+  }
+
+  .loop-card b {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border: 1px solid var(--line-strong);
+    border-radius: 17px;
+    color: var(--sage-2);
+    font-family: "Geist Mono", monospace;
+    font-size: 12px;
+  }
+
+  .loop-card strong {
+    display: block;
+    margin-bottom: 8px;
+    font-size: clamp(22px, 2.8vw, 34px);
+    line-height: 0.96;
+    letter-spacing: -0.058em;
+  }
+
+  .loop-card p {
+    margin: 0;
+    color: var(--muted);
+  }
+
+  .feature {
+    min-height: 270px;
+    padding: 24px;
     border: 1px solid var(--line);
     border-radius: 30px;
-    background: rgba(255, 253, 248, 0.68);
+    background: rgba(250, 252, 247, 0.58);
   }
 
-  .panel h3 {
+  .feature:nth-child(1),
+  .feature:nth-child(4) {
+    grid-column: span 3;
+  }
+
+  .feature:nth-child(2),
+  .feature:nth-child(3),
+  .feature:nth-child(5),
+  .feature:nth-child(6) {
+    grid-column: span 3;
+  }
+
+  .feature-icon {
+    width: 42px;
+    height: 42px;
+    margin-bottom: 44px;
+    border: 1px solid var(--line-strong);
+    border-radius: 15px;
+    background:
+      linear-gradient(135deg, rgba(46, 118, 102, 0.18), transparent),
+      rgba(250, 252, 247, 0.68);
+  }
+
+  .feature h3 {
+    margin: 0 0 10px;
+    font-size: clamp(24px, 2.6vw, 38px);
+    line-height: 0.96;
+    letter-spacing: -0.065em;
+  }
+
+  .feature p {
+    margin: 0;
+    color: var(--muted);
+  }
+
+  .wide-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 0.78fr) minmax(320px, 0.62fr);
+    gap: 28px;
+    align-items: stretch;
+    padding: clamp(22px, 4vw, 42px);
+    border: 1px solid var(--line-strong);
+    border-radius: 38px;
+    background:
+      radial-gradient(circle at 10% 20%, rgba(46, 118, 102, 0.18), transparent 30rem),
+      rgba(250, 252, 247, 0.7);
+    box-shadow: var(--shadow);
+  }
+
+  .wide-panel h2 {
+    max-width: 11ch;
+  }
+
+  .route-card {
+    display: grid;
+    gap: 12px;
+    align-content: start;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    background: rgba(233, 237, 240, 0.72);
+  }
+
+  .route-line {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 12px;
+    color: var(--muted);
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+  }
+
+  .route-line::before,
+  .route-line::after {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--sage);
+    content: "";
+  }
+
+  .route-line span {
+    height: 1px;
+    background: var(--line-strong);
+  }
+
+  .route-copy {
+    margin-top: 4px;
+    color: var(--muted);
+  }
+
+  .install-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.82fr) minmax(320px, 0.62fr);
+    gap: 16px;
+  }
+
+  .install-card {
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-radius: 32px;
+    background: rgba(250, 252, 247, 0.62);
+  }
+
+  .install-card h3 {
     margin: 8px 0 12px;
-    font-size: 38px;
-    line-height: 0.95;
-    letter-spacing: -0.06em;
+    font-size: clamp(30px, 4vw, 54px);
+    line-height: 0.92;
+    letter-spacing: -0.07em;
   }
 
-  .panel p {
+  .install-card p {
     margin: 0;
     color: var(--muted);
   }
@@ -384,44 +831,95 @@
   .command {
     margin-top: 22px;
     padding: 18px;
-    border-radius: 22px;
-    background: var(--charcoal);
-    color: #eef2ea;
     overflow: auto;
+    border-radius: 22px;
+    background: var(--blueprint);
+    color: #f7fbf4;
     font-family: "Geist Mono", monospace;
     font-size: 13px;
     line-height: 1.9;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
 
   .command span {
-    color: rgba(238, 242, 234, 0.46);
+    color: rgba(247, 241, 231, 0.48);
   }
 
-  .security {
-    background: #eee8db;
+  .note-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 22px;
   }
 
-  .faq {
+  .note {
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .faq-list {
     border-top: 1px solid var(--line);
   }
 
   .faq-row {
     display: grid;
-    grid-template-columns: minmax(170px, 0.36fr) 1fr;
-    gap: 28px;
+    grid-template-columns: minmax(210px, 0.34fr) 1fr;
+    gap: 32px;
     padding: 24px 0;
     border-bottom: 1px solid var(--line);
   }
 
   .faq-row strong {
-    font-size: 20px;
+    font-size: 22px;
     line-height: 1;
-    letter-spacing: -0.04em;
+    letter-spacing: -0.05em;
   }
 
   .faq-row p {
+    max-width: 74ch;
     margin: 0;
     color: var(--muted);
+  }
+
+  .closing {
+    padding-bottom: clamp(70px, 9vw, 128px);
+  }
+
+  .closing-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 28px;
+    align-items: end;
+    padding: clamp(28px, 5vw, 54px);
+    border: 1px solid var(--line-strong);
+    border-radius: 40px;
+    background: var(--ink);
+    color: #f7fbf4;
+    box-shadow: var(--shadow);
+  }
+
+  .closing-card h2 {
+    max-width: 12ch;
+    margin: 0 0 14px;
+    font-family: "Instrument Serif", serif;
+    font-size: clamp(48px, 7vw, 94px);
+    font-weight: 400;
+    line-height: 0.88;
+    letter-spacing: -0.064em;
+  }
+
+  .closing-card p {
+    max-width: 62ch;
+    margin: 0;
+    color: rgba(247, 251, 244, 0.72);
+  }
+
+  .closing-card .button {
+    border-color: #f7fbf4;
+    background: #f7fbf4;
+    color: var(--ink);
   }
 
   footer {
@@ -434,31 +932,50 @@
     font-size: 12px;
   }
 
-  @keyframes breathe {
-    70% { box-shadow: 0 0 0 10px rgba(46, 107, 92, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(46, 107, 92, 0); }
+  footer nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+
+  footer a {
+    border-bottom: 1px solid rgba(111, 115, 104, 0.34);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--sage-2);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .device-shell,
+    .step,
+    .feature,
+    .install-card,
+    .wide-panel {
+      animation: rise 680ms var(--ease) both;
+    }
+
+    .step:nth-child(2),
+    .feature:nth-child(2) { animation-delay: 70ms; }
+    .step:nth-child(3),
+    .feature:nth-child(3) { animation-delay: 120ms; }
+    .step:nth-child(4),
+    .feature:nth-child(4) { animation-delay: 170ms; }
   }
 
   @keyframes rise {
-    from { opacity: 0; transform: translateY(14px); }
+    from { opacity: 0; transform: translateY(18px); }
     to { opacity: 1; transform: translateY(0); }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-      animation-duration: 1ms !important;
-      animation-iteration-count: 1 !important;
-      scroll-behavior: auto !important;
-      transition-duration: 1ms !important;
-    }
-  }
-
-  @media (max-width: 900px) {
+  @media (max-width: 980px) {
     .hero,
     .section-head,
-    .two-col {
+    .split-story,
+    .loop-grid,
+    .wide-panel,
+    .install-grid {
       grid-template-columns: 1fr;
     }
 
@@ -466,146 +983,401 @@
       min-height: auto;
     }
 
-    .phone {
-      margin: 0 auto;
+    .console-card {
+      margin: 0;
+    }
+
+    .story-rail {
+      position: static;
     }
   }
 
-  @media (max-width: 640px) {
-    .wrap {
-      width: min(100% - 24px, 640px);
+  @media (max-width: 760px) {
+    :root {
+      --wrap: min(calc(100% - 24px), 720px);
     }
 
-    .nav {
-      grid-template-columns: 1fr auto;
+    .nav-inner {
+      grid-template-columns: 1fr;
+      min-height: 68px;
     }
 
     .nav-links {
       display: none;
     }
 
-    .actions,
-    .button {
+    .nav-cta {
+      display: none;
+    }
+
+    .hero {
+      padding-top: 48px;
+    }
+
+    .lede {
+      max-width: 28ch;
+      font-size: 17px;
+    }
+
+    h1 {
+      max-width: 7.4ch;
+      font-size: clamp(62px, 17vw, 78px);
+    }
+
+    .hero-actions,
+    .hero-actions .button {
       width: 100%;
     }
 
-    .row,
+    .trust-line {
+      max-width: 28ch;
+    }
+
+    .console-card::before {
+      display: none;
+    }
+
+    .work-pane {
+      grid-template-columns: 1fr;
+      min-height: auto;
+    }
+
+    .session-list {
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .feature-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .feature,
+    .feature:nth-child(1),
+    .feature:nth-child(2),
+    .feature:nth-child(3),
+    .feature:nth-child(4),
+    .feature:nth-child(5),
+    .feature:nth-child(6) {
+      grid-column: auto;
+      min-height: 230px;
+    }
+
+    .feature-icon {
+      margin-bottom: 34px;
+    }
+
+    .step {
+      grid-template-columns: 1fr;
+    }
+
+    .loop-lead {
+      min-height: 320px;
+    }
+
+    .loop-card {
+      grid-template-columns: 1fr;
+    }
+
     .faq-row,
+    .closing-card,
     footer {
       grid-template-columns: 1fr;
-      gap: 8px;
     }
 
-    .phone {
-      padding: 10px;
-      border-radius: 34px;
-    }
-
-    .screen {
-      min-height: auto;
-      border-radius: 26px;
+    .closing-card .button {
+      width: 100%;
     }
   }
 </style>
 </head>
 <body>
-  <header class="wrap nav">
-    <a class="brand" href="/"><img class="brand-logo" src="/assets/app-icon.png" alt="" aria-hidden="true" /><span>Sidemesh</span></a>
-    <nav class="nav-links" aria-label="Primary">
-      <a href="#why">Why</a>
-      <a href="#surface">Surface</a>
-      <a href="#install">Install</a>
-      <a href="#faq">FAQ</a>
-    </nav>
-    <a class="button" href="#install">Preview access</a>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="/" aria-label="Sidemesh home">
+        <img class="brand-logo" src="/assets/app-icon.png" alt="" aria-hidden="true" />
+        <span>Sidemesh</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#how">How it works</a>
+        <a href="#surface">What you get</a>
+        <a href="#security">Security</a>
+        <a href="#install">Install</a>
+      </nav>
+      <a class="button nav-cta" href="#install">Preview access</a>
+    </div>
   </header>
 
-  <main class="wrap">
-    <section class="hero">
+  <main id="main">
+    <section class="wrap hero" aria-labelledby="hero-title">
       <div>
-        <span class="eyebrow">Private preview</span>
-        <h1>Your coding agents, wherever you are.</h1>
-        <p class="lede">Start Codex on your Mac, a VPS, or a private machine. Sidemesh keeps that session within reach, so you can check progress, approve the next step, send a quick prompt, or inspect what changed from your phone or desktop.</p>
-        <div class="actions">
+        <span class="eyebrow">private agent workstation</span>
+        <h1 id="hero-title">Your coding agents, from anywhere.</h1>
+        <p class="lede">Run agents on your Mac, VPS, or workstation. Sidemesh gives you the full remote layer around that work: chat, approvals, files, git context, terminal access, port forwarding, and live browser previews.</p>
+        <div class="hero-actions">
           <a class="button" href="#install">Get preview access</a>
-          <a class="button secondary" href="#surface">See the surface</a>
+          <a class="button secondary" href="#how">See how it works</a>
         </div>
-        <p class="fine">Built for Codex in this preview, with the same simple promise: keep your agent sessions close without moving your code.</p>
+        <div class="trust-line" aria-label="Product notes">
+          <span class="chip">your machines</span>
+          <span class="chip">private network first</span>
+          <span class="chip">full host surface</span>
+          <span class="chip">no cloud workspace</span>
+        </div>
       </div>
 
-      <aside class="phone" aria-label="Sidemesh mobile preview">
-        <div class="notch" aria-hidden="true"></div>
-        <div class="screen">
-          <div class="screen-head"><span>Recent</span><strong>4 hosts · 11 sessions</strong></div>
-          <div class="items">
-            <div class="item ask" style="--i:0"><div class="meta"><span>Remote host</span><span>approval</span></div><strong>Allow web search?</strong><p>Codex paused before reaching outside the host.</p></div>
-            <div class="item" style="--i:1"><div class="meta"><span>Workstation</span><span>active</span></div><strong>Review the latest changes</strong><p>Transcript, git state, images, and files are visible.</p></div>
-            <div class="item" style="--i:2"><div class="meta"><span>Build host</span><span>terminal</span></div><strong>Restart daemon safely</strong><p>Attached to a trusted host shell.</p></div>
+      <aside class="console-card" aria-label="Sidemesh app preview">
+        <div class="device-shell">
+          <div class="device-top">
+            <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="status">MacBook online</span>
           </div>
-          <div class="composer">Message the selected agent...</div>
+          <div class="work-pane">
+            <div class="session-list">
+              <h2>Recent</h2>
+              <span class="session-pill active"><strong>Donation system</strong><span>running · approval waiting</span></span>
+              <span class="session-pill"><strong>Marketing site</strong><span>idle · 42% context left</span></span>
+              <span class="session-pill"><strong>Release build</strong><span>terminal attached</span></span>
+            </div>
+            <div class="chat-pane">
+              <h2>Session</h2>
+              <div class="message approval">
+                <div class="meta"><span>permission</span><span>now</span></div>
+                <strong>Allow network access?</strong>
+                <p>The agent wants to verify package metadata before changing the install flow.</p>
+              </div>
+              <div class="message">
+                <div class="meta"><span>tool call</span><span>git</span></div>
+                <strong>3 files changed</strong>
+                <p>Setup command, service restart, and docs were updated on the host.</p>
+              </div>
+              <div class="message">
+                <div class="meta"><span>preview</span><span>local port</span></div>
+                <strong>Frontend server available</strong>
+                <p>Open the forwarded preview without exposing the VPS to the internet.</p>
+              </div>
+              <div class="composer">Reply to the agent...</div>
+            </div>
+          </div>
         </div>
       </aside>
     </section>
 
-    <section class="section" id="why">
-      <div class="section-head">
-        <div><span class="label">Why</span><h2>Your agents keep working. You keep the handle.</h2></div>
-        <p>Coding agents are most useful when they can keep going without you staring at a terminal. Sidemesh is for the in-between moments: a command needs approval, a test is stuck, or you want to see what changed before replying.</p>
+    <section class="section tight" id="how">
+      <div class="wrap split-story">
+        <aside class="story-rail">
+          <span class="kicker">The shape</span>
+          <div class="metric"><b>1</b><span>small daemon per trusted machine</span></div>
+          <div class="metric"><b>N</b><span>agent sessions across hosts</span></div>
+          <div class="metric"><b>0</b><span>need to move code into a hosted IDE</span></div>
+          <p>Sidemesh keeps compute, code, credentials, browsers, and terminals on your host. The app becomes the control surface around them.</p>
+        </aside>
+
+        <div class="steps">
+          <article class="step">
+            <div>
+              <h3>Install the daemon on the machines where agents run.</h3>
+              <p>Use it on a Mac, a VPS, or a workstation. Pair through a private route such as Tailscale or a trusted LAN.</p>
+            </div>
+          </article>
+          <article class="step">
+            <div>
+              <h3>Open the app and choose the session that needs you.</h3>
+              <p>Recent sessions, pending approvals, host status, git state, files, images, and terminals are reachable from one place.</p>
+            </div>
+          </article>
+          <article class="step">
+            <div>
+              <h3>Use the right surface for the job.</h3>
+              <p>Reply in chat, approve a tool call, inspect files, attach a terminal, forward a port, or stream the browser when the visual state matters.</p>
+            </div>
+          </article>
+        </div>
       </div>
-      <div class="rows">
-        <div class="row"><b>Mobile first</b><div><strong>Say yes, no, or wait from your phone.</strong><p>Handle command, file, permission, network, and tool asks without opening SSH for a tiny decision.</p></div></div>
-        <div class="row"><b>Many hosts</b><div><strong>Your private machines feel closer.</strong><p>Pair the machines where agents already run, then browse their recent sessions from one app.</p></div></div>
-        <div class="row"><b>Host context</b><div><strong>See the workspace before you answer.</strong><p>Read markdown, inspect files, check git state, open images, or use terminal access when chat is not enough.</p></div></div>
+    </section>
+
+    <section class="section" aria-labelledby="stack-title">
+      <div class="wrap loop-grid">
+        <div class="loop-lead">
+          <span class="kicker">The stack</span>
+          <h2 id="stack-title">More than remote chat for Codex.</h2>
+          <p>The useful part is not only sending prompts. It is having enough of the host available to do real work when you are away from the machine.</p>
+        </div>
+        <div class="loop-stack">
+          <article class="loop-card">
+            <b>01</b>
+            <div>
+              <strong>Agent control stays visible.</strong>
+              <p>Running sessions, pending approvals, model state, generated images, web searches, tool calls, and ordered transcript events stay reachable.</p>
+            </div>
+          </article>
+          <article class="loop-card">
+            <b>02</b>
+            <div>
+              <strong>The workspace is inspectable.</strong>
+              <p>Browse files, render markdown, check git status, view resources, and understand what changed before you approve the next action.</p>
+            </div>
+          </article>
+          <article class="loop-card">
+            <b>03</b>
+            <div>
+              <strong>Runtime access is built in.</strong>
+              <p>Use terminal, local port forwarding, and browser streaming for the cases where a transcript is not enough.</p>
+            </div>
+          </article>
+        </div>
       </div>
     </section>
 
     <section class="section" id="surface">
-      <div class="section-head">
-        <div><span class="label">Surface</span><h2>A calm app around active work.</h2></div>
-        <p>Sidemesh is intentionally not a full IDE. It is the part of agent work that should be reachable even when your editor is closed.</p>
+      <div class="wrap">
+        <div class="section-head">
+          <div>
+            <span class="kicker">What you get</span>
+            <h2>The missing layer around agent work.</h2>
+          </div>
+          <p>Sidemesh is the remote workstation layer around long-running agent sessions. It keeps chat, approvals, workspace inspection, shell access, and previews in one coherent app.</p>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true"></div>
+            <h3>Recent sessions across hosts</h3>
+            <p>See what is running or waiting on each paired machine without remembering where you started the work.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true"></div>
+            <h3>Approvals that do not hide in chat</h3>
+            <p>Pending decisions get surfaced clearly, so blocked sessions do not stay blocked because you missed a transcript line.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true"></div>
+            <h3>Files, markdown, git, and images</h3>
+            <p>Inspect the workspace before you answer. Review generated assets, read docs, and understand the state of the repo.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true"></div>
+            <h3>Optional terminal access</h3>
+            <p>When chat is too indirect, attach to a host terminal deliberately. Keep it behind a private network where host-level access is intentional.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true"></div>
+            <h3>Browser previews and port forwarding</h3>
+            <p>Open development servers from a phone or desktop while the server keeps running on the remote machine.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true"></div>
+            <h3>Designed for interruption</h3>
+            <p>Check a running session during travel, from a couch, or between meetings. Drop into deeper tools only when the situation needs it.</p>
+          </article>
+        </div>
       </div>
-      <div class="rows">
-        <div class="row"><b>Recent</b><div><strong>Pick up the thread from any paired host.</strong><p>Keep track of running and recent Codex sessions across the machines you use.</p></div></div>
-        <div class="row"><b>Inbox</b><div><strong>Know exactly what is waiting.</strong><p>Pending approvals sit outside the normal transcript, so blocked work is easy to spot.</p></div></div>
-        <div class="row"><b>Chat</b><div><strong>Reply without reopening your terminal.</strong><p>Messages, tool calls, generated images, diffs, and resources stay in one ordered timeline.</p></div></div>
-        <div class="row"><b>Files</b><div><strong>Browse the project when words are not enough.</strong><p>Render markdown, inspect git branch, and view generated resources from the selected host.</p></div></div>
-        <div class="row"><b>Terminal</b><div><strong>Use shell access deliberately.</strong><p>Optional terminal support is for trusted private networks where host-level access is intentional.</p></div></div>
+    </section>
+
+    <section class="section" id="security">
+      <div class="wrap wide-panel">
+        <div>
+          <span class="kicker">Security model</span>
+          <h2>Powerful by design. Private by default.</h2>
+          <p class="route-copy">Sidemesh can expose agent transcripts, workspace files, approvals, forwarded ports, browser sessions, and optional terminal access. That is the point: it gives you a real handle on your own host. It is also why the route should stay private.</p>
+        </div>
+        <div class="route-card" aria-label="Private network route">
+          <div class="route-line"><strong>phone</strong><span></span><strong>private route</strong></div>
+          <div class="route-line"><strong>desktop</strong><span></span><strong>daemon</strong></div>
+          <div class="route-line"><strong>agent</strong><span></span><strong>workspace</strong></div>
+          <p class="route-copy">Use Tailscale, a VPN, or a trusted LAN. Do not expose a powerful host-control daemon casually to the open internet.</p>
+        </div>
       </div>
     </section>
 
     <section class="section" id="install">
-      <div class="two-col">
-        <div class="panel">
-          <span class="label">Install</span>
-          <h3>Install it where your agents run.</h3>
-          <p>Sidemesh is in private preview. Builds and daemon install commands are distributed directly for now; public install channels will appear here when they are ready.</p>
-          <div class="command"><span>$</span> sidemesh setup<br><span>$</span> sidemesh service install<br><span>$</span> sidemesh pair</div>
+      <div class="wrap">
+        <div class="section-head">
+          <div>
+            <span class="kicker">Install</span>
+            <h2>Pair the machines you already use.</h2>
+          </div>
+          <p>The preview is distributed directly for now. Public install channels, policy pages, and store listings will come after the release packaging is stable.</p>
         </div>
-        <div class="panel security">
-          <span class="label">Security</span>
-          <h3>Keep the route private.</h3>
-          <p>Sidemesh can expose transcripts, workspace files, approvals, git metadata, and optional terminal access. Keep it behind Tailscale or a trusted LAN.</p>
+
+        <div class="install-grid">
+          <article class="install-card">
+            <span class="kicker">Daemon</span>
+            <h3>Start on each trusted host.</h3>
+            <p>Run setup once, install the service if you want it to survive restarts, then pair the app with the generated host address and token.</p>
+            <div class="command" aria-label="Install commands">
+              <span>$</span> sidemesh setup<br />
+              <span>$</span> sidemesh service install<br />
+              <span>$</span> sidemesh pair
+            </div>
+          </article>
+          <aside class="install-card">
+            <span class="kicker">App</span>
+            <h3>Open, pair, continue.</h3>
+            <p>The app gives you the daily surface: recent sessions, inbox, chat, files, git details, terminals, port forwarding, and previews.</p>
+            <div class="note-list">
+              <div class="note">Mobile first, with desktop support for larger inspection work.</div>
+              <div class="note">Best on private networks where your devices can reach each host directly.</div>
+              <div class="note">Built for agent sessions and development servers you run yourself, not for moving code into a managed cloud workspace.</div>
+            </div>
+          </aside>
         </div>
       </div>
     </section>
 
     <section class="section" id="faq">
-      <div class="section-head">
-        <div><span class="label">FAQ</span><h2>The important parts, plainly.</h2></div>
-        <p>Minimal should not mean vague. The page still needs to say what Sidemesh is, what it is not, and where the security boundary lives.</p>
+      <div class="wrap">
+        <div class="section-head">
+          <div>
+            <span class="kicker">FAQ</span>
+            <h2>Plain answers before you install.</h2>
+          </div>
+          <p>The short version: Sidemesh is a control surface for your own agent hosts. It is useful because it is powerful, so the network boundary matters.</p>
+        </div>
+        <div class="faq-list">
+          <div class="faq-row">
+            <strong>Is this a cloud IDE?</strong>
+            <p>No. Your code, credentials, terminals, and development servers stay on your machine or VPS. Sidemesh connects to the daemon running next to them.</p>
+          </div>
+          <div class="faq-row">
+            <strong>Which agent does it support?</strong>
+            <p>The preview centers on Codex sessions today. The bigger product shape is the same: a host-level surface around the coding agents you run yourself.</p>
+          </div>
+          <div class="faq-row">
+            <strong>Can it run on the open internet?</strong>
+            <p>Do not treat that as the default. Use a private route first. The daemon is intentionally close to powerful host capabilities.</p>
+          </div>
+          <div class="faq-row">
+            <strong>How is this better than SSH?</strong>
+            <p>SSH gives you a shell. Sidemesh gives you the agent-aware workstation surface: recent sessions, pending approvals, ordered transcripts, images, files, git state, terminal access, port forwarding, and browser previews.</p>
+          </div>
+          <div class="faq-row">
+            <strong>Is it only for mobile?</strong>
+            <p>No. Mobile is the strongest reason for the product, but desktop is useful for side-by-side chat, files, terminals, ports, and previews.</p>
+          </div>
+        </div>
       </div>
-      <div class="faq">
-        <div class="faq-row"><strong>Is this a cloud IDE?</strong><p>No. Sidemesh connects to your own machines and the agent sessions running there.</p></div>
-        <div class="faq-row"><strong>Does it replace Codex?</strong><p>No. Codex remains the agent. Sidemesh is the mobile and desktop surface around it.</p></div>
-        <div class="faq-row"><strong>Which agent does it work with?</strong><p>This preview is built around Codex sessions running on your own machines.</p></div>
-        <div class="faq-row"><strong>Can I use it away from home?</strong><p>Yes, when your phone or desktop can reach the host through Tailscale or another private route.</p></div>
+    </section>
+
+    <section class="wrap closing" aria-label="Preview call to action">
+      <div class="closing-card">
+        <div>
+          <h2>Carry the workstation surface, not the workstation.</h2>
+          <p>Install the daemon on trusted hosts, pair the app, and keep control of sessions, files, terminals, ports, and previews when the machine is not in front of you.</p>
+        </div>
+        <a class="button" href="#install">Start with setup</a>
       </div>
     </section>
   </main>
 
   <footer class="wrap">
-    <span>Preview · Minimal Anywhere</span>
     <span>Sidemesh private developer preview</span>
+    <nav aria-label="Footer">
+      <a href="#security">Security model</a>
+      <a href="#install">Install</a>
+      <a href="#faq">FAQ</a>
+    </nav>
   </footer>
 </body>
 </html>
