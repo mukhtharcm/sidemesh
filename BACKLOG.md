@@ -50,6 +50,9 @@ GitHub Copilot and future coding agents behind the same Sidemesh API.
 
 ## Current Wave
 
+- [ ] Execute the low-network reliability roadmap in
+      `docs/low-network-reliability-roadmap.md`, starting with connection
+      freshness UI and true incremental session replay.
 - [ ] Polish the provider-neutral integrated terminal: opt-in host capability,
       PTY-backed live shell, reconnect replay, mobile key row, and later tmux
       durability when available.
