@@ -29,6 +29,11 @@ import {
 
 type Environment = Record<string, string | undefined>;
 
+const DEFAULT_BROWSER_PREVIEW_MAX_PREVIEWS = 8;
+const DEFAULT_BROWSER_PREVIEW_IDLE_TTL_MS = 60 * 60 * 1000;
+const DEFAULT_BROWSER_PREVIEW_FRAME_INTERVAL_MS = 900;
+const DEFAULT_BROWSER_PREVIEW_QUALITY = 55;
+
 export interface LoadConfigOptions {
   env?: Environment;
   configPath?: string | null;
@@ -277,12 +282,40 @@ function resolveBrowserPreviewConfig(
     env.SIDEMESH_BROWSER_PREVIEW ?? env.SIDEMESH_ENABLE_BROWSER_PREVIEW,
   );
   const envChromePath = env.SIDEMESH_BROWSER_PREVIEW_CHROME_PATH?.trim();
+  const maxPreviews = parseBoundedInteger(
+    env.SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS,
+    browserPreview?.maxPreviews ?? DEFAULT_BROWSER_PREVIEW_MAX_PREVIEWS,
+    1,
+    32,
+  );
+  const idleTtlMs = parseBoundedInteger(
+    env.SIDEMESH_BROWSER_PREVIEW_IDLE_TTL_MS,
+    browserPreview?.idleTtlMs ?? DEFAULT_BROWSER_PREVIEW_IDLE_TTL_MS,
+    30_000,
+    24 * 60 * 60 * 1000,
+  );
+  const frameIntervalMs = parseBoundedInteger(
+    env.SIDEMESH_BROWSER_PREVIEW_FRAME_INTERVAL_MS,
+    browserPreview?.frameIntervalMs ?? DEFAULT_BROWSER_PREVIEW_FRAME_INTERVAL_MS,
+    250,
+    10_000,
+  );
+  const quality = parseBoundedInteger(
+    env.SIDEMESH_BROWSER_PREVIEW_QUALITY,
+    browserPreview?.quality ?? DEFAULT_BROWSER_PREVIEW_QUALITY,
+    20,
+    95,
+  );
   return {
     enabled: envEnabled ?? browserPreview?.enabled ?? false,
     chromePath:
       env.SIDEMESH_BROWSER_PREVIEW_CHROME_PATH !== undefined
         ? envChromePath || null
         : browserPreview?.chromePath ?? null,
+    maxPreviews,
+    idleTtlMs,
+    frameIntervalMs,
+    quality,
   };
 }
 
@@ -301,4 +334,14 @@ function parseInteger(value: string | undefined, fallback: number): number {
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseBoundedInteger(
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const parsed = parseInteger(value, fallback);
+  return Math.max(min, Math.min(max, parsed));
 }

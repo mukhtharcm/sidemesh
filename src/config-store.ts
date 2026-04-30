@@ -60,6 +60,15 @@ const portForwardingConfigSchema = z.object({
 const browserPreviewConfigSchema = z.object({
   enabled: z.boolean().default(false),
   chromePath: z.string().trim().min(1).nullable().default(null),
+  maxPreviews: z.number().int().min(1).max(32).default(8),
+  idleTtlMs: z
+    .number()
+    .int()
+    .min(30_000)
+    .max(24 * 60 * 60 * 1000)
+    .default(60 * 60 * 1000),
+  frameIntervalMs: z.number().int().min(250).max(10_000).default(900),
+  quality: z.number().int().min(20).max(95).default(55),
 });
 
 const persistedProviderConfigSchema = z.discriminatedUnion("kind", [

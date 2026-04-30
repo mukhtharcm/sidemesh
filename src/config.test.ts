@@ -81,6 +81,10 @@ describe("loadConfig", () => {
     assert.deepEqual(config.browserPreview, {
       enabled: false,
       chromePath: null,
+      maxPreviews: 8,
+      idleTtlMs: 60 * 60 * 1000,
+      frameIntervalMs: 900,
+      quality: 55,
     });
   });
 
@@ -163,6 +167,10 @@ describe("loadConfig", () => {
         browserPreview: {
           enabled: true,
           chromePath: "/opt/chrome",
+          maxPreviews: 3,
+          idleTtlMs: 120000,
+          frameIntervalMs: 1500,
+          quality: 70,
         },
         providers: [{ kind: "codex", bin: "codex" }],
       }),
@@ -172,6 +180,10 @@ describe("loadConfig", () => {
     assert.deepEqual(persisted.browserPreview, {
       enabled: true,
       chromePath: "/opt/chrome",
+      maxPreviews: 3,
+      idleTtlMs: 120000,
+      frameIntervalMs: 1500,
+      quality: 70,
     });
 
     const overridden = await loadConfig({
@@ -179,11 +191,19 @@ describe("loadConfig", () => {
       env: {
         SIDEMESH_BROWSER_PREVIEW: "0",
         SIDEMESH_BROWSER_PREVIEW_CHROME_PATH: "/usr/bin/chromium",
+        SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS: "2",
+        SIDEMESH_BROWSER_PREVIEW_IDLE_TTL_MS: "30000",
+        SIDEMESH_BROWSER_PREVIEW_FRAME_INTERVAL_MS: "250",
+        SIDEMESH_BROWSER_PREVIEW_QUALITY: "95",
       },
     });
     assert.deepEqual(overridden.browserPreview, {
       enabled: false,
       chromePath: "/usr/bin/chromium",
+      maxPreviews: 2,
+      idleTtlMs: 30000,
+      frameIntervalMs: 250,
+      quality: 95,
     });
   });
 

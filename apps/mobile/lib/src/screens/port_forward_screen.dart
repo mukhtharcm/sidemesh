@@ -82,6 +82,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   List<HostPortForwardInfo> _ports = const [];
   List<HostBrowserPreviewInfo> _browserPreviews = const [];
   _ActivePortPreview? _inlinePreview;
+  _ActiveBrowserPreview? _inlineBrowserPreview;
   final Set<String> _startingBrowserPreviews = {};
   bool _loading = true;
   bool _creating = false;
@@ -233,6 +234,9 @@ class _PortForwardPaneState extends State<PortForwardPane> {
         if (_inlinePreview?.forward.id == stopped.id) {
           _inlinePreview = null;
         }
+        if (_inlineBrowserPreview?.forward.id == stopped.id) {
+          _inlineBrowserPreview = null;
+        }
         _ports = _ports
             .map((item) => item.id == stopped.id ? stopped : item)
             .toList(growable: false);
@@ -286,6 +290,16 @@ class _PortForwardPaneState extends State<PortForwardPane> {
           ),
         ];
       });
+      if (widget.previewPresentation == PortForwardPreviewPresentation.inline) {
+        setState(() {
+          _inlinePreview = null;
+          _inlineBrowserPreview = _ActiveBrowserPreview(
+            forward: forward,
+            preview: preview,
+          );
+        });
+        return;
+      }
       final stopped = await Navigator.of(context).push<bool>(
         MaterialPageRoute<bool>(
           builder: (_) => BrowserPreviewScreen(
@@ -378,6 +392,24 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   @override
   Widget build(BuildContext context) {
     final inlinePreview = _inlinePreview;
+    final inlineBrowserPreview = _inlineBrowserPreview;
+    if (inlineBrowserPreview != null) {
+      return BrowserPreviewPane(
+        key: ValueKey('browser-preview:${inlineBrowserPreview.preview.id}'),
+        host: widget.host,
+        api: widget.api,
+        preview: inlineBrowserPreview.preview,
+        onBack: () => setState(() => _inlineBrowserPreview = null),
+        onStopped: (stopped) {
+          setState(() {
+            _inlineBrowserPreview = null;
+            _browserPreviews = _browserPreviews
+                .where((item) => item.id != stopped.id)
+                .toList(growable: false);
+          });
+        },
+      );
+    }
     if (inlinePreview != null) {
       return _InlinePortForwardPreview(
         title: inlinePreview.forward.label,
@@ -555,6 +587,13 @@ class _ActivePortPreview {
 
   final HostPortForwardInfo forward;
   final Uri uri;
+}
+
+class _ActiveBrowserPreview {
+  const _ActiveBrowserPreview({required this.forward, required this.preview});
+
+  final HostPortForwardInfo forward;
+  final HostBrowserPreviewInfo preview;
 }
 
 bool get _supportsEmbeddedPreview =>

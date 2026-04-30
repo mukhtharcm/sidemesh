@@ -22,7 +22,14 @@ describe("launchd service rendering", () => {
       stateDir: "/Users/example/.sidemesh",
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
       portForwarding: { enabled: true, allowNonLoopbackTargets: false },
-      browserPreview: { enabled: true, chromePath: "/Applications/Chromium.app/Contents/MacOS/Chromium" },
+      browserPreview: {
+        enabled: true,
+        chromePath: "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        maxPreviews: 2,
+        idleTtlMs: 120000,
+        frameIntervalMs: 1000,
+        quality: 60,
+      },
       configPath: "/Users/example/.sidemesh/config.json",
       configExists: true,
     };
@@ -57,6 +64,10 @@ describe("launchd service rendering", () => {
     assert.match(env, /SIDEMESH_TERMINAL=1/);
     assert.match(env, /SIDEMESH_PORT_FORWARDING=1/);
     assert.match(env, /SIDEMESH_BROWSER_PREVIEW=1/);
+    assert.match(env, /SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS=2/);
+    assert.match(env, /SIDEMESH_BROWSER_PREVIEW_IDLE_TTL_MS=120000/);
+    assert.match(env, /SIDEMESH_BROWSER_PREVIEW_FRAME_INTERVAL_MS=1000/);
+    assert.match(env, /SIDEMESH_BROWSER_PREVIEW_QUALITY=60/);
     assert.match(env, /SIDEMESH_LABEL="Mac Dev"/);
   });
 
