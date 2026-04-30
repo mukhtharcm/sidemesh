@@ -21,6 +21,7 @@ describe("pairing helpers", () => {
       stateDir: "/tmp/sidemesh",
       terminal: { enabled: false, shell: null, requirePty: false },
       portForwarding: { enabled: false, allowNonLoopbackTargets: false },
+      browserPreview: { enabled: false, chromePath: null },
       configPath: "/tmp/sidemesh/config.json",
       configExists: true,
     };
