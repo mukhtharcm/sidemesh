@@ -203,14 +203,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            _BrowserDockAction(
-              icon: Icons.open_in_full_rounded,
-              tooltip: 'Full page',
-              color: colors.accent,
-              onTap: onFullPage,
-            ),
-            const SizedBox(width: 6),
-            _BrowserDockAction(
+            _BrowserDockCloseButton(
               icon: Icons.close_rounded,
               tooltip: 'Hide preview',
               onTap: onClose,
@@ -481,6 +474,38 @@ class _BrowserDockAction extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: Icon(icon, size: 18, color: fg),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BrowserDockCloseButton extends StatelessWidget {
+  const _BrowserDockCloseButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: SizedBox(
+            width: 32,
+            height: 32,
+            child: Icon(icon, size: 17, color: colors.textTertiary),
           ),
         ),
       ),
