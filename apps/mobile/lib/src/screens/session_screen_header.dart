@@ -4,11 +4,13 @@ class _CachedTranscriptStrip extends StatelessWidget {
   const _CachedTranscriptStrip({
     required this.mode,
     required this.refreshing,
+    this.lastConnectedLabel,
     this.onRetry,
   });
 
   final _TranscriptFreshnessMode mode;
   final bool refreshing;
+  final String? lastConnectedLabel;
   final VoidCallback? onRetry;
 
   @override
@@ -25,9 +27,13 @@ class _CachedTranscriptStrip extends StatelessWidget {
             ? 'Cached transcript · syncing latest changes'
             : 'Cached transcript · waiting for latest host snapshot',
       _TranscriptFreshnessMode.reconnecting =>
-        'Reconnecting · checking latest events',
+        lastConnectedLabel == null
+            ? 'Reconnecting · checking latest events'
+            : 'Reconnecting · $_lastConnectedText',
       _TranscriptFreshnessMode.offline =>
-        'Offline · showing last known session state',
+        lastConnectedLabel == null
+            ? 'Offline · showing last known session state'
+            : 'Offline · $_lastConnectedText',
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -81,6 +87,10 @@ class _CachedTranscriptStrip extends StatelessWidget {
       ),
     );
   }
+
+  String get _lastConnectedText => lastConnectedLabel == 'just now'
+      ? 'last connected just now'
+      : 'last connected $lastConnectedLabel ago';
 }
 
 enum _SessionActionTone { neutral, accent, warning, danger }
