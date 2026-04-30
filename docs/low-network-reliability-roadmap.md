@@ -16,6 +16,9 @@ Already implemented:
   snapshot arrives.
 - Session resume marks in-memory transcripts as possibly stale and shows
   reconnecting/offline UI instead of silently showing old state.
+- Session detail tracks the host's latest successful contact and can show
+  messages such as `Reconnecting - last connected 12s ago` or
+  `Offline - last connected 2m ago`.
 - Session live events carry sequence IDs and the client can request delta replay
   with `/api/sessions/:sessionId/events?since=<seq>`.
 - Terminal output has replay buffers and reconnects with `since`.
@@ -35,6 +38,31 @@ Goal: make the app honest about connection freshness everywhere.
 
 The user should always know whether they are seeing live state, recently synced
 state, or cached/stale state.
+
+Current completed slice:
+
+- `HostStatusStore` now carries `lastOnlineAt` and `lastEventAt`.
+- Successful session live events update `lastEventAt`.
+- Session detail stale/reconnecting/offline banners can show the last connected
+  age.
+- Background resume no longer silently leaves an in-memory transcript looking
+  fresh while resync is still happening.
+
+Still missing from this priority:
+
+- Recent, Hosts, and Inbox still need the richer freshness labels; most of the
+  app still behaves like green/red/probing dots.
+- Terminal panes do not yet show `last output`, `last connected`, or
+  `reconnecting` status.
+- Browser preview panes do not yet show `last frame`, `paused`, or reconnect
+  age.
+- We do not measure latency or RTT yet.
+- We do not yet have a centralized `ConnectionQualityStore`; the first slice
+  extended `HostStatusStore`.
+- Relative time labels do not tick on their own. They update when the widget
+  rebuilds, so `12s ago` can become stale while the screen is idle.
+- We do not yet record a full connection timeline for debugging reconnect
+  loops.
 
 Track this per host and per active session:
 
@@ -313,4 +341,3 @@ Sidemesh should pass these manual scenarios:
   preview is paused or reconnected intentionally, not silently dead.
 - Run on a small VPS:
   memory stays bounded under terminal/browser/session reconnect churn.
-
