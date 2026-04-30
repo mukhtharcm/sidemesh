@@ -323,6 +323,65 @@ class HostTerminalInfo {
       );
 }
 
+class HostPortForwardInfo {
+  const HostPortForwardInfo({
+    required this.id,
+    required this.label,
+    required this.targetHost,
+    required this.targetPort,
+    required this.scheme,
+    required this.cwd,
+    required this.sessionId,
+    required this.status,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.lastConnectionAt,
+    required this.connections,
+    required this.activeConnections,
+    required this.bytesFromClient,
+    required this.bytesFromTarget,
+  });
+
+  final String id;
+  final String label;
+  final String targetHost;
+  final int targetPort;
+  final String scheme;
+  final String? cwd;
+  final String? sessionId;
+  final String status;
+  final int createdAt;
+  final int updatedAt;
+  final int? lastConnectionAt;
+  final int connections;
+  final int activeConnections;
+  final int bytesFromClient;
+  final int bytesFromTarget;
+
+  bool get isRunning => status == 'running';
+
+  String get target => '$targetHost:$targetPort';
+
+  factory HostPortForwardInfo.fromJson(Map<String, dynamic> json) =>
+      HostPortForwardInfo(
+        id: _stringValue(json['id']),
+        label: _stringValue(json['label']),
+        targetHost: _stringValue(json['targetHost']),
+        targetPort: _intValue(json['targetPort']),
+        scheme: _stringValue(json['scheme']),
+        cwd: _stringOrNull(json['cwd']),
+        sessionId: _stringOrNull(json['sessionId']),
+        status: _stringValue(json['status']),
+        createdAt: _intValue(json['createdAt']),
+        updatedAt: _intValue(json['updatedAt']),
+        lastConnectionAt: _intOrNull(json['lastConnectionAt']),
+        connections: _intValue(json['connections']),
+        activeConnections: _intValue(json['activeConnections']),
+        bytesFromClient: _intValue(json['bytesFromClient']),
+        bytesFromTarget: _intValue(json['bytesFromTarget']),
+      );
+}
+
 class GitInfoSummary {
   const GitInfoSummary({this.sha, this.branch, this.originUrl});
 
