@@ -37,6 +37,15 @@ describe("browser preview", () => {
       () => registry.create({ targetHost: "127.0.0.1", targetPort: 0 }),
       /targetPort must be between 1 and 65535/,
     );
+    await assert.rejects(
+      () =>
+        registry.create({
+          targetHost: "127.0.0.1",
+          targetPort: 3000,
+          profileMode: "default-profile",
+        }),
+      /browser preview profileMode must be temporary or sidemesh/,
+    );
   });
 
   it("tries the requested browser target before loopback fallbacks", () => {
@@ -73,6 +82,7 @@ describe("browser preview", () => {
       scheme: "http" as const,
       cwd: "/workspace",
       sessionId: "session-1",
+      profileMode: "temporary" as const,
     };
 
     assert.equal(
@@ -86,6 +96,10 @@ describe("browser preview", () => {
     assert.notEqual(
       browserPreviewReuseKey(base),
       browserPreviewReuseKey({ ...base, cwd: "/other" }),
+    );
+    assert.notEqual(
+      browserPreviewReuseKey(base),
+      browserPreviewReuseKey({ ...base, profileMode: "sidemesh" }),
     );
   });
 

@@ -216,6 +216,14 @@ reduce CPU and bandwidth. The app closes its viewer socket when the preview
 route is not active or the app backgrounds, but the daemon-side browser remains
 available until it is stopped or idle-cleaned.
 
+Browser previews can run with a temporary browser profile or the saved Sidemesh
+browser profile. Temporary profiles are deleted when the preview stops. The
+saved Sidemesh profile lives under the daemon state directory at
+`browser-profiles/sidemesh` and keeps normal browser state such as cookies,
+local storage, IndexedDB, service workers, and cached login sessions. Treat that
+directory as sensitive: anyone with access to the daemon host may be able to use
+the saved web sessions. Sidemesh does not use your normal Chrome profile.
+
 To run against GitHub Copilot CLI instead of Codex without using the setup
 wizard:
 
