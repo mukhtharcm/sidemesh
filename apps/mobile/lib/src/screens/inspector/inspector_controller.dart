@@ -14,6 +14,7 @@ enum InspectorSurfaceKind {
   fileBrowser,
   pinned,
   terminal,
+  ports,
   gitDetails,
   sessionDetails,
 }
