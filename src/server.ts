@@ -4,6 +4,7 @@ import { hostname, platform } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import nodePath from "node:path";
 
+import compression from "compression";
 import cors from "cors";
 import express, {
   type Request,
@@ -620,6 +621,18 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     (await provider.getVersion().catch(() => "unknown"));
 
   app.use(cors());
+  // Compress large JSON responses while skipping already-compressed content
+  // types (images, video) and the unauthenticated health-check endpoint.
+  app.use(
+    compression({
+      filter: (request, response) => {
+        if (request.path === "/healthz") {
+          return false;
+        }
+        return compression.filter(request, response);
+      },
+    }),
+  );
   // Image attachments are sent as data URLs, so message payloads can be
   // materially larger than plain-text turns.
   app.use(express.json({ limit: "16mb" }));
