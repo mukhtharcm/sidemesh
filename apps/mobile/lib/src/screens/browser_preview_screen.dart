@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' hide Uint8List;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../api_client.dart';
@@ -76,6 +77,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     with WidgetsBindingObserver {
   final _textController = TextEditingController();
   final _inputFocusNode = FocusNode();
+  final _browserFocusNode = FocusNode(debugLabel: 'browser-preview-input');
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   late HostBrowserPreviewInfo _preview;
@@ -87,6 +89,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   bool _inputRailConfigured = false;
   bool _inputRailOpen = false;
   bool _clientPaused = false;
+  bool _manualPause = false;
 
   @override
   void initState() {
@@ -103,6 +106,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     WidgetsBinding.instance.removeObserver(this);
     _textController.dispose();
     _inputFocusNode.dispose();
+    _browserFocusNode.dispose();
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     if (widget.stopOnDispose) {
@@ -116,15 +120,14 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     super.didChangeDependencies();
     if (_inputRailConfigured) return;
     _inputRailConfigured = true;
-    _inputRailOpen = MediaQuery.sizeOf(context).shortestSide >= 700;
+    _inputRailOpen = false;
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      if (_clientPaused) {
-        _clientPaused = false;
-        _connect();
+      if (_clientPaused && !_manualPause) {
+        _resumeStream();
       }
       return;
     }
@@ -132,7 +135,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached ||
         state == AppLifecycleState.hidden) {
-      _pauseStream();
+      _pauseStream(manual: false);
     }
   }
 
@@ -171,17 +174,27 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     );
   }
 
-  void _pauseStream() {
+  void _pauseStream({required bool manual}) {
     if (_clientPaused) return;
     _clientPaused = true;
+    _manualPause = manual;
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     _subscription = null;
     _channel = null;
     if (!mounted) return;
     setState(() {
-      _status = 'Stream paused while the app is in the background.';
+      _status = manual
+          ? 'Stream paused. The remote browser is still running.'
+          : 'Stream paused while the app is in the background.';
     });
+  }
+
+  void _resumeStream() {
+    if (!_clientPaused) return;
+    _clientPaused = false;
+    _manualPause = false;
+    _connect();
   }
 
   void _handleFrame(dynamic payload) {
@@ -266,8 +279,12 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   void _sendText() {
     final text = _textController.text;
     if (text.isEmpty) return;
-    _send({'type': 'text', 'text': text});
+    _sendTextPayload(text);
     _textController.clear();
+  }
+
+  void _sendTextPayload(String text) {
+    _send({'type': 'text', 'text': text});
   }
 
   void _sendKey(String key) {
@@ -275,18 +292,76 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   void _toggleInputRail() {
-    final next = !_inputRailOpen;
-    setState(() => _inputRailOpen = next);
-    if (!next) {
-      _inputFocusNode.unfocus();
+    if (!_inputRailOpen) {
+      _openInputRail();
       return;
     }
+    if (!_inputFocusNode.hasFocus) {
+      _focusInputRail();
+      return;
+    }
+    _closeInputRail();
+  }
+
+  void _openInputRail() {
+    setState(() => _inputRailOpen = true);
+    _focusInputRail();
+  }
+
+  void _closeInputRail() {
+    setState(() => _inputRailOpen = false);
+    _inputFocusNode.unfocus();
+    _browserFocusNode.requestFocus();
+  }
+
+  void _focusInputRail() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _inputFocusNode.requestFocus();
     });
   }
 
+  KeyEventResult _handleHardwareKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final hardware = HardwareKeyboard.instance;
+    final hasShortcutModifier =
+        hardware.isMetaPressed ||
+        hardware.isControlPressed ||
+        hardware.isAltPressed;
+    if (hasShortcutModifier) return KeyEventResult.ignored;
+
+    final specialKey = _browserSpecialKey(event.logicalKey);
+    if (specialKey != null) {
+      _sendKey(specialKey);
+      return KeyEventResult.handled;
+    }
+
+    final character = event.character;
+    if (character == null ||
+        character.isEmpty ||
+        character.codeUnits.any((unit) => unit < 32)) {
+      return KeyEventResult.ignored;
+    }
+    _sendTextPayload(character);
+    return KeyEventResult.handled;
+  }
+
+  String? _browserSpecialKey(LogicalKeyboardKey key) {
+    return switch (key) {
+      LogicalKeyboardKey.escape => 'Escape',
+      LogicalKeyboardKey.tab => 'Tab',
+      LogicalKeyboardKey.enter => 'Enter',
+      LogicalKeyboardKey.numpadEnter => 'Enter',
+      LogicalKeyboardKey.backspace => 'Backspace',
+      LogicalKeyboardKey.arrowLeft => 'ArrowLeft',
+      LogicalKeyboardKey.arrowUp => 'ArrowUp',
+      LogicalKeyboardKey.arrowDown => 'ArrowDown',
+      LogicalKeyboardKey.arrowRight => 'ArrowRight',
+      _ => null,
+    };
+  }
+
   void _sendTap(TapUpDetails details, Size size) {
+    _browserFocusNode.requestFocus();
     final point = _mapPoint(details.localPosition, size);
     if (point == null) return;
     _send({'type': 'tap', 'x': point.dx, 'y': point.dy});
@@ -329,15 +404,19 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final desktopLike = MediaQuery.sizeOf(context).shortestSide >= 700;
     return Column(
       children: [
         if (widget.showHeader)
           _PreviewHeader(
             preview: _preview,
             connected: _error == null && _status == null,
+            streamPaused: _clientPaused,
             inputRailOpen: _inputRailOpen,
             onBack: widget.onBack,
             onToggleInput: _toggleInputRail,
+            onPause: () => _pauseStream(manual: true),
+            onResume: _resumeStream,
             onStop: () => unawaited(_stopRemoteBrowser()),
           ),
         Expanded(
@@ -358,23 +437,35 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                       child: LayoutBuilder(
                         builder: (context, constraints) {
                           final size = constraints.biggest;
-                          return GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTapUp: (details) => _sendTap(details, size),
-                            onVerticalDragUpdate: (details) =>
-                                _sendScroll(details, size),
-                            onHorizontalDragUpdate: (details) =>
-                                _sendScroll(details, size),
-                            child: Container(
-                              color: const Color(0xFF07090D),
-                              alignment: Alignment.center,
-                              child: _buildPreviewBody(colors),
+                          return Focus(
+                            focusNode: _browserFocusNode,
+                            autofocus: desktopLike,
+                            onKeyEvent: _handleHardwareKey,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTapUp: (details) => _sendTap(details, size),
+                              onVerticalDragUpdate: (details) =>
+                                  _sendScroll(details, size),
+                              onHorizontalDragUpdate: (details) =>
+                                  _sendScroll(details, size),
+                              child: Container(
+                                color: const Color(0xFF07090D),
+                                alignment: Alignment.center,
+                                child: _buildPreviewBody(colors),
+                              ),
                             ),
                           );
                         },
                       ),
                     ),
                   ),
+                  if (_clientPaused)
+                    Positioned.fill(
+                      child: _PausedPreviewOverlay(
+                        manualPause: _manualPause,
+                        onResume: _resumeStream,
+                      ),
+                    ),
                   Positioned(
                     right: 12,
                     bottom: 12,
@@ -394,7 +485,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             focusNode: _inputFocusNode,
             onSendText: _sendText,
             onKey: _sendKey,
-            onClose: _toggleInputRail,
+            onFocusInput: _focusInputRail,
+            onClose: _closeInputRail,
+            showSpecialKeys: !desktopLike,
           ),
       ],
     );
@@ -443,16 +536,22 @@ class _PreviewHeader extends StatelessWidget {
   const _PreviewHeader({
     required this.preview,
     required this.connected,
+    required this.streamPaused,
     required this.inputRailOpen,
     required this.onToggleInput,
+    required this.onPause,
+    required this.onResume,
     required this.onStop,
     this.onBack,
   });
 
   final HostBrowserPreviewInfo preview;
   final bool connected;
+  final bool streamPaused;
   final bool inputRailOpen;
   final VoidCallback onToggleInput;
+  final VoidCallback onPause;
+  final VoidCallback onResume;
   final VoidCallback onStop;
   final VoidCallback? onBack;
 
@@ -508,8 +607,14 @@ class _PreviewHeader extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       MeshPill(
-                        label: connected ? 'live' : preview.status,
-                        tone: connected
+                        label: streamPaused
+                            ? 'paused'
+                            : connected
+                            ? 'live'
+                            : preview.status,
+                        tone: streamPaused
+                            ? MeshPillTone.warning
+                            : connected
                             ? MeshPillTone.success
                             : MeshPillTone.neutral,
                         mono: true,
@@ -528,10 +633,19 @@ class _PreviewHeader extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             MeshIconButton(
+              icon: streamPaused
+                  ? Icons.play_circle_outline_rounded
+                  : Icons.pause_circle_outline_rounded,
+              tooltip: streamPaused ? 'Resume stream' : 'Pause stream',
+              color: streamPaused ? colors.success : colors.textSecondary,
+              onTap: streamPaused ? onResume : onPause,
+            ),
+            const SizedBox(width: 6),
+            MeshIconButton(
               icon: inputRailOpen
                   ? Icons.keyboard_hide_outlined
                   : Icons.keyboard_alt_outlined,
-              tooltip: inputRailOpen ? 'Hide page input' : 'Show page input',
+              tooltip: inputRailOpen ? 'Hide keyboard' : 'Open keyboard',
               color: inputRailOpen ? colors.accent : colors.textSecondary,
               onTap: onToggleInput,
             ),
@@ -543,6 +657,64 @@ class _PreviewHeader extends StatelessWidget {
               onTap: onStop,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PausedPreviewOverlay extends StatelessWidget {
+  const _PausedPreviewOverlay({
+    required this.manualPause,
+    required this.onResume,
+  });
+
+  final bool manualPause;
+  final VoidCallback onResume;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return DecoratedBox(
+      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.42)),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: MeshCard(
+            tone: MeshCardTone.surface,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.pause_circle_filled_rounded,
+                  size: 34,
+                  color: colors.textSecondary,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  manualPause ? 'Viewer paused' : 'Viewer is sleeping',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  manualPause
+                      ? 'The remote browser is still running. Resume when you want fresh frames again.'
+                      : 'Sidemesh paused the stream while the app was backgrounded. Resume to reconnect.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: colors.textSecondary, height: 1.35),
+                ),
+                const SizedBox(height: 14),
+                FilledButton.icon(
+                  onPressed: onResume,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('Resume stream'),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -573,7 +745,7 @@ class _PreviewFloatingControls extends StatelessWidget {
         child: TextButton.icon(
           onPressed: onToggleInput,
           icon: const Icon(Icons.keyboard_alt_outlined, size: 18),
-          label: const Text('Input'),
+          label: const Text('Keyboard'),
         ),
       ),
     );
@@ -586,14 +758,18 @@ class _InputRail extends StatelessWidget {
     required this.focusNode,
     required this.onSendText,
     required this.onKey,
+    required this.onFocusInput,
     required this.onClose,
+    required this.showSpecialKeys,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final VoidCallback onSendText;
   final void Function(String key) onKey;
+  final VoidCallback onFocusInput;
   final VoidCallback onClose;
+  final bool showSpecialKeys;
 
   @override
   Widget build(BuildContext context) {
@@ -617,13 +793,19 @@ class _InputRail extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Page input',
+                      showSpecialKeys ? 'Page input' : 'Keyboard relay',
                       style: TextStyle(
                         color: colors.textSecondary,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
+                  TextButton.icon(
+                    onPressed: onFocusInput,
+                    icon: const Icon(Icons.keyboard_rounded, size: 17),
+                    label: const Text('Focus'),
+                  ),
+                  const SizedBox(width: 4),
                   IconButton(
                     tooltip: 'Hide keyboard',
                     onPressed: onClose,
@@ -633,21 +815,30 @@ class _InputRail extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 6),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _KeyButton(label: 'Esc', onTap: () => onKey('Escape')),
-                    _KeyButton(label: 'Tab', onTap: () => onKey('Tab')),
-                    _KeyButton(label: 'Enter', onTap: () => onKey('Enter')),
-                    _KeyButton(label: '⌫', onTap: () => onKey('Backspace')),
-                    _KeyButton(label: '←', onTap: () => onKey('ArrowLeft')),
-                    _KeyButton(label: '↑', onTap: () => onKey('ArrowUp')),
-                    _KeyButton(label: '↓', onTap: () => onKey('ArrowDown')),
-                    _KeyButton(label: '→', onTap: () => onKey('ArrowRight')),
-                  ],
+              if (showSpecialKeys)
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _KeyButton(label: 'Esc', onTap: () => onKey('Escape')),
+                      _KeyButton(label: 'Tab', onTap: () => onKey('Tab')),
+                      _KeyButton(label: 'Enter', onTap: () => onKey('Enter')),
+                      _KeyButton(label: '⌫', onTap: () => onKey('Backspace')),
+                      _KeyButton(label: '←', onTap: () => onKey('ArrowLeft')),
+                      _KeyButton(label: '↑', onTap: () => onKey('ArrowUp')),
+                      _KeyButton(label: '↓', onTap: () => onKey('ArrowDown')),
+                      _KeyButton(label: '→', onTap: () => onKey('ArrowRight')),
+                    ],
+                  ),
+                )
+              else
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Desktop mode: click the preview and type normally. Use this box for paste-heavy input.',
+                    style: TextStyle(color: colors.textSecondary, height: 1.35),
+                  ),
                 ),
-              ),
               const SizedBox(height: 10),
               Row(
                 children: [
@@ -661,6 +852,7 @@ class _InputRail extends StatelessWidget {
                       decoration: const InputDecoration(
                         hintText: 'Type text for the remote page',
                       ),
+                      onTap: onFocusInput,
                       onSubmitted: (_) => onSendText(),
                     ),
                   ),
