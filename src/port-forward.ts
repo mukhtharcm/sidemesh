@@ -453,22 +453,18 @@ function isLoopbackHost(host: string): boolean {
     .every((part) => Number(part) >= 0 && Number(part) <= 255);
 }
 
-function loopbackTargetCandidates(host: string): string[] {
-  if (!isLoopbackHost(host)) {
-    return [host];
-  }
-  const candidates = [host];
+export function loopbackTargetCandidates(host: string): string[] {
   const normalized = host.toLowerCase();
-  if (normalized !== "::1") {
-    candidates.push("::1");
+  if (normalized === "localhost") {
+    return ["localhost", "::1", "127.0.0.1"];
   }
-  if (normalized !== "127.0.0.1") {
-    candidates.push("127.0.0.1");
+  if (normalized === "127.0.0.1") {
+    return ["127.0.0.1", "::1", "localhost"];
   }
-  if (normalized !== "localhost") {
-    candidates.push("localhost");
+  if (normalized === "::1") {
+    return ["::1", "127.0.0.1", "localhost"];
   }
-  return [...new Set(candidates)];
+  return [host];
 }
 
 function rawDataToBuffer(raw: WebSocket.RawData): Buffer {
