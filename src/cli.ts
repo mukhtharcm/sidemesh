@@ -370,6 +370,7 @@ export async function main(argv = process.argv): Promise<void> {
           port: config.port,
           stateDir: config.stateDir,
           terminal: config.terminal,
+          portForwarding: config.portForwarding,
           defaultProvider: config.defaultProviderKind,
           providers: config.providers.map((provider) => provider.kind),
           tokenSource: config.tokenSource,
@@ -391,6 +392,15 @@ export async function main(argv = process.argv): Promise<void> {
         console.log(
           `Terminal: ${payload.terminal.enabled ? "enabled" : "disabled"}${
             payload.terminal.shell ? ` (${payload.terminal.shell})` : ""
+          }`,
+        );
+        console.log(
+          `Port forwarding: ${
+            payload.portForwarding.enabled ? "enabled" : "disabled"
+          }${
+            payload.portForwarding.allowNonLoopbackTargets
+              ? " (non-localhost targets allowed)"
+              : ""
           }`,
         );
         console.log(`Default provider: ${payload.defaultProvider}`);
