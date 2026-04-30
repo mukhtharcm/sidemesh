@@ -217,6 +217,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   const browserPreviewRegistry = new BrowserPreviewRegistry({
     enabled: hostCapabilities.workspace.browserPreview,
     chromePath: config.browserPreview.chromePath,
+    persistentProfileRoot: nodePath.join(config.stateDir, "browser-profiles"),
     maxPreviews: config.browserPreview.maxPreviews,
     idleTtlMs: config.browserPreview.idleTtlMs,
     frameIntervalMs: config.browserPreview.frameIntervalMs,
@@ -887,6 +888,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         sessionId: asString(request.body?.sessionId),
         width: asInteger(request.body?.width),
         height: asInteger(request.body?.height),
+        profileMode: asString(request.body?.profileMode),
       });
       response.status(201).json(preview);
     }),
