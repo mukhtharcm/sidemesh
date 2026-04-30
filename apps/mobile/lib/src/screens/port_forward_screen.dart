@@ -86,6 +86,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   final Set<String> _startingBrowserPreviews = {};
   bool _loading = true;
   bool _creating = false;
+  bool _rememberBrowserLogins = true;
   String _scheme = 'http';
   String? _error;
 
@@ -265,7 +266,12 @@ class _PortForwardPaneState extends State<PortForwardPane> {
     setState(() => _startingBrowserPreviews.add(forward.id));
     try {
       final previews = await widget.api.fetchBrowserPreviews(widget.host);
-      final existing = _firstMatchingPreview(previews, forward);
+      final profileMode = _browserProfileMode;
+      final existing = _firstMatchingPreview(
+        previews,
+        forward,
+        profileMode: profileMode,
+      );
       final preview =
           existing ??
           await widget.api.createBrowserPreview(
@@ -278,6 +284,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
             sessionId: forward.sessionId ?? widget.sessionId,
             width: viewport.width.round().clamp(320, 1200),
             height: viewport.height.round().clamp(480, 1400),
+            profileMode: profileMode,
           );
       if (!mounted) return;
       setState(() {
@@ -359,23 +366,29 @@ class _PortForwardPaneState extends State<PortForwardPane> {
     );
   }
 
+  String get _browserProfileMode =>
+      _rememberBrowserLogins ? 'sidemesh' : 'temporary';
+
   bool _matchesForward(
     HostBrowserPreviewInfo preview,
-    HostPortForwardInfo forward,
-  ) {
+    HostPortForwardInfo forward, {
+    String? profileMode,
+  }) {
     return preview.targetHost == forward.targetHost &&
         preview.targetPort == forward.targetPort &&
         preview.scheme == forward.scheme &&
         preview.cwd == (forward.cwd ?? widget.cwd) &&
-        preview.sessionId == (forward.sessionId ?? widget.sessionId);
+        preview.sessionId == (forward.sessionId ?? widget.sessionId) &&
+        (profileMode == null || preview.profileMode == profileMode);
   }
 
   HostBrowserPreviewInfo? _firstMatchingPreview(
     Iterable<HostBrowserPreviewInfo> previews,
-    HostPortForwardInfo forward,
-  ) {
+    HostPortForwardInfo forward, {
+    String? profileMode,
+  }) {
     for (final preview in previews) {
-      if (_matchesForward(preview, forward) &&
+      if (_matchesForward(preview, forward, profileMode: profileMode) &&
           (preview.status == 'running' || preview.status == 'starting')) {
         return preview;
       }
@@ -505,6 +518,21 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                           hintText: 'Vite',
                         ),
                       ),
+                    ),
+                    FilterChip(
+                      selected: _rememberBrowserLogins,
+                      avatar: Icon(
+                        _rememberBrowserLogins
+                            ? Icons.lock_clock_rounded
+                            : Icons.lock_reset_rounded,
+                        size: 17,
+                      ),
+                      label: const Text('Remember browser logins'),
+                      onSelected: _scheme == 'tcp'
+                          ? null
+                          : (selected) => setState(
+                              () => _rememberBrowserLogins = selected,
+                            ),
                     ),
                   ],
                 ),

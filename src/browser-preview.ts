@@ -17,15 +17,18 @@ const DEFAULT_QUALITY = 55;
 const CHROME_START_TIMEOUT_MS = 10_000;
 const MAX_TEXT_INPUT_CHARS = 20_000;
 const MAX_CLIENT_BUFFERED_AMOUNT = 8 * 1024 * 1024;
+const SIDEMESH_BROWSER_PROFILE_DIR = "sidemesh";
 
 type BrowserProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 export type BrowserPreviewStatus = "starting" | "running" | "stopped" | "failed";
 export type BrowserPreviewScheme = "http" | "https";
+export type BrowserPreviewProfileMode = "temporary" | "sidemesh";
 
 export interface BrowserPreviewRegistryOptions {
   enabled: boolean;
   chromePath?: string | null;
+  persistentProfileRoot?: string | null;
   maxPreviews?: number;
   idleTtlMs?: number;
   frameIntervalMs?: number;
@@ -41,6 +44,7 @@ export interface CreateBrowserPreviewRequest {
   sessionId?: string | null;
   width?: number | null;
   height?: number | null;
+  profileMode?: string | null;
 }
 
 export interface BrowserPreviewInfo {
@@ -52,6 +56,7 @@ export interface BrowserPreviewInfo {
   scheme: BrowserPreviewScheme;
   cwd: string | null;
   sessionId: string | null;
+  profileMode: BrowserPreviewProfileMode;
   status: BrowserPreviewStatus;
   width: number;
   height: number;
@@ -69,6 +74,7 @@ export interface BrowserPreviewReuseCriteria {
   scheme: BrowserPreviewScheme;
   cwd: string | null;
   sessionId: string | null;
+  profileMode: BrowserPreviewProfileMode;
 }
 
 interface BrowserPreviewRecord {
@@ -80,6 +86,7 @@ interface BrowserPreviewRecord {
   scheme: BrowserPreviewScheme;
   cwd: string | null;
   sessionId: string | null;
+  profileMode: BrowserPreviewProfileMode;
   status: BrowserPreviewStatus;
   width: number;
   height: number;
@@ -93,25 +100,40 @@ interface BrowserPreviewRecord {
   process: BrowserProcess | null;
   cdp: CdpConnection | null;
   sessionIdCdp: string | null;
+  targetId: string | null;
+  ownsBrowser: boolean;
   nextFrameSeq: number;
   frameTimer: NodeJS.Timeout | null;
   starting: Promise<void> | null;
   capturingFrame: boolean;
+  cleanupHandlers: Array<() => void>;
+}
+
+interface PersistentBrowserHost {
+  userDataDir: string;
+  process: BrowserProcess;
+  cdp: CdpConnection;
 }
 
 export class BrowserPreviewRegistry {
   private readonly previews = new Map<string, BrowserPreviewRecord>();
   private readonly enabled: boolean;
   private readonly chromePath: string | null;
+  private readonly persistentProfileRoot: string;
   private readonly maxPreviews: number;
   private readonly idleTtlMs: number;
   private readonly frameIntervalMs: number;
   private readonly quality: number;
   private cleanupTimer: NodeJS.Timeout | null = null;
+  private persistentHost: PersistentBrowserHost | null = null;
+  private persistentHostStarting: Promise<PersistentBrowserHost> | null = null;
 
   public constructor(options: BrowserPreviewRegistryOptions) {
     this.enabled = options.enabled;
     this.chromePath = options.chromePath?.trim() || null;
+    this.persistentProfileRoot =
+      options.persistentProfileRoot?.trim() ||
+      path.join(tmpdir(), "sidemesh-browser-profiles");
     this.maxPreviews = clampInteger(
       options.maxPreviews ?? DEFAULT_MAX_PREVIEWS,
       1,
@@ -156,12 +178,14 @@ export class BrowserPreviewRegistry {
     const height = normalizeViewportSize(request.height, DEFAULT_HEIGHT);
     const cwd = request.cwd?.trim() || null;
     const sessionId = request.sessionId?.trim() || null;
+    const profileMode = normalizeProfileMode(request.profileMode);
     const reusable = this.findReusablePreview({
       targetHost,
       targetPort,
       scheme,
       cwd,
       sessionId,
+      profileMode,
     });
     if (reusable) {
       await this.updatePreviewViewport(reusable, width, height);
@@ -194,6 +218,7 @@ export class BrowserPreviewRegistry {
       scheme,
       cwd,
       sessionId,
+      profileMode,
       status: "starting",
       width,
       height,
@@ -207,10 +232,13 @@ export class BrowserPreviewRegistry {
       process: null,
       cdp: null,
       sessionIdCdp: null,
+      targetId: null,
+      ownsBrowser: false,
       nextFrameSeq: 1,
       frameTimer: null,
       starting: null,
       capturingFrame: false,
+      cleanupHandlers: [],
     };
     this.previews.set(preview.id, preview);
     preview.starting = this.startPreview(preview);
@@ -297,21 +325,17 @@ export class BrowserPreviewRegistry {
       ),
     );
     this.previews.clear();
+    await this.stopPersistentHost();
   }
 
   private async startPreview(preview: BrowserPreviewRecord): Promise<void> {
     try {
-      const chromePath = await resolveChromePath(this.chromePath);
-      const userDataDir = await mkdtemp(
-        path.join(tmpdir(), "sidemesh-browser-preview-"),
-      );
+      const { cdp, process: child, userDataDir, ownsBrowser } =
+        await this.openBrowserForPreview(preview);
       preview.userDataDir = userDataDir;
-      const { process: child, browserWsUrl } = await launchChrome(
-        chromePath,
-        userDataDir,
-      );
-      preview.process = child;
-      const cdp = await CdpConnection.connect(browserWsUrl);
+      preview.process = ownsBrowser ? child : null;
+      preview.ownsBrowser = ownsBrowser;
+      preview.cdp = cdp;
       const target = await cdp.send("Target.createTarget", {
         url: "about:blank",
       });
@@ -321,18 +345,118 @@ export class BrowserPreviewRegistry {
         flatten: true,
       });
       const sessionId = stringField(attached, "sessionId");
-      preview.cdp = cdp;
+      preview.targetId = targetId;
       preview.sessionIdCdp = sessionId;
       await setViewport(preview);
       await cdp.send("Page.enable", {}, sessionId);
       await cdp.send("Runtime.enable", {}, sessionId);
-      this.registerBrowserNavigationHandlers(preview, targetId, sessionId);
-      await cdp.send("Target.setDiscoverTargets", { discover: true });
+      this.registerBrowserNavigationHandlers(preview, targetId, sessionId, {
+        followUnscopedPopups: preview.profileMode === "temporary",
+      });
+      if (preview.profileMode === "temporary") {
+        await cdp.send("Target.setDiscoverTargets", { discover: true });
+      }
       preview.url = await navigateToReachableTarget(cdp, sessionId, preview);
       preview.status = "running";
       preview.updatedAt = Date.now();
-      child.once("exit", () => {
-        if (preview.status === "stopped") return;
+      if (ownsBrowser) {
+        child.once("exit", () => {
+          if (preview.status === "stopped") return;
+          preview.status = "failed";
+          preview.lastError = "Chromium exited.";
+          preview.updatedAt = Date.now();
+          this.stopFrameLoop(preview);
+          this.broadcast(preview, {
+            type: "error",
+            message: preview.lastError,
+          });
+        });
+      }
+    } catch (error) {
+      preview.status = "failed";
+      preview.lastError = error instanceof Error ? error.message : String(error);
+      preview.updatedAt = Date.now();
+      await this.stopRecord(preview, "failed");
+      throw error;
+    }
+  }
+
+  private async openBrowserForPreview(preview: BrowserPreviewRecord): Promise<{
+    cdp: CdpConnection;
+    process: BrowserProcess;
+    userDataDir: string;
+    ownsBrowser: boolean;
+  }> {
+    const chromePath = await resolveChromePath(this.chromePath);
+    if (preview.profileMode === "sidemesh") {
+      const host = await this.ensurePersistentHost(chromePath);
+      return {
+        cdp: host.cdp,
+        process: host.process,
+        userDataDir: host.userDataDir,
+        ownsBrowser: false,
+      };
+    }
+    const userDataDir = await mkdtemp(
+      path.join(tmpdir(), "sidemesh-browser-preview-"),
+    );
+    const { process: child, browserWsUrl } = await launchChrome(chromePath, userDataDir);
+    try {
+      return {
+        cdp: await CdpConnection.connect(browserWsUrl),
+        process: child,
+        userDataDir,
+        ownsBrowser: true,
+      };
+    } catch (error) {
+      if (!child.killed) child.kill("SIGTERM");
+      await rm(userDataDir, { recursive: true, force: true }).catch(() => {});
+      throw error;
+    }
+  }
+
+  private async ensurePersistentHost(
+    chromePath: string,
+  ): Promise<PersistentBrowserHost> {
+    if (this.persistentHost && !this.persistentHost.process.killed) {
+      return this.persistentHost;
+    }
+    if (this.persistentHostStarting) {
+      return this.persistentHostStarting;
+    }
+    this.persistentHostStarting = this.startPersistentHost(chromePath);
+    try {
+      this.persistentHost = await this.persistentHostStarting;
+      return this.persistentHost;
+    } finally {
+      this.persistentHostStarting = null;
+    }
+  }
+
+  private async startPersistentHost(
+    chromePath: string,
+  ): Promise<PersistentBrowserHost> {
+    const userDataDir = path.join(
+      this.persistentProfileRoot,
+      SIDEMESH_BROWSER_PROFILE_DIR,
+    );
+    const { process: child, browserWsUrl } = await launchChrome(chromePath, userDataDir);
+    let cdp: CdpConnection;
+    try {
+      cdp = await CdpConnection.connect(browserWsUrl);
+      await cdp.send("Target.setDiscoverTargets", { discover: true });
+    } catch (error) {
+      if (!child.killed) child.kill("SIGTERM");
+      throw error;
+    }
+    const host = { userDataDir, process: child, cdp };
+    child.once("exit", () => {
+      if (this.persistentHost?.process === child) {
+        this.persistentHost = null;
+      }
+      for (const preview of this.previews.values()) {
+        if (preview.profileMode !== "sidemesh") continue;
+        if (preview.status === "stopped") continue;
         preview.status = "failed";
         preview.lastError = "Chromium exited.";
         preview.updatedAt = Date.now();
@@ -341,14 +465,9 @@ export class BrowserPreviewRegistry {
           type: "error",
           message: preview.lastError,
         });
-      });
-    } catch (error) {
-      preview.status = "failed";
-      preview.lastError = error instanceof Error ? error.message : String(error);
-      preview.updatedAt = Date.now();
-      await this.stopRecord(preview, "failed");
-      throw error;
-    }
+      }
+    });
+    return host;
   }
 
   private async handleClientMessage(
@@ -555,25 +674,30 @@ export class BrowserPreviewRegistry {
     preview: BrowserPreviewRecord,
     primaryTargetId: string,
     sessionId: string,
+    options: { followUnscopedPopups: boolean },
   ): void {
     const cdp = preview.cdp;
     if (!cdp) return;
 
-    cdp.onSessionEvent(sessionId, "Page.frameNavigated", (params) => {
-      const frame = objectValue(params.frame);
-      if (!frame || stringValue(frame.parentId)) return;
-      const url = stringValue(frame.url);
-      if (!url) return;
-      this.updatePreviewUrl(preview, url);
-    });
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Page.frameNavigated", (params) => {
+        const frame = objectValue(params.frame);
+        if (!frame || stringValue(frame.parentId)) return;
+        const url = stringValue(frame.url);
+        if (!url) return;
+        this.updatePreviewUrl(preview, url);
+      }),
+    );
 
-    cdp.onSessionEvent(sessionId, "Page.windowOpen", (params) => {
-      const url = stringValue(params.url);
-      if (!isBrowserNavigationUrl(url)) return;
-      void this.navigatePreviewToUrl(preview, url).catch((error: unknown) =>
-        this.handleCaptureError(preview, error),
-      );
-    });
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Page.windowOpen", (params) => {
+        const url = stringValue(params.url);
+        if (!isBrowserNavigationUrl(url)) return;
+        void this.navigatePreviewToUrl(preview, url).catch((error: unknown) =>
+          this.handleCaptureError(preview, error),
+        );
+      }),
+    );
 
     const followedPopupTargets = new Set<string>();
     const followTargetInfo = (targetInfo: Record<string, unknown> | null) => {
@@ -581,6 +705,12 @@ export class BrowserPreviewRegistry {
       const targetId = stringValue(targetInfo.targetId);
       if (!targetId || targetId === primaryTargetId) return;
       if (followedPopupTargets.has(targetId)) return;
+      const openerId = stringValue(targetInfo.openerId);
+      if (openerId) {
+        if (openerId !== primaryTargetId) return;
+      } else if (!options.followUnscopedPopups) {
+        return;
+      }
       if (stringValue(targetInfo.type) !== "page") return;
       const url = stringValue(targetInfo.url);
       if (!isBrowserNavigationUrl(url)) return;
@@ -590,13 +720,17 @@ export class BrowserPreviewRegistry {
       );
     };
 
-    cdp.onEvent("Target.targetCreated", (event) => {
-      followTargetInfo(objectValue(event.params.targetInfo));
-    });
+    preview.cleanupHandlers.push(
+      cdp.onEvent("Target.targetCreated", (event) => {
+        followTargetInfo(objectValue(event.params.targetInfo));
+      }),
+    );
 
-    cdp.onEvent("Target.targetInfoChanged", (event) => {
-      followTargetInfo(objectValue(event.params.targetInfo));
-    });
+    preview.cleanupHandlers.push(
+      cdp.onEvent("Target.targetInfoChanged", (event) => {
+        followTargetInfo(objectValue(event.params.targetInfo));
+      }),
+    );
   }
 
   private async followPopupTarget(
@@ -670,19 +804,50 @@ export class BrowserPreviewRegistry {
       }
     }
     preview.clients.clear();
-    preview.cdp?.close();
+    for (const cleanup of preview.cleanupHandlers.splice(0)) {
+      cleanup();
+    }
+    if (preview.targetId && preview.cdp && !preview.ownsBrowser) {
+      await preview.cdp
+        .send("Target.closeTarget", { targetId: preview.targetId })
+        .catch(() => {});
+    }
+    if (preview.ownsBrowser) {
+      preview.cdp?.close();
+    }
     preview.cdp = null;
     preview.sessionIdCdp = null;
-    if (preview.process && !preview.process.killed) {
+    preview.targetId = null;
+    if (preview.ownsBrowser && preview.process && !preview.process.killed) {
       preview.process.kill("SIGTERM");
     }
     preview.process = null;
     const userDataDir = preview.userDataDir;
     preview.userDataDir = null;
-    if (userDataDir) {
+    if (preview.ownsBrowser && userDataDir) {
       await rm(userDataDir, { recursive: true, force: true }).catch(() => {});
     }
     this.previews.delete(preview.id);
+    if (
+      preview.profileMode === "sidemesh" &&
+      ![...this.previews.values()].some(
+        (item) =>
+          item.profileMode === "sidemesh" &&
+          (item.status === "running" || item.status === "starting"),
+      )
+    ) {
+      await this.stopPersistentHost();
+    }
+  }
+
+  private async stopPersistentHost(): Promise<void> {
+    const host = this.persistentHost;
+    this.persistentHost = null;
+    if (!host) return;
+    host.cdp.close();
+    if (!host.process.killed) {
+      host.process.kill("SIGTERM");
+    }
   }
 
   private requirePreview(id: string): BrowserPreviewRecord {
@@ -729,6 +894,7 @@ export class BrowserPreviewRegistry {
       scheme: preview.scheme,
       cwd: preview.cwd,
       sessionId: preview.sessionId,
+      profileMode: preview.profileMode,
       status: preview.status,
       width: preview.width,
       height: preview.height,
@@ -764,6 +930,7 @@ class CdpConnection {
   >();
 
   private constructor(private readonly socket: WebSocket) {
+    this.events.setMaxListeners(128);
     socket.on("message", (raw) => this.handleMessage(raw));
     socket.on("close", () => this.rejectAll(new Error("CDP socket closed")));
     socket.on("error", (error) => this.rejectAll(error));
@@ -1123,6 +1290,16 @@ function normalizeScheme(value: string | null | undefined): BrowserPreviewScheme
   throw new BrowserPreviewError("browser preview scheme must be http or https");
 }
 
+function normalizeProfileMode(
+  value: string | null | undefined,
+): BrowserPreviewProfileMode {
+  const mode = value?.trim().toLowerCase() || "temporary";
+  if (mode === "temporary" || mode === "sidemesh") return mode;
+  throw new BrowserPreviewError(
+    "browser preview profileMode must be temporary or sidemesh",
+  );
+}
+
 export function buildBrowserTargetUrlCandidates(
   scheme: BrowserPreviewScheme,
   targetHost: string,
@@ -1137,6 +1314,7 @@ export function browserPreviewReuseKey(
   criteria: BrowserPreviewReuseCriteria,
 ): string {
   return JSON.stringify([
+    criteria.profileMode,
     criteria.scheme,
     criteria.targetHost,
     criteria.targetPort,
