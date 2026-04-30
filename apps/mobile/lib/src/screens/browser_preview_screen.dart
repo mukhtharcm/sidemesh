@@ -18,12 +18,15 @@ class BrowserPreviewScreen extends StatefulWidget {
     required this.host,
     required this.api,
     required this.preview,
-    this.stopOnDispose = true,
+    this.stopOnDispose = false,
   });
 
   final HostProfile host;
   final ApiClient api;
   final HostBrowserPreviewInfo preview;
+
+  /// When false, leaving the route only detaches this viewer. The daemon-side
+  /// browser remains alive so the user can return from chat without reloading.
   final bool stopOnDispose;
 
   @override
@@ -34,6 +37,7 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
   final _textController = TextEditingController();
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
+  late HostBrowserPreviewInfo _preview;
   Uint8List? _frameBytes;
   int _frameWidth = 390;
   int _frameHeight = 844;
@@ -43,8 +47,9 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
   @override
   void initState() {
     super.initState();
-    _frameWidth = widget.preview.width;
-    _frameHeight = widget.preview.height;
+    _preview = widget.preview;
+    _frameWidth = _preview.width;
+    _frameHeight = _preview.height;
     _connect();
   }
 
@@ -90,8 +95,14 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
     if (decoded is! Map) return;
     final type = decoded['type'];
     if (type == 'hello' || type == 'ready') {
+      final preview = _previewFromMessage(decoded);
       if (!mounted) return;
       setState(() {
+        if (preview != null) {
+          _preview = preview;
+          _frameWidth = preview.width;
+          _frameHeight = preview.height;
+        }
         _status = 'Waiting for first frame...';
         _error = null;
       });
@@ -117,6 +128,26 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
         _error = decoded['message']?.toString() ?? 'Remote browser error';
         _status = null;
       });
+    }
+  }
+
+  HostBrowserPreviewInfo? _previewFromMessage(Map<dynamic, dynamic> decoded) {
+    final preview = decoded['preview'];
+    if (preview is! Map) return null;
+    return HostBrowserPreviewInfo.fromJson(preview.cast<String, dynamic>());
+  }
+
+  Future<void> _stopRemoteBrowser() async {
+    try {
+      await widget.api.stopBrowserPreview(widget.host, _preview.id);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        'Could not stop remote browser: ${friendlyError(error)}',
+      );
     }
   }
 
@@ -190,19 +221,22 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Text(_preview.label, maxLines: 1, overflow: TextOverflow.ellipsis),
             Text(
-              widget.preview.label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            Text(
-              widget.preview.url,
+              _preview.url,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: monoStyle(color: colors.textSecondary, fontSize: 11),
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Stop remote browser',
+            onPressed: () => unawaited(_stopRemoteBrowser()),
+            icon: const Icon(Icons.stop_circle_outlined),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -310,10 +344,7 @@ class _InputRail extends StatelessWidget {
                     _KeyButton(label: 'Esc', onTap: () => onKey('Escape')),
                     _KeyButton(label: 'Tab', onTap: () => onKey('Tab')),
                     _KeyButton(label: 'Enter', onTap: () => onKey('Enter')),
-                    _KeyButton(
-                      label: '⌫',
-                      onTap: () => onKey('Backspace'),
-                    ),
+                    _KeyButton(label: '⌫', onTap: () => onKey('Backspace')),
                     _KeyButton(label: '←', onTap: () => onKey('ArrowLeft')),
                     _KeyButton(label: '↑', onTap: () => onKey('ArrowUp')),
                     _KeyButton(label: '↓', onTap: () => onKey('ArrowDown')),
@@ -364,10 +395,7 @@ class _KeyButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
-      child: OutlinedButton(
-        onPressed: onTap,
-        child: Text(label),
-      ),
+      child: OutlinedButton(onPressed: onTap, child: Text(label)),
     );
   }
 }
