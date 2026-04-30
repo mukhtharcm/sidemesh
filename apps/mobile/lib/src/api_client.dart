@@ -295,11 +295,13 @@ class ApiClient {
     String? sessionId,
     int? width,
     int? height,
+    String profileMode = 'temporary',
   }) async {
     final body = <String, dynamic>{
       'targetPort': targetPort,
       'targetHost': targetHost,
       'scheme': scheme,
+      'profileMode': profileMode,
       if ((label ?? '').isNotEmpty) 'label': label,
       if ((cwd ?? '').isNotEmpty) 'cwd': cwd,
       if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,
@@ -675,10 +677,7 @@ class ApiClient {
     );
   }
 
-  WebSocketChannel openBrowserPreviewLive(
-    HostProfile host,
-    String previewId,
-  ) {
+  WebSocketChannel openBrowserPreviewLive(HostProfile host, String previewId) {
     _ensureHostEnabled(host);
     final baseUri = Uri.parse(host.baseUrl);
     final wsUri = baseUri.replace(
