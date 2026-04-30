@@ -5,6 +5,7 @@ import {
   BrowserPreviewError,
   BrowserPreviewRegistry,
   buildBrowserTargetUrlCandidates,
+  browserPreviewReuseKey,
 } from "./browser-preview.js";
 
 describe("browser preview", () => {
@@ -61,6 +62,29 @@ describe("browser preview", () => {
         "https://127.0.0.1:8443/",
         "https://[::1]:8443/",
       ],
+    );
+  });
+
+  it("keys reusable previews by target and session scope", () => {
+    const base = {
+      targetHost: "127.0.0.1",
+      targetPort: 3000,
+      scheme: "http" as const,
+      cwd: "/workspace",
+      sessionId: "session-1",
+    };
+
+    assert.equal(
+      browserPreviewReuseKey(base),
+      browserPreviewReuseKey({ ...base }),
+    );
+    assert.notEqual(
+      browserPreviewReuseKey(base),
+      browserPreviewReuseKey({ ...base, sessionId: "session-2" }),
+    );
+    assert.notEqual(
+      browserPreviewReuseKey(base),
+      browserPreviewReuseKey({ ...base, cwd: "/other" }),
     );
   });
 });

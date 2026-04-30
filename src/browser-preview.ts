@@ -61,6 +61,14 @@ export interface BrowserPreviewInfo {
   lastError: string | null;
 }
 
+export interface BrowserPreviewReuseCriteria {
+  targetHost: string;
+  targetPort: number;
+  scheme: BrowserPreviewScheme;
+  cwd: string | null;
+  sessionId: string | null;
+}
+
 interface BrowserPreviewRecord {
   id: string;
   label: string;
@@ -122,13 +130,35 @@ export class BrowserPreviewRegistry {
     request: CreateBrowserPreviewRequest,
   ): Promise<BrowserPreviewInfo> {
     this.assertEnabled();
-    this.enforcePreviewLimit();
 
     const targetHost = normalizeTargetHost(request.targetHost);
     const targetPort = normalizePort(request.targetPort);
     const scheme = normalizeScheme(request.scheme);
     const width = normalizeViewportSize(request.width, DEFAULT_WIDTH);
     const height = normalizeViewportSize(request.height, DEFAULT_HEIGHT);
+    const cwd = request.cwd?.trim() || null;
+    const sessionId = request.sessionId?.trim() || null;
+    const reusable = this.findReusablePreview({
+      targetHost,
+      targetPort,
+      scheme,
+      cwd,
+      sessionId,
+    });
+    if (reusable) {
+      await this.updatePreviewViewport(reusable, width, height);
+      if (request.label?.trim()) {
+        reusable.label = request.label.trim();
+      }
+      reusable.updatedAt = Date.now();
+      if (reusable.starting) {
+        await reusable.starting;
+      }
+      return this.info(reusable);
+    }
+
+    this.enforcePreviewLimit();
+
     const url = buildBrowserTargetUrlCandidates(
       scheme,
       targetHost,
@@ -144,8 +174,8 @@ export class BrowserPreviewRegistry {
       targetHost,
       targetPort,
       scheme,
-      cwd: request.cwd?.trim() || null,
-      sessionId: request.sessionId?.trim() || null,
+      cwd,
+      sessionId,
       status: "starting",
       width,
       height,
@@ -390,10 +420,24 @@ export class BrowserPreviewRegistry {
       return;
     }
     if (type === "resize") {
-      preview.width = normalizeViewportSize(message.width, preview.width);
-      preview.height = normalizeViewportSize(message.height, preview.height);
-      await setViewport(preview);
+      await this.updatePreviewViewport(
+        preview,
+        normalizeViewportSize(message.width, preview.width),
+        normalizeViewportSize(message.height, preview.height),
+      );
     }
+  }
+
+  private async updatePreviewViewport(
+    preview: BrowserPreviewRecord,
+    width: number,
+    height: number,
+  ): Promise<void> {
+    if (preview.width === width && preview.height === height) return;
+    preview.width = width;
+    preview.height = height;
+    preview.updatedAt = Date.now();
+    await setViewport(preview);
   }
 
   private startFrameLoop(preview: BrowserPreviewRecord): void {
@@ -518,6 +562,21 @@ export class BrowserPreviewRegistry {
       throw new BrowserPreviewError("browser preview not found", 404);
     }
     return preview;
+  }
+
+  private findReusablePreview(
+    criteria: BrowserPreviewReuseCriteria,
+  ): BrowserPreviewRecord | null {
+    const key = browserPreviewReuseKey(criteria);
+    for (const preview of this.previews.values()) {
+      if (preview.status !== "running" && preview.status !== "starting") {
+        continue;
+      }
+      if (browserPreviewReuseKey(preview) === key) {
+        return preview;
+      }
+    }
+    return null;
   }
 
   private assertEnabled(): void {
@@ -906,6 +965,18 @@ export function buildBrowserTargetUrlCandidates(
   return loopbackTargetCandidates(targetHost).map(
     (host) => `${scheme}://${formatUrlHost(host)}:${targetPort}/`,
   );
+}
+
+export function browserPreviewReuseKey(
+  criteria: BrowserPreviewReuseCriteria,
+): string {
+  return JSON.stringify([
+    criteria.scheme,
+    criteria.targetHost,
+    criteria.targetPort,
+    criteria.cwd ?? "",
+    criteria.sessionId ?? "",
+  ]);
 }
 
 function loopbackTargetCandidates(targetHost: string): string[] {
