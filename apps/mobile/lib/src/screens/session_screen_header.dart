@@ -1,13 +1,34 @@
 part of 'session_screen.dart';
 
 class _CachedTranscriptStrip extends StatelessWidget {
-  const _CachedTranscriptStrip({required this.refreshing});
+  const _CachedTranscriptStrip({
+    required this.mode,
+    required this.refreshing,
+    this.onRetry,
+  });
 
+  final _TranscriptFreshnessMode mode;
   final bool refreshing;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final icon = switch (mode) {
+      _TranscriptFreshnessMode.cached => Icons.history_rounded,
+      _TranscriptFreshnessMode.reconnecting => Icons.sync_rounded,
+      _TranscriptFreshnessMode.offline => Icons.wifi_off_rounded,
+    };
+    final text = switch (mode) {
+      _TranscriptFreshnessMode.cached =>
+        refreshing
+            ? 'Cached transcript · syncing latest changes'
+            : 'Cached transcript · waiting for latest host snapshot',
+      _TranscriptFreshnessMode.reconnecting =>
+        'Reconnecting · checking latest events',
+      _TranscriptFreshnessMode.offline =>
+        'Offline · showing last known session state',
+    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -27,13 +48,11 @@ class _CachedTranscriptStrip extends StatelessWidget {
               ),
             )
           else
-            Icon(Icons.history_rounded, size: 14, color: colors.warning),
+            Icon(icon, size: 14, color: colors.warning),
           const SizedBox(width: 9),
           Expanded(
             child: Text(
-              refreshing
-                  ? 'Cached transcript · syncing latest changes'
-                  : 'Cached transcript · waiting for latest host snapshot',
+              text,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: monoStyle(
@@ -43,6 +62,21 @@ class _CachedTranscriptStrip extends StatelessWidget {
               ),
             ),
           ),
+          if (mode == _TranscriptFreshnessMode.offline && onRetry != null) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onRetry,
+              behavior: HitTestBehavior.opaque,
+              child: Text(
+                'Retry',
+                style: monoStyle(
+                  color: colors.warning,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
