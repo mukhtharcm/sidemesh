@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
+import { createServer, get, type Server } from "node:http";
+import type { RequestOptions } from "node:http";
 import { afterEach, describe, it } from "node:test";
 
 import compression from "compression";
@@ -48,6 +49,23 @@ function listen(app: express.Express): Promise<{ baseUrl: string; server: Server
   });
 }
 
+
+function rawGet(url: string, options?: RequestOptions): Promise<{ statusCode: number; headers: import("node:http").IncomingHttpHeaders; body: string }> {
+  return new Promise((resolve, reject) => {
+    get(url, options ?? {}, (response) => {
+      let body = "";
+      response.on("data", (chunk) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        resolve({ statusCode: response.statusCode ?? 0, headers: response.headers, body });
+      });
+    }).on("error", (error) => {
+      reject(error);
+    });
+  });
+}
+
 describe("HTTP payload compression", () => {
   let server: Server | undefined;
 
@@ -78,8 +96,8 @@ describe("HTTP payload compression", () => {
     });
     assert.strictEqual(response.status, 200);
     assert.strictEqual(response.headers.get("content-encoding"), "gzip");
-    const body = await response.text();
-    assert.ok(body.length < 10_000, "compressed body should be smaller than raw JSON");
+    const raw = await rawGet(`${baseUrl}/api/large`, { headers: { "Accept-Encoding": "gzip" } });
+    assert.ok(raw.body.length < 10_000, "compressed body should be smaller than raw JSON");
   });
 
   it("does not compress small responses below the default threshold", async () => {
