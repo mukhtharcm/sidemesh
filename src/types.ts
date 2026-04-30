@@ -53,6 +53,10 @@ export interface HostPortForwardingConfig {
 export interface HostBrowserPreviewConfig {
   enabled: boolean;
   chromePath: string | null;
+  maxPreviews: number;
+  idleTtlMs: number;
+  frameIntervalMs: number;
+  quality: number;
 }
 
 export interface HostCapabilities {
