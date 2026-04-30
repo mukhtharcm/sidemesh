@@ -744,10 +744,22 @@ class _SessionScreenState extends State<SessionScreen>
     _scrollController.addListener(_onTranscriptScroll);
     _scheduleMarkCurrentSessionSeen();
     unawaited(_loadPendingSends());
-    unawaited(_loadCachedSnapshot());
-    _loadSnapshot();
+    unawaited(_bootstrapSnapshot());
     unawaited(_loadNodeInfo());
     _connectLive();
+  }
+
+  Future<void> _bootstrapSnapshot() async {
+    final loadedCache = await _loadCachedSnapshot();
+    if (!mounted || _disposed) {
+      return;
+    }
+    if (loadedCache) {
+      unawaited(_loadSnapshot());
+      unawaited(_refreshCachedSessionStatus());
+      return;
+    }
+    await _loadSnapshot();
   }
 
   Future<void> _loadNodeInfo() async {
@@ -1739,14 +1751,14 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
-  Future<void> _loadCachedSnapshot() async {
+  Future<bool> _loadCachedSnapshot() async {
     try {
       final cached = await SessionCacheStore.instance.loadSessionLog(
         widget.host,
         widget.session.id,
       );
       if (!mounted || cached == null || _messages.isNotEmpty) {
-        return;
+        return false;
       }
       final log = cached.log;
       setState(() {
@@ -1779,8 +1791,38 @@ class _SessionScreenState extends State<SessionScreen>
       });
       _refreshThinkingState();
       _markCurrentSessionSeen();
+      return true;
     } catch (_) {
       // Cached transcripts are best-effort. A fresh snapshot is already queued.
+      return false;
+    }
+  }
+
+  Future<void> _refreshCachedSessionStatus() async {
+    try {
+      final status = await widget.api.fetchStatus(
+        widget.host,
+        widget.session.id,
+      );
+      if (!mounted || !_showingCachedSnapshot) {
+        return;
+      }
+      setState(() {
+        _running = status.isRunning;
+        _pendingAction = status.pendingAction;
+        _showingCachedSnapshot = false;
+        _snapshotRefreshing = false;
+        _loading = false;
+        _awaitingAssistantReply =
+            status.isRunning &&
+            _liveAssistantText.isEmpty &&
+            status.pendingAction == null;
+      });
+      HostStatusStore.instance.markOnline(widget.host.id);
+      _refreshThinkingState();
+      _syncSessionLiveActivity();
+    } catch (_) {
+      // Keep the cached-transcript strip visible until the full snapshot lands.
     }
   }
 
