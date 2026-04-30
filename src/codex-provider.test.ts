@@ -209,4 +209,60 @@ describe("codex provider resume runtime restore", () => {
       },
     });
   });
+
+  it("restores persisted runtime before compacting an unloaded session", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const thread = createThread();
+    const runtime: SessionRuntimeSummary = {
+      model: "kimi-k2.6:cloud",
+      modelProvider: "ollama-launch",
+      reasoningEffort: "xhigh",
+      approvalPolicy: "never",
+      sandboxMode: "danger-full-access",
+    };
+    let resume:
+      | { threadId: string; options: AgentSessionResumeOptions | undefined }
+      | null = null;
+    const bridgeCalls: Array<{ method: string; params: unknown }> = [];
+
+    provider.isSessionThreadLoaded = async () => false;
+    provider.readSessionThread = async () => thread;
+    provider.readSessionRuntime = async () => runtime;
+    provider.resumeSessionThread = async (
+      threadId: string,
+      options?: AgentSessionResumeOptions,
+    ) => {
+      resume = { threadId, options };
+      return {};
+    };
+    provider.bridge = {
+      request: async (method: string, params: unknown) => {
+        bridgeCalls.push({ method, params });
+        return { started: true };
+      },
+    };
+
+    const result = await provider.compactSession("thread-1");
+
+    assert.deepEqual(resume, {
+      threadId: "thread-1",
+      options: {
+        persistExtendedHistory: true,
+        model: "kimi-k2.6:cloud",
+        modelProvider: "ollama-launch",
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+        config: {
+          model_reasoning_effort: "xhigh",
+        },
+      },
+    });
+    assert.deepEqual(bridgeCalls, [
+      {
+        method: "thread/compact/start",
+        params: { threadId: "thread-1" },
+      },
+    ]);
+    assert.deepEqual(result, { started: true });
+  });
 });

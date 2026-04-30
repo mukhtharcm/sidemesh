@@ -169,7 +169,13 @@ export class CodexAgentProvider
     return this.bridge.request("thread/unarchive", { threadId });
   }
 
-  public compactSession(threadId: string): Promise<unknown> {
+  public async compactSession(threadId: string): Promise<unknown> {
+    if (!(await this.isSessionThreadLoaded(threadId))) {
+      await this.resumeSessionThread(
+        threadId,
+        await this.buildResumeOptionsForThread(threadId, null),
+      );
+    }
     return this.bridge.request("thread/compact/start", { threadId });
   }
 
@@ -400,10 +406,17 @@ export class CodexAgentProvider
   private async buildResumeOptionsForSubmit(
     request: AgentSubmitInputRequest,
   ): Promise<AgentSessionResumeOptions> {
+    return this.buildResumeOptionsForThread(request.sessionId, request.overrides);
+  }
+
+  private async buildResumeOptionsForThread(
+    threadId: string,
+    overrides: AgentSubmitInputRequest["overrides"] | null,
+  ): Promise<AgentSessionResumeOptions> {
     const options: AgentSessionResumeOptions = {
       persistExtendedHistory: true,
     };
-    const thread = await this.readSessionThread(request.sessionId, false).catch(() => null);
+    const thread = await this.readSessionThread(threadId, false).catch(() => null);
     if (!thread) {
       return options;
     }
@@ -412,7 +425,7 @@ export class CodexAgentProvider
       return options;
     }
 
-    const model = request.overrides.model || runtime.model || null;
+    const model = overrides?.model || runtime.model || null;
     if (model) {
       options.model = model;
     }
@@ -421,21 +434,21 @@ export class CodexAgentProvider
       options.modelProvider = runtime.modelProvider;
     }
 
-    if (request.overrides.fastMode !== null) {
-      options.serviceTier = request.overrides.fastMode ? "fast" : null;
+    if (overrides?.fastMode !== null && overrides?.fastMode !== undefined) {
+      options.serviceTier = overrides.fastMode ? "fast" : null;
     } else if (runtime.serviceTier) {
       options.serviceTier = runtime.serviceTier;
     }
 
     const approvalPolicy = parseCodexApprovalPolicy(
-      request.overrides.approvalPolicy ?? runtime.approvalPolicy ?? null,
+      overrides?.approvalPolicy ?? runtime.approvalPolicy ?? null,
     );
     if (approvalPolicy) {
       options.approvalPolicy = approvalPolicy;
     }
 
     const sandboxMode = parseCodexSandboxMode(
-      request.overrides.sandboxMode ?? runtime.sandboxMode ?? null,
+      overrides?.sandboxMode ?? runtime.sandboxMode ?? null,
     );
     if (sandboxMode) {
       options.sandbox = sandboxMode;
@@ -443,7 +456,7 @@ export class CodexAgentProvider
 
     const config: Record<string, unknown> = {};
     const reasoningEffort = parseCodexReasoningEffort(
-      request.overrides.reasoningEffort ?? runtime.reasoningEffort ?? null,
+      overrides?.reasoningEffort ?? runtime.reasoningEffort ?? null,
     );
     if (reasoningEffort) {
       config.model_reasoning_effort = reasoningEffort;

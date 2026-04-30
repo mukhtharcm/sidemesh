@@ -1690,25 +1690,6 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         });
         return;
       }
-      if (
-        hasProviderMethod(provider, "listLoadedSessionIds") &&
-        !(await isThreadLoaded(provider, sessionId))
-      ) {
-        if (
-          !requireProviderCapability(
-            response,
-            sessionProvider.provider,
-            sessionProvider.provider.capabilities.sessions.resume,
-            "session resume",
-            "resumeSessionThread",
-          )
-        ) {
-          return;
-        }
-        await provider.resumeSessionThread!(sessionId, {
-          persistExtendedHistory: true,
-        });
-      }
       const result = await provider.compactSession!(sessionId);
       clearSessionLogCache(logCache, sessionId);
       response.json({ compacted: true, result: result ?? null });
