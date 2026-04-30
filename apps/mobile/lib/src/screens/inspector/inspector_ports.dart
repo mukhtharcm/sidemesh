@@ -23,6 +23,7 @@ InspectorSurface buildInspectorPortsSurface({
       cwd: session.cwd,
       sessionId: session.id,
       sessionTitle: session.title,
+      previewPresentation: PortForwardPreviewPresentation.inline,
     ),
   );
 }

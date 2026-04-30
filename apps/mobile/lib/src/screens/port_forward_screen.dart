@@ -58,6 +58,7 @@ class PortForwardPane extends StatefulWidget {
     required this.cwd,
     required this.sessionId,
     required this.sessionTitle,
+    this.previewPresentation = PortForwardPreviewPresentation.route,
   });
 
   final HostProfile host;
@@ -65,6 +66,7 @@ class PortForwardPane extends StatefulWidget {
   final String cwd;
   final String sessionId;
   final String sessionTitle;
+  final PortForwardPreviewPresentation previewPresentation;
 
   @override
   State<PortForwardPane> createState() => _PortForwardPaneState();
@@ -77,6 +79,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   final Map<String, PortForwardBridge> _bridges = {};
 
   List<HostPortForwardInfo> _ports = const [];
+  _ActivePortPreview? _inlinePreview;
   bool _loading = true;
   bool _creating = false;
   String _scheme = 'http';
@@ -201,6 +204,9 @@ class _PortForwardPaneState extends State<PortForwardPane> {
       final stopped = await widget.api.stopPortForward(widget.host, forward.id);
       if (!mounted) return;
       setState(() {
+        if (_inlinePreview?.forward.id == stopped.id) {
+          _inlinePreview = null;
+        }
         _ports = _ports
             .map((item) => item.id == stopped.id ? stopped : item)
             .toList(growable: false);
@@ -229,6 +235,12 @@ class _PortForwardPaneState extends State<PortForwardPane> {
       unawaited(_openExternal(uri));
       return;
     }
+    if (widget.previewPresentation == PortForwardPreviewPresentation.inline) {
+      setState(() {
+        _inlinePreview = _ActivePortPreview(forward: forward, uri: uri);
+      });
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) =>
@@ -245,6 +257,15 @@ class _PortForwardPaneState extends State<PortForwardPane> {
 
   @override
   Widget build(BuildContext context) {
+    final inlinePreview = _inlinePreview;
+    if (inlinePreview != null) {
+      return _InlinePortForwardPreview(
+        title: inlinePreview.forward.label,
+        uri: inlinePreview.uri,
+        onBack: () => setState(() => _inlinePreview = null),
+      );
+    }
+
     final colors = context.colors;
     return RefreshIndicator(
       onRefresh: _loadPorts,
@@ -397,6 +418,21 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   }
 }
 
+enum PortForwardPreviewPresentation {
+  route,
+  inline,
+}
+
+class _ActivePortPreview {
+  const _ActivePortPreview({
+    required this.forward,
+    required this.uri,
+  });
+
+  final HostPortForwardInfo forward;
+  final Uri uri;
+}
+
 bool get _supportsEmbeddedPreview =>
     Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
 
@@ -525,6 +561,137 @@ class PortForwardPreviewScreen extends StatefulWidget {
       _PortForwardPreviewScreenState();
 }
 
+class _InlinePortForwardPreview extends StatefulWidget {
+  const _InlinePortForwardPreview({
+    required this.title,
+    required this.uri,
+    required this.onBack,
+  });
+
+  final String title;
+  final Uri uri;
+  final VoidCallback onBack;
+
+  @override
+  State<_InlinePortForwardPreview> createState() =>
+      _InlinePortForwardPreviewState();
+}
+
+class _InlinePortForwardPreviewState extends State<_InlinePortForwardPreview> {
+  late final WebViewController _controller;
+  int _progress = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onProgress: (progress) {
+            if (!mounted) return;
+            setState(() => _progress = progress);
+          },
+        ),
+      )
+      ..loadRequest(widget.uri);
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.uri.toString()));
+    if (!mounted) return;
+    showAppSnackBar(context, 'Copied ${widget.uri.toString()}');
+  }
+
+  Future<void> _openExternal() async {
+    final opened = await launchUrl(
+      widget.uri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!mounted || opened) return;
+    showAppSnackBar(context, 'Could not open ${widget.uri}');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+          child: MeshCard(
+            tone: MeshCardTone.surface,
+            child: Row(
+              children: [
+                MeshIconButton(
+                  icon: Icons.arrow_back_rounded,
+                  tooltip: 'Back to ports',
+                  onTap: widget.onBack,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall
+                            ?.copyWith(
+                              color: colors.textPrimary,
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.uri.toString(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: monoStyle(
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                MeshIconButton(
+                  icon: Icons.refresh_rounded,
+                  tooltip: 'Reload preview',
+                  onTap: () => _controller.reload(),
+                ),
+                const SizedBox(width: 6),
+                MeshIconButton(
+                  icon: Icons.copy_rounded,
+                  tooltip: 'Copy preview URL',
+                  onTap: () => unawaited(_copy()),
+                ),
+                const SizedBox(width: 6),
+                MeshIconButton(
+                  icon: Icons.open_in_browser_rounded,
+                  tooltip: 'Open in browser',
+                  onTap: () => unawaited(_openExternal()),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Expanded(
+          child: Stack(
+            children: [
+              WebViewWidget(controller: _controller),
+              if (_progress > 0 && _progress < 100)
+                LinearProgressIndicator(value: _progress / 100),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _PortForwardPreviewScreenState extends State<PortForwardPreviewScreen> {
   late final WebViewController _controller;
   int _progress = 0;
@@ -536,7 +703,10 @@ class _PortForwardPreviewScreenState extends State<PortForwardPreviewScreen> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onProgress: (progress) => setState(() => _progress = progress),
+          onProgress: (progress) {
+            if (!mounted) return;
+            setState(() => _progress = progress);
+          },
         ),
       )
       ..loadRequest(widget.uri);
