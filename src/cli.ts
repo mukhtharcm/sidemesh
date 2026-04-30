@@ -134,6 +134,8 @@ export async function main(argv = process.argv): Promise<void> {
       .option("--plist-file <path>", "macOS LaunchAgent plist path")
       .option("--service-env-file <path>", "service environment file path")
       .option("--launcher-file <path>", "service launcher script path")
+      .option("--memory-high <size>", "soft cgroup memory pressure threshold, e.g. 2G")
+      .option("--memory-max <size>", "hard cgroup memory cap, e.g. 3G")
       .option("--no-start", "write service files without starting/restarting")
       .option("-y, --yes", "do not prompt before overwriting/restarting")
       .action(
@@ -146,6 +148,8 @@ export async function main(argv = process.argv): Promise<void> {
           plistFile?: string;
           serviceEnvFile?: string;
           launcherFile?: string;
+          memoryHigh?: string;
+          memoryMax?: string;
           start?: boolean;
           yes?: boolean;
         }) => {
@@ -186,6 +190,8 @@ export async function main(argv = process.argv): Promise<void> {
               unitPath: options.unitFile,
               envPath: options.serviceEnvFile,
               launcherPath: options.launcherFile,
+              memoryHigh: options.memoryHigh,
+              memoryMax: options.memoryMax,
               start: options.start !== false,
             });
             console.log(`Installed ${paths.serviceName}.service`);
@@ -831,7 +837,7 @@ function registerShutdownHandlers(
     shuttingDown = true;
     void (async () => {
       try {
-        await getServer()?.close();
+        await closeWithDeadline(getServer(), 8_000);
       } finally {
         await removeDaemonState(config, process.pid).catch(() => undefined);
         process.exit(signal === "SIGINT" ? 130 : 0);
@@ -840,6 +846,27 @@ function registerShutdownHandlers(
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
+}
+
+async function closeWithDeadline(
+  server: RunningServer | null,
+  timeoutMs: number,
+): Promise<void> {
+  if (!server) return;
+  let timeout: NodeJS.Timeout | null = null;
+  try {
+    await Promise.race([
+      server.close(),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, timeoutMs);
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 async function checkHealth(url: string): Promise<boolean> {

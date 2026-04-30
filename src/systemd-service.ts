@@ -26,6 +26,8 @@ export interface InstallServiceOptions {
   unitPath?: string | null;
   envPath?: string | null;
   launcherPath?: string | null;
+  memoryHigh?: string | null;
+  memoryMax?: string | null;
   start: boolean;
 }
 
@@ -62,7 +64,17 @@ export function resolveServicePaths(options: {
   };
 }
 
-export function renderSystemdUnit(paths: ServicePaths): string {
+export function renderSystemdUnit(
+  paths: ServicePaths,
+  limits: { memoryHigh?: string | null; memoryMax?: string | null } = {},
+): string {
+  const memoryHigh = normalizeSystemdSize(limits.memoryHigh);
+  const memoryMax = normalizeSystemdSize(limits.memoryMax);
+  const resourceLines = [
+    "MemoryAccounting=yes",
+    memoryHigh ? `MemoryHigh=${memoryHigh}` : null,
+    memoryMax ? `MemoryMax=${memoryMax}` : null,
+  ].filter((line): line is string => line !== null);
   return `[Unit]
 Description=Sidemesh daemon
 After=network-online.target tailscaled.service
@@ -75,6 +87,11 @@ EnvironmentFile=${paths.envPath}
 ExecStart=${paths.launcherPath}
 Restart=always
 RestartSec=3
+KillMode=mixed
+KillSignal=SIGTERM
+SendSIGKILL=yes
+TimeoutStopSec=15s
+${resourceLines.join("\n")}
 
 [Install]
 WantedBy=multi-user.target
@@ -138,7 +155,14 @@ export async function installSystemdService(
     mode: 0o755,
   });
   await chmod(paths.launcherPath, 0o755);
-  await writeFile(paths.unitPath, renderSystemdUnit(paths), { mode: 0o644 });
+  await writeFile(
+    paths.unitPath,
+    renderSystemdUnit(paths, {
+      memoryHigh: options.memoryHigh,
+      memoryMax: options.memoryMax,
+    }),
+    { mode: 0o644 },
+  );
 
   await systemctl(["daemon-reload"]);
   await systemctl(["enable", `${paths.serviceName}.service`]);
@@ -246,6 +270,18 @@ function normalizeServiceName(value: string | null | undefined): string {
   return serviceName.endsWith(".service")
     ? serviceName.slice(0, -".service".length)
     : serviceName;
+}
+
+function normalizeSystemdSize(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  if (
+    normalized === "infinity" ||
+    /^[0-9]+(?:[KMGTP]?)$/.test(normalized)
+  ) {
+    return normalized;
+  }
+  throw new Error(`Invalid systemd memory size: ${value}`);
 }
 
 function envLine(key: string, value: string): string {
