@@ -36,6 +36,7 @@ dependencies:
   path_provider: ^2.1.5
   shared_preferences: ^2.5.3
   web_socket_channel: ^3.0.3
+  gpt_markdown: ^1.1.6
   flutter_highlight: ^0.7.0
   highlight: ^0.7.0
   macos_window_utils: ^1.9.1
@@ -50,7 +51,6 @@ dependencies:
   desktop_multi_window: ^0.3.0
   xterm: ^4.0.0
   mobile_scanner: ^7.2.0
-  flutter_smooth_markdown: ^0.7.2
 
 dev_dependencies:
   flutter_test:
