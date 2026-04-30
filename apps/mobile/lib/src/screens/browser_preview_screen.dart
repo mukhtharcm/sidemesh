@@ -12,7 +12,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 
-class BrowserPreviewScreen extends StatefulWidget {
+class BrowserPreviewScreen extends StatelessWidget {
   const BrowserPreviewScreen({
     super.key,
     required this.host,
@@ -30,10 +30,50 @@ class BrowserPreviewScreen extends StatefulWidget {
   final bool stopOnDispose;
 
   @override
-  State<BrowserPreviewScreen> createState() => _BrowserPreviewScreenState();
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Scaffold(
+      backgroundColor: colors.canvas,
+      appBar: AppBar(
+        backgroundColor: colors.canvas,
+        title: const Text('Stream pixels'),
+      ),
+      body: BrowserPreviewPane(
+        host: host,
+        api: api,
+        preview: preview,
+        stopOnDispose: stopOnDispose,
+      ),
+    );
+  }
 }
 
-class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
+class BrowserPreviewPane extends StatefulWidget {
+  const BrowserPreviewPane({
+    super.key,
+    required this.host,
+    required this.api,
+    required this.preview,
+    this.stopOnDispose = false,
+    this.showHeader = true,
+    this.onBack,
+    this.onStopped,
+  });
+
+  final HostProfile host;
+  final ApiClient api;
+  final HostBrowserPreviewInfo preview;
+  final bool stopOnDispose;
+  final bool showHeader;
+  final VoidCallback? onBack;
+  final void Function(HostBrowserPreviewInfo preview)? onStopped;
+
+  @override
+  State<BrowserPreviewPane> createState() => _BrowserPreviewPaneState();
+}
+
+class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
+    with WidgetsBindingObserver {
   final _textController = TextEditingController();
   final _inputFocusNode = FocusNode();
   WebSocketChannel? _channel;
@@ -46,10 +86,12 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
   String? _error;
   bool _inputRailConfigured = false;
   bool _inputRailOpen = false;
+  bool _clientPaused = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _preview = widget.preview;
     _frameWidth = _preview.width;
     _frameHeight = _preview.height;
@@ -58,6 +100,7 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _textController.dispose();
     _inputFocusNode.dispose();
     unawaited(_subscription?.cancel());
@@ -76,29 +119,69 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
     _inputRailOpen = MediaQuery.sizeOf(context).shortestSide >= 700;
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (_clientPaused) {
+        _clientPaused = false;
+        _connect();
+      }
+      return;
+    }
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      _pauseStream();
+    }
+  }
+
   void _connect() {
+    unawaited(_subscription?.cancel());
+    unawaited(_channel?.sink.close());
     final channel = widget.api.openBrowserPreviewLive(
       widget.host,
       widget.preview.id,
     );
     _channel = channel;
+    if (mounted) {
+      setState(() {
+        _status = _frameBytes == null
+            ? 'Connecting to remote browser...'
+            : 'Reconnecting stream...';
+        _error = null;
+      });
+    }
     _subscription = channel.stream.listen(
       _handleFrame,
       onError: (error) {
-        if (!mounted) return;
+        if (!mounted || _clientPaused) return;
         setState(() {
           _error = friendlyError(error);
           _status = null;
         });
       },
       onDone: () {
-        if (!mounted) return;
+        if (!mounted || _clientPaused) return;
         setState(() {
           _status = 'Remote browser stopped.';
         });
       },
       cancelOnError: true,
     );
+  }
+
+  void _pauseStream() {
+    if (_clientPaused) return;
+    _clientPaused = true;
+    unawaited(_subscription?.cancel());
+    unawaited(_channel?.sink.close());
+    _subscription = null;
+    _channel = null;
+    if (!mounted) return;
+    setState(() {
+      _status = 'Stream paused while the app is in the background.';
+    });
   }
 
   void _handleFrame(dynamic payload) {
@@ -153,9 +236,15 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
 
   Future<void> _stopRemoteBrowser() async {
     try {
-      await widget.api.stopBrowserPreview(widget.host, _preview.id);
+      final stopped = await widget.api.stopBrowserPreview(
+        widget.host,
+        _preview.id,
+      );
       if (!mounted) return;
-      Navigator.of(context).pop(true);
+      widget.onStopped?.call(stopped);
+      if (widget.onStopped == null) {
+        Navigator.of(context).pop(true);
+      }
     } catch (error) {
       if (!mounted) return;
       showAppSnackBar(
@@ -240,90 +329,74 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Scaffold(
-      backgroundColor: colors.canvas,
-      appBar: AppBar(
-        backgroundColor: colors.canvas,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(_preview.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-            Text(
-              _preview.url,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: monoStyle(color: colors.textSecondary, fontSize: 11),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            tooltip: _inputRailOpen
-                ? 'Hide page keyboard'
-                : 'Show page keyboard',
-            onPressed: _toggleInputRail,
-            icon: Icon(
-              _inputRailOpen
-                  ? Icons.keyboard_hide_outlined
-                  : Icons.keyboard_alt_outlined,
-            ),
+    return Column(
+      children: [
+        if (widget.showHeader)
+          _PreviewHeader(
+            preview: _preview,
+            connected: _error == null && _status == null,
+            inputRailOpen: _inputRailOpen,
+            onBack: widget.onBack,
+            onToggleInput: _toggleInputRail,
+            onStop: () => unawaited(_stopRemoteBrowser()),
           ),
-          IconButton(
-            tooltip: 'Stop remote browser',
-            onPressed: () => unawaited(_stopRemoteBrowser()),
-            icon: const Icon(Icons.stop_circle_outlined),
-          ),
-        ],
-      ),
-      floatingActionButton: _inputRailOpen
-          ? null
-          : FloatingActionButton.small(
-              heroTag: 'browser-preview-keyboard',
-              tooltip: 'Show page keyboard',
-              onPressed: _toggleInputRail,
-              child: const Icon(Icons.keyboard_alt_outlined),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              widget.showHeader ? 10 : 12,
+              widget.showHeader ? 2 : 12,
+              widget.showHeader ? 10 : 12,
+              10,
             ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: MeshCard(
-                tone: MeshCardTone.elevated,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final size = constraints.biggest;
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTapUp: (details) => _sendTap(details, size),
-                        onVerticalDragUpdate: (details) =>
-                            _sendScroll(details, size),
-                        onHorizontalDragUpdate: (details) =>
-                            _sendScroll(details, size),
-                        child: Container(
-                          color: Colors.black,
-                          alignment: Alignment.center,
-                          child: _buildPreviewBody(colors),
-                        ),
-                      );
-                    },
+            child: MeshCard(
+              tone: MeshCardTone.elevated,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final size = constraints.biggest;
+                          return GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTapUp: (details) => _sendTap(details, size),
+                            onVerticalDragUpdate: (details) =>
+                                _sendScroll(details, size),
+                            onHorizontalDragUpdate: (details) =>
+                                _sendScroll(details, size),
+                            child: Container(
+                              color: const Color(0xFF07090D),
+                              alignment: Alignment.center,
+                              child: _buildPreviewBody(colors),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                   ),
-                ),
+                  Positioned(
+                    right: 12,
+                    bottom: 12,
+                    child: _PreviewFloatingControls(
+                      inputRailOpen: _inputRailOpen,
+                      onToggleInput: _toggleInputRail,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          if (_inputRailOpen)
-            _InputRail(
-              controller: _textController,
-              focusNode: _inputFocusNode,
-              onSendText: _sendText,
-              onKey: _sendKey,
-              onClose: _toggleInputRail,
-            ),
-        ],
-      ),
+        ),
+        if (_inputRailOpen)
+          _InputRail(
+            controller: _textController,
+            focusNode: _inputFocusNode,
+            onSendText: _sendText,
+            onKey: _sendKey,
+            onClose: _toggleInputRail,
+          ),
+      ],
     );
   }
 
@@ -345,9 +418,13 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
         children: [
           const CircularProgressIndicator(),
           const SizedBox(height: 14),
-          Text(
-            _status ?? 'Starting remote browser...',
-            style: TextStyle(color: colors.textSecondary),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(
+              _status ?? 'Starting remote browser...',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: colors.textSecondary),
+            ),
           ),
         ],
       );
@@ -358,6 +435,147 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
       fit: BoxFit.contain,
       width: double.infinity,
       height: double.infinity,
+    );
+  }
+}
+
+class _PreviewHeader extends StatelessWidget {
+  const _PreviewHeader({
+    required this.preview,
+    required this.connected,
+    required this.inputRailOpen,
+    required this.onToggleInput,
+    required this.onStop,
+    this.onBack,
+  });
+
+  final HostBrowserPreviewInfo preview;
+  final bool connected;
+  final bool inputRailOpen;
+  final VoidCallback onToggleInput;
+  final VoidCallback onStop;
+  final VoidCallback? onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+      child: MeshCard(
+        tone: MeshCardTone.surface,
+        child: Row(
+          children: [
+            if (onBack != null) ...[
+              MeshIconButton(
+                icon: Icons.arrow_back_rounded,
+                tooltip: 'Back to ports',
+                onTap: onBack!,
+              ),
+              const SizedBox(width: 8),
+            ],
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: colors.accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
+              ),
+              child: Icon(
+                Icons.screenshot_monitor_rounded,
+                color: colors.accent,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          preview.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                color: colors.textPrimary,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      MeshPill(
+                        label: connected ? 'live' : preview.status,
+                        tone: connected
+                            ? MeshPillTone.success
+                            : MeshPillTone.neutral,
+                        mono: true,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    preview.url,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: monoStyle(color: colors.textSecondary, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            MeshIconButton(
+              icon: inputRailOpen
+                  ? Icons.keyboard_hide_outlined
+                  : Icons.keyboard_alt_outlined,
+              tooltip: inputRailOpen ? 'Hide page input' : 'Show page input',
+              color: inputRailOpen ? colors.accent : colors.textSecondary,
+              onTap: onToggleInput,
+            ),
+            const SizedBox(width: 6),
+            MeshIconButton(
+              icon: Icons.stop_circle_outlined,
+              tooltip: 'Stop remote browser',
+              color: colors.danger,
+              onTap: onStop,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PreviewFloatingControls extends StatelessWidget {
+  const _PreviewFloatingControls({
+    required this.inputRailOpen,
+    required this.onToggleInput,
+  });
+
+  final bool inputRailOpen;
+  final VoidCallback onToggleInput;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (inputRailOpen) return const SizedBox.shrink();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.canvas.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: colors.border.withValues(alpha: 0.9)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        child: TextButton.icon(
+          onPressed: onToggleInput,
+          icon: const Icon(Icons.keyboard_alt_outlined, size: 18),
+          label: const Text('Input'),
+        ),
+      ),
     );
   }
 }
@@ -383,7 +601,7 @@ class _InputRail extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
         child: MeshCard(
           tone: MeshCardTone.surface,
           child: Column(
