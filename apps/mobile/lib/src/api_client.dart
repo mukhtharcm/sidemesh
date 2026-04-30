@@ -211,6 +211,61 @@ class ApiClient {
     return HostTerminalInfo.fromJson(_decodeObject(response));
   }
 
+  Future<List<HostPortForwardInfo>> fetchPortForwards(HostProfile host) async {
+    final response = await _get(
+      host,
+      '/api/ports',
+      timeout: _quickReadTimeout,
+      operation: 'load forwarded ports',
+    );
+    final decoded = _decodeObject(response);
+    return ((decoded['ports'] as List?) ?? const [])
+        .whereType<Map>()
+        .map(
+          (item) => HostPortForwardInfo.fromJson(item.cast<String, dynamic>()),
+        )
+        .toList();
+  }
+
+  Future<HostPortForwardInfo> createPortForward(
+    HostProfile host, {
+    required int targetPort,
+    String targetHost = '127.0.0.1',
+    String scheme = 'http',
+    String? label,
+    String? cwd,
+    String? sessionId,
+  }) async {
+    final response = await _post(
+      host,
+      '/api/ports',
+      body: {
+        'targetPort': targetPort,
+        'targetHost': targetHost,
+        'scheme': scheme,
+        if ((label ?? '').isNotEmpty) 'label': label,
+        if ((cwd ?? '').isNotEmpty) 'cwd': cwd,
+        if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,
+      },
+      timeout: _standardReadTimeout,
+      operation: 'forward port',
+    );
+    return HostPortForwardInfo.fromJson(_decodeObject(response));
+  }
+
+  Future<HostPortForwardInfo> stopPortForward(
+    HostProfile host,
+    String portForwardId,
+  ) async {
+    final response = await _delete(
+      host,
+      '/api/ports/$portForwardId',
+      timeout: _quickReadTimeout,
+      operation: 'stop port forward',
+    );
+    return HostPortForwardInfo.fromJson(_decodeObject(response));
+  }
+
   Future<SessionLog> fetchLog(
     HostProfile host,
     String sessionId, {
@@ -534,6 +589,25 @@ class ApiClient {
     );
   }
 
+  WebSocketChannel openPortForwardTunnel(
+    HostProfile host,
+    String portForwardId,
+  ) {
+    _ensureHostEnabled(host);
+    final baseUri = Uri.parse(host.baseUrl);
+    final wsUri = baseUri.replace(
+      scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
+      path: '/api/ports/$portForwardId/connect',
+    );
+
+    return IOWebSocketChannel.connect(
+      wsUri,
+      headers: {'Authorization': 'Bearer ${host.token}'},
+      connectTimeout: _webSocketConnectTimeout,
+      pingInterval: _webSocketPingInterval,
+    );
+  }
+
   Uri fsBlobUri(HostProfile host, String path, {String? agentProvider}) {
     _ensureHostEnabled(host);
     return _uri(host, '/api/fs/blob', queryParameters: {'path': path});
@@ -732,6 +806,24 @@ class ApiClient {
       request,
       timeout: timeout,
       operation: operation ?? 'send request',
+    );
+  }
+
+  Future<http.Response> _delete(
+    HostProfile host,
+    String path, {
+    Duration? timeout,
+    String? operation,
+  }) {
+    _ensureHostEnabled(host);
+    final request = _client.delete(_uri(host, path), headers: _headers(host));
+    if (timeout == null) {
+      return request;
+    }
+    return _withTimeout(
+      request,
+      timeout: timeout,
+      operation: operation ?? 'delete request',
     );
   }
 

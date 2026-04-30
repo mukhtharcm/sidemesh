@@ -45,12 +45,18 @@ export interface HostTerminalConfig {
   requirePty: boolean;
 }
 
+export interface HostPortForwardingConfig {
+  enabled: boolean;
+  allowNonLoopbackTargets: boolean;
+}
+
 export interface HostCapabilities {
   workspace: {
     filesystem: boolean;
     gitStatus: boolean;
     gitDiff: boolean;
     terminal: boolean;
+    portForwarding: boolean;
   };
 }
 
@@ -64,6 +70,7 @@ export interface NodeConfig {
   defaultProviderKind: AgentProviderKind;
   stateDir: string;
   terminal: HostTerminalConfig;
+  portForwarding: HostPortForwardingConfig;
   configPath: string;
   configExists: boolean;
 }

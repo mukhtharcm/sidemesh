@@ -76,9 +76,9 @@ Workspace:
 - `readRemoteGitDiff`
 - filesystem methods under `fs*`
 
-Local git status and local working/staged/unstaged diffs are daemon-owned host
-features. Providers only own `readRemoteGitDiff`, because that may require
-agent/provider-specific context.
+Local git status, local working/staged/unstaged diffs, integrated terminals, and
+port forwarding are daemon-owned host features. Providers only own
+`readRemoteGitDiff`, because that may require agent/provider-specific context.
 
 ## Runtime Events
 
@@ -103,7 +103,8 @@ types instead of leaking provider-specific wire payloads to the Flutter app.
 Server routes check both capability flags and method presence. A provider that
 does not support a provider-owned route should produce a `501` instead of
 forcing every adapter to implement Codex-only methods. Daemon-owned features
-such as local git status are exposed through `hostCapabilities`.
+such as local git status, terminals, and port forwarding are exposed through
+`hostCapabilities`.
 
 Compatibility shims are acceptable only when a provider already exposes a
 native concept but its current server/runtime integration fails to restore or

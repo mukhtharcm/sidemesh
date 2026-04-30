@@ -167,6 +167,8 @@ SIDEMESH_STATE_DIR=~/.sidemesh
 SIDEMESH_TERMINAL=0
 SIDEMESH_TERMINAL_SHELL=/bin/zsh
 SIDEMESH_TERMINAL_REQUIRE_PTY=0
+SIDEMESH_PORT_FORWARDING=0
+SIDEMESH_PORT_FORWARDING_ALLOW_NON_LOOPBACK=0
 ```
 
 `SIDEMESH_PROVIDER` defaults to `codex`. `SIDEMESH_PROVIDER_COMMAND` is a
@@ -187,6 +189,14 @@ execute-bit issue before falling back; if PTY startup still fails, run
 `npm rebuild node-pty`. Pipe fallback is intentionally labeled as limited in the
 app; it has no real PTY resize semantics, but the daemon still terminates the
 whole fallback process group when you stop the terminal.
+
+Port forwarding is also host-side and provider-neutral. It is disabled by
+default because it lets authenticated clients reach services from the host.
+Enable it with `SIDEMESH_PORT_FORWARDING=1` or through `sidemesh setup`; the
+default target policy only allows the daemon to connect to `localhost`/
+`127.0.0.1` on the host. Set
+`SIDEMESH_PORT_FORWARDING_ALLOW_NON_LOOPBACK=1` only if you intentionally want
+the daemon to bridge to other addresses reachable from that host.
 
 To run against GitHub Copilot CLI instead of Codex without using the setup
 wizard:
@@ -270,9 +280,9 @@ Use `sidemesh daemon` instead of `sidemesh start` when you want a foreground
 process, for example inside `systemd` or during local debugging.
 
 Use `sidemesh status` when you are unsure which local daemon is active. It
-prints the resolved port, provider list, token fingerprint, terminal setting,
-managed daemon pid/state, and reachable local/Tailscale addresses without
-revealing the full token.
+prints the resolved port, provider list, token fingerprint, terminal and port
+forwarding settings, managed daemon pid/state, and reachable local/Tailscale
+addresses without revealing the full token.
 
 If you prefer raw env vars, this still works:
 

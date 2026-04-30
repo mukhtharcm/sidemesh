@@ -6,6 +6,7 @@ import type {
   AgentProviderConfig,
   AgentProviderConfigSummary,
   AgentProviderKind,
+  HostPortForwardingConfig,
   HostTerminalConfig,
   NodeConfig,
 } from "./types.js";
@@ -60,6 +61,7 @@ export async function loadConfig(
     env,
   );
   const terminal = resolveTerminalConfig(persisted.value, env);
+  const portForwarding = resolvePortForwardingConfig(persisted.value, env);
   const provider =
     providers.find((candidate) => candidate.kind === defaultProviderKind) ??
     providers[0];
@@ -89,6 +91,7 @@ export async function loadConfig(
     defaultProviderKind,
     stateDir,
     terminal,
+    portForwarding,
     configPath,
     configExists: persisted.exists,
   };
@@ -239,6 +242,26 @@ function resolveTerminalConfig(
         ? envShell || null
         : terminal?.shell ?? null,
     requirePty: envRequirePty ?? terminal?.requirePty ?? false,
+  };
+}
+
+function resolvePortForwardingConfig(
+  persisted: PersistedNodeConfig | null,
+  env: Environment,
+): HostPortForwardingConfig {
+  const portForwarding = persisted?.portForwarding;
+  const envEnabled = parseOptionalBoolean(
+    env.SIDEMESH_PORT_FORWARDING ?? env.SIDEMESH_ENABLE_PORT_FORWARDING,
+  );
+  const envAllowNonLoopbackTargets = parseOptionalBoolean(
+    env.SIDEMESH_PORT_FORWARDING_ALLOW_NON_LOOPBACK,
+  );
+  return {
+    enabled: envEnabled ?? portForwarding?.enabled ?? false,
+    allowNonLoopbackTargets:
+      envAllowNonLoopbackTargets ??
+      portForwarding?.allowNonLoopbackTargets ??
+      false,
   };
 }
 

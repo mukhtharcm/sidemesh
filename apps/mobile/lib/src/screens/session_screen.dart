@@ -28,9 +28,11 @@ import 'inspector/inspector_controller.dart';
 import 'inspector/inspector_file_browser.dart';
 import 'inspector/inspector_persistence.dart';
 import 'inspector/inspector_pinned.dart';
+import 'inspector/inspector_ports.dart';
 import 'inspector/inspector_resources.dart';
 import 'inspector/inspector_search.dart';
 import 'inspector/inspector_terminal.dart';
+import 'port_forward_screen.dart';
 import 'workspace_browser_dialog.dart';
 import '../session_favorites_store.dart';
 import '../session_cache_store.dart';
@@ -271,6 +273,9 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsTerminal =>
       _supportsHostCapability('workspace', 'terminal');
 
+  bool get _supportsPortForwarding =>
+      _supportsHostCapability('workspace', 'portForwarding');
+
   bool _supportsGitDiffKind(String kind) {
     if (kind == 'remote') {
       return _supportsProviderCapability('workspace', 'remoteGitDiff');
@@ -410,7 +415,12 @@ class _SessionScreenState extends State<SessionScreen>
         !_supportsFilesystem;
     final unsupportedTerminal =
         current.kind == InspectorSurfaceKind.terminal && !_supportsTerminal;
-    if (unsupportedResources || unsupportedFiles || unsupportedTerminal) {
+    final unsupportedPorts =
+        current.kind == InspectorSurfaceKind.ports && !_supportsPortForwarding;
+    if (unsupportedResources ||
+        unsupportedFiles ||
+        unsupportedTerminal ||
+        unsupportedPorts) {
       controller.closeForOwner(current.ownerKey);
     }
   }
@@ -612,6 +622,17 @@ class _SessionScreenState extends State<SessionScreen>
           ),
         );
         break;
+      case InspectorSurfaceKind.ports:
+        if (!_supportsPortForwarding) return;
+        controller.show(
+          buildInspectorPortsSurface(
+            ownerKey: ownerKey,
+            host: widget.host,
+            api: widget.api,
+            session: _session ?? widget.session,
+          ),
+        );
+        break;
       case InspectorSurfaceKind.debug:
       case InspectorSurfaceKind.gitDetails:
       case InspectorSurfaceKind.sessionDetails:
@@ -777,6 +798,14 @@ class _SessionScreenState extends State<SessionScreen>
     final cur = scope.current;
     return cur != null &&
         cur.kind == InspectorSurfaceKind.terminal &&
+        cur.ownerKey == _inspectorOwnerKey();
+  }
+
+  bool _isPortsInspectorOpen(InspectorController? scope) {
+    if (scope == null) return false;
+    final cur = scope.current;
+    return cur != null &&
+        cur.kind == InspectorSurfaceKind.ports &&
         cur.ownerKey == _inspectorOwnerKey();
   }
 
@@ -3483,6 +3512,37 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
+  Future<void> _openPorts() async {
+    if (!_supportsPortForwarding) {
+      showAppSnackBar(context, 'This host does not expose port forwarding.');
+      return;
+    }
+    final session = _session ?? widget.session;
+    final scope = InspectorScope.maybeOf(context);
+    if (widget.desktopMode && scope != null) {
+      scope.show(
+        buildInspectorPortsSurface(
+          ownerKey: _inspectorOwnerKey(),
+          host: widget.host,
+          api: widget.api,
+          session: session,
+        ),
+      );
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PortForwardScreen(
+          host: widget.host,
+          api: widget.api,
+          cwd: session.cwd,
+          sessionId: session.id,
+          sessionTitle: session.title,
+        ),
+      ),
+    );
+  }
+
   void _dismissKeyboard() {
     _restoreComposerFocusOnResume = false;
     FocusManager.instance.primaryFocus?.unfocus();
@@ -3878,6 +3938,11 @@ class _SessionScreenState extends State<SessionScreen>
           unawaited(_openTerminal());
         }
         break;
+      case 'ports':
+        if (_supportsPortForwarding) {
+          unawaited(_openPorts());
+        }
+        break;
       case 'search':
         _toggleSearchPanel();
         break;
@@ -3952,6 +4017,7 @@ class _SessionScreenState extends State<SessionScreen>
     required bool gitAvailable,
     required bool gitDirty,
     required bool terminalOpen,
+    required bool portsOpen,
     required bool searchOpen,
     required bool resourcesOpen,
   }) {
@@ -3983,6 +4049,19 @@ class _SessionScreenState extends State<SessionScreen>
                   ? _SessionActionTone.accent
                   : _SessionActionTone.neutral,
               active: terminalOpen,
+            ),
+          if (_supportsPortForwarding)
+            _SessionActionSpec(
+              value: 'ports',
+              label: portsOpen ? 'Ports are open' : 'Forward port',
+              detail: portsOpen
+                  ? 'Jump back to forwarded previews.'
+                  : 'Preview a localhost service from this host.',
+              icon: Icons.cable_rounded,
+              tone: portsOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: portsOpen,
             ),
           _SessionActionSpec(
             value: 'search',
@@ -4099,6 +4178,7 @@ class _SessionScreenState extends State<SessionScreen>
     required bool gitAvailable,
     required bool gitDirty,
     required bool terminalOpen,
+    required bool portsOpen,
     required bool searchOpen,
     required bool resourcesOpen,
   }) async {
@@ -4116,6 +4196,7 @@ class _SessionScreenState extends State<SessionScreen>
           gitAvailable: gitAvailable,
           gitDirty: gitDirty,
           terminalOpen: terminalOpen,
+          portsOpen: portsOpen,
           searchOpen: searchOpen,
           resourcesOpen: resourcesOpen,
         ),
@@ -4344,6 +4425,7 @@ class _SessionScreenState extends State<SessionScreen>
         inspectorScope != null && _isSearchInspectorOpen(inspectorScope);
     final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
     final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
+    final portsOpenInInspector = _isPortsInspectorOpen(inspectorScope);
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -4433,6 +4515,20 @@ class _SessionScreenState extends State<SessionScreen>
                     ? colors.accent
                     : colors.textSecondary,
                 onTap: () => unawaited(_openTerminal()),
+              ),
+            ),
+          if (!isCompact && _supportsPortForwarding)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: MeshIconButton(
+                icon: Icons.cable_rounded,
+                tooltip: portsOpenInInspector
+                    ? 'Ports are open'
+                    : 'Forward port',
+                color: portsOpenInInspector
+                    ? colors.accent
+                    : colors.textSecondary,
+                onTap: () => unawaited(_openPorts()),
               ),
             ),
           if (!isCompact &&
@@ -4529,6 +4625,7 @@ class _SessionScreenState extends State<SessionScreen>
                       gitAvailable: gitAvailable,
                       gitDirty: gitDirty,
                       terminalOpen: terminalOpenInInspector,
+                      portsOpen: portsOpenInInspector,
                       searchOpen: searchOpenInInspector,
                       resourcesOpen: resourcesOpenInInspector,
                     ),
@@ -4607,6 +4704,17 @@ class _SessionScreenState extends State<SessionScreen>
                           Icon(Icons.folder_outlined, size: 18),
                           SizedBox(width: 10),
                           Text('Browse files'),
+                        ],
+                      ),
+                    ),
+                  if (_supportsPortForwarding)
+                    const PopupMenuItem<String>(
+                      value: 'ports',
+                      child: Row(
+                        children: [
+                          Icon(Icons.cable_rounded, size: 18),
+                          SizedBox(width: 10),
+                          Text('Ports'),
                         ],
                       ),
                     ),

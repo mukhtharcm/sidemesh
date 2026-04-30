@@ -1029,6 +1029,7 @@ String _capabilityFeatureLabel(String key) {
     'remoteGitDiff' => 'remote git diff',
     'gitStatus' => 'git status',
     'gitDiff' => 'git diff',
+    'portForwarding' => 'port forwarding',
     'approveForSession' => 'approve for session',
     'userInput' => 'ask user',
     'elicitation' => 'form requests',

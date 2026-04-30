@@ -21,6 +21,7 @@ describe("launchd service rendering", () => {
       defaultProviderKind: "codex",
       stateDir: "/Users/example/.sidemesh",
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
+      portForwarding: { enabled: true, allowNonLoopbackTargets: false },
       configPath: "/Users/example/.sidemesh/config.json",
       configExists: true,
     };
@@ -53,6 +54,7 @@ describe("launchd service rendering", () => {
     const env = renderLaunchdEnv(config);
     assert.match(env, /SIDEMESH_TOKEN=test-token/);
     assert.match(env, /SIDEMESH_TERMINAL=1/);
+    assert.match(env, /SIDEMESH_PORT_FORWARDING=1/);
     assert.match(env, /SIDEMESH_LABEL="Mac Dev"/);
   });
 

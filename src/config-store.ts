@@ -52,6 +52,11 @@ const terminalConfigSchema = z.object({
   requirePty: z.boolean().default(false),
 });
 
+const portForwardingConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  allowNonLoopbackTargets: z.boolean().default(false),
+});
+
 const persistedProviderConfigSchema = z.discriminatedUnion("kind", [
   codexProviderConfigSchema,
   copilotProviderConfigSchema,
@@ -65,6 +70,7 @@ const persistedNodeConfigSchema = z.object({
   token: z.string().trim().min(1).optional(),
   stateDir: z.string().trim().min(1).optional(),
   terminal: terminalConfigSchema.optional(),
+  portForwarding: portForwardingConfigSchema.optional(),
   defaultProviderKind: z.enum(["codex", "copilot", "fake"]).optional(),
   providers: z.array(persistedProviderConfigSchema).default([]),
 });
@@ -147,6 +153,7 @@ export function persistedConfigFromNodeConfig(
     token: config.token,
     stateDir: config.stateDir,
     terminal: config.terminal,
+    portForwarding: config.portForwarding,
     defaultProviderKind: config.defaultProviderKind,
     providers: config.providers.map((provider) =>
       normalizePersistedProviderConfig(provider),

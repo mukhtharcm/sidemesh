@@ -21,6 +21,7 @@ describe("systemd service rendering", () => {
       defaultProviderKind: "codex",
       stateDir: "/root/.sidemesh",
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
+      portForwarding: { enabled: true, allowNonLoopbackTargets: false },
       configPath: "/root/.sidemesh/config.json",
       configExists: true,
     };
@@ -46,6 +47,7 @@ describe("systemd service rendering", () => {
     const env = renderServiceEnv(config);
     assert.match(env, /SIDEMESH_TOKEN=test-token/);
     assert.match(env, /SIDEMESH_TERMINAL=1/);
+    assert.match(env, /SIDEMESH_PORT_FORWARDING=1/);
     assert.match(env, /SIDEMESH_TERMINAL_SHELL=\/bin\/zsh/);
     assert.match(env, /SIDEMESH_LABEL="Lab Node"/);
   });

@@ -20,6 +20,7 @@ describe("pairing helpers", () => {
       defaultProviderKind: "codex",
       stateDir: "/tmp/sidemesh",
       terminal: { enabled: false, shell: null, requirePty: false },
+      portForwarding: { enabled: false, allowNonLoopbackTargets: false },
       configPath: "/tmp/sidemesh/config.json",
       configExists: true,
     };
