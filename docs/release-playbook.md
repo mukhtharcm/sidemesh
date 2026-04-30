@@ -99,16 +99,19 @@ Current workflows:
   tests and analysis on pull requests and `main`.
 - `Mobile Artifacts`: manual workflow that builds an Android debug APK, a macOS
   debug app, and an iOS simulator app. These are unsigned development artifacts.
-- `Release macOS App`: tag/manual workflow that builds the Flutter macOS app,
+- `Release macOS App`: manual workflow that builds the Flutter macOS app,
   packages `.zip` and `.dmg` artifacts, optionally signs with Developer ID,
-  optionally notarizes/staples with Apple, and publishes a GitHub Release from
-  `v*` tags.
+  optionally notarizes/staples with Apple, and can publish a GitHub Release
+  when `publish_release` is enabled.
+- `Deploy to TestFlight`: manual workflow that builds and uploads the signed iOS
+  prod flavor. It is intentionally not tied to tags so server releases do not
+  spend macOS CI minutes.
 - `Deploy Website`: deploys the static `web/` marketing site and Pages
   Functions to Cloudflare Pages when `web/**` changes on `main`.
 - `Secret Scan`: manual gitleaks scan over full git history.
 
-Store deployment is intentionally not configured yet. Add TestFlight and signed
-Android workflows only after the signing/provisioning story is stable.
+Store deployment is intentionally opt-in. Run TestFlight only when you actually
+need a mobile build; use server tags/releases for daemon-only changes.
 
 ## Website Deploy
 
@@ -149,15 +152,15 @@ for internal smoke testing. With signing secrets only, it produces signed
 artifacts. With signing and notary secrets, it notarizes and staples both the
 app and DMG.
 
-To create a release from a tag:
+To create a GitHub Release from the macOS workflow, run it manually and enable
+`publish_release`. Generic server tags intentionally do not trigger app builds.
+
+To create a server-only tag:
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
-
-To run manually without publishing a GitHub Release, use the
-`Release macOS App` workflow and leave `publish_release` disabled.
 
 To package locally:
 
