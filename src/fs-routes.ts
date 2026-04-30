@@ -1,19 +1,20 @@
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
-import { watch, type FSWatcher } from "node:fs";
+import { createReadStream, watch, type FSWatcher } from "node:fs";
 import {
   copyFile,
   cp,
   lstat,
   mkdir,
+  open,
   readdir,
-  readFile,
   realpath,
   rm,
   stat,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 
 import type { Express, NextFunction, Request, Response } from "express";
 import type { WebSocket, WebSocketServer } from "ws";
@@ -27,18 +28,21 @@ import type { SessionSummary } from "./types.js";
 
 const READ_SOFT_CAP_BYTES = 2 * 1024 * 1024; // 2 MiB — UX preview cap.
 const WRITE_SOFT_CAP_BYTES = 4 * 1024 * 1024; // 4 MiB — payload safety cap.
+const WORKSPACE_ROOTS_TTL_MS = 5_000;
 
 interface FsRoutesOptions {
   listSessions: () => Promise<SessionSummary[]>;
 }
 
 export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
+  const resolveRoots = createWorkspaceRootsResolver(opts.listSessions);
+
   app.get(
     "/api/fs/list",
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(
         request.query.path,
-        opts.listSessions,
+        resolveRoots,
       );
       const entries = (await readdir(target, { withFileTypes: true }))
         .map((entry) => ({
@@ -60,7 +64,7 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(
         request.query.path,
-        opts.listSessions,
+        resolveRoots,
       );
       response.json(await buildMetadata(target));
     }),
@@ -71,23 +75,22 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(
         request.query.path,
-        opts.listSessions,
+        resolveRoots,
       );
       const meta = await buildMetadata(target);
       if (!meta.isFile) {
         response.status(400).json({ error: "path is not a regular file" });
         return;
       }
-      const bytes = await readFile(target);
-      const size = bytes.byteLength;
+      const bytes = await readFilePreview(target, meta.size);
       const binary = isBinary(bytes);
-      const truncated = size > READ_SOFT_CAP_BYTES;
+      const truncated = meta.size > READ_SOFT_CAP_BYTES;
       if (binary) {
         response.json({
           path: target,
-          size,
+          size: meta.size,
           binary: true,
-          truncated: false,
+          truncated,
           modifiedAtMs: meta.modifiedAtMs,
           mimeHint: guessMime(target),
           encoding: "none",
@@ -100,7 +103,7 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
         : bytes;
       response.json({
         path: target,
-        size,
+        size: meta.size,
         binary: false,
         truncated,
         modifiedAtMs: meta.modifiedAtMs,
@@ -116,17 +119,17 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingBlobPath(
         request.query.path,
-        opts.listSessions,
+        resolveRoots,
       );
-      const bytes = await readFile(target);
+      const info = await stat(target);
       response.setHeader("Content-Type", guessMime(target));
-      response.setHeader("Content-Length", String(bytes.byteLength));
+      response.setHeader("Content-Length", String(info.size));
       response.setHeader("Cache-Control", "private, max-age=60");
       response.setHeader(
         "Content-Disposition",
         `inline; filename="${path.basename(target).replaceAll('"', "")}"`,
       );
-      response.send(bytes);
+      await pipeline(createReadStream(target), response);
     }),
   );
 
@@ -135,7 +138,7 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(
         request.body?.path,
-        opts.listSessions,
+        resolveRoots,
         {
           allowMissing: true,
         },
@@ -160,7 +163,7 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(
         request.body?.path,
-        opts.listSessions,
+        resolveRoots,
         {
           allowMissing: true,
         },
@@ -176,7 +179,7 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     asyncRoute(async (request, response) => {
       const target = await resolveIncomingPath(
         request.body?.path,
-        opts.listSessions,
+        resolveRoots,
       );
       const recursive = request.body?.recursive !== false;
       const force = request.body?.force !== false;
@@ -190,11 +193,11 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     asyncRoute(async (request, response) => {
       const source = await resolveIncomingPath(
         request.body?.sourcePath,
-        opts.listSessions,
+        resolveRoots,
       );
       const destination = await resolveIncomingPath(
         request.body?.destinationPath,
-        opts.listSessions,
+        resolveRoots,
         { allowMissing: true },
       );
       const recursive = request.body?.recursive === true;
@@ -217,30 +220,28 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.get(
     "/api/fs/roots",
     asyncRoute(async (_request, response) => {
-      const roots = await collectWorkspaceRoots(opts.listSessions);
-      response.json({ roots });
+      response.json({ roots: await resolveRoots() });
     }),
   );
 }
 
 async function resolveIncomingPath(
   raw: unknown,
-  listSessions: () => Promise<SessionSummary[]>,
+  roots: () => Promise<string[]>,
   options: { allowMissing?: boolean } = {},
 ): Promise<string> {
   if (typeof raw !== "string") {
     throw new WorkspaceAccessError("path is required", 400);
   }
-  const roots = await collectWorkspaceRoots(listSessions);
-  return resolveWorkspacePath(raw, roots, options);
+  return resolveWorkspacePath(raw, await roots(), options);
 }
 
 async function resolveIncomingBlobPath(
   raw: unknown,
-  listSessions: () => Promise<SessionSummary[]>,
+  roots: () => Promise<string[]>,
 ): Promise<string> {
   try {
-    return await resolveIncomingPath(raw, listSessions);
+    return await resolveIncomingPath(raw, roots);
   } catch (error) {
     if (typeof raw !== "string" || !path.isAbsolute(raw)) {
       throw error;
@@ -391,6 +392,7 @@ export function attachFsLiveSocket(
     listSessions: () => Promise<SessionSummary[]>;
   },
 ): void {
+  const resolveRoots = createWorkspaceRootsResolver(opts.listSessions);
   ws.on("message", async (raw) => {
     let message: any;
     try {
@@ -402,11 +404,10 @@ export function attachFsLiveSocket(
     const messageType = message?.type;
     try {
       if (messageType === "subscribe") {
-        const roots = await collectWorkspaceRoots(opts.listSessions);
         const { watchId, path: resolved } = await registry.subscribe(ws, {
           path: String(message.path ?? ""),
           userWatchId: String(message.id ?? ""),
-          roots,
+          roots: await resolveRoots(),
         });
         sendJson(ws, {
           type: "subscribed",
@@ -463,11 +464,43 @@ async function buildMetadata(target: string) {
   const info = await lstat(target);
   return {
     path: target,
+    size: info.size,
     isDirectory: info.isDirectory(),
     isFile: info.isFile(),
     isSymlink: info.isSymbolicLink(),
     createdAtMs: Number.isFinite(info.birthtimeMs) ? info.birthtimeMs : 0,
     modifiedAtMs: Number.isFinite(info.mtimeMs) ? info.mtimeMs : 0,
+  };
+}
+
+async function readFilePreview(target: string, size: number): Promise<Buffer> {
+  const bytesToRead = Math.min(size, READ_SOFT_CAP_BYTES + 1);
+  if (bytesToRead <= 0) {
+    return Buffer.alloc(0);
+  }
+  const handle = await open(target, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(bytesToRead);
+    const { bytesRead } = await handle.read(buffer, 0, bytesToRead, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+function createWorkspaceRootsResolver(
+  listSessions: () => Promise<SessionSummary[]>,
+): () => Promise<string[]> {
+  let expiresAt = 0;
+  let promise: Promise<string[]> | null = null;
+  return async () => {
+    const now = Date.now();
+    if (promise && now < expiresAt) {
+      return promise;
+    }
+    promise = collectWorkspaceRoots(listSessions).catch(() => []);
+    expiresAt = now + WORKSPACE_ROOTS_TTL_MS;
+    return promise;
   };
 }
 
