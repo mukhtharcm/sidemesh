@@ -22,10 +22,14 @@ class RemoteSessionEntry {
 /// HTTP remains the reconciliation path for reconnects and compatibility with
 /// older servers, while the websocket path keeps the list fresh between polls.
 class RecentSessionsStore extends ChangeNotifier {
-  RecentSessionsStore({Duration pollInterval = const Duration(seconds: 90)})
-    : _pollInterval = pollInterval;
+  RecentSessionsStore({
+    Duration pollInterval = const Duration(seconds: 90),
+    Duration initialHttpFallbackDelay = const Duration(milliseconds: 1600),
+  }) : _pollInterval = pollInterval,
+       _initialHttpFallbackDelay = initialHttpFallbackDelay;
 
   final Duration _pollInterval;
+  final Duration _initialHttpFallbackDelay;
 
   ApiClient? _api;
   List<HostProfile> _hosts = const [];
@@ -40,6 +44,7 @@ class RecentSessionsStore extends ChangeNotifier {
   bool _disposed = false;
   int _loadGen = 0;
   Timer? _pollTimer;
+  Timer? _initialHttpFallbackTimer;
 
   List<RemoteSessionEntry> get entries => _entries;
   Set<String> get pendingHostIds => Set.unmodifiable(_pendingHostIds);
@@ -78,11 +83,13 @@ class RecentSessionsStore extends ChangeNotifier {
 
     unawaited(_hydrateCachedHosts(_hosts));
     if (hostsChanged || !_hasLoadedOnce) {
-      unawaited(refresh());
+      _scheduleInitialHttpFallback();
     }
   }
 
   Future<void> refresh({bool showLoading = true}) async {
+    _initialHttpFallbackTimer?.cancel();
+    _initialHttpFallbackTimer = null;
     final api = _api;
     if (_disposed || api == null) return;
     final hosts = _hosts;
@@ -149,6 +156,26 @@ class RecentSessionsStore extends ChangeNotifier {
       }),
       eagerError: false,
     );
+  }
+
+  void _scheduleInitialHttpFallback() {
+    _initialHttpFallbackTimer?.cancel();
+    if (_hosts.isEmpty || _hosts.every((host) => !host.enabled)) {
+      return;
+    }
+    _pendingHostIds = _hosts.map((host) => host.id).toSet();
+    _failedHostLabels = const [];
+    for (final host in _hosts) {
+      HostStatusStore.instance.markProbing(host.id);
+    }
+    notifyListeners();
+    _initialHttpFallbackTimer = Timer(_initialHttpFallbackDelay, () {
+      _initialHttpFallbackTimer = null;
+      if (_disposed || _pendingHostIds.isEmpty) {
+        return;
+      }
+      unawaited(refresh());
+    });
   }
 
   Future<void> _hydrateCachedHosts(List<HostProfile> hosts) async {
@@ -230,11 +257,7 @@ class RecentSessionsStore extends ChangeNotifier {
 
   void _handleLiveSnapshot(HostProfile host, List<SessionSummary> sessions) {
     if (_disposed || !_hostsById.containsKey(host.id)) return;
-    _confirmedHostIds.add(host.id);
-    _pendingHostIds = {..._pendingHostIds}..remove(host.id);
-    _failedHostLabels = _failedHostLabels
-        .where((label) => label != host.label)
-        .toList(growable: false);
+    _markHostFreshFromLive(host);
     _hasLoadedOnce = true;
     _replaceHostSessions(host, sessions);
     _publishEntries();
@@ -244,11 +267,7 @@ class RecentSessionsStore extends ChangeNotifier {
 
   void _handleLiveUpsert(HostProfile host, SessionSummary session) {
     if (_disposed || !_hostsById.containsKey(host.id)) return;
-    _confirmedHostIds.add(host.id);
-    _pendingHostIds = {..._pendingHostIds}..remove(host.id);
-    _failedHostLabels = _failedHostLabels
-        .where((label) => label != host.label)
-        .toList(growable: false);
+    _markHostFreshFromLive(host);
     final next = Map<String, SessionSummary>.from(
       _sessionsByHostId[host.id] ?? const <String, SessionSummary>{},
     );
@@ -262,11 +281,7 @@ class RecentSessionsStore extends ChangeNotifier {
 
   void _handleLiveRemove(HostProfile host, String sessionId) {
     if (_disposed || !_hostsById.containsKey(host.id)) return;
-    _confirmedHostIds.add(host.id);
-    _pendingHostIds = {..._pendingHostIds}..remove(host.id);
-    _failedHostLabels = _failedHostLabels
-        .where((label) => label != host.label)
-        .toList(growable: false);
+    _markHostFreshFromLive(host);
     final existing = _sessionsByHostId[host.id];
     if (existing == null || !existing.containsKey(sessionId)) {
       notifyListeners();
@@ -278,6 +293,18 @@ class RecentSessionsStore extends ChangeNotifier {
     _publishEntries();
     notifyListeners();
     _persistHostCache(host);
+  }
+
+  void _markHostFreshFromLive(HostProfile host) {
+    _confirmedHostIds.add(host.id);
+    _pendingHostIds = {..._pendingHostIds}..remove(host.id);
+    if (_pendingHostIds.isEmpty) {
+      _initialHttpFallbackTimer?.cancel();
+      _initialHttpFallbackTimer = null;
+    }
+    _failedHostLabels = _failedHostLabels
+        .where((label) => label != host.label)
+        .toList(growable: false);
   }
 
   void _replaceHostSessions(HostProfile host, List<SessionSummary> sessions) {
@@ -333,6 +360,7 @@ class RecentSessionsStore extends ChangeNotifier {
     }
     _disposed = true;
     _pollTimer?.cancel();
+    _initialHttpFallbackTimer?.cancel();
     for (final connection in _liveConnections.values) {
       connection.dispose();
     }
@@ -383,16 +411,18 @@ class _RecentHostLiveConnection {
         onDone: () => _scheduleReconnectIfCurrent(channel, null),
       );
       unawaited(
-        channel.ready.then((_) {
-          if (_disposed || !identical(_channel, channel)) return;
-          _attempt = 0;
-        }).catchError((Object error) {
-          if (_disposed || !identical(_channel, channel) || !host.enabled) {
-            return null;
-          }
-          _scheduleReconnect(error);
-          return null;
-        }),
+        channel.ready
+            .then((_) {
+              if (_disposed || !identical(_channel, channel)) return;
+              _attempt = 0;
+            })
+            .catchError((Object error) {
+              if (_disposed || !identical(_channel, channel) || !host.enabled) {
+                return null;
+              }
+              _scheduleReconnect(error);
+              return null;
+            }),
       );
     } catch (error) {
       if (!host.enabled) return;

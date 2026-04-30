@@ -1810,8 +1810,7 @@ class _SessionScreenState extends State<SessionScreen>
       setState(() {
         _running = status.isRunning;
         _pendingAction = status.pendingAction;
-        _showingCachedSnapshot = false;
-        _snapshotRefreshing = false;
+        _snapshotRefreshing = _snapshotInFlight;
         _loading = false;
         _awaitingAssistantReply =
             status.isRunning &&

@@ -26,7 +26,10 @@ void main() {
     final api = _FakeApiClient()
       ..throwOnOpenSessionsLive = true
       ..sessionsByHostId[host.id] = [_session('session-1', title: 'HTTP only')];
-    final store = RecentSessionsStore(pollInterval: const Duration(hours: 1));
+    final store = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: const Duration(milliseconds: 1),
+    );
     addTearDown(store.dispose);
 
     store.configure(hosts: const [host], api: api);
@@ -48,7 +51,10 @@ void main() {
         ..sessionsByHostId[host.id] = [
           _session('session-2', title: 'Fresh later'),
         ];
-      final store = RecentSessionsStore(pollInterval: const Duration(hours: 1));
+      final store = RecentSessionsStore(
+        pollInterval: const Duration(hours: 1),
+        initialHttpFallbackDelay: const Duration(milliseconds: 1),
+      );
       addTearDown(store.dispose);
 
       store.configure(hosts: const [host], api: api);
@@ -70,7 +76,10 @@ void main() {
   test('live snapshot and remove keep recent sessions current', () async {
     final api = _FakeApiClient()
       ..sessionsByHostId[host.id] = const <SessionSummary>[];
-    final store = RecentSessionsStore(pollInterval: const Duration(hours: 1));
+    final store = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: const Duration(milliseconds: 100),
+    );
     addTearDown(store.dispose);
 
     store.configure(hosts: const [host], api: api);
@@ -110,44 +119,52 @@ void main() {
     expect(store.entries.map((entry) => entry.session.id), {'session-2'});
   });
 
-  test('swallows websocket handshake failures and keeps HTTP fallback alive', () async {
-    final uncaught = <Object>[];
+  test(
+    'swallows websocket handshake failures and keeps HTTP fallback alive',
+    () async {
+      final uncaught = <Object>[];
 
-    await runZonedGuarded(() async {
-      final api = _FakeApiClient()
-        ..liveReady = Future<void>.error(
-          StateError('handshake failed'),
-        )
-        ..sessionsByHostId[host.id] = [
-          _session('session-1', title: 'HTTP survives'),
-        ];
-      final store = RecentSessionsStore(
-        pollInterval: const Duration(hours: 1),
+      await runZonedGuarded(
+        () async {
+          final api = _FakeApiClient()
+            ..liveReady = Future<void>.error(StateError('handshake failed'))
+            ..sessionsByHostId[host.id] = [
+              _session('session-1', title: 'HTTP survives'),
+            ];
+          final store = RecentSessionsStore(
+            pollInterval: const Duration(hours: 1),
+            initialHttpFallbackDelay: const Duration(milliseconds: 1),
+          );
+          addTearDown(store.dispose);
+
+          store.configure(hosts: const [host], api: api);
+          await _settle();
+          await _settle();
+
+          expect(store.entries, hasLength(1));
+          expect(store.entries.single.session.title, 'HTTP survives');
+
+          store.dispose();
+          await _settle();
+        },
+        (error, stackTrace) {
+          uncaught.add(error);
+        },
       );
-      addTearDown(store.dispose);
 
-      store.configure(hosts: const [host], api: api);
-      await _settle();
-      await _settle();
-
-      expect(store.entries, hasLength(1));
-      expect(store.entries.single.session.title, 'HTTP survives');
-
-      store.dispose();
-      await _settle();
-    }, (error, stackTrace) {
-      uncaught.add(error);
-    });
-
-    expect(uncaught, isEmpty);
-  });
+      expect(uncaught, isEmpty);
+    },
+  );
 
   test(
     'live disconnect clears confirmation without dropping visible entries',
     () async {
       final api = _FakeApiClient()
         ..sessionsByHostId[host.id] = const <SessionSummary>[];
-      final store = RecentSessionsStore(pollInterval: const Duration(hours: 1));
+      final store = RecentSessionsStore(
+        pollInterval: const Duration(hours: 1),
+        initialHttpFallbackDelay: const Duration(milliseconds: 100),
+      );
       addTearDown(store.dispose);
 
       store.configure(hosts: const [host], api: api);
@@ -170,6 +187,30 @@ void main() {
       expect(store.confirmedHostIds, isNot(contains(host.id)));
     },
   );
+
+  test('live snapshot cancels the initial HTTP fallback', () async {
+    final api = _FakeApiClient()
+      ..sessionsByHostId[host.id] = [_session('session-http', title: 'HTTP')];
+    final store = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: const Duration(milliseconds: 30),
+    );
+    addTearDown(store.dispose);
+
+    store.configure(hosts: const [host], api: api);
+    api
+        .liveChannelFor(host)
+        .addIncoming(
+          jsonEncode({
+            'type': 'snapshot',
+            'sessions': [_session('session-live', title: 'Live').toJson()],
+          }),
+        );
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+
+    expect(api.fetchSessionsCalls, 0);
+    expect(store.entries.map((entry) => entry.session.title), ['Live']);
+  });
 }
 
 class _FakeApiClient extends ApiClient {
@@ -178,12 +219,14 @@ class _FakeApiClient extends ApiClient {
   bool throwOnOpenSessionsLive = false;
   Duration fetchDelay = Duration.zero;
   Future<void> liveReady = Future<void>.value();
+  int fetchSessionsCalls = 0;
 
   @override
   Future<List<SessionSummary>> fetchSessions(
     HostProfile host, {
     int? limit,
   }) async {
+    fetchSessionsCalls++;
     if (fetchDelay > Duration.zero) {
       await Future<void>.delayed(fetchDelay);
     }
@@ -201,11 +244,8 @@ class _FakeApiClient extends ApiClient {
     );
   }
 
-  _FakeWebSocketChannel liveChannelFor(HostProfile host) =>
-      _liveChannels.putIfAbsent(
-        host.id,
-        () => _FakeWebSocketChannel(ready: liveReady),
-      );
+  _FakeWebSocketChannel liveChannelFor(HostProfile host) => _liveChannels
+      .putIfAbsent(host.id, () => _FakeWebSocketChannel(ready: liveReady));
 }
 
 class _FakeWebSocketChannel extends StreamChannelMixin<dynamic>

@@ -32,8 +32,8 @@ class _CachedTranscriptStrip extends StatelessWidget {
           Expanded(
             child: Text(
               refreshing
-                  ? 'Cached transcript · refreshing host'
-                  : 'Cached transcript · host not fresh yet',
+                  ? 'Cached transcript · syncing latest changes'
+                  : 'Cached transcript · waiting for latest host snapshot',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: monoStyle(
