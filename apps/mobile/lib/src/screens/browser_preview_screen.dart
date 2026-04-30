@@ -79,6 +79,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     with WidgetsBindingObserver {
   static const _firstFrameTimeout = Duration(seconds: 18);
   static const _maxFirstFrameReconnects = 3;
+  static const _maxStreamReconnects = 8;
 
   final _textController = TextEditingController();
   final _inputFocusNode = FocusNode();
@@ -86,6 +87,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   Timer? _firstFrameTimer;
+  Timer? _reconnectTimer;
   late HostBrowserPreviewInfo _preview;
   Uint8List? _frameBytes;
   int _frameWidth = 390;
@@ -97,7 +99,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   bool _inputRailOpen = false;
   bool _clientPaused = false;
   bool _manualPause = false;
+  bool _remoteClosed = false;
   int _firstFrameReconnects = 0;
+  int _streamReconnects = 0;
 
   @override
   void initState() {
@@ -116,6 +120,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _inputFocusNode.dispose();
     _browserFocusNode.dispose();
     _firstFrameTimer?.cancel();
+    _reconnectTimer?.cancel();
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     if (widget.stopOnDispose) {
@@ -150,6 +155,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _connect() {
     _firstFrameTimer?.cancel();
+    _reconnectTimer?.cancel();
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     final channel = widget.api.openBrowserPreviewLive(
@@ -168,19 +174,22 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _subscription = channel.stream.listen(
       _handleFrame,
       onError: (error) {
+        if (!identical(_channel, channel)) return;
         if (!mounted || _clientPaused) return;
         _firstFrameTimer?.cancel();
-        setState(() {
-          _error = friendlyError(error);
-          _status = null;
-        });
+        _scheduleStreamReconnect(friendlyError(error));
       },
       onDone: () {
+        if (!identical(_channel, channel)) return;
         if (!mounted || _clientPaused) return;
         _firstFrameTimer?.cancel();
-        setState(() {
-          _status = 'Remote browser stopped.';
-        });
+        if (_remoteClosed) {
+          setState(() {
+            _status = 'Remote browser stopped.';
+          });
+          return;
+        }
+        _scheduleStreamReconnect('Viewer connection closed.');
       },
       cancelOnError: true,
     );
@@ -191,6 +200,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _clientPaused = true;
     _manualPause = manual;
     _firstFrameTimer?.cancel();
+    _reconnectTimer?.cancel();
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     _subscription = null;
@@ -207,6 +217,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!_clientPaused) return;
     _clientPaused = false;
     _manualPause = false;
+    _remoteClosed = false;
     _connect();
   }
 
@@ -250,6 +261,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       if (!mounted) return;
       _firstFrameTimer?.cancel();
       _firstFrameReconnects = 0;
+      _streamReconnects = 0;
       setState(() {
         _frameBytes = bytes;
         _frameWidth = _intValue(frame['width'], _frameWidth);
@@ -262,9 +274,33 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (type == 'error') {
       if (!mounted) return;
       _firstFrameTimer?.cancel();
+      final message = frame['message']?.toString() ?? 'Remote browser error';
       setState(() {
-        _error = frame['message']?.toString() ?? 'Remote browser error';
-        _status = null;
+        if (_frameBytes == null) {
+          _error = message;
+          _status = null;
+        } else {
+          // Capture errors are often transient. Keep showing the last good
+          // frame instead of blanking the preview while the daemon recovers.
+          _error = null;
+          _status = message;
+        }
+      });
+      return;
+    }
+    if (type == 'closed') {
+      _remoteClosed = true;
+      _firstFrameTimer?.cancel();
+      _reconnectTimer?.cancel();
+      final preview = _previewFromMessage(frame);
+      if (!mounted) return;
+      if (preview != null) {
+        _preview = preview;
+        widget.onStopped?.call(preview);
+      }
+      setState(() {
+        _status = 'Remote browser stopped.';
+        _error = null;
       });
     }
   }
@@ -294,10 +330,37 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _retryPreviewStream() {
     _firstFrameReconnects = 0;
+    _streamReconnects = 0;
     _frameBytes = null;
     _clientPaused = false;
     _manualPause = false;
+    _remoteClosed = false;
     _connect();
+  }
+
+  void _scheduleStreamReconnect(String reason) {
+    if (!mounted || _clientPaused || _remoteClosed) return;
+    if (_streamReconnects >= _maxStreamReconnects) {
+      setState(() {
+        _status = null;
+        _error = '$reason Reconnect attempts exhausted.';
+      });
+      return;
+    }
+    _streamReconnects += 1;
+    final delay = Duration(
+      milliseconds: (450 * _streamReconnects).clamp(450, 3000),
+    );
+    setState(() {
+      _error = null;
+      _status =
+          '$reason Reconnecting viewer ($_streamReconnects/$_maxStreamReconnects)...';
+    });
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(delay, () {
+      if (!mounted || _clientPaused || _remoteClosed) return;
+      _connect();
+    });
   }
 
   HostBrowserPreviewInfo? _previewFromMessage(Map<dynamic, dynamic> decoded) {
