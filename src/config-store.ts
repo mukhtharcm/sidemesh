@@ -57,6 +57,11 @@ const portForwardingConfigSchema = z.object({
   allowNonLoopbackTargets: z.boolean().default(false),
 });
 
+const browserPreviewConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  chromePath: z.string().trim().min(1).nullable().default(null),
+});
+
 const persistedProviderConfigSchema = z.discriminatedUnion("kind", [
   codexProviderConfigSchema,
   copilotProviderConfigSchema,
@@ -71,6 +76,7 @@ const persistedNodeConfigSchema = z.object({
   stateDir: z.string().trim().min(1).optional(),
   terminal: terminalConfigSchema.optional(),
   portForwarding: portForwardingConfigSchema.optional(),
+  browserPreview: browserPreviewConfigSchema.optional(),
   defaultProviderKind: z.enum(["codex", "copilot", "fake"]).optional(),
   providers: z.array(persistedProviderConfigSchema).default([]),
 });
@@ -154,6 +160,7 @@ export function persistedConfigFromNodeConfig(
     stateDir: config.stateDir,
     terminal: config.terminal,
     portForwarding: config.portForwarding,
+    browserPreview: config.browserPreview,
     defaultProviderKind: config.defaultProviderKind,
     providers: config.providers.map((provider) =>
       normalizePersistedProviderConfig(provider),

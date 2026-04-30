@@ -129,12 +129,24 @@ export function renderServiceEnv(config: NodeConfig): string {
       config.portForwarding.allowNonLoopbackTargets ? "1" : "0",
     ),
     envLine(
+      "SIDEMESH_BROWSER_PREVIEW",
+      config.browserPreview.enabled ? "1" : "0",
+    ),
+    envLine(
       "SIDEMESH_TERMINAL_REQUIRE_PTY",
       config.terminal.requirePty ? "1" : "0",
     ),
   ];
   if (config.terminal.shell) {
     lines.push(envLine("SIDEMESH_TERMINAL_SHELL", config.terminal.shell));
+  }
+  if (config.browserPreview.chromePath) {
+    lines.push(
+      envLine(
+        "SIDEMESH_BROWSER_PREVIEW_CHROME_PATH",
+        config.browserPreview.chromePath,
+      ),
+    );
   }
   return `${lines.join("\n")}\n`;
 }

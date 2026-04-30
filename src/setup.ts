@@ -17,6 +17,7 @@ import { readResolvedPersistedConfig, saveConfig } from "./config.js";
 import type {
   AgentProviderConfig,
   AgentProviderKind,
+  HostBrowserPreviewConfig,
   HostPortForwardingConfig,
   HostTerminalConfig,
   NodeConfig,
@@ -77,6 +78,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
   });
   const terminal = await promptTerminalConfig(existing);
   const portForwarding = await promptPortForwardingConfig(existing);
+  const browserPreview = await promptBrowserPreviewConfig(existing);
 
   const initialProviders =
     existing?.providers.map((provider) => provider.kind) ?? ["codex"];
@@ -157,6 +159,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     stateDir: stateDir.trim(),
     terminal,
     portForwarding,
+    browserPreview,
     configPath: persisted.path,
     configExists: true,
   };
@@ -243,6 +246,37 @@ async function promptPortForwardingConfig(
   return {
     enabled: true,
     allowNonLoopbackTargets,
+  };
+}
+
+async function promptBrowserPreviewConfig(
+  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
+): Promise<HostBrowserPreviewConfig> {
+  note(
+    "Remote browser preview starts Chromium on this host and streams page pixels to authenticated Sidemesh clients. Keep it disabled unless this host should render localhost web apps.",
+    "Remote browser preview",
+  );
+  const current = existing?.browserPreview;
+  const enabled = await confirm({
+    message: "Enable remote browser preview on this host?",
+    initialValue: current?.enabled ?? false,
+  });
+  if (isCancel(enabled)) {
+    throw new Error("Setup cancelled.");
+  }
+  if (!enabled) {
+    return {
+      enabled: false,
+      chromePath: current?.chromePath ?? null,
+    };
+  }
+  const chromePath = await promptText({
+    message: "Chrome/Chromium path",
+    defaultValue: current?.chromePath ?? "",
+  });
+  return {
+    enabled: true,
+    chromePath: chromePath.trim() || null,
   };
 }
 

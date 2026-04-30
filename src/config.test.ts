@@ -78,6 +78,10 @@ describe("loadConfig", () => {
       enabled: false,
       allowNonLoopbackTargets: false,
     });
+    assert.deepEqual(config.browserPreview, {
+      enabled: false,
+      chromePath: null,
+    });
   });
 
   it("loads terminal settings from persisted config and env overrides", async () => {
@@ -147,6 +151,39 @@ describe("loadConfig", () => {
     assert.deepEqual(overridden.portForwarding, {
       enabled: false,
       allowNonLoopbackTargets: true,
+    });
+  });
+
+  it("loads browser preview settings from persisted config and env overrides", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        browserPreview: {
+          enabled: true,
+          chromePath: "/opt/chrome",
+        },
+        providers: [{ kind: "codex", bin: "codex" }],
+      }),
+    );
+
+    const persisted = await loadConfig({ configPath, env: {} });
+    assert.deepEqual(persisted.browserPreview, {
+      enabled: true,
+      chromePath: "/opt/chrome",
+    });
+
+    const overridden = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_BROWSER_PREVIEW: "0",
+        SIDEMESH_BROWSER_PREVIEW_CHROME_PATH: "/usr/bin/chromium",
+      },
+    });
+    assert.deepEqual(overridden.browserPreview, {
+      enabled: false,
+      chromePath: "/usr/bin/chromium",
     });
   });
 

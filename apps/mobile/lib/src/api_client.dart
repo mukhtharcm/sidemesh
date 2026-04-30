@@ -266,6 +266,73 @@ class ApiClient {
     return HostPortForwardInfo.fromJson(_decodeObject(response));
   }
 
+  Future<List<HostBrowserPreviewInfo>> fetchBrowserPreviews(
+    HostProfile host,
+  ) async {
+    final response = await _get(
+      host,
+      '/api/browser-previews',
+      timeout: _quickReadTimeout,
+      operation: 'load browser previews',
+    );
+    final decoded = _decodeObject(response);
+    return ((decoded['previews'] as List?) ?? const [])
+        .whereType<Map>()
+        .map(
+          (item) =>
+              HostBrowserPreviewInfo.fromJson(item.cast<String, dynamic>()),
+        )
+        .toList();
+  }
+
+  Future<HostBrowserPreviewInfo> createBrowserPreview(
+    HostProfile host, {
+    required int targetPort,
+    String targetHost = '127.0.0.1',
+    String scheme = 'http',
+    String? label,
+    String? cwd,
+    String? sessionId,
+    int? width,
+    int? height,
+  }) async {
+    final body = <String, dynamic>{
+      'targetPort': targetPort,
+      'targetHost': targetHost,
+      'scheme': scheme,
+      if ((label ?? '').isNotEmpty) 'label': label,
+      if ((cwd ?? '').isNotEmpty) 'cwd': cwd,
+      if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,
+    };
+    if (width != null) {
+      body['width'] = width;
+    }
+    if (height != null) {
+      body['height'] = height;
+    }
+    final response = await _post(
+      host,
+      '/api/browser-previews',
+      body: body,
+      timeout: _standardReadTimeout,
+      operation: 'start browser preview',
+    );
+    return HostBrowserPreviewInfo.fromJson(_decodeObject(response));
+  }
+
+  Future<HostBrowserPreviewInfo> stopBrowserPreview(
+    HostProfile host,
+    String previewId,
+  ) async {
+    final response = await _delete(
+      host,
+      '/api/browser-previews/$previewId',
+      timeout: _quickReadTimeout,
+      operation: 'stop browser preview',
+    );
+    return HostBrowserPreviewInfo.fromJson(_decodeObject(response));
+  }
+
   Future<SessionLog> fetchLog(
     HostProfile host,
     String sessionId, {
@@ -598,6 +665,25 @@ class ApiClient {
     final wsUri = baseUri.replace(
       scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
       path: '/api/ports/$portForwardId/connect',
+    );
+
+    return IOWebSocketChannel.connect(
+      wsUri,
+      headers: {'Authorization': 'Bearer ${host.token}'},
+      connectTimeout: _webSocketConnectTimeout,
+      pingInterval: _webSocketPingInterval,
+    );
+  }
+
+  WebSocketChannel openBrowserPreviewLive(
+    HostProfile host,
+    String previewId,
+  ) {
+    _ensureHostEnabled(host);
+    final baseUri = Uri.parse(host.baseUrl);
+    final wsUri = baseUri.replace(
+      scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
+      path: '/api/browser-previews/$previewId/live',
     );
 
     return IOWebSocketChannel.connect(

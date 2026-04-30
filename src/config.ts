@@ -6,6 +6,7 @@ import type {
   AgentProviderConfig,
   AgentProviderConfigSummary,
   AgentProviderKind,
+  HostBrowserPreviewConfig,
   HostPortForwardingConfig,
   HostTerminalConfig,
   NodeConfig,
@@ -62,6 +63,7 @@ export async function loadConfig(
   );
   const terminal = resolveTerminalConfig(persisted.value, env);
   const portForwarding = resolvePortForwardingConfig(persisted.value, env);
+  const browserPreview = resolveBrowserPreviewConfig(persisted.value, env);
   const provider =
     providers.find((candidate) => candidate.kind === defaultProviderKind) ??
     providers[0];
@@ -92,6 +94,7 @@ export async function loadConfig(
     stateDir,
     terminal,
     portForwarding,
+    browserPreview,
     configPath,
     configExists: persisted.exists,
   };
@@ -262,6 +265,24 @@ function resolvePortForwardingConfig(
       envAllowNonLoopbackTargets ??
       portForwarding?.allowNonLoopbackTargets ??
       false,
+  };
+}
+
+function resolveBrowserPreviewConfig(
+  persisted: PersistedNodeConfig | null,
+  env: Environment,
+): HostBrowserPreviewConfig {
+  const browserPreview = persisted?.browserPreview;
+  const envEnabled = parseOptionalBoolean(
+    env.SIDEMESH_BROWSER_PREVIEW ?? env.SIDEMESH_ENABLE_BROWSER_PREVIEW,
+  );
+  const envChromePath = env.SIDEMESH_BROWSER_PREVIEW_CHROME_PATH?.trim();
+  return {
+    enabled: envEnabled ?? browserPreview?.enabled ?? false,
+    chromePath:
+      env.SIDEMESH_BROWSER_PREVIEW_CHROME_PATH !== undefined
+        ? envChromePath || null
+        : browserPreview?.chromePath ?? null,
   };
 }
 
