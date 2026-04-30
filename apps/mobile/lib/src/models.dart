@@ -392,6 +392,7 @@ class HostBrowserPreviewInfo {
     required this.scheme,
     required this.cwd,
     required this.sessionId,
+    required this.profileMode,
     required this.status,
     required this.width,
     required this.height,
@@ -411,6 +412,7 @@ class HostBrowserPreviewInfo {
   final String scheme;
   final String? cwd;
   final String? sessionId;
+  final String profileMode;
   final String status;
   final int width;
   final int height;
@@ -433,6 +435,9 @@ class HostBrowserPreviewInfo {
         scheme: _stringValue(json['scheme']),
         cwd: _stringOrNull(json['cwd']),
         sessionId: _stringOrNull(json['sessionId']),
+        profileMode: _stringValue(json['profileMode']).isEmpty
+            ? 'temporary'
+            : _stringValue(json['profileMode']),
         status: _stringValue(json['status']),
         width: _intValue(json['width']),
         height: _intValue(json['height']),
