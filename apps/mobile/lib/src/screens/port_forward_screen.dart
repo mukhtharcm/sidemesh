@@ -23,6 +23,7 @@ class PortForwardScreen extends StatelessWidget {
     required this.cwd,
     required this.sessionId,
     required this.sessionTitle,
+    this.onBrowserPreviewOpened,
   });
 
   final HostProfile host;
@@ -30,6 +31,7 @@ class PortForwardScreen extends StatelessWidget {
   final String cwd;
   final String sessionId;
   final String sessionTitle;
+  final PortForwardBrowserPreviewOpened? onBrowserPreviewOpened;
 
   @override
   Widget build(BuildContext context) {
@@ -46,10 +48,14 @@ class PortForwardScreen extends StatelessWidget {
         cwd: cwd,
         sessionId: sessionId,
         sessionTitle: sessionTitle,
+        onBrowserPreviewOpened: onBrowserPreviewOpened,
       ),
     );
   }
 }
+
+typedef PortForwardBrowserPreviewOpened =
+    void Function(HostPortForwardInfo forward, HostBrowserPreviewInfo preview);
 
 class PortForwardPane extends StatefulWidget {
   const PortForwardPane({
@@ -60,6 +66,7 @@ class PortForwardPane extends StatefulWidget {
     required this.sessionId,
     required this.sessionTitle,
     this.previewPresentation = PortForwardPreviewPresentation.route,
+    this.onBrowserPreviewOpened,
   });
 
   final HostProfile host;
@@ -68,6 +75,7 @@ class PortForwardPane extends StatefulWidget {
   final String sessionId;
   final String sessionTitle;
   final PortForwardPreviewPresentation previewPresentation;
+  final PortForwardBrowserPreviewOpened? onBrowserPreviewOpened;
 
   @override
   State<PortForwardPane> createState() => _PortForwardPaneState();
@@ -297,6 +305,11 @@ class _PortForwardPaneState extends State<PortForwardPane> {
           ),
         ];
       });
+      final onBrowserPreviewOpened = widget.onBrowserPreviewOpened;
+      if (onBrowserPreviewOpened != null) {
+        onBrowserPreviewOpened(forward, preview);
+        return;
+      }
       if (widget.previewPresentation == PortForwardPreviewPresentation.inline) {
         setState(() {
           _inlinePreview = null;
