@@ -28,6 +28,8 @@ export interface BrowserPreviewRegistryOptions {
   chromePath?: string | null;
   maxPreviews?: number;
   idleTtlMs?: number;
+  frameIntervalMs?: number;
+  quality?: number;
 }
 
 export interface CreateBrowserPreviewRequest {
@@ -103,13 +105,29 @@ export class BrowserPreviewRegistry {
   private readonly chromePath: string | null;
   private readonly maxPreviews: number;
   private readonly idleTtlMs: number;
+  private readonly frameIntervalMs: number;
+  private readonly quality: number;
   private cleanupTimer: NodeJS.Timeout | null = null;
 
   public constructor(options: BrowserPreviewRegistryOptions) {
     this.enabled = options.enabled;
     this.chromePath = options.chromePath?.trim() || null;
-    this.maxPreviews = options.maxPreviews ?? DEFAULT_MAX_PREVIEWS;
-    this.idleTtlMs = options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS;
+    this.maxPreviews = clampInteger(
+      options.maxPreviews ?? DEFAULT_MAX_PREVIEWS,
+      1,
+      32,
+    );
+    this.idleTtlMs = clampInteger(
+      options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS,
+      30_000,
+      24 * 60 * 60 * 1000,
+    );
+    this.frameIntervalMs = clampInteger(
+      options.frameIntervalMs ?? DEFAULT_FRAME_INTERVAL_MS,
+      250,
+      10_000,
+    );
+    this.quality = clampInteger(options.quality ?? DEFAULT_QUALITY, 20, 95);
     if (this.enabled) {
       this.cleanupTimer = setInterval(() => void this.cleanup(), 60_000);
       this.cleanupTimer.unref?.();
@@ -448,7 +466,7 @@ export class BrowserPreviewRegistry {
       void this.captureAndBroadcast(preview).catch((error: unknown) =>
         this.handleCaptureError(preview, error),
       );
-    }, DEFAULT_FRAME_INTERVAL_MS);
+    }, this.frameIntervalMs);
     preview.frameTimer.unref?.();
   }
 
@@ -470,7 +488,7 @@ export class BrowserPreviewRegistry {
         "Page.captureScreenshot",
         {
           format: "jpeg",
-          quality: DEFAULT_QUALITY,
+          quality: this.quality,
           fromSurface: true,
           optimizeForSpeed: true,
         },
@@ -1152,6 +1170,11 @@ function numberValue(value: unknown, fallback: number): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, Math.round(value)));
 }
 
 function shellQuote(value: string): string {

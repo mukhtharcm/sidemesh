@@ -268,15 +268,72 @@ async function promptBrowserPreviewConfig(
     return {
       enabled: false,
       chromePath: current?.chromePath ?? null,
+      maxPreviews: current?.maxPreviews ?? 8,
+      idleTtlMs: current?.idleTtlMs ?? 60 * 60 * 1000,
+      frameIntervalMs: current?.frameIntervalMs ?? 900,
+      quality: current?.quality ?? 55,
     };
   }
   const chromePath = await promptText({
     message: "Chrome/Chromium path",
     defaultValue: current?.chromePath ?? "",
   });
+  const defaults = {
+    maxPreviews: current?.maxPreviews ?? 8,
+    idleTtlMs: current?.idleTtlMs ?? 60 * 60 * 1000,
+    frameIntervalMs: current?.frameIntervalMs ?? 900,
+    quality: current?.quality ?? 55,
+  };
+  const tuneResources = await confirm({
+    message: "Tune browser preview resource limits?",
+    initialValue:
+      defaults.maxPreviews !== 8 ||
+      defaults.idleTtlMs !== 60 * 60 * 1000 ||
+      defaults.frameIntervalMs !== 900 ||
+      defaults.quality !== 55,
+  });
+  if (isCancel(tuneResources)) {
+    throw new Error("Setup cancelled.");
+  }
+  const maxPreviews = tuneResources
+    ? await promptInteger({
+        message: "Max simultaneous browser previews",
+        defaultValue: defaults.maxPreviews,
+        min: 1,
+        max: 32,
+      })
+    : defaults.maxPreviews;
+  const idleTtlMs = tuneResources
+    ? await promptInteger({
+        message: "Idle cleanup after milliseconds",
+        defaultValue: defaults.idleTtlMs,
+        min: 30_000,
+        max: 24 * 60 * 60 * 1000,
+      })
+    : defaults.idleTtlMs;
+  const frameIntervalMs = tuneResources
+    ? await promptInteger({
+        message: "Screenshot interval milliseconds",
+        defaultValue: defaults.frameIntervalMs,
+        min: 250,
+        max: 10_000,
+      })
+    : defaults.frameIntervalMs;
+  const quality = tuneResources
+    ? await promptInteger({
+        message: "JPEG quality",
+        defaultValue: defaults.quality,
+        min: 20,
+        max: 95,
+      })
+    : defaults.quality;
   return {
     enabled: true,
     chromePath: chromePath.trim() || null,
+    maxPreviews,
+    idleTtlMs,
+    frameIntervalMs,
+    quality,
   };
 }
 
@@ -418,6 +475,30 @@ async function promptText(options: {
     defaultValue: options.defaultValue,
     fallbackToDefaultOnEmpty: options.fallbackToDefaultOnEmpty,
   });
+}
+
+async function promptInteger(options: {
+  message: string;
+  defaultValue: number;
+  min: number;
+  max: number;
+}): Promise<number> {
+  const value = await promptText({
+    message: options.message,
+    defaultValue: String(options.defaultValue),
+    validate: (raw) => {
+      const parsed = Number.parseInt(raw, 10);
+      if (
+        !Number.isFinite(parsed) ||
+        parsed < options.min ||
+        parsed > options.max
+      ) {
+        return `Enter a number between ${options.min} and ${options.max}.`;
+      }
+      return undefined;
+    },
+  });
+  return Number.parseInt(value, 10);
 }
 
 export function normalizePromptTextValue(

@@ -22,7 +22,14 @@ describe("systemd service rendering", () => {
       stateDir: "/root/.sidemesh",
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
       portForwarding: { enabled: true, allowNonLoopbackTargets: false },
-      browserPreview: { enabled: true, chromePath: "/usr/bin/chromium" },
+      browserPreview: {
+        enabled: true,
+        chromePath: "/usr/bin/chromium",
+        maxPreviews: 2,
+        idleTtlMs: 120000,
+        frameIntervalMs: 1000,
+        quality: 60,
+      },
       configPath: "/root/.sidemesh/config.json",
       configExists: true,
     };
@@ -53,6 +60,10 @@ describe("systemd service rendering", () => {
     assert.match(env, /SIDEMESH_TERMINAL=1/);
     assert.match(env, /SIDEMESH_PORT_FORWARDING=1/);
     assert.match(env, /SIDEMESH_BROWSER_PREVIEW=1/);
+    assert.match(env, /SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS=2/);
+    assert.match(env, /SIDEMESH_BROWSER_PREVIEW_IDLE_TTL_MS=120000/);
+    assert.match(env, /SIDEMESH_BROWSER_PREVIEW_FRAME_INTERVAL_MS=1000/);
+    assert.match(env, /SIDEMESH_BROWSER_PREVIEW_QUALITY=60/);
     assert.match(env, /SIDEMESH_BROWSER_PREVIEW_CHROME_PATH=\/usr\/bin\/chromium/);
     assert.match(env, /SIDEMESH_TERMINAL_SHELL=\/bin\/zsh/);
     assert.match(env, /SIDEMESH_LABEL="Lab Node"/);

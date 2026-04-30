@@ -217,6 +217,10 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   const browserPreviewRegistry = new BrowserPreviewRegistry({
     enabled: hostCapabilities.workspace.browserPreview,
     chromePath: config.browserPreview.chromePath,
+    maxPreviews: config.browserPreview.maxPreviews,
+    idleTtlMs: config.browserPreview.idleTtlMs,
+    frameIntervalMs: config.browserPreview.frameIntervalMs,
+    quality: config.browserPreview.quality,
   });
 
   function allocSeq(sessionId: string): number {
