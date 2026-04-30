@@ -35,6 +35,7 @@ class BrowserPreviewScreen extends StatefulWidget {
 
 class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
   final _textController = TextEditingController();
+  final _inputFocusNode = FocusNode();
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   late HostBrowserPreviewInfo _preview;
@@ -43,6 +44,8 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
   int _frameHeight = 844;
   String? _status = 'Connecting to remote browser...';
   String? _error;
+  bool _inputRailConfigured = false;
+  bool _inputRailOpen = false;
 
   @override
   void initState() {
@@ -56,12 +59,21 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
   @override
   void dispose() {
     _textController.dispose();
+    _inputFocusNode.dispose();
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     if (widget.stopOnDispose) {
       unawaited(widget.api.stopBrowserPreview(widget.host, widget.preview.id));
     }
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_inputRailConfigured) return;
+    _inputRailConfigured = true;
+    _inputRailOpen = MediaQuery.sizeOf(context).shortestSide >= 700;
   }
 
   void _connect() {
@@ -94,7 +106,7 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
     final decoded = jsonDecode(payload);
     if (decoded is! Map) return;
     final type = decoded['type'];
-    if (type == 'hello' || type == 'ready') {
+    if (type == 'hello' || type == 'ready' || type == 'preview') {
       final preview = _previewFromMessage(decoded);
       if (!mounted) return;
       setState(() {
@@ -103,7 +115,9 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
           _frameWidth = preview.width;
           _frameHeight = preview.height;
         }
-        _status = 'Waiting for first frame...';
+        if (type != 'preview') {
+          _status = 'Waiting for first frame...';
+        }
         _error = null;
       });
       return;
@@ -171,6 +185,18 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
     _send({'type': 'key', 'key': key});
   }
 
+  void _toggleInputRail() {
+    final next = !_inputRailOpen;
+    setState(() => _inputRailOpen = next);
+    if (!next) {
+      _inputFocusNode.unfocus();
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _inputFocusNode.requestFocus();
+    });
+  }
+
   void _sendTap(TapUpDetails details, Size size) {
     final point = _mapPoint(details.localPosition, size);
     if (point == null) return;
@@ -232,12 +258,31 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: _inputRailOpen
+                ? 'Hide page keyboard'
+                : 'Show page keyboard',
+            onPressed: _toggleInputRail,
+            icon: Icon(
+              _inputRailOpen
+                  ? Icons.keyboard_hide_outlined
+                  : Icons.keyboard_alt_outlined,
+            ),
+          ),
+          IconButton(
             tooltip: 'Stop remote browser',
             onPressed: () => unawaited(_stopRemoteBrowser()),
             icon: const Icon(Icons.stop_circle_outlined),
           ),
         ],
       ),
+      floatingActionButton: _inputRailOpen
+          ? null
+          : FloatingActionButton.small(
+              heroTag: 'browser-preview-keyboard',
+              tooltip: 'Show page keyboard',
+              onPressed: _toggleInputRail,
+              child: const Icon(Icons.keyboard_alt_outlined),
+            ),
       body: Column(
         children: [
           Expanded(
@@ -269,11 +314,14 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
               ),
             ),
           ),
-          _InputRail(
-            controller: _textController,
-            onSendText: _sendText,
-            onKey: _sendKey,
-          ),
+          if (_inputRailOpen)
+            _InputRail(
+              controller: _textController,
+              focusNode: _inputFocusNode,
+              onSendText: _sendText,
+              onKey: _sendKey,
+              onClose: _toggleInputRail,
+            ),
         ],
       ),
     );
@@ -317,13 +365,17 @@ class _BrowserPreviewScreenState extends State<BrowserPreviewScreen> {
 class _InputRail extends StatelessWidget {
   const _InputRail({
     required this.controller,
+    required this.focusNode,
     required this.onSendText,
     required this.onKey,
+    required this.onClose,
   });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final VoidCallback onSendText;
   final void Function(String key) onKey;
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -337,6 +389,32 @@ class _InputRail extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.keyboard_alt_outlined,
+                    size: 18,
+                    color: colors.textSecondary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Page input',
+                      style: TextStyle(
+                        color: colors.textSecondary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Hide keyboard',
+                    onPressed: onClose,
+                    icon: const Icon(Icons.close_rounded),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
@@ -358,6 +436,7 @@ class _InputRail extends StatelessWidget {
                   Expanded(
                     child: TextField(
                       controller: controller,
+                      focusNode: focusNode,
                       minLines: 1,
                       maxLines: 3,
                       textInputAction: TextInputAction.send,
