@@ -63,6 +63,8 @@ part 'session_screen_composer.dart';
 part 'session_screen_timeline.dart';
 part 'session_screen_controls.dart';
 
+enum _TranscriptFreshnessMode { cached, reconnecting, offline }
+
 class SessionScreen extends StatefulWidget {
   const SessionScreen({
     super.key,
@@ -584,6 +586,9 @@ class _SessionScreenState extends State<SessionScreen>
   bool _loadingNodeInfo = false;
   bool _showingCachedSnapshot = false;
   bool _snapshotRefreshing = false;
+  bool _showingPossiblyStaleSnapshot = false;
+  bool _resumeSyncing = false;
+  bool _resumeSyncFailed = false;
   String _searchQuery = '';
   String? _skillsError;
   String? _failedSendRetryClientMessageId;
@@ -625,6 +630,18 @@ class _SessionScreenState extends State<SessionScreen>
       _liveAssistantNotifier.value;
 
   String get _liveAssistantText => _liveAssistantMessage?.text ?? '';
+  _TranscriptFreshnessMode? get _transcriptFreshnessMode {
+    if (_showingCachedSnapshot) {
+      return _TranscriptFreshnessMode.cached;
+    }
+    if (!_showingPossiblyStaleSnapshot) {
+      return null;
+    }
+    return _resumeSyncFailed
+        ? _TranscriptFreshnessMode.offline
+        : _TranscriptFreshnessMode.reconnecting;
+  }
+
   // Surfaces a "↓ New" pill when the user has scrolled away from the
   // bottom of the transcript so they can jump back to the live area.
   final ValueNotifier<bool> _showJumpToLatest = ValueNotifier<bool>(false);
@@ -1616,18 +1633,12 @@ class _SessionScreenState extends State<SessionScreen>
       // a full snapshot whenever we have a known lastSeq.
       _reconnectAttempts = 0;
       _reconnectTimer?.cancel();
-      unawaited(() async {
-        final applied = await _resyncDelta();
-        if (!applied && mounted) {
-          await _loadSnapshot(
-            messageLimit: _messageLimit,
-            activityLimit: _activityLimit,
-            scrollToBottom: false,
-          );
-        }
-      }());
+      unawaited(_resyncAfterResume());
       _connectLive();
       _schedulePendingSendRetry();
+    } else if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      _markTranscriptPossiblyStale();
     }
   }
 
@@ -1647,6 +1658,66 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _reloadSnapshot() {
     unawaited(_loadSnapshot(scrollToBottom: false));
+  }
+
+  void _retryFreshnessSync() {
+    setState(() {
+      _showingPossiblyStaleSnapshot = true;
+      _resumeSyncing = true;
+      _resumeSyncFailed = false;
+    });
+    unawaited(
+      _loadSnapshot(
+        messageLimit: _messageLimit,
+        activityLimit: _activityLimit,
+        scrollToBottom: false,
+      ),
+    );
+  }
+
+  void _markTranscriptPossiblyStale() {
+    if (!mounted ||
+        _disposed ||
+        _messages.isEmpty ||
+        _showingCachedSnapshot ||
+        _showingPossiblyStaleSnapshot) {
+      return;
+    }
+    setState(() {
+      _showingPossiblyStaleSnapshot = true;
+      _resumeSyncing = false;
+      _resumeSyncFailed = false;
+    });
+  }
+
+  Future<void> _resyncAfterResume() async {
+    if (!mounted || _disposed) {
+      return;
+    }
+    if (_messages.isNotEmpty && !_showingCachedSnapshot) {
+      setState(() {
+        _showingPossiblyStaleSnapshot = true;
+        _resumeSyncing = true;
+        _resumeSyncFailed = false;
+      });
+    }
+    final applied = await _resyncDelta();
+    if (!mounted || _disposed) {
+      return;
+    }
+    if (applied) {
+      setState(() {
+        _showingPossiblyStaleSnapshot = false;
+        _resumeSyncing = false;
+        _resumeSyncFailed = false;
+      });
+      return;
+    }
+    await _loadSnapshot(
+      messageLimit: _messageLimit,
+      activityLimit: _activityLimit,
+      scrollToBottom: false,
+    );
   }
 
   Future<void> _loadSnapshot({
@@ -1688,6 +1759,9 @@ class _SessionScreenState extends State<SessionScreen>
         _historyBannerDismissed = false;
         _showingCachedSnapshot = false;
         _snapshotRefreshing = false;
+        _showingPossiblyStaleSnapshot = false;
+        _resumeSyncing = false;
+        _resumeSyncFailed = false;
         // Prefer a live-delivered pendingAction over a stale snapshot "none".
         // The server only exposes the most-recent action, so if live says one
         // is open we trust it until action_resolved arrives.
@@ -1735,6 +1809,10 @@ class _SessionScreenState extends State<SessionScreen>
       setState(() {
         _loading = false;
         _snapshotRefreshing = false;
+        if (_showingPossiblyStaleSnapshot) {
+          _resumeSyncing = false;
+          _resumeSyncFailed = true;
+        }
       });
       HostStatusStore.instance.markOffline(
         widget.host.id,
@@ -1773,6 +1851,9 @@ class _SessionScreenState extends State<SessionScreen>
         _running = log.session.isActive;
         _loading = false;
         _showingCachedSnapshot = true;
+        _showingPossiblyStaleSnapshot = false;
+        _resumeSyncing = false;
+        _resumeSyncFailed = false;
         _snapshotRefreshing = _snapshotInFlight;
         _awaitingAssistantReply =
             log.session.isActive &&
@@ -1841,6 +1922,7 @@ class _SessionScreenState extends State<SessionScreen>
           delta.activities.isEmpty &&
           delta.pendingAction == null &&
           delta.session == null) {
+        HostStatusStore.instance.markOnline(widget.host.id);
         return true;
       }
       setState(() {
@@ -1889,8 +1971,10 @@ class _SessionScreenState extends State<SessionScreen>
       _syncSessionLiveActivity();
       _markCurrentSessionSeen();
       _persistCurrentSessionLog();
+      HostStatusStore.instance.markOnline(widget.host.id);
       return true;
     } catch (_) {
+      HostStatusStore.instance.markOffline(widget.host.id);
       return false;
     }
   }
@@ -4747,6 +4831,7 @@ class _SessionScreenState extends State<SessionScreen>
     final pinnedActive = _isPinnedInspectorOpen(
       InspectorScope.maybeOf(context),
     );
+    final freshnessMode = _transcriptFreshnessMode;
     final showHistoryBanner =
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
     final bodyContent = Column(
@@ -4779,10 +4864,19 @@ class _SessionScreenState extends State<SessionScreen>
               onRespond: _respondAction,
             ),
           ),
-        if (_showingCachedSnapshot)
+        if (freshnessMode != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: _CachedTranscriptStrip(refreshing: _snapshotRefreshing),
+            child: _CachedTranscriptStrip(
+              mode: freshnessMode,
+              refreshing:
+                  _snapshotRefreshing ||
+                  (freshnessMode == _TranscriptFreshnessMode.reconnecting &&
+                      _resumeSyncing),
+              onRetry: freshnessMode == _TranscriptFreshnessMode.offline
+                  ? _retryFreshnessSync
+                  : null,
+            ),
           ),
         Expanded(
           child: (_loading && timelineEntries.isEmpty)
