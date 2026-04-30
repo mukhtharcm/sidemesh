@@ -129,7 +129,11 @@ export class BrowserPreviewRegistry {
     const scheme = normalizeScheme(request.scheme);
     const width = normalizeViewportSize(request.width, DEFAULT_WIDTH);
     const height = normalizeViewportSize(request.height, DEFAULT_HEIGHT);
-    const url = buildBrowserTargetUrl(scheme, targetHost, targetPort);
+    const url = buildBrowserTargetUrlCandidates(
+      scheme,
+      targetHost,
+      targetPort,
+    )[0];
     const now = Date.now();
     const preview: BrowserPreviewRecord = {
       id: randomUUID(),
@@ -274,7 +278,7 @@ export class BrowserPreviewRegistry {
       await setViewport(preview);
       await cdp.send("Page.enable", {}, sessionId);
       await cdp.send("Runtime.enable", {}, sessionId);
-      await cdp.send("Page.navigate", { url: preview.url }, sessionId);
+      preview.url = await navigateToReachableTarget(cdp, sessionId, preview);
       preview.status = "running";
       preview.updatedAt = Date.now();
       child.once("exit", () => {
@@ -662,6 +666,37 @@ async function setViewport(preview: BrowserPreviewRecord): Promise<void> {
   );
 }
 
+async function navigateToReachableTarget(
+  cdp: CdpConnection,
+  sessionId: string,
+  preview: BrowserPreviewRecord,
+): Promise<string> {
+  const candidates = buildBrowserTargetUrlCandidates(
+    preview.scheme,
+    preview.targetHost,
+    preview.targetPort,
+  );
+  const failures: string[] = [];
+  for (const url of candidates) {
+    try {
+      const result = await cdp.send("Page.navigate", { url }, sessionId);
+      const errorText = stringValue(result.errorText);
+      if (!errorText) {
+        return url;
+      }
+      failures.push(`${url}: ${errorText}`);
+    } catch (error) {
+      failures.push(
+        `${url}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  throw new BrowserPreviewError(
+    `Could not open browser preview target. Tried ${failures.join("; ")}`,
+    502,
+  );
+}
+
 async function sendSpecialKey(
   cdp: CdpConnection,
   sessionId: string,
@@ -846,7 +881,8 @@ function normalizePort(value: number | null): number {
 }
 
 function normalizeTargetHost(value: string | null | undefined): string {
-  const targetHost = value?.trim() || "127.0.0.1";
+  const rawTargetHost = value?.trim() || "127.0.0.1";
+  const targetHost = rawTargetHost === "[::1]" ? "::1" : rawTargetHost;
   if (!["127.0.0.1", "::1", "localhost"].includes(targetHost)) {
     throw new BrowserPreviewError(
       "browser previews can only open localhost targets",
@@ -862,17 +898,30 @@ function normalizeScheme(value: string | null | undefined): BrowserPreviewScheme
   throw new BrowserPreviewError("browser preview scheme must be http or https");
 }
 
-export function buildBrowserTargetUrl(
+export function buildBrowserTargetUrlCandidates(
   scheme: BrowserPreviewScheme,
   targetHost: string,
   targetPort: number,
-): string {
-  // Browser previews run inside Chrome on the daemon host. Prefer the hostname
-  // form for loopback so dev servers that bind to localhost-only still work.
-  const host = ["127.0.0.1", "::1", "localhost"].includes(targetHost)
-    ? "localhost"
-    : targetHost;
-  return `${scheme}://${host}:${targetPort}/`;
+): string[] {
+  return loopbackTargetCandidates(targetHost).map(
+    (host) => `${scheme}://${formatUrlHost(host)}:${targetPort}/`,
+  );
+}
+
+function loopbackTargetCandidates(targetHost: string): string[] {
+  switch (targetHost) {
+    case "localhost":
+      return ["localhost", "127.0.0.1", "::1"];
+    case "::1":
+      return ["::1", "localhost", "127.0.0.1"];
+    case "127.0.0.1":
+    default:
+      return ["127.0.0.1", "localhost", "::1"];
+  }
+}
+
+function formatUrlHost(host: string): string {
+  return host.includes(":") ? `[${host.replace(/^\[|\]$/g, "")}]` : host;
 }
 
 function normalizeViewportSize(value: unknown, fallback: number): number {

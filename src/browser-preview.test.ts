@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import {
   BrowserPreviewError,
   BrowserPreviewRegistry,
-  buildBrowserTargetUrl,
+  buildBrowserTargetUrlCandidates,
 } from "./browser-preview.js";
 
 describe("browser preview", () => {
@@ -37,18 +37,30 @@ describe("browser preview", () => {
     );
   });
 
-  it("opens loopback browser targets through localhost", () => {
-    assert.equal(
-      buildBrowserTargetUrl("http", "127.0.0.1", 3000),
-      "http://localhost:3000/",
+  it("tries the requested browser target before loopback fallbacks", () => {
+    assert.deepEqual(
+      buildBrowserTargetUrlCandidates("http", "127.0.0.1", 3000),
+      [
+        "http://127.0.0.1:3000/",
+        "http://localhost:3000/",
+        "http://[::1]:3000/",
+      ],
     );
-    assert.equal(
-      buildBrowserTargetUrl("http", "::1", 3000),
-      "http://localhost:3000/",
+    assert.deepEqual(
+      buildBrowserTargetUrlCandidates("http", "::1", 3000),
+      [
+        "http://[::1]:3000/",
+        "http://localhost:3000/",
+        "http://127.0.0.1:3000/",
+      ],
     );
-    assert.equal(
-      buildBrowserTargetUrl("https", "localhost", 8443),
-      "https://localhost:8443/",
+    assert.deepEqual(
+      buildBrowserTargetUrlCandidates("https", "localhost", 8443),
+      [
+        "https://localhost:8443/",
+        "https://127.0.0.1:8443/",
+        "https://[::1]:8443/",
+      ],
     );
   });
 });
