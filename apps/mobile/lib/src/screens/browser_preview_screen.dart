@@ -77,11 +77,15 @@ class BrowserPreviewPane extends StatefulWidget {
 
 class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     with WidgetsBindingObserver {
+  static const _firstFrameTimeout = Duration(seconds: 18);
+  static const _maxFirstFrameReconnects = 3;
+
   final _textController = TextEditingController();
   final _inputFocusNode = FocusNode();
   final _browserFocusNode = FocusNode(debugLabel: 'browser-preview-input');
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
+  Timer? _firstFrameTimer;
   late HostBrowserPreviewInfo _preview;
   Uint8List? _frameBytes;
   int _frameWidth = 390;
@@ -93,6 +97,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   bool _inputRailOpen = false;
   bool _clientPaused = false;
   bool _manualPause = false;
+  int _firstFrameReconnects = 0;
 
   @override
   void initState() {
@@ -110,6 +115,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _textController.dispose();
     _inputFocusNode.dispose();
     _browserFocusNode.dispose();
+    _firstFrameTimer?.cancel();
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     if (widget.stopOnDispose) {
@@ -143,6 +149,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   void _connect() {
+    _firstFrameTimer?.cancel();
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     final channel = widget.api.openBrowserPreviewLive(
@@ -162,6 +169,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       _handleFrame,
       onError: (error) {
         if (!mounted || _clientPaused) return;
+        _firstFrameTimer?.cancel();
         setState(() {
           _error = friendlyError(error);
           _status = null;
@@ -169,6 +177,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       },
       onDone: () {
         if (!mounted || _clientPaused) return;
+        _firstFrameTimer?.cancel();
         setState(() {
           _status = 'Remote browser stopped.';
         });
@@ -181,6 +190,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_clientPaused) return;
     _clientPaused = true;
     _manualPause = manual;
+    _firstFrameTimer?.cancel();
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     _subscription = null;
@@ -202,11 +212,17 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _handleFrame(dynamic payload) {
     if (payload is! String) return;
-    final decoded = jsonDecode(payload);
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(payload);
+    } catch (_) {
+      return;
+    }
     if (decoded is! Map) return;
-    final type = decoded['type'];
+    final frame = decoded;
+    final type = frame['type'];
     if (type == 'hello' || type == 'ready' || type == 'preview') {
-      final preview = _previewFromMessage(decoded);
+      final preview = _previewFromMessage(frame);
       if (!mounted) return;
       setState(() {
         if (preview != null) {
@@ -219,17 +235,25 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         }
         _error = null;
       });
+      _scheduleFirstFrameWatchdog();
       return;
     }
     if (type == 'frame') {
-      final data = decoded['data'];
+      final data = frame['data'];
       if (data is! String || data.isEmpty) return;
-      final bytes = base64Decode(data);
+      final Uint8List bytes;
+      try {
+        bytes = base64Decode(data);
+      } catch (_) {
+        return;
+      }
       if (!mounted) return;
+      _firstFrameTimer?.cancel();
+      _firstFrameReconnects = 0;
       setState(() {
         _frameBytes = bytes;
-        _frameWidth = _intValue(decoded['width'], _frameWidth);
-        _frameHeight = _intValue(decoded['height'], _frameHeight);
+        _frameWidth = _intValue(frame['width'], _frameWidth);
+        _frameHeight = _intValue(frame['height'], _frameHeight);
         _status = null;
         _error = null;
       });
@@ -237,11 +261,43 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     }
     if (type == 'error') {
       if (!mounted) return;
+      _firstFrameTimer?.cancel();
       setState(() {
-        _error = decoded['message']?.toString() ?? 'Remote browser error';
+        _error = frame['message']?.toString() ?? 'Remote browser error';
         _status = null;
       });
     }
+  }
+
+  void _scheduleFirstFrameWatchdog() {
+    _firstFrameTimer?.cancel();
+    if (!mounted || _clientPaused || _frameBytes != null) return;
+    _firstFrameTimer = Timer(_firstFrameTimeout, () {
+      if (!mounted || _clientPaused || _frameBytes != null) return;
+      if (_firstFrameReconnects < _maxFirstFrameReconnects) {
+        _firstFrameReconnects += 1;
+        setState(() {
+          _status =
+              'Still waiting for frames. Reconnecting viewer ($_firstFrameReconnects/$_maxFirstFrameReconnects)...';
+          _error = null;
+        });
+        _connect();
+        return;
+      }
+      setState(() {
+        _status = null;
+        _error =
+            'No browser frames arrived. The remote browser may be stuck or overloaded.';
+      });
+    });
+  }
+
+  void _retryPreviewStream() {
+    _firstFrameReconnects = 0;
+    _frameBytes = null;
+    _clientPaused = false;
+    _manualPause = false;
+    _connect();
   }
 
   HostBrowserPreviewInfo? _previewFromMessage(Map<dynamic, dynamic> decoded) {
@@ -534,10 +590,21 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_error != null) {
       return Padding(
         padding: const EdgeInsets.all(24),
-        child: Text(
-          _error!,
-          textAlign: TextAlign.center,
-          style: TextStyle(color: colors.danger),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: colors.danger),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: _retryPreviewStream,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Reconnect viewer'),
+            ),
+          ],
         ),
       );
     }
