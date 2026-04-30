@@ -7,11 +7,15 @@ class HostStatus {
   const HostStatus({
     required this.reachability,
     this.lastChangedAt,
+    this.lastOnlineAt,
+    this.lastEventAt,
     this.lastError,
   });
 
   final HostReachability reachability;
   final DateTime? lastChangedAt;
+  final DateTime? lastOnlineAt;
+  final DateTime? lastEventAt;
   final String? lastError;
 
   static const unknown = HostStatus(reachability: HostReachability.unknown);
@@ -19,12 +23,16 @@ class HostStatus {
   HostStatus copyWith({
     HostReachability? reachability,
     DateTime? lastChangedAt,
+    DateTime? lastOnlineAt,
+    DateTime? lastEventAt,
     String? lastError,
     bool clearError = false,
   }) {
     return HostStatus(
       reachability: reachability ?? this.reachability,
       lastChangedAt: lastChangedAt ?? this.lastChangedAt,
+      lastOnlineAt: lastOnlineAt ?? this.lastOnlineAt,
+      lastEventAt: lastEventAt ?? this.lastEventAt,
       lastError: clearError ? null : (lastError ?? this.lastError),
     );
   }
@@ -58,9 +66,29 @@ class HostStatusStore extends ChangeNotifier {
 
   void markOnline(String hostId) {
     final current = statusFor(hostId);
+    final now = DateTime.now();
     _byHostId[hostId] = HostStatus(
       reachability: HostReachability.online,
-      lastChangedAt: DateTime.now(),
+      lastChangedAt: now,
+      lastOnlineAt: now,
+      lastEventAt: current.lastEventAt,
+    );
+    if (current.reachability != HostReachability.online ||
+        current.lastError != null) {
+      notifyListeners();
+    }
+  }
+
+  void markEvent(String hostId) {
+    final current = statusFor(hostId);
+    final now = DateTime.now();
+    _byHostId[hostId] = HostStatus(
+      reachability: HostReachability.online,
+      lastChangedAt: current.reachability == HostReachability.online
+          ? current.lastChangedAt
+          : now,
+      lastOnlineAt: now,
+      lastEventAt: now,
     );
     if (current.reachability != HostReachability.online ||
         current.lastError != null) {
@@ -73,6 +101,8 @@ class HostStatusStore extends ChangeNotifier {
     _byHostId[hostId] = HostStatus(
       reachability: HostReachability.offline,
       lastChangedAt: DateTime.now(),
+      lastOnlineAt: current.lastOnlineAt,
+      lastEventAt: current.lastEventAt,
       lastError: error,
     );
     if (current.reachability != HostReachability.offline ||

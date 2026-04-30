@@ -642,6 +642,25 @@ class _SessionScreenState extends State<SessionScreen>
         : _TranscriptFreshnessMode.reconnecting;
   }
 
+  String? get _lastConnectedLabel {
+    final status = HostStatusStore.instance.statusFor(widget.host.id);
+    final last = status.lastEventAt ?? status.lastOnlineAt;
+    if (last == null) {
+      return null;
+    }
+    final elapsed = DateTime.now().difference(last);
+    if (elapsed.inSeconds < 5) {
+      return 'just now';
+    }
+    if (elapsed.inMinutes < 1) {
+      return '${elapsed.inSeconds}s';
+    }
+    if (elapsed.inHours < 1) {
+      return '${elapsed.inMinutes}m';
+    }
+    return '${elapsed.inHours}h';
+  }
+
   // Surfaces a "↓ New" pill when the user has scrolled away from the
   // bottom of the transcript so they can jump back to the live area.
   final ValueNotifier<bool> _showJumpToLatest = ValueNotifier<bool>(false);
@@ -2091,6 +2110,7 @@ class _SessionScreenState extends State<SessionScreen>
       // bad line. Transport-level errors land in onError / onDone instead.
       return;
     }
+    HostStatusStore.instance.markEvent(widget.host.id);
     _handleEvent(event);
   }
 
@@ -4873,6 +4893,7 @@ class _SessionScreenState extends State<SessionScreen>
                   _snapshotRefreshing ||
                   (freshnessMode == _TranscriptFreshnessMode.reconnecting &&
                       _resumeSyncing),
+              lastConnectedLabel: _lastConnectedLabel,
               onRetry: freshnessMode == _TranscriptFreshnessMode.offline
                   ? _retryFreshnessSync
                   : null,
