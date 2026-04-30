@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { createServer } from "node:net";
 import { describe, it } from "node:test";
 
-import { PortForwardError, PortForwardRegistry } from "./port-forward.js";
+import {
+  PortForwardError,
+  PortForwardRegistry,
+  loopbackTargetCandidates,
+} from "./port-forward.js";
 
 describe("port forwarding", () => {
   it("keeps port forwarding opt-in", () => {
@@ -137,6 +141,25 @@ describe("port forwarding", () => {
       registry.dispose();
       await closeServer(target);
     }
+  });
+
+  it("only falls back for canonical localhost targets", () => {
+    assert.deepEqual(loopbackTargetCandidates("127.0.0.1"), [
+      "127.0.0.1",
+      "::1",
+      "localhost",
+    ]);
+    assert.deepEqual(loopbackTargetCandidates("::1"), [
+      "::1",
+      "127.0.0.1",
+      "localhost",
+    ]);
+    assert.deepEqual(loopbackTargetCandidates("localhost"), [
+      "localhost",
+      "::1",
+      "127.0.0.1",
+    ]);
+    assert.deepEqual(loopbackTargetCandidates("127.0.0.2"), ["127.0.0.2"]);
   });
 });
 
