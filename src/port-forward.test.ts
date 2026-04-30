@@ -109,6 +109,35 @@ describe("port forwarding", () => {
       await closeServer(target);
     }
   });
+
+  it("falls back between loopback families for IPv6-only dev servers", async () => {
+    const target = createServer((socket) => {
+      socket.on("data", (chunk) => {
+        socket.write(Buffer.from(`ipv6:${chunk.toString("utf8")}`));
+      });
+    });
+    const targetPort = await listenOnRandomPort(target, "::1");
+    const registry = new PortForwardRegistry({ enabled: true });
+    const forward = registry.create({ targetHost: "127.0.0.1", targetPort });
+    const socket = new FakeSocket();
+
+    try {
+      registry.attach(socket as never, forward.id);
+      await waitForFrame(socket, (frame) => frame.type === "hello");
+
+      socket.emit("message", Buffer.from("hello"));
+      const echoed = await waitForBinary(socket);
+      assert.equal(echoed.toString("utf8"), "ipv6:hello");
+
+      const updated = registry.get(forward.id);
+      assert.equal(updated?.connections, 1);
+      assert.equal(updated?.activeConnections, 1);
+    } finally {
+      socket.close();
+      registry.dispose();
+      await closeServer(target);
+    }
+  });
 });
 
 class FakeSocket {
@@ -202,10 +231,13 @@ function decodeJsonFrame(payload: unknown): Record<string, unknown> | null {
   return parsed as Record<string, unknown>;
 }
 
-async function listenOnRandomPort(server: ReturnType<typeof createServer>) {
+async function listenOnRandomPort(
+  server: ReturnType<typeof createServer>,
+  host = "127.0.0.1",
+) {
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(0, host, () => {
       server.off("error", reject);
       resolve();
     });
