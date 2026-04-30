@@ -37,6 +37,12 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Sidemesh uses the camera to scan host pairing QR codes.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Sidemesh connects to your private hosts on local and Tailscale networks.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Sidemesh lets you attach images from your photo library to coding-agent sessions.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
