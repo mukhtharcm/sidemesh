@@ -104,6 +104,12 @@ export function renderServiceLauncher(
 ): string {
   return `#!/usr/bin/env bash
 set -euo pipefail
+if [[ -z "\${USER:-}" ]]; then export USER="$(id -un)"; fi
+if [[ -z "\${LOGNAME:-}" ]]; then export LOGNAME="\${USER}"; fi
+if [[ -z "\${HOME:-}" ]]; then export HOME="$(getent passwd "\${USER}" 2>/dev/null | cut -d: -f6)"; fi
+if [[ -z "\${HOME:-}" ]]; then export HOME="$(eval echo ~"\${USER}")"; fi
+if [[ -z "\${SHELL:-}" ]]; then export SHELL="$(getent passwd "\${USER}" 2>/dev/null | cut -d: -f7)"; fi
+if [[ -z "\${SHELL:-}" ]]; then export SHELL="/bin/bash"; fi
 export PATH=${shellQuote(dirname(paths.nodeBin))}:$PATH
 cd ${shellQuote(paths.packageDir)}
 exec ${shellQuote(paths.nodeBin)} ${shellQuote(join(paths.packageDir, "dist", "cli.js"))} daemon --config ${shellQuote(config.configPath)}
