@@ -4,7 +4,7 @@ import {
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
 import { createRequire } from "node:module";
-import { arch, platform } from "node:os";
+import { arch, homedir, platform, userInfo } from "node:os";
 import { chmodSync, existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
@@ -721,9 +721,37 @@ function terminalEnvironment(): NodeJS.ProcessEnv {
     COLORTERM: process.env.COLORTERM || "truecolor",
     SIDEMESH_TERMINAL_SESSION: "1",
   };
+  seedInteractiveIdentity(env);
   // Do not leak the daemon bearer token into arbitrary terminal children.
   delete env.SIDEMESH_TOKEN;
   return env;
+}
+
+function seedInteractiveIdentity(env: NodeJS.ProcessEnv): void {
+  const home = env.HOME?.trim() || homedir().trim();
+  if (home) {
+    env.HOME = home;
+  }
+
+  let username = env.USER?.trim() || env.LOGNAME?.trim() || "";
+  let shell = env.SHELL?.trim() || "";
+  try {
+    const info = userInfo();
+    username ||= info.username.trim();
+    shell ||= info.shell?.trim() || "";
+  } catch {
+    // Keep the best-effort defaults below.
+  }
+  if (username) {
+    env.USER ||= username;
+    env.LOGNAME ||= username;
+  }
+  if (!shell && platform() !== "win32") {
+    shell = "/bin/bash";
+  }
+  if (shell) {
+    env.SHELL ||= shell;
+  }
 }
 
 function normalizeDimensions(

@@ -52,6 +52,9 @@ describe("systemd service rendering", () => {
     assert.match(unit, /MemoryAccounting=yes/);
 
     const launcher = renderServiceLauncher(paths, config);
+    assert.match(launcher, /export HOME=/);
+    assert.match(launcher, /export LOGNAME=/);
+    assert.match(launcher, /export SHELL=/);
     assert.match(launcher, /dist\/cli\.js' daemon --config/);
     assert.match(launcher, /\/root\/\.sidemesh\/config\.json/);
 
