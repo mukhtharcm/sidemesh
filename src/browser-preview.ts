@@ -181,7 +181,7 @@ export class BrowserPreviewRegistry {
     const cwd = request.cwd?.trim() || null;
     const sessionId = request.sessionId?.trim() || null;
     const profileMode = normalizeProfileMode(request.profileMode);
-    const reusable = this.findReusablePreview({
+    let reusable = this.findReusablePreview({
       targetHost,
       targetPort,
       scheme,
@@ -189,6 +189,10 @@ export class BrowserPreviewRegistry {
       sessionId,
       profileMode,
     });
+    if (reusable && this.isPreviewUnhealthy(reusable)) {
+      await this.stopRecord(reusable, "failed");
+      reusable = null;
+    }
     if (reusable) {
       await this.updatePreviewViewport(reusable, width, height);
       if (request.label?.trim()) {
@@ -266,7 +270,11 @@ export class BrowserPreviewRegistry {
       return;
     }
     const preview = this.previews.get(id);
-    if (!preview || preview.status === "stopped") {
+    if (
+      !preview ||
+      preview.status === "stopped" ||
+      preview.status === "failed"
+    ) {
       sendJson(socket, { type: "error", message: "browser preview not found" });
       socket.close();
       return;
@@ -424,8 +432,15 @@ export class BrowserPreviewRegistry {
   private async ensurePersistentHost(
     chromePath: string,
   ): Promise<PersistentBrowserHost> {
-    if (this.persistentHost && !this.persistentHost.process.killed) {
+    if (
+      this.persistentHost &&
+      !this.persistentHost.process.killed &&
+      !this.persistentHost.cdp.isClosed
+    ) {
       return this.persistentHost;
+    }
+    if (this.persistentHost) {
+      await this.stopPersistentHost();
     }
     if (this.persistentHostStarting) {
       return this.persistentHostStarting;
@@ -781,6 +796,11 @@ export class BrowserPreviewRegistry {
     payload: Record<string, unknown>,
   ): void {
     for (const client of preview.clients) {
+      if (client.readyState !== client.OPEN) continue;
+      if (client.bufferedAmount > MAX_CLIENT_BUFFERED_AMOUNT) {
+        client.close(1013, "browser preview client is too far behind");
+        continue;
+      }
       sendJson(client, payload);
     }
   }
@@ -883,6 +903,19 @@ export class BrowserPreviewRegistry {
     return null;
   }
 
+  private isPreviewUnhealthy(preview: BrowserPreviewRecord): boolean {
+    if (preview.status === "failed" || preview.status === "stopped") return true;
+    if (preview.status === "starting") return false;
+    if (preview.cdp?.isClosed) return true;
+    if (preview.lastError && preview.lastFrameAt == null) return true;
+    const noFramesEver = preview.lastFrameAt == null;
+    const staleWithoutClients =
+      preview.clients.size === 0 &&
+      Date.now() - preview.updatedAt >
+        Math.max(60_000, this.frameIntervalMs * 10);
+    return noFramesEver && staleWithoutClients;
+  }
+
   private assertEnabled(): void {
     if (!this.enabled) {
       throw new BrowserPreviewError("browser preview is disabled", 403);
@@ -930,6 +963,7 @@ export class BrowserPreviewError extends Error {
 
 class CdpConnection {
   private nextId = 1;
+  private closed = false;
   private readonly events = new EventEmitter();
   private readonly pending = new Map<
     number,
@@ -942,8 +976,18 @@ class CdpConnection {
   private constructor(private readonly socket: WebSocket) {
     this.events.setMaxListeners(128);
     socket.on("message", (raw) => this.handleMessage(raw));
-    socket.on("close", () => this.rejectAll(new Error("CDP socket closed")));
-    socket.on("error", (error) => this.rejectAll(error));
+    socket.on("close", () => {
+      this.closed = true;
+      this.rejectAll(new Error("CDP socket closed"));
+    });
+    socket.on("error", (error) => {
+      this.closed = true;
+      this.rejectAll(error);
+    });
+  }
+
+  public get isClosed(): boolean {
+    return this.closed || this.socket.readyState >= WebSocket.CLOSING;
   }
 
   public static async connect(url: string): Promise<CdpConnection> {
@@ -957,6 +1001,9 @@ class CdpConnection {
     params: Record<string, unknown> = {},
     sessionId?: string | null,
   ): Promise<Record<string, unknown>> {
+    if (this.isClosed) {
+      return Promise.reject(new Error("CDP socket closed"));
+    }
     const id = this.nextId++;
     const payload = sessionId
       ? { id, method, params, sessionId }
@@ -1012,6 +1059,7 @@ class CdpConnection {
   }
 
   public close(): void {
+    this.closed = true;
     try {
       this.socket.close();
     } catch {
