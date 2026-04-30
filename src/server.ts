@@ -74,6 +74,7 @@ import {
   TerminalRegistry,
   normalizeTerminalShell,
 } from "./terminal.js";
+import { PortForwardError, PortForwardRegistry } from "./port-forward.js";
 import {
   WorkspaceAccessError,
   collectWorkspaceRoots,
@@ -102,6 +103,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
     gitStatus: true,
     gitDiff: true,
     terminal: false,
+    portForwarding: false,
   },
 };
 
@@ -153,6 +155,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     workspace: {
       ...HOST_CAPABILITIES.workspace,
       terminal: config.terminal.enabled,
+      portForwarding: config.portForwarding.enabled,
     },
   };
 
@@ -200,6 +203,10 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     requirePty: config.terminal.requirePty,
     resolveCwd: (cwd, request) =>
       resolveTerminalCwd(provider, runtimeCache, cwd, request.sessionId),
+  });
+  const portForwardRegistry = new PortForwardRegistry({
+    enabled: hostCapabilities.workspace.portForwarding,
+    allowNonLoopbackTargets: config.portForwarding.allowNonLoopbackTargets,
   });
 
   function allocSeq(sessionId: string): number {
@@ -774,6 +781,61 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         return;
       }
       response.json(terminalRegistry.kill(pathParam(request.params.terminalId)));
+    }),
+  );
+
+  app.get("/api/ports", (_request, response) => {
+    if (
+      !requireHostCapability(
+        response,
+        hostCapabilities.workspace.portForwarding,
+        "port forwarding",
+      )
+    ) {
+      return;
+    }
+    response.json({ ports: portForwardRegistry.list() });
+  });
+
+  app.post(
+    "/api/ports",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireHostCapability(
+          response,
+          hostCapabilities.workspace.portForwarding,
+          "port forwarding",
+        )
+      ) {
+        return;
+      }
+      const portForward = portForwardRegistry.create({
+        targetPort: asInteger(request.body?.targetPort),
+        targetHost: asString(request.body?.targetHost),
+        scheme: asString(request.body?.scheme),
+        label: asString(request.body?.label),
+        cwd: asString(request.body?.cwd),
+        sessionId: asString(request.body?.sessionId),
+      });
+      response.status(201).json(portForward);
+    }),
+  );
+
+  app.delete(
+    "/api/ports/:portForwardId",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireHostCapability(
+          response,
+          hostCapabilities.workspace.portForwarding,
+          "port forwarding",
+        )
+      ) {
+        return;
+      }
+      response.json(
+        portForwardRegistry.stop(pathParam(request.params.portForwardId)),
+      );
     }),
   );
 
@@ -1728,12 +1790,14 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     const terminalLiveMatch = /^\/api\/terminals\/([^/]+)\/live$/.exec(
       pathOnly,
     );
+    const portForwardMatch = /^\/api\/ports\/([^/]+)\/connect$/.exec(pathOnly);
     if (
       pathOnly !== "/api/live" &&
       pathOnly !== "/api/sessions/live" &&
       pathOnly !== "/api/fs/live" &&
       pathOnly !== "/api/actions/live" &&
-      !terminalLiveMatch
+      !terminalLiveMatch &&
+      !portForwardMatch
     ) {
       socket.destroy();
       return;
@@ -1754,6 +1818,14 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       const since = asInteger(params.get("since")) ?? -1;
       wsServer.handleUpgrade(request, socket, head, (ws) => {
         terminalRegistry.attach(ws, terminalId, since);
+      });
+      return;
+    }
+
+    if (portForwardMatch) {
+      const portForwardId = decodeURIComponent(portForwardMatch[1] || "");
+      wsServer.handleUpgrade(request, socket, head, (ws) => {
+        portForwardRegistry.attach(ws, portForwardId);
       });
       return;
     }
@@ -1859,7 +1931,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       const message =
         error instanceof Error ? error.message : "Internal server error";
       const status =
-        error instanceof TerminalError || error instanceof WorkspaceAccessError
+        error instanceof TerminalError ||
+        error instanceof WorkspaceAccessError ||
+        error instanceof PortForwardError
           ? error.status
           : 500;
       response.status(status).json({ error: message });
@@ -1878,6 +1952,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   return {
     close: async () => {
       terminalRegistry.dispose();
+      portForwardRegistry.dispose();
       for (const socket of approvalSockets) socket.close();
       for (const socket of recentSessionsSockets) socket.close();
       for (const sockets of socketsBySession.values()) {
