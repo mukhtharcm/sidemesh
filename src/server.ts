@@ -76,6 +76,10 @@ import {
 } from "./terminal.js";
 import { PortForwardError, PortForwardRegistry } from "./port-forward.js";
 import {
+  BrowserPreviewError,
+  BrowserPreviewRegistry,
+} from "./browser-preview.js";
+import {
   WorkspaceAccessError,
   collectWorkspaceRoots,
   resolveWorkspacePath,
@@ -104,6 +108,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
     gitDiff: true,
     terminal: false,
     portForwarding: false,
+    browserPreview: false,
   },
 };
 
@@ -156,6 +161,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       ...HOST_CAPABILITIES.workspace,
       terminal: config.terminal.enabled,
       portForwarding: config.portForwarding.enabled,
+      browserPreview: config.browserPreview.enabled,
     },
   };
 
@@ -207,6 +213,10 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   const portForwardRegistry = new PortForwardRegistry({
     enabled: hostCapabilities.workspace.portForwarding,
     allowNonLoopbackTargets: config.portForwarding.allowNonLoopbackTargets,
+  });
+  const browserPreviewRegistry = new BrowserPreviewRegistry({
+    enabled: hostCapabilities.workspace.browserPreview,
+    chromePath: config.browserPreview.chromePath,
   });
 
   function allocSeq(sessionId: string): number {
@@ -835,6 +845,63 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       }
       response.json(
         portForwardRegistry.stop(pathParam(request.params.portForwardId)),
+      );
+    }),
+  );
+
+  app.get("/api/browser-previews", (_request, response) => {
+    if (
+      !requireHostCapability(
+        response,
+        hostCapabilities.workspace.browserPreview,
+        "browser preview",
+      )
+    ) {
+      return;
+    }
+    response.json({ previews: browserPreviewRegistry.list() });
+  });
+
+  app.post(
+    "/api/browser-previews",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireHostCapability(
+          response,
+          hostCapabilities.workspace.browserPreview,
+          "browser preview",
+        )
+      ) {
+        return;
+      }
+      const preview = await browserPreviewRegistry.create({
+        targetPort: asInteger(request.body?.targetPort),
+        targetHost: asString(request.body?.targetHost),
+        scheme: asString(request.body?.scheme),
+        label: asString(request.body?.label),
+        cwd: asString(request.body?.cwd),
+        sessionId: asString(request.body?.sessionId),
+        width: asInteger(request.body?.width),
+        height: asInteger(request.body?.height),
+      });
+      response.status(201).json(preview);
+    }),
+  );
+
+  app.delete(
+    "/api/browser-previews/:previewId",
+    asyncRoute(async (request, response) => {
+      if (
+        !requireHostCapability(
+          response,
+          hostCapabilities.workspace.browserPreview,
+          "browser preview",
+        )
+      ) {
+        return;
+      }
+      response.json(
+        await browserPreviewRegistry.stop(pathParam(request.params.previewId)),
       );
     }),
   );
@@ -1791,13 +1858,16 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       pathOnly,
     );
     const portForwardMatch = /^\/api\/ports\/([^/]+)\/connect$/.exec(pathOnly);
+    const browserPreviewMatch =
+      /^\/api\/browser-previews\/([^/]+)\/live$/.exec(pathOnly);
     if (
       pathOnly !== "/api/live" &&
       pathOnly !== "/api/sessions/live" &&
       pathOnly !== "/api/fs/live" &&
       pathOnly !== "/api/actions/live" &&
       !terminalLiveMatch &&
-      !portForwardMatch
+      !portForwardMatch &&
+      !browserPreviewMatch
     ) {
       socket.destroy();
       return;
@@ -1826,6 +1896,14 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       const portForwardId = decodeURIComponent(portForwardMatch[1] || "");
       wsServer.handleUpgrade(request, socket, head, (ws) => {
         portForwardRegistry.attach(ws, portForwardId);
+      });
+      return;
+    }
+
+    if (browserPreviewMatch) {
+      const previewId = decodeURIComponent(browserPreviewMatch[1] || "");
+      wsServer.handleUpgrade(request, socket, head, (ws) => {
+        browserPreviewRegistry.attach(ws, previewId);
       });
       return;
     }
@@ -1933,7 +2011,8 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       const status =
         error instanceof TerminalError ||
         error instanceof WorkspaceAccessError ||
-        error instanceof PortForwardError
+        error instanceof PortForwardError ||
+        error instanceof BrowserPreviewError
           ? error.status
           : 500;
       response.status(status).json({ error: message });
@@ -1953,6 +2032,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     close: async () => {
       terminalRegistry.dispose();
       portForwardRegistry.dispose();
+      await browserPreviewRegistry.dispose();
       for (const socket of approvalSockets) socket.close();
       for (const socket of recentSessionsSockets) socket.close();
       for (const sockets of socketsBySession.values()) {
