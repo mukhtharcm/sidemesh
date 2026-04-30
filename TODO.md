@@ -11,7 +11,8 @@
 - [x] Add CI for focused Flutter tests and analysis.
 - [x] Add manual GitHub Actions artifact builds for Android, macOS, and iOS simulator.
 - [x] Add a proper macOS release workflow with ZIP/DMG packaging,
-      optional Developer ID signing, optional notarization, and GitHub Release publishing.
+      optional Developer ID signing, optional notarization, and manual GitHub Release publishing.
+- [x] Keep app release workflows manual-only so server releases do not burn macOS CI minutes.
 - [x] Add Cloudflare Pages deploy automation for the marketing site.
 - [x] Add `sidemesh service uninstall` for Linux/systemd and macOS/LaunchAgent.
 - [x] Clean package metadata while keeping the package private and unlicensed.
@@ -26,4 +27,4 @@
 - [ ] Decide app distribution: TestFlight/APK first, app stores later.
 - [ ] Publish a provider maturity matrix; Codex is primary, Copilot is still early.
 - [ ] Polish terminal reconnect/restart UX and service restart flows.
-- [ ] Add TestFlight deployment once App Store Connect secrets/profiles are ready.
+- [x] Add manual TestFlight deployment once App Store Connect secrets/profiles are ready.

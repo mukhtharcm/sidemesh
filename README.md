@@ -338,9 +338,11 @@ GitHub Actions currently provide:
 - A manual `Mobile Artifacts` workflow for unsigned Android, macOS, and iOS
   simulator builds.
 - A `Release macOS App` workflow for ZIP/DMG packaging, optional Developer ID
-  signing, optional notarization, and GitHub Release publishing from `v*` tags.
+  signing, optional notarization, and optional GitHub Release publishing. This
+  is manual-only so server tags do not spend macOS CI minutes.
+- A manual `Deploy to TestFlight` workflow for signed iOS uploads.
 - A `Deploy Website` workflow for the Cloudflare Pages marketing site in
-  `web/`.
+  `web/`; it runs on `main` only when `web/**` changes.
 - A manual `Secret Scan` workflow for a full-history gitleaks scan.
 
 Before changing repository visibility or distributing to untrusted users, run:
