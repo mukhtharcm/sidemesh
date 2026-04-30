@@ -58,6 +58,7 @@ class BrowserPreviewPane extends StatefulWidget {
     this.stopOnDispose = false,
     this.showHeader = true,
     this.onBack,
+    this.onMinimize,
     this.onStopped,
   });
 
@@ -67,6 +68,7 @@ class BrowserPreviewPane extends StatefulWidget {
   final bool stopOnDispose;
   final bool showHeader;
   final VoidCallback? onBack;
+  final VoidCallback? onMinimize;
   final void Function(HostBrowserPreviewInfo preview)? onStopped;
 
   @override
@@ -439,6 +441,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             streamPaused: _clientPaused,
             inputRailOpen: _inputRailOpen,
             onBack: widget.onBack,
+            onMinimize: widget.onMinimize,
             onToggleInput: _toggleInputRail,
             onPause: () => _pauseStream(manual: true),
             onResume: _resumeStream,
@@ -962,6 +965,7 @@ class _PreviewHeader extends StatelessWidget {
     required this.onResume,
     required this.onStop,
     this.onBack,
+    this.onMinimize,
   });
 
   final HostBrowserPreviewInfo preview;
@@ -973,6 +977,7 @@ class _PreviewHeader extends StatelessWidget {
   final VoidCallback onResume;
   final VoidCallback onStop;
   final VoidCallback? onBack;
+  final VoidCallback? onMinimize;
 
   @override
   Widget build(BuildContext context) {
@@ -1069,6 +1074,15 @@ class _PreviewHeader extends StatelessWidget {
               onTap: onToggleInput,
             ),
             const SizedBox(width: 6),
+            if (onMinimize != null) ...[
+              MeshIconButton(
+                icon: Icons.keyboard_arrow_down_rounded,
+                tooltip: 'Minimize preview',
+                color: colors.textSecondary,
+                onTap: onMinimize!,
+              ),
+              const SizedBox(width: 6),
+            ],
             MeshIconButton(
               icon: Icons.stop_circle_outlined,
               tooltip: 'Stop remote browser',

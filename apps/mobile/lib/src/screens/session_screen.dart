@@ -19,6 +19,7 @@ import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
 import '../models.dart';
 import '../pending_send_recovery.dart';
+import 'browser_preview_screen.dart';
 import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_screen.dart';
@@ -102,6 +103,157 @@ class SessionComposerSeed {
   final List<SessionInputItem> inputItems;
 }
 
+class _DockedBrowserPreview {
+  const _DockedBrowserPreview({
+    required this.forward,
+    required this.preview,
+    this.expanded = true,
+  });
+
+  final HostPortForwardInfo forward;
+  final HostBrowserPreviewInfo preview;
+  final bool expanded;
+
+  _DockedBrowserPreview copyWith({
+    HostPortForwardInfo? forward,
+    HostBrowserPreviewInfo? preview,
+    bool? expanded,
+  }) {
+    return _DockedBrowserPreview(
+      forward: forward ?? this.forward,
+      preview: preview ?? this.preview,
+      expanded: expanded ?? this.expanded,
+    );
+  }
+}
+
+class _SessionBrowserPreviewDock extends StatelessWidget {
+  const _SessionBrowserPreviewDock({
+    required this.host,
+    required this.api,
+    required this.dockedPreview,
+    required this.onExpand,
+    required this.onMinimize,
+    required this.onClose,
+    required this.onStop,
+    required this.onStopped,
+  });
+
+  final HostProfile host;
+  final ApiClient api;
+  final _DockedBrowserPreview dockedPreview;
+  final VoidCallback onExpand;
+  final VoidCallback onMinimize;
+  final VoidCallback onClose;
+  final VoidCallback onStop;
+  final void Function(HostBrowserPreviewInfo preview) onStopped;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (!dockedPreview.expanded) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+        child: MeshCard(
+          tone: MeshCardTone.elevated,
+          onTap: onExpand,
+          padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: colors.accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: colors.accent.withValues(alpha: 0.28),
+                  ),
+                ),
+                child: Icon(
+                  Icons.screenshot_monitor_rounded,
+                  color: colors.accent,
+                  size: 17,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      dockedPreview.preview.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Paused locally · ${dockedPreview.forward.targetHost}:${dockedPreview.forward.targetPort}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(
+                        color: colors.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              MeshIconButton(
+                icon: Icons.open_in_full_rounded,
+                tooltip: 'Open preview',
+                color: colors.accent,
+                onTap: onExpand,
+              ),
+              const SizedBox(width: 6),
+              MeshIconButton(
+                icon: Icons.stop_circle_outlined,
+                tooltip: 'Stop remote browser',
+                color: colors.danger,
+                onTap: onStop,
+              ),
+              const SizedBox(width: 6),
+              MeshIconButton(
+                icon: Icons.close_rounded,
+                tooltip: 'Hide preview',
+                color: colors.textSecondary,
+                onTap: onClose,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final dockHeight = math.min(math.max(screenHeight * 0.42, 300.0), 480.0);
+    return Container(
+      height: dockHeight,
+      margin: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: colors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: BrowserPreviewPane(
+        key: ValueKey('session-browser-preview:${dockedPreview.preview.id}'),
+        host: host,
+        api: api,
+        preview: dockedPreview.preview,
+        onMinimize: onMinimize,
+        onStopped: onStopped,
+      ),
+    );
+  }
+}
+
 class _SessionScreenState extends State<SessionScreen>
     with WidgetsBindingObserver {
   static const _initialMessageLimit = 120;
@@ -161,6 +313,7 @@ class _SessionScreenState extends State<SessionScreen>
   _ActiveComposerSkillQuery? _activeSkillQuery;
   SessionLogHistorySummary? _history;
   PendingAction? _pendingAction;
+  _DockedBrowserPreview? _dockedBrowserPreview;
   int _messageLimit = _initialMessageLimit;
   int _activityLimit = _initialActivityLimit;
   bool _running = false;
@@ -3538,9 +3691,63 @@ class _SessionScreenState extends State<SessionScreen>
           cwd: session.cwd,
           sessionId: session.id,
           sessionTitle: session.title,
+          onBrowserPreviewOpened: (forward, preview) {
+            _showDockedBrowserPreview(forward: forward, preview: preview);
+            Navigator.of(context).maybePop();
+          },
         ),
       ),
     );
+  }
+
+  void _showDockedBrowserPreview({
+    required HostPortForwardInfo forward,
+    required HostBrowserPreviewInfo preview,
+  }) {
+    if (!mounted || _disposed) return;
+    setState(() {
+      _dockedBrowserPreview = _DockedBrowserPreview(
+        forward: forward,
+        preview: preview,
+      );
+    });
+  }
+
+  void _minimizeDockedBrowserPreview() {
+    final current = _dockedBrowserPreview;
+    if (current == null) return;
+    setState(() {
+      _dockedBrowserPreview = current.copyWith(expanded: false);
+    });
+  }
+
+  void _expandDockedBrowserPreview() {
+    final current = _dockedBrowserPreview;
+    if (current == null) return;
+    setState(() {
+      _dockedBrowserPreview = current.copyWith(expanded: true);
+    });
+  }
+
+  void _closeDockedBrowserPreview() {
+    if (_dockedBrowserPreview == null) return;
+    setState(() => _dockedBrowserPreview = null);
+  }
+
+  Future<void> _stopDockedBrowserPreview() async {
+    final current = _dockedBrowserPreview;
+    if (current == null) return;
+    try {
+      await widget.api.stopBrowserPreview(widget.host, current.preview.id);
+      if (!mounted || _disposed) return;
+      setState(() => _dockedBrowserPreview = null);
+    } catch (error) {
+      if (!mounted || _disposed) return;
+      showAppSnackBar(
+        context,
+        'Could not stop browser preview: ${friendlyError(error)}',
+      );
+    }
   }
 
   void _dismissKeyboard() {
@@ -4384,6 +4591,17 @@ class _SessionScreenState extends State<SessionScreen>
                   ],
                 ),
         ),
+        if (!widget.desktopMode && _dockedBrowserPreview != null)
+          _SessionBrowserPreviewDock(
+            host: widget.host,
+            api: widget.api,
+            dockedPreview: _dockedBrowserPreview!,
+            onExpand: _expandDockedBrowserPreview,
+            onMinimize: _minimizeDockedBrowserPreview,
+            onClose: _closeDockedBrowserPreview,
+            onStop: () => unawaited(_stopDockedBrowserPreview()),
+            onStopped: (_) => _closeDockedBrowserPreview(),
+          ),
         if (_pendingSends.isNotEmpty)
           _PendingSendStrip(
             host: widget.host,
