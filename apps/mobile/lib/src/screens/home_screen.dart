@@ -24,6 +24,7 @@ import '../session_runtime.dart';
 import '../session_send_outbox_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/notification_permission_banner.dart';
@@ -433,17 +434,14 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
         bottom: false,
         child: Column(
           children: [
-            _TopBar(
+            _HomeStickyHeader(
               tab: tab,
+              searchController: _searchController,
+              viewMode: _tabIndex == 0 ? _recentViewMode : null,
+              onViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
               onRefresh: _refreshHosts,
               onStartSession: _startSessionFromHome,
               onOpenSettings: _openSettings,
-            ),
-            _HomeSearchBar(
-              controller: _searchController,
-              hintText: 'Search ${tab.title.toLowerCase()}',
-              viewMode: _tabIndex == 0 ? _recentViewMode : null,
-              onViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
             ),
             const NotificationPermissionBanner(),
             Expanded(
@@ -537,15 +535,21 @@ class _TabDef {
   final IconData selectedIcon;
 }
 
-class _TopBar extends StatelessWidget {
-  const _TopBar({
+class _HomeStickyHeader extends StatelessWidget {
+  const _HomeStickyHeader({
     required this.tab,
+    required this.searchController,
+    required this.viewMode,
+    required this.onViewModeChanged,
     required this.onRefresh,
     required this.onStartSession,
     required this.onOpenSettings,
   });
 
   final _TabDef tab;
+  final TextEditingController searchController;
+  final SessionViewMode? viewMode;
+  final ValueChanged<SessionViewMode>? onViewModeChanged;
   final VoidCallback onRefresh;
   final VoidCallback onStartSession;
   final VoidCallback onOpenSettings;
@@ -554,88 +558,233 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 16, 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.sm,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: colors.accent,
-              borderRadius: BorderRadius.circular(11),
-              boxShadow: [
-                BoxShadow(
-                  color: colors.accent.withValues(alpha: 0.3),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: colors.accentMuted,
+                  borderRadius: AppShapes.input,
+                  border: Border.all(
+                    color: colors.accent.withValues(alpha: 0.32),
+                  ),
                 ),
-              ],
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.graphic_eq_rounded,
-              color: colors.accentOn,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.graphic_eq_rounded,
+                  color: colors.accent,
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
                   children: [
                     Text(
                       'sidemesh',
                       style: monoStyle(
                         color: colors.textPrimary,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                      ).copyWith(letterSpacing: -0.4),
+                        fontSize: 17,
+                        fontWeight: AppWeights.title,
+                      ).copyWith(letterSpacing: AppLetterSpacing.headline),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '/ ${tab.title.toLowerCase()}',
-                      style: monoStyle(
-                        color: colors.accent,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
+                    const SizedBox(width: AppSpacing.sm),
+                    Flexible(
+                      child: Text(
+                        '/ ${tab.title.toLowerCase()}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: monoStyle(
+                          color: colors.accent,
+                          fontSize: 13,
+                          fontWeight: AppWeights.emphasis,
+                        ),
                       ),
                     ),
                   ],
                 ),
-                Text(
-                  tab.subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              MeshIconButton(
+                icon: Icons.terminal_rounded,
+                tooltip: 'New session',
+                onTap: onStartSession,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              MeshIconButton(
+                icon: Icons.tune_rounded,
+                tooltip: 'Settings',
+                onTap: onOpenSettings,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              MeshIconButton(
+                icon: Icons.refresh_rounded,
+                tooltip: 'Refresh',
+                onTap: onRefresh,
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          MeshIconButton(
-            icon: Icons.terminal_rounded,
-            tooltip: 'New session',
-            onTap: onStartSession,
-          ),
-          const SizedBox(width: 8),
-          MeshIconButton(
-            icon: Icons.tune_rounded,
-            tooltip: 'Settings',
-            onTap: onOpenSettings,
-          ),
-          const SizedBox(width: 8),
-          MeshIconButton(
-            icon: Icons.refresh_rounded,
-            tooltip: 'Refresh',
-            onTap: onRefresh,
+          const SizedBox(height: AppSpacing.sm),
+          _HomeSearchField(
+            controller: searchController,
+            hintText: 'Search ${tab.title.toLowerCase()}',
+            viewMode: viewMode,
+            onViewModeChanged: onViewModeChanged,
           ),
         ],
       ),
+    );
+  }
+}
+
+class _HomeSearchField extends StatelessWidget {
+  const _HomeSearchField({
+    required this.controller,
+    required this.hintText,
+    this.viewMode,
+    this.onViewModeChanged,
+  });
+
+  final TextEditingController controller;
+  final String hintText;
+  final SessionViewMode? viewMode;
+  final ValueChanged<SessionViewMode>? onViewModeChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final hasQuery = controller.text.isNotEmpty;
+        return TextField(
+          controller: controller,
+          textInputAction: TextInputAction.search,
+          style: TextStyle(color: colors.textPrimary, fontSize: 14),
+          decoration: InputDecoration(
+            isDense: true,
+            filled: true,
+            fillColor: colors.surface,
+            hintText: hintText,
+            hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
+            prefixIcon: viewMode != null && onViewModeChanged != null
+                ? ConstrainedBox(
+                    constraints: const BoxConstraints.tightFor(
+                      width: 32,
+                      height: 32,
+                    ),
+                    child: PopupMenuButton<SessionViewMode>(
+                      padding: EdgeInsets.zero,
+                      icon: Icon(
+                        switch (viewMode!) {
+                          SessionViewMode.flat => Icons.view_list_rounded,
+                          SessionViewMode.byCwd => Icons.folder_rounded,
+                          SessionViewMode.byHost => Icons.hub_rounded,
+                        },
+                        size: 18,
+                        color: colors.textSecondary,
+                      ),
+                      tooltip: 'View mode',
+                      onSelected: onViewModeChanged,
+                      itemBuilder: (context) => [
+                        PopupMenuItem(
+                          value: SessionViewMode.flat,
+                          child: Row(
+                            children: [
+                              const Icon(Icons.view_list_rounded, size: 18),
+                              const SizedBox(width: 10),
+                              const Text('Flat list'),
+                              if (viewMode == SessionViewMode.flat) ...[
+                                const SizedBox(width: 8),
+                                const Icon(Icons.check_rounded, size: 16),
+                              ],
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: SessionViewMode.byCwd,
+                          child: Row(
+                            children: [
+                              const Icon(Icons.folder_rounded, size: 18),
+                              const SizedBox(width: 10),
+                              const Text('By working dir'),
+                              if (viewMode == SessionViewMode.byCwd) ...[
+                                const SizedBox(width: 8),
+                                const Icon(Icons.check_rounded, size: 16),
+                              ],
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: SessionViewMode.byHost,
+                          child: Row(
+                            children: [
+                              const Icon(Icons.hub_rounded, size: 18),
+                              const SizedBox(width: 10),
+                              const Text('By host'),
+                              if (viewMode == SessionViewMode.byHost) ...[
+                                const SizedBox(width: 8),
+                                const Icon(Icons.check_rounded, size: 16),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : Icon(
+                    Icons.search_rounded,
+                    size: 18,
+                    color: colors.textSecondary,
+                  ),
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 36,
+              minHeight: 36,
+            ),
+            suffixIcon: hasQuery
+                ? IconButton(
+                    tooltip: 'Clear',
+                    splashRadius: 16,
+                    iconSize: 16,
+                    onPressed: controller.clear,
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: colors.textSecondary,
+                    ),
+                  )
+                : null,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 8,
+              vertical: 10,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: AppShapes.pill,
+              borderSide: BorderSide(color: colors.border),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: AppShapes.pill,
+              borderSide: BorderSide(color: colors.border),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: AppShapes.pill,
+              borderSide: BorderSide(color: colors.accent, width: 1.2),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -4056,148 +4205,6 @@ class _RecentErrorBanner extends StatelessWidget {
             child: const Text('Retry'),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _HomeSearchBar extends StatelessWidget {
-  const _HomeSearchBar({
-    required this.controller,
-    required this.hintText,
-    this.viewMode,
-    this.onViewModeChanged,
-  });
-
-  final TextEditingController controller;
-  final String hintText;
-  final SessionViewMode? viewMode;
-  final ValueChanged<SessionViewMode>? onViewModeChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-      child: AnimatedBuilder(
-        animation: controller,
-        builder: (context, _) {
-          final hasQuery = controller.text.isNotEmpty;
-          return TextField(
-            controller: controller,
-            textInputAction: TextInputAction.search,
-            style: TextStyle(color: colors.textPrimary, fontSize: 14),
-            decoration: InputDecoration(
-              isDense: true,
-              filled: true,
-              fillColor: colors.surface,
-              hintText: hintText,
-              hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
-              prefixIcon: viewMode != null && onViewModeChanged != null
-                  ? ConstrainedBox(
-                      constraints: const BoxConstraints.tightFor(
-                        width: 32,
-                        height: 32,
-                      ),
-                      child: PopupMenuButton<SessionViewMode>(
-                        padding: EdgeInsets.zero,
-                        icon: Icon(
-                          switch (viewMode!) {
-                            SessionViewMode.flat => Icons.view_list_rounded,
-                            SessionViewMode.byCwd => Icons.folder_outlined,
-                            SessionViewMode.byHost => Icons.hub_outlined,
-                          },
-                          size: 18,
-                          color: colors.textSecondary,
-                        ),
-                        tooltip: 'View mode',
-                        onSelected: onViewModeChanged,
-                        itemBuilder: (context) => [
-                        PopupMenuItem(
-                          value: SessionViewMode.flat,
-                          child: Row(
-                            children: [
-                              Icon(Icons.view_list_rounded, size: 18),
-                              const SizedBox(width: 10),
-                              Text('Flat list'),
-                              if (viewMode == SessionViewMode.flat) ...[
-                                const SizedBox(width: 8),
-                                Icon(Icons.check_rounded, size: 16),
-                              ],
-                            ],
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: SessionViewMode.byCwd,
-                          child: Row(
-                            children: [
-                              Icon(Icons.folder_outlined, size: 18),
-                              const SizedBox(width: 10),
-                              Text('By working dir'),
-                              if (viewMode == SessionViewMode.byCwd) ...[
-                                const SizedBox(width: 8),
-                                Icon(Icons.check_rounded, size: 16),
-                              ],
-                            ],
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: SessionViewMode.byHost,
-                          child: Row(
-                            children: [
-                              Icon(Icons.hub_outlined, size: 18),
-                              const SizedBox(width: 10),
-                              Text('By host'),
-                              if (viewMode == SessionViewMode.byHost) ...[
-                                const SizedBox(width: 8),
-                                Icon(Icons.check_rounded, size: 16),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
-                      ),
-                    )
-                  : Icon(
-                      Icons.search_rounded,
-                      size: 18,
-                      color: colors.textSecondary,
-                    ),
-              prefixIconConstraints: const BoxConstraints(
-                minWidth: 36,
-                minHeight: 36,
-              ),
-              suffixIcon: hasQuery
-                  ? IconButton(
-                      tooltip: 'Clear',
-                      splashRadius: 16,
-                      iconSize: 16,
-                      onPressed: controller.clear,
-                      icon: Icon(
-                        Icons.close_rounded,
-                        color: colors.textSecondary,
-                      ),
-                    )
-                  : null,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 10,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: colors.border),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: colors.border),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: colors.accent, width: 1.2),
-              ),
-            ),
-          );
-        },
       ),
     );
   }
