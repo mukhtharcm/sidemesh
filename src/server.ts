@@ -2102,6 +2102,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       }
       await closeWebSocketServer(wsServer);
       await closeHttpServer(server);
+      await provider.close?.();
     },
   };
 }
