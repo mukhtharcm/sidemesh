@@ -91,6 +91,7 @@ import {
 } from "./session-input-dedupe-store.js";
 import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
+import { SessionReplayIndex } from "./session-replay-index.js";
 
 const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
@@ -183,6 +184,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, SessionActivity>>();
+  const replayIndex = new SessionReplayIndex();
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
   const logCache = new Map<string, SessionLogCacheEntry>();
   const sessionSeqCursor = new Map<string, number>();
@@ -1075,29 +1077,79 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       const since = asInteger(query.since) ?? 0;
 
       const session = await readSession(provider, sessionId, false);
-      const log = await provider.readSessionLog!(session);
-      ensureSeqCursor(sessionId, log.nextSeq);
-      const activities = mergeSessionActivities(
-        log.activities,
-        liveActivities.get(sessionId)?.values() || [],
-      );
-      const newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
-      const newActivities = activities.filter((a) => (a.seq ?? 0) > since);
-      let highestSeq = since;
-      for (const m of newMessages) {
-        if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
+
+      let newMessages: SessionMessage[];
+      let newActivities: SessionActivity[];
+      let nextSeq: number;
+      let logRuntime: SessionRuntimeSummary | null;
+
+      if (session.path && session.path.endsWith(".jsonl")) {
+        try {
+          const entry = await replayIndex.load(sessionId, session.path);
+          const delta = replayIndex.getDelta(entry, since);
+          newMessages = delta.messages;
+          newActivities = mergeSessionActivities(
+            delta.activities,
+            liveActivities.get(sessionId)?.values() || [],
+          ).filter((a) => (a.seq ?? 0) > since);
+          nextSeq = delta.nextSeq;
+          logRuntime = delta.runtime;
+        } catch (error: any) {
+          if (error.code === "STALE_CURSOR") {
+            response.status(410).json({
+              error: "stale_cursor",
+              since: error.staleSince,
+              oldestAvailableSeq: error.oldestAvailableSeq,
+            });
+            return;
+          }
+          // Fallback to provider readSessionLog on any other error
+          const log = await provider.readSessionLog!(session);
+          ensureSeqCursor(sessionId, log.nextSeq);
+          const activities = mergeSessionActivities(
+            log.activities,
+            liveActivities.get(sessionId)?.values() || [],
+          );
+          newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
+          newActivities = activities.filter((a) => (a.seq ?? 0) > since);
+          let highestSeq = since;
+          for (const m of newMessages) {
+            if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
+          }
+          for (const a of newActivities) {
+            if ((a.seq ?? 0) > highestSeq) highestSeq = a.seq ?? highestSeq;
+          }
+          nextSeq = highestSeq;
+          logRuntime = log.runtime;
+        }
+      } else {
+        const log = await provider.readSessionLog!(session);
+        ensureSeqCursor(sessionId, log.nextSeq);
+        const activities = mergeSessionActivities(
+          log.activities,
+          liveActivities.get(sessionId)?.values() || [],
+        );
+        newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
+        newActivities = activities.filter((a) => (a.seq ?? 0) > since);
+        let highestSeq = since;
+        for (const m of newMessages) {
+          if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
+        }
+        for (const a of newActivities) {
+          if ((a.seq ?? 0) > highestSeq) highestSeq = a.seq ?? highestSeq;
+        }
+        nextSeq = highestSeq;
+        logRuntime = log.runtime;
       }
-      for (const a of newActivities) {
-        if ((a.seq ?? 0) > highestSeq) highestSeq = a.seq ?? highestSeq;
-      }
+
       response.json({
         sessionId,
         since,
-        nextSeq: highestSeq,
+        nextSeq,
         messages: newMessages,
         activities: newActivities,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
-        session: mapSession(session, log.runtime),
+        session: mapSession(session, logRuntime),
       });
     }),
   );
