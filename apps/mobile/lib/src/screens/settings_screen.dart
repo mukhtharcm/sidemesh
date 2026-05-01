@@ -17,6 +17,8 @@ import '../theme/theme_controller.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/appearance_sheet.dart';
 import '../widgets/mesh_widgets.dart';
+import '../onboarding_store.dart';
+import 'onboarding_screen.dart';
 
 Future<void> openSettingsScreen(
   BuildContext context, {
@@ -216,6 +218,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _replayOnboarding() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final colors = dialogContext.colors;
+        return AlertDialog(
+          backgroundColor: colors.surface,
+          title: const Text('Replay onboarding?'),
+          content: const Text(
+            'This will show the first-run guide again. You can skip it at any time.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Replay'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+    await OnboardingStore.instance.reset();
+    if (!mounted) return;
+    await showOnboardingScreen(context, themeController: ThemeScope.of(context));
+  }
+
   String _platformLabel() {
     if (kIsWeb) return 'Web';
     return switch (defaultTargetPlatform) {
@@ -243,6 +275,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final hasDesktopControls =
         widget.onResetSidebarWidth != null ||
         widget.onResetInspectorWidth != null;
+    final canReplayOnboarding =
+        kIsWeb || defaultTargetPlatform != TargetPlatform.macOS;
     final content = _SettingsContent(
       embedded: widget.embedded,
       onClose: widget.onClose,
@@ -264,6 +298,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onRunStorageAction: _runStorageAction,
       onResetSidebarWidth: widget.onResetSidebarWidth,
       onResetInspectorWidth: widget.onResetInspectorWidth,
+      onReplayOnboarding: canReplayOnboarding ? _replayOnboarding : null,
     );
     if (widget.embedded) {
       return content;
@@ -485,6 +520,7 @@ class _SettingsContent extends StatelessWidget {
     required this.onRunStorageAction,
     required this.onResetSidebarWidth,
     required this.onResetInspectorWidth,
+    required this.onReplayOnboarding,
   });
 
   final bool embedded;
@@ -514,6 +550,7 @@ class _SettingsContent extends StatelessWidget {
   onRunStorageAction;
   final VoidCallback? onResetSidebarWidth;
   final VoidCallback? onResetInspectorWidth;
+  final VoidCallback? onReplayOnboarding;
 
   @override
   Widget build(BuildContext context) {
@@ -808,6 +845,12 @@ class _SettingsContent extends StatelessWidget {
                 icon: Icons.devices_rounded,
                 tone: MeshPillTone.neutral,
               ),
+              if (onReplayOnboarding != null)
+                OutlinedButton.icon(
+                  onPressed: onReplayOnboarding,
+                  icon: const Icon(Icons.replay_rounded, size: 16),
+                  label: const Text('Replay onboarding'),
+                ),
             ],
           ),
         ),
