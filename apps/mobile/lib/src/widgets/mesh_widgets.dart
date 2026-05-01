@@ -82,7 +82,15 @@ class MeshPill extends StatelessWidget {
             Icon(icon, size: 13, color: fg),
             const SizedBox(width: 5),
           ],
-          Text(label, style: textStyle),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+              style: textStyle,
+            ),
+          ),
         ],
       ),
     );

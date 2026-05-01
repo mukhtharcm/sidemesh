@@ -7,8 +7,10 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:macos_window_utils/macos_window_utils.dart';
 
+import 'src/onboarding_store.dart';
 import 'src/screens/desktop_shell.dart';
 import 'src/screens/home_screen.dart';
+import 'src/screens/onboarding_screen.dart';
 import 'src/screens/session_window_screen.dart';
 import 'src/background_sync_service.dart';
 import 'src/create_session_defaults_store.dart';
@@ -44,8 +46,13 @@ Future<void> main(List<String> args) async {
   await CreateSessionDefaultsStore.instance.ensureLoaded();
   await ScreenAwakeSettingsStore.instance.ensureLoaded();
   final themeController = await ThemeController.load();
+  final onboardingCompleted = await OnboardingStore.instance.isCompleted;
   runApp(
-    SidemeshApp(themeController: themeController, launchState: launchState),
+    SidemeshApp(
+      themeController: themeController,
+      launchState: launchState,
+      onboardingCompleted: onboardingCompleted,
+    ),
   );
   unawaited(_startPostLaunchServices(launchState));
 }
@@ -81,10 +88,12 @@ class SidemeshApp extends StatelessWidget {
     super.key,
     required this.themeController,
     required this.launchState,
+    required this.onboardingCompleted,
   });
 
   final ThemeController themeController;
   final SidemeshWindowLaunchState launchState;
+  final bool onboardingCompleted;
 
   @override
   Widget build(BuildContext context) {
@@ -104,10 +113,11 @@ class SidemeshApp extends StatelessWidget {
                   MediaQuery.platformBrightnessOf(context) == Brightness.dark);
           final activePalette = isDark ? darkPalette : lightPalette;
           final home = switch (launchState.arguments.kind) {
-            SidemeshWindowKind.main =>
-              _isMacOSDesktop
-                  ? const DesktopShell()
-                  : const SidemeshHomeScreen(),
+            SidemeshWindowKind.main => _isMacOSDesktop
+                ? const DesktopShell()
+                : onboardingCompleted
+                    ? const SidemeshHomeScreen()
+                    : OnboardingScreen(themeController: themeController),
             SidemeshWindowKind.session => SessionWindowScreen(
               arguments: launchState.arguments,
               windowId: launchState.windowId,
