@@ -169,10 +169,16 @@ function resolveProviderConfigs(
   const configuredKinds = parseProviderKinds(
     env.SIDEMESH_PROVIDERS,
     persisted,
+    env,
   );
+  const persistedDefaultProviderKind =
+    persisted?.defaultProviderKind &&
+    isProviderEnabled(persisted.defaultProviderKind, env)
+      ? persisted.defaultProviderKind
+      : null;
   const defaultProviderKind = env.SIDEMESH_PROVIDER?.trim()
-    ? parseProviderKind(env.SIDEMESH_PROVIDER)
-    : persisted?.defaultProviderKind ||
+    ? parseProviderKind(env.SIDEMESH_PROVIDER, env)
+    : persistedDefaultProviderKind ||
       configuredKinds[0] ||
       DEFAULT_AGENT_PROVIDER_KIND;
   const kinds = dedupeProviderKinds([
@@ -187,9 +193,17 @@ function resolveProviderConfigs(
   };
 }
 
-function parseProviderKind(value: string | undefined): AgentProviderKind {
+function parseProviderKind(
+  value: string | undefined,
+  env: Environment,
+): AgentProviderKind {
   const provider = value?.trim() || DEFAULT_AGENT_PROVIDER_KIND;
   if (isAgentProviderKind(provider)) {
+    if (!isProviderEnabled(provider, env)) {
+      throw new Error(
+        `Sidemesh provider "${provider}" is disabled. Set SIDEMESH_ENABLE_COPILOT=1 to enable the experimental Copilot provider.`,
+      );
+    }
     return provider;
   }
   throw new Error(
@@ -200,11 +214,13 @@ function parseProviderKind(value: string | undefined): AgentProviderKind {
 function parseProviderKinds(
   value: string | undefined,
   persisted: PersistedNodeConfig | null,
+  env: Environment,
 ): AgentProviderKind[] {
   if (!value?.trim()) {
     return persisted?.providers
       .map((provider) => provider.kind)
-      .filter(isAgentProviderKind) ?? [];
+      .filter(isAgentProviderKind)
+      .filter((provider) => isProviderEnabled(provider, env)) ?? [];
   }
   return value
     .split(",")
@@ -212,12 +228,27 @@ function parseProviderKinds(
     .filter(Boolean)
     .map((item) => {
       if (isAgentProviderKind(item)) {
+        if (!isProviderEnabled(item, env)) {
+          throw new Error(
+            `Sidemesh provider "${item}" is disabled. Set SIDEMESH_ENABLE_COPILOT=1 to enable the experimental Copilot provider.`,
+          );
+        }
         return item;
       }
       throw new Error(
         `Unsupported SIDEMESH_PROVIDERS entry "${item}". Supported providers: ${supportedAgentProviderKinds().join(", ")}`,
       );
     });
+}
+
+function isProviderEnabled(
+  kind: AgentProviderKind,
+  env: Environment,
+): boolean {
+  if (kind !== "copilot") {
+    return true;
+  }
+  return parseOptionalBoolean(env.SIDEMESH_ENABLE_COPILOT) === true;
 }
 
 function dedupeProviderKinds(

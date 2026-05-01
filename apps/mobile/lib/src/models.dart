@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 class HostProfile {
   const HostProfile({
     required this.id,
@@ -1714,20 +1712,6 @@ class SessionActivity {
     required this.pattern,
     required this.revisedPrompt,
     required this.savedPath,
-    required this.activityAction,
-    required this.summary,
-    required this.content,
-    required this.detail,
-    required this.level,
-    required this.reasoningId,
-    required this.agentId,
-    required this.agentName,
-    required this.agentDisplayName,
-    required this.description,
-    required this.model,
-    required this.totalTokens,
-    required this.totalToolCalls,
-    required this.errorText,
   });
 
   final String id;
@@ -1760,20 +1744,6 @@ class SessionActivity {
   final String? pattern;
   final String? revisedPrompt;
   final String? savedPath;
-  final String? activityAction;
-  final String? summary;
-  final String? content;
-  final String? detail;
-  final String? level;
-  final String? reasoningId;
-  final String? agentId;
-  final String? agentName;
-  final String? agentDisplayName;
-  final String? description;
-  final String? model;
-  final int? totalTokens;
-  final int? totalToolCalls;
-  final String? errorText;
 
   bool get isCommand => type == 'command';
   bool get isTool => type == 'tool';
@@ -1782,18 +1752,6 @@ class SessionActivity {
   bool get isWebSearch => type == 'web_search';
   bool get isImageGeneration => type == 'image_generation';
   bool get isContextCompaction => type == 'context_compaction';
-  bool get isPlan => type == 'plan';
-  bool get isTask => type == 'task';
-  bool get isSubagent => type == 'subagent';
-  bool get isReasoning => type == 'reasoning';
-  bool get isSystemEvent => type == 'system_event';
-  bool get isHiddenProviderControlActivity {
-    if (!isTool) return false;
-    final kind = _providerControlActivityKind(toolName, toolTitle);
-    return kind == _ProviderControlActivityKind.hidden ||
-        kind == _ProviderControlActivityKind.commentary;
-  }
-
   String? get toolCategory => toolSemantic?.category;
   String? get toolAction => toolSemantic?.action;
   List<SessionToolSemanticTarget> get toolSemanticTargets =>
@@ -1822,99 +1780,53 @@ class SessionActivity {
   String? get toolMode =>
       _firstSemanticTargetOfType(toolSemanticTargets, 'mode')?.value;
 
-  factory SessionActivity.fromJson(Map<String, dynamic> json) {
-    final rawType = _stringValue(json['type']);
-    final toolName = _stringOrNull(json['toolName']);
-    final toolTitle = _stringOrNull(json['title']);
-    final questionActivity = rawType == 'tool'
-        ? _providerQuestionActivityPresentation(json, toolName, toolTitle)
-        : null;
-    final providerControlKind = rawType == 'tool'
-        ? _providerControlActivityKind(toolName, toolTitle)
-        : null;
-    final normalizedId = questionActivity == null
-        ? _stringValue(json['id'])
-        : 'question:${_stringValue(json['id'])}';
-    final normalizedType = questionActivity != null
-        ? 'system_event'
-        : providerControlKind == _ProviderControlActivityKind.task
-        ? 'plan'
-        : rawType;
-    final normalizedToolTitle =
-        questionActivity?.title ??
-        (providerControlKind == _ProviderControlActivityKind.task
-            ? 'Plan updated'
-            : toolTitle);
-    final normalizedSummary =
-        providerControlKind == _ProviderControlActivityKind.task
-        ? _providerControlActivitySummary(
-            json,
-            fallbackTitle: normalizedToolTitle,
-            fallbackToolName: toolName,
-          )
-        : _stringOrNull(json['summary']);
-
-    return SessionActivity(
-      id: normalizedId,
-      type: normalizedType,
-      createdAt: _dateValue(json['createdAt']),
-      seq: _intOrNull(json['seq']) ?? 0,
-      status: _stringValue(json['status']),
-      turnId: _stringOrNull(json['turnId']),
-      command: _stringOrNull(json['command']),
-      cwd: _stringOrNull(json['cwd']),
-      output: _stringOrNull(json['output']),
-      exitCode: _intOrNull(json['exitCode']),
-      durationMs: _intOrNull(json['durationMs']),
-      source: _stringOrNull(json['source']),
-      processId: _stringOrNull(json['processId']),
-      commandActions: (json['commandActions'] as List<dynamic>? ?? [])
-          .map(
-            (item) => SessionCommandActionSummary.fromJson(
-              item as Map<String, dynamic>,
-            ),
-          )
-          .toList(),
-      terminalStatus: _stringOrNull(json['terminalStatus']),
-      terminalInput: _stringOrNull(json['terminalInput']),
-      toolName: toolName,
-      toolTitle: normalizedToolTitle,
-      toolArgs: json['args'],
-      toolResult: json['result'],
-      toolError: json['isError'] is bool ? json['isError'] as bool : null,
-      toolSemantic: _toolSemanticFromActivityJson(json),
-      changes: (json['changes'] as List<dynamic>? ?? [])
-          .map(
-            (item) =>
-                SessionActivityChange.fromJson(item as Map<String, dynamic>),
-          )
-          .toList(),
-      diff: _stringOrNull(json['diff']),
-      query: _stringOrNull(json['query']),
-      queries: (json['queries'] as List<dynamic>? ?? const <dynamic>[])
-          .map((item) => _stringValue(item))
-          .where((item) => item.isNotEmpty)
-          .toList(),
-      targetUrl: _stringOrNull(json['targetUrl']),
-      pattern: _stringOrNull(json['pattern']),
-      revisedPrompt: _stringOrNull(json['revisedPrompt']),
-      savedPath: _stringOrNull(json['savedPath']),
-      activityAction: _stringOrNull(json['action']),
-      summary: normalizedSummary,
-      content: _stringOrNull(json['content']) ?? _stringOrNull(json['text']),
-      detail: questionActivity?.detail ?? _stringOrNull(json['detail']),
-      level: questionActivity == null ? _stringOrNull(json['level']) : 'info',
-      reasoningId: _stringOrNull(json['reasoningId']),
-      agentId: _stringOrNull(json['agentId']),
-      agentName: _stringOrNull(json['agentName']),
-      agentDisplayName: _stringOrNull(json['agentDisplayName']),
-      description: _stringOrNull(json['description']),
-      model: _stringOrNull(json['model']),
-      totalTokens: _intOrNull(json['totalTokens']),
-      totalToolCalls: _intOrNull(json['totalToolCalls']),
-      errorText: _stringOrNull(json['error']),
-    );
-  }
+  factory SessionActivity.fromJson(Map<String, dynamic> json) =>
+      SessionActivity(
+        id: _stringValue(json['id']),
+        type: _stringValue(json['type']),
+        createdAt: _dateValue(json['createdAt']),
+        seq: _intOrNull(json['seq']) ?? 0,
+        status: _stringValue(json['status']),
+        turnId: _stringOrNull(json['turnId']),
+        command: _stringOrNull(json['command']),
+        cwd: _stringOrNull(json['cwd']),
+        output: _stringOrNull(json['output']),
+        exitCode: _intOrNull(json['exitCode']),
+        durationMs: _intOrNull(json['durationMs']),
+        source: _stringOrNull(json['source']),
+        processId: _stringOrNull(json['processId']),
+        commandActions: (json['commandActions'] as List<dynamic>? ?? [])
+            .map(
+              (item) => SessionCommandActionSummary.fromJson(
+                item as Map<String, dynamic>,
+              ),
+            )
+            .toList(),
+        terminalStatus: _stringOrNull(json['terminalStatus']),
+        terminalInput: _stringOrNull(json['terminalInput']),
+        toolName: _stringOrNull(json['toolName']),
+        toolTitle: _stringOrNull(json['title']),
+        toolArgs: json['args'],
+        toolResult: json['result'],
+        toolError: json['isError'] is bool ? json['isError'] as bool : null,
+        toolSemantic: _toolSemanticFromActivityJson(json),
+        changes: (json['changes'] as List<dynamic>? ?? [])
+            .map(
+              (item) =>
+                  SessionActivityChange.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(),
+        diff: _stringOrNull(json['diff']),
+        query: _stringOrNull(json['query']),
+        queries: (json['queries'] as List<dynamic>? ?? const <dynamic>[])
+            .map((item) => _stringValue(item))
+            .where((item) => item.isNotEmpty)
+            .toList(),
+        targetUrl: _stringOrNull(json['targetUrl']),
+        pattern: _stringOrNull(json['pattern']),
+        revisedPrompt: _stringOrNull(json['revisedPrompt']),
+        savedPath: _stringOrNull(json['savedPath']),
+      );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -1947,224 +1859,7 @@ class SessionActivity {
     'pattern': pattern,
     'revisedPrompt': revisedPrompt,
     'savedPath': savedPath,
-    'action': activityAction,
-    'summary': summary,
-    'content': content,
-    'detail': detail,
-    'level': level,
-    'reasoningId': reasoningId,
-    'agentId': agentId,
-    'agentName': agentName,
-    'agentDisplayName': agentDisplayName,
-    'description': description,
-    'model': model,
-    'totalTokens': totalTokens,
-    'totalToolCalls': totalToolCalls,
-    'error': errorText,
   };
-}
-
-enum _ProviderControlActivityKind { hidden, commentary, task }
-
-class _QuestionActivityPresentation {
-  const _QuestionActivityPresentation({required this.title, this.detail});
-
-  final String title;
-  final String? detail;
-}
-
-const _questionProviderControlToolKeys = {
-  'ask_user',
-  'request_user_input',
-  'user_input',
-};
-
-const _hiddenProviderControlToolKeys = {
-  'ask_user',
-  'request_user_input',
-  'user_input',
-  'elicitation',
-  'request_elicitation',
-};
-
-const _commentaryProviderControlToolKeys = {
-  'report_intent',
-  'assistant_intent',
-  'report_progress',
-};
-
-const _taskProviderControlToolKeys = {
-  'update_plan',
-  'todo_write',
-  'todo_update',
-  'write_todo',
-  'write_todos',
-};
-
-const _genericProviderControlToolKeys = {'tool', 'unknown', 'tool_execution'};
-
-_ProviderControlActivityKind? _providerControlActivityKind(
-  String? toolName,
-  String? title,
-) {
-  return _providerControlActivityKindForKey(
-    _providerControlActivityToolKey(toolName, title),
-  );
-}
-
-String? _providerControlActivityToolKey(String? toolName, String? title) {
-  final toolKey = _providerControlToolKey(toolName);
-  if (toolKey != null && !_genericProviderControlToolKeys.contains(toolKey)) {
-    return toolKey;
-  }
-
-  final titleToolName = _providerControlToolNameFromTitle(title);
-  if (titleToolName != null) {
-    return _providerControlToolKey(titleToolName);
-  }
-
-  return toolKey;
-}
-
-String? _providerControlToolNameFromTitle(String? title) {
-  final trimmed = (title ?? '').trim();
-  if (trimmed.isEmpty) return null;
-  final firstToken = trimmed.split(RegExp(r'\s+')).first;
-  final key = _providerControlToolKey(firstToken);
-  return _providerControlActivityKindForKey(key) == null ? null : firstToken;
-}
-
-String? _providerControlToolKey(String? value) {
-  final normalized = (value ?? '')
-      .trim()
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
-      .replaceAll(RegExp(r'^_+|_+$'), '');
-  return normalized.isEmpty ? null : normalized;
-}
-
-_QuestionActivityPresentation? _providerQuestionActivityPresentation(
-  Map<String, dynamic> json,
-  String? toolName,
-  String? title,
-) {
-  final toolKey = _providerControlActivityToolKey(toolName, title);
-  if (!_questionProviderControlToolKeys.contains(toolKey)) {
-    return null;
-  }
-  final args = _mapOrNull(json['args']);
-  final result = _mapOrNull(json['result']);
-  final titlePayload = _providerControlTitlePayload(title);
-  final question =
-      _readFirstString(args, const ['question', 'message', 'prompt', 'text']) ??
-      _readFirstString(result, const [
-        'question',
-        'message',
-        'prompt',
-        'text',
-      ]) ??
-      _readFirstString(titlePayload, const [
-        'question',
-        'message',
-        'prompt',
-        'text',
-      ]);
-  if (question == null) {
-    return null;
-  }
-  final choices =
-      _readStringList(args?['choices']) ??
-      _readStringList(titlePayload?['choices']) ??
-      const <String>[];
-  final answer =
-      _readFirstString(result, const [
-        'answer',
-        'response',
-        'selected',
-        'content',
-        'text',
-      ]) ??
-      _providerQuestionAnswerFromOutput(_stringOrNull(json['output']));
-  final detailParts = [
-    if (choices.isNotEmpty) 'Options: ${choices.join(' / ')}',
-    if (answer != null) 'You answered: $answer',
-  ];
-  return _QuestionActivityPresentation(
-    title: 'Model asked: $question',
-    detail: detailParts.isEmpty ? null : detailParts.join('\n'),
-  );
-}
-
-Map<String, dynamic>? _providerControlTitlePayload(String? title) {
-  final match = RegExp(r'\{[\s\S]*\}\s*$').firstMatch(title ?? '');
-  if (match == null) return null;
-  try {
-    return _mapOrNull(jsonDecode(match.group(0)!));
-  } catch (_) {
-    return null;
-  }
-}
-
-Map<String, dynamic>? _mapOrNull(Object? value) {
-  if (value is Map<String, dynamic>) return value;
-  if (value is Map) return value.cast<String, dynamic>();
-  return null;
-}
-
-String? _readFirstString(Map<String, dynamic>? map, List<String> keys) {
-  if (map == null) return null;
-  for (final key in keys) {
-    final value = _stringOrNull(map[key])?.trim();
-    if (value != null && value.isNotEmpty) return value;
-  }
-  return null;
-}
-
-List<String>? _readStringList(Object? value) {
-  if (value is! List) return null;
-  final strings = value
-      .map((item) => item is String ? item.trim() : '')
-      .where((item) => item.isNotEmpty)
-      .toList(growable: false);
-  return strings.isEmpty ? null : strings;
-}
-
-String? _providerQuestionAnswerFromOutput(String? output) {
-  final value = output?.trim();
-  if (value == null || value.isEmpty) return null;
-  return value
-      .replaceFirst(
-        RegExp(r'^User\s+(selected|responded):\s*', caseSensitive: false),
-        '',
-      )
-      .replaceFirst(RegExp(r'^Answer:\s*', caseSensitive: false), '')
-      .trim();
-}
-
-_ProviderControlActivityKind? _providerControlActivityKindForKey(String? key) {
-  if (key == null) return null;
-  if (_hiddenProviderControlToolKeys.contains(key)) {
-    return _ProviderControlActivityKind.hidden;
-  }
-  if (_commentaryProviderControlToolKeys.contains(key)) {
-    return _ProviderControlActivityKind.commentary;
-  }
-  if (_taskProviderControlToolKeys.contains(key)) {
-    return _ProviderControlActivityKind.task;
-  }
-  return null;
-}
-
-String? _providerControlActivitySummary(
-  Map<String, dynamic> json, {
-  required String? fallbackTitle,
-  required String? fallbackToolName,
-}) {
-  for (final key in const ['summary', 'output', 'content', 'text']) {
-    final value = _stringOrNull(json[key]);
-    if (value != null) return value;
-  }
-  return fallbackTitle ?? fallbackToolName;
 }
 
 SessionToolSemantic? _toolSemanticFromActivityJson(Map<String, dynamic> json) {

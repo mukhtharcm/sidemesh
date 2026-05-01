@@ -46,7 +46,6 @@ import {
 } from "./codex-history.js";
 import type {
   ModelSummary,
-  PendingActionElicitationField,
   ProviderProfileCatalog,
   ProviderProfileSummary,
   SessionActivity,
@@ -660,8 +659,6 @@ export class CodexAgentProvider
     if (
       method !== "item/commandExecution/requestApproval" &&
       method !== "item/fileChange/requestApproval" &&
-      method !== "item/tool/requestUserInput" &&
-      method !== "mcpServer/elicitation/request" &&
       method !== "item/permissions/requestApproval"
     ) {
       return;
@@ -1767,14 +1764,6 @@ function buildCodexPendingAction(
     };
   }
 
-  if (method === "item/tool/requestUserInput") {
-    return buildCodexUserInputPendingAction(typed, providerRequestId, sessionId);
-  }
-
-  if (method === "mcpServer/elicitation/request") {
-    return buildCodexElicitationPendingAction(typed, providerRequestId, sessionId);
-  }
-
   const cwd = asString(typed.cwd) ?? undefined;
   const reason = asString(typed.reason) ?? undefined;
   const detail = formatPermissionRequestDetail(typed.reason, typed.permissions);
@@ -1810,325 +1799,6 @@ function buildCodexPendingAction(
     providerRequestKind: method,
     providerPayload: typed.permissions,
   };
-}
-
-interface CodexUserInputQuestion {
-  id: string;
-  header: string;
-  question: string;
-  isOther: boolean;
-  isSecret: boolean;
-  options: Array<{ label: string; description: string }>;
-}
-
-function buildCodexUserInputPendingAction(
-  params: Record<string, any>,
-  providerRequestId: number | string,
-  sessionId: string,
-): AgentPendingAction {
-  const questions = normalizeCodexUserInputQuestions(params.questions);
-  const first = questions[0];
-  const requestedAt = Date.now();
-  const itemId = asString(params.itemId) ?? String(providerRequestId);
-  if (questions.length === 1 && first && !first.isSecret) {
-    const choices = first.options
-      .map((option) => option.label.trim())
-      .filter((label) => label.length > 0);
-    return {
-      id: `codex-user-input-${itemId}`,
-      sessionId,
-      kind: "user_input",
-      title: first.header || "Agent question",
-      detail: first.question,
-      requestedAt,
-      canApprove: false,
-      canApproveForSession: false,
-      canDecline: false,
-      userInput: {
-        question: first.question,
-        choices,
-        allowFreeform: first.isOther || choices.length === 0,
-      },
-      providerRequestId,
-      providerRequestKind: "item/tool/requestUserInput",
-      providerPayload: params,
-    };
-  }
-
-  const fields = questions.map(codexQuestionToElicitationField);
-  return {
-    id: `codex-user-input-form-${itemId}`,
-    sessionId,
-    kind: "elicitation",
-    title: "Agent questions",
-    detail:
-      questions.length === 1
-        ? questions[0]?.question ?? "Agent requested input."
-        : `Agent asked ${questions.length} questions.`,
-    requestedAt,
-    canApprove: false,
-    canApproveForSession: false,
-    canDecline: true,
-    elicitation: {
-      mode: "form",
-      message:
-        questions.length === 1
-          ? questions[0]?.question ?? "Agent requested input."
-          : `Agent asked ${questions.length} questions.`,
-      fields,
-    },
-    providerRequestId,
-    providerRequestKind: "item/tool/requestUserInput",
-    providerPayload: params,
-  };
-}
-
-function buildCodexElicitationPendingAction(
-  params: Record<string, any>,
-  providerRequestId: number | string,
-  sessionId: string,
-): AgentPendingAction {
-  const mode = params.mode === "url" ? "url" : "form";
-  const message = asString(params.message) ?? "Structured input requested";
-  return {
-    id: `codex-elicitation-${String(providerRequestId)}`,
-    sessionId,
-    kind: "elicitation",
-    title: mode === "url" ? "Browser sign-in required" : "Structured input requested",
-    detail: message,
-    requestedAt: Date.now(),
-    canApprove: false,
-    canApproveForSession: false,
-    canDecline: true,
-    elicitation: {
-      mode,
-      message,
-      source: asString(params.serverName) ?? undefined,
-      url: mode === "url" ? asString(params.url) ?? undefined : undefined,
-      fields:
-        mode === "form"
-          ? normalizeCodexElicitationFields(params.requestedSchema)
-          : [],
-    },
-    providerRequestId,
-    providerRequestKind: "mcpServer/elicitation/request",
-    providerPayload: params,
-  };
-}
-
-function normalizeCodexUserInputQuestions(
-  value: unknown,
-): CodexUserInputQuestion[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.map((raw, index) => {
-    const typed = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
-    const id = asString(typed.id) ?? `question-${index + 1}`;
-    const question = asString(typed.question) ?? asString(typed.header) ?? "Agent question";
-    const header = asString(typed.header) ?? question;
-    const options = Array.isArray(typed.options)
-      ? typed.options
-          .map((option) => {
-            const optionRecord =
-              option && typeof option === "object"
-                ? option as Record<string, unknown>
-                : {};
-            const label = asString(optionRecord.label);
-            return label
-              ? {
-                  label,
-                  description: asString(optionRecord.description) ?? "",
-                }
-              : null;
-          })
-          .filter(
-            (option): option is { label: string; description: string } =>
-              option !== null,
-          )
-      : [];
-    return {
-      id,
-      header,
-      question,
-      isOther: typed.isOther === true,
-      isSecret: typed.isSecret === true,
-      options,
-    };
-  });
-}
-
-function codexQuestionToElicitationField(
-  question: CodexUserInputQuestion,
-): PendingActionElicitationField {
-  const title = question.header || question.question;
-  const description = question.header && question.header !== question.question
-    ? question.question
-    : undefined;
-  const options = question.options.map((option) => ({
-    value: option.label,
-    label: option.description || option.label,
-  }));
-  return {
-    key: question.id,
-    type: "string",
-    title,
-    ...(description ? { description } : {}),
-    required: true,
-    ...(options.length > 0 ? { options } : {}),
-  };
-}
-
-function normalizeCodexElicitationFields(
-  schema: unknown,
-): PendingActionElicitationField[] {
-  const typed = schema && typeof schema === "object"
-    ? schema as Record<string, unknown>
-    : null;
-  const properties = typed?.properties && typeof typed.properties === "object"
-    ? typed.properties as Record<string, unknown>
-    : {};
-  const required = new Set(
-    Array.isArray(typed?.required)
-      ? typed.required.filter((key): key is string => typeof key === "string")
-      : [],
-  );
-  return Object.entries(properties).map(([key, value]) =>
-    codexSchemaPropertyToField(key, value, required.has(key)),
-  );
-}
-
-function codexSchemaPropertyToField(
-  key: string,
-  value: unknown,
-  required: boolean,
-): PendingActionElicitationField {
-  const schema = value && typeof value === "object"
-    ? value as Record<string, unknown>
-    : {};
-  const title = asString(schema.title) ?? humanizeCodexFieldKey(key);
-  const description = asString(schema.description) ?? undefined;
-  const base = {
-    key,
-    title,
-    ...(description ? { description } : {}),
-    required,
-  };
-  const schemaType = asString(schema.type);
-  if (schemaType === "boolean") {
-    const defaultValue = asOptionalBoolean(schema.default);
-    return {
-      ...base,
-      type: "boolean",
-      ...(defaultValue === undefined ? {} : { defaultValue }),
-    };
-  }
-  if (schemaType === "number" || schemaType === "integer") {
-    const defaultValue = asNumber(schema.default);
-    const minimum = asNumber(schema.minimum);
-    const maximum = asNumber(schema.maximum);
-    return {
-      ...base,
-      type: "number",
-      integer: schemaType === "integer",
-      ...(defaultValue == null ? {} : { defaultValue }),
-      ...(minimum == null ? {} : { minimum }),
-      ...(maximum == null ? {} : { maximum }),
-    };
-  }
-  if (schemaType === "array") {
-    const options = codexStringOptions((schema.items as unknown) ?? schema);
-    if (options.length > 0) {
-      const defaultValue = Array.isArray(schema.default)
-        ? schema.default.filter((item): item is string => typeof item === "string")
-        : undefined;
-      const minItems = asNumber(schema.minItems);
-      const maxItems = asNumber(schema.maxItems);
-      return {
-        ...base,
-        type: "string[]",
-        options,
-        ...(defaultValue === undefined ? {} : { defaultValue }),
-        ...(minItems == null ? {} : { minItems }),
-        ...(maxItems == null ? {} : { maxItems }),
-      };
-    }
-  }
-  const defaultValue = asString(schema.default);
-  const minLength = asNumber(schema.minLength);
-  const maxLength = asNumber(schema.maxLength);
-  const format = codexStringFormat(schema.format);
-  const options = codexStringOptions(schema);
-  return {
-    ...base,
-    type: "string",
-    ...(defaultValue == null ? {} : { defaultValue }),
-    ...(minLength == null ? {} : { minLength }),
-    ...(maxLength == null ? {} : { maxLength }),
-    ...(format === undefined ? {} : { format }),
-    ...(options.length > 0 ? { options } : {}),
-  };
-}
-
-function codexStringOptions(
-  value: unknown,
-): Array<{ value: string; label: string }> {
-  const schema = value && typeof value === "object"
-    ? value as Record<string, unknown>
-    : {};
-  const oneOf = Array.isArray(schema.oneOf)
-    ? schema.oneOf
-    : Array.isArray(schema.anyOf)
-      ? schema.anyOf
-      : [];
-  const oneOfOptions = oneOf
-    .map((option) => {
-      const typed = option && typeof option === "object"
-        ? option as Record<string, unknown>
-        : {};
-      const constValue = asString(typed.const);
-      if (!constValue) {
-        return null;
-      }
-      return {
-        value: constValue,
-        label: asString(typed.title) ?? constValue,
-      };
-    })
-    .filter((option): option is { value: string; label: string } => option !== null);
-  if (oneOfOptions.length > 0) {
-    return oneOfOptions;
-  }
-  if (!Array.isArray(schema.enum)) {
-    return [];
-  }
-  const names = Array.isArray(schema.enumNames) ? schema.enumNames : [];
-  return schema.enum
-    .filter((item): item is string => typeof item === "string")
-    .map((item, index) => ({
-      value: item,
-      label: typeof names[index] === "string" ? names[index] : item,
-    }));
-}
-
-function codexStringFormat(
-  value: unknown,
-): "email" | "uri" | "date" | "date-time" | undefined {
-  return value === "email" ||
-    value === "uri" ||
-    value === "date" ||
-    value === "date-time"
-    ? value
-    : undefined;
-}
-
-function humanizeCodexFieldKey(value: string): string {
-  return value
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/^./, (match) => match.toUpperCase());
 }
 
 function codexNetworkApprovalTarget(
@@ -2191,8 +1861,8 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     skills: true,
   },
   interaction: {
-    userInput: true,
-    elicitation: true,
+    userInput: false,
+    elicitation: false,
   },
   approvals: {
     command: true,
@@ -2227,13 +1897,6 @@ function buildCodexActionResponse(
   action: AgentPendingAction,
   input: PendingActionResponseInput,
 ): unknown | null {
-  if (action.providerRequestKind === "item/tool/requestUserInput") {
-    return buildCodexUserInputResponse(action, input);
-  }
-  if (action.providerRequestKind === "mcpServer/elicitation/request") {
-    return buildCodexElicitationResponse(input);
-  }
-
   const decision = normalizePendingActionDecision(
     input as PendingActionDecisionInput,
   );
@@ -2267,78 +1930,6 @@ function buildCodexActionResponse(
   }
 
   return null;
-}
-
-function buildCodexUserInputResponse(
-  action: AgentPendingAction,
-  input: PendingActionResponseInput,
-): unknown | null {
-  const payload = action.providerPayload && typeof action.providerPayload === "object"
-    ? action.providerPayload as Record<string, unknown>
-    : {};
-  const questions = normalizeCodexUserInputQuestions(payload.questions);
-  if (action.kind === "user_input") {
-    if (
-      !input ||
-      typeof input !== "object" ||
-      !("answer" in input) ||
-      typeof input.answer !== "string"
-    ) {
-      return null;
-    }
-    const questionId = questions[0]?.id ?? "question-1";
-    return {
-      answers: {
-        [questionId]: { answers: [input.answer] },
-      },
-    };
-  }
-  if (
-    action.kind !== "elicitation" ||
-    !input ||
-    typeof input !== "object" ||
-    !("action" in input) ||
-    input.action !== "accept"
-  ) {
-    return null;
-  }
-  const content = "content" in input && input.content ? input.content : {};
-  const answers: Record<string, { answers: string[] }> = {};
-  for (const question of questions) {
-    const value = content[question.id];
-    answers[question.id] = { answers: codexUserInputAnswerValues(value) };
-  }
-  return { answers };
-}
-
-function codexUserInputAnswerValues(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item));
-  }
-  if (value === undefined || value === null) {
-    return [];
-  }
-  return [String(value)];
-}
-
-function buildCodexElicitationResponse(
-  input: PendingActionResponseInput,
-): unknown | null {
-  if (
-    !input ||
-    typeof input !== "object" ||
-    !("action" in input) ||
-    (input.action !== "accept" &&
-      input.action !== "decline" &&
-      input.action !== "cancel")
-  ) {
-    return null;
-  }
-  return {
-    action: input.action,
-    content: input.action === "accept" ? input.content ?? null : null,
-    _meta: null,
-  };
 }
 
 function formatPermissionRequestDetail(reason: unknown, permissions: unknown): string {

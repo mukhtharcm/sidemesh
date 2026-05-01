@@ -2164,21 +2164,10 @@ class _SessionScreenState extends State<SessionScreen>
       unawaited(_loadSkills(forceReload: true));
       final nextSeq = event.nextSeq;
       final last = _lastEventSeq;
-      if (nextSeq != null &&
-          last != null &&
-          (nextSeq > last + 1 || nextSeq <= last)) {
-        // We either missed events while disconnected, or the daemon restarted
-        // and reset its live-event sequence. A reset cannot be reconciled by
-        // asking for events after our old seq, so fetch a full snapshot.
+      if (nextSeq != null && last != null && nextSeq > last + 1) {
+        // We missed events while disconnected; try the cheap delta first,
+        // fall back to a full snapshot if that fails.
         unawaited(() async {
-          if (nextSeq <= last) {
-            await _loadSnapshot(
-              messageLimit: _messageLimit,
-              activityLimit: _activityLimit,
-              scrollToBottom: false,
-            );
-            return;
-          }
           final applied = await _resyncDelta();
           if (!applied && mounted) {
             await _loadSnapshot(
@@ -3797,7 +3786,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     try {
-      final submittedMessage = await widget.api.respondToAction(
+      await widget.api.respondToAction(
         widget.host,
         actionId: action.id,
         response: response,
@@ -3807,15 +3796,9 @@ class _SessionScreenState extends State<SessionScreen>
       }
       HapticFeedback.selectionClick();
       setState(() {
-        if (submittedMessage != null) {
-          _upsertOptimisticMessage(submittedMessage);
-        }
         _pendingAction = null;
       });
       _syncSessionLiveActivity();
-      if (submittedMessage != null) {
-        _scrollToBottomFast();
-      }
       final label = switch (action.kind) {
         'user_input' => 'Answer sent',
         'elicitation' => 'Response sent',
@@ -4334,9 +4317,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   List<SessionActivity> _sortActivities(List<SessionActivity> activities) {
-    final sorted = activities
-        .where((activity) => !activity.isHiddenProviderControlActivity)
-        .toList(growable: false);
+    final sorted = [...activities];
     sorted.sort((left, right) {
       final bySeq = left.seq.compareTo(right.seq);
       if (bySeq != 0) return bySeq;
@@ -4468,16 +4449,6 @@ class _SessionScreenState extends State<SessionScreen>
       activity.targetUrl ?? '',
       activity.pattern ?? '',
       activity.savedPath ?? '',
-      activity.activityAction ?? '',
-      activity.summary ?? '',
-      activity.content ?? '',
-      activity.detail ?? '',
-      activity.level ?? '',
-      activity.agentName ?? '',
-      activity.agentDisplayName ?? '',
-      activity.description ?? '',
-      activity.model ?? '',
-      activity.errorText ?? '',
       activity.terminalInput ?? '',
       changesText,
       tail,
@@ -4506,20 +4477,6 @@ class _SessionScreenState extends State<SessionScreen>
         return q.isEmpty ? 'Web search' : 'Web: $q';
       case 'image_generation':
         return 'Generated image';
-      case 'plan':
-      case 'task':
-      case 'reasoning':
-      case 'system_event':
-        final title = (activity.toolTitle ?? '').trim();
-        if (title.isNotEmpty) return title;
-        final summary = (activity.summary ?? '').trim();
-        if (summary.isNotEmpty) return summary;
-        return activity.type.replaceAll('_', ' ');
-      case 'subagent':
-        final displayName = (activity.agentDisplayName ?? '').trim();
-        if (displayName.isNotEmpty) return displayName;
-        final name = (activity.agentName ?? '').trim();
-        return name.isEmpty ? 'Subagent' : name;
       default:
         return activity.type;
     }
