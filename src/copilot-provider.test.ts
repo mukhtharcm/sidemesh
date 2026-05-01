@@ -423,21 +423,9 @@ describe("Copilot provider", () => {
         log.activities.map((activity) => ({
           id: activity.id,
           type: activity.type,
-          title:
-            activity.type === "tool" || activity.type === "system_event"
-              ? activity.title
-              : undefined,
-          ...(activity.type === "system_event"
-            ? { detail: activity.detail }
-            : {}),
+          title: activity.type === "tool" ? activity.title : undefined,
         })),
         [
-          {
-            id: "question:ask-user-tool",
-            type: "system_event",
-            title: "Model asked: Should I start?",
-            detail: null,
-          },
           { id: "plan-tool", type: "plan", title: undefined },
           { id: "read-tool", type: "tool", title: "Read README.md" },
         ],
@@ -1245,22 +1233,7 @@ describe("Copilot provider", () => {
       await completed;
 
       const log = await provider.readSessionLog!(created.thread);
-      assert.deepEqual(
-        log.activities.map((activity) => ({
-          type: activity.type,
-          status: activity.status,
-          title: activity.type === "system_event" ? activity.title : null,
-          detail: activity.type === "system_event" ? activity.detail : null,
-        })),
-        [
-          {
-            type: "system_event",
-            status: "completed",
-            title: "Model asked: Which environment should I use?",
-            detail: "Options: staging / production\nYou answered: staging",
-          },
-        ],
-      );
+      assert.equal(log.activities.length, 0);
       assert.match(log.messages.at(-1)?.text ?? "", /staging/);
     } finally {
       await settleProviderWrites();

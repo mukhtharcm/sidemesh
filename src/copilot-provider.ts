@@ -122,7 +122,6 @@ interface PendingCopilotPermission {
 
 interface PendingCopilotUserInput {
   action: AgentPendingAction;
-  activityId: string;
   resolve(result: CopilotSdkUserInputResponse): void;
 }
 
@@ -610,22 +609,6 @@ export class CopilotAgentProvider
         return false;
       }
       this.pendingUserInputs.delete(action.id);
-      const session = this.sessions.get(action.sessionId);
-      if (session) {
-        const active = this.activeTurns.get(action.sessionId);
-        this.upsertAndEmitActivity(
-          session,
-          active?.turnId ?? null,
-          buildCopilotQuestionActivity({
-            activityId: inputRequest.activityId,
-            turnId: active?.turnId ?? null,
-            question: action.userInput?.question ?? action.detail,
-            choices: action.userInput?.choices ?? [],
-            answer: decision.answer,
-            status: "completed",
-          }),
-        );
-      }
       inputRequest.resolve(decision);
       return true;
     }
@@ -1581,26 +1564,12 @@ export class CopilotAgentProvider
     }
 
     const action = buildCopilotUserInputAction(session, request);
-    const activityId = `copilot-question-${action.id}`;
-    const active = this.activeTurns.get(sessionId);
-    this.upsertAndEmitActivity(
-      session,
-      active?.turnId ?? null,
-      buildCopilotQuestionActivity({
-        activityId,
-        turnId: active?.turnId ?? null,
-        question:
-          action.userInput?.question ?? questionFromUserInputRequest(request),
-        choices: action.userInput?.choices ?? [],
-        status: "in_progress",
-      }),
-    );
     this.emit("liveEvent", {
       type: "action_opened",
       action,
     });
     return new Promise<CopilotSdkUserInputResponse>((resolve) => {
-      this.pendingUserInputs.set(action.id, { action, activityId, resolve });
+      this.pendingUserInputs.set(action.id, { action, resolve });
     });
   }
 
@@ -2241,8 +2210,11 @@ function buildCopilotUserInputAction(
   request: CopilotSdkUserInputRequest,
 ): AgentPendingAction {
   const actionId = `copilot-user-input-${randomUUID()}`;
-  const question = questionFromUserInputRequest(request);
-  const choices = choicesFromUserInputRequest(request);
+  const question = request.question?.trim() || "Agent question";
+  const choices = (request.choices ?? []).filter(
+    (choice: string | undefined): choice is string =>
+      typeof choice === "string" && choice.trim().length > 0,
+  );
   return {
     id: actionId,
     sessionId: session.thread.id,
@@ -2263,47 +2235,6 @@ function buildCopilotUserInputAction(
     providerRequestId: actionId,
     providerRequestKind: "copilot/ask_user",
     providerPayload: request,
-  };
-}
-
-function questionFromUserInputRequest(request: CopilotSdkUserInputRequest): string {
-  return request.question?.trim() || "Agent question";
-}
-
-function choicesFromUserInputRequest(
-  request: CopilotSdkUserInputRequest,
-): string[] {
-  return (request.choices ?? []).filter(
-    (choice: string | undefined): choice is string =>
-      typeof choice === "string" && choice.trim().length > 0,
-  );
-}
-
-function buildCopilotQuestionActivity(options: {
-  activityId: string;
-  turnId: string | null;
-  question: string;
-  choices?: string[];
-  answer?: string | null;
-  status: "in_progress" | "completed" | "failed" | "declined";
-}): AgentSessionActivityDraft {
-  const question = options.question.trim() || "Agent question";
-  const choices = (options.choices ?? [])
-    .map((choice) => choice.trim())
-    .filter((choice) => choice.length > 0);
-  const answer = options.answer?.trim() || null;
-  const detailParts = [
-    ...(choices.length > 0 ? [`Options: ${choices.join(" / ")}`] : []),
-    ...(answer ? [`You answered: ${answer}`] : []),
-  ];
-  return {
-    id: options.activityId,
-    type: "system_event",
-    turnId: options.turnId,
-    status: options.status,
-    level: "info",
-    title: `Model asked: ${question}`,
-    detail: detailParts.length > 0 ? detailParts.join("\n") : null,
   };
 }
 
@@ -3357,17 +3288,6 @@ function normalizeStoredCopilotActivities(
       presentation.kind === "hidden" ||
       presentation.kind === "commentary"
     ) {
-      const questionActivity = buildStoredCopilotQuestionActivity(
-        stored,
-        storedToolName,
-      );
-      if (questionActivity) {
-        normalized.push({
-          ...questionActivity,
-          createdAt: stored.createdAt,
-          seq: stored.seq,
-        });
-      }
       continue;
     }
     if (presentation.kind === "task") {
@@ -3406,100 +3326,6 @@ function copilotStoredToolPresentationName(
   }
   const titleToolName = copilotToolNameFromTitle(activity.title);
   return titleToolName ?? toolName;
-}
-
-function buildStoredCopilotQuestionActivity(
-  activity: ToolActivity,
-  toolName: string,
-): AgentSessionActivityDraft | null {
-  const toolKey = normalizeCopilotToolKey(toolName);
-  if (
-    toolKey !== "ask_user" &&
-    toolKey !== "request_user_input" &&
-    toolKey !== "user_input"
-  ) {
-    return null;
-  }
-  const question = extractCopilotQuestionText(activity);
-  if (!question) {
-    return null;
-  }
-  const answer = extractCopilotAnswerText(activity);
-  return buildCopilotQuestionActivity({
-    activityId: `question:${activity.id}`,
-    turnId: activity.turnId,
-    question,
-    choices: extractCopilotQuestionChoices(activity),
-    answer,
-    status: activity.status,
-  });
-}
-
-function extractCopilotQuestionText(activity: ToolActivity): string | null {
-  const args = asRecord(activity.args);
-  const result = asRecord(activity.result);
-  return (
-    normalizeCopilotCommentaryText(
-      readFirstString(args, ["question", "message", "prompt", "text"]),
-    ) ??
-    normalizeCopilotCommentaryText(
-      readFirstString(result, ["question", "message", "prompt", "text"]),
-    ) ??
-    normalizeCopilotCommentaryText(
-      readFirstString(copilotToolTitlePayload(activity.title), [
-        "question",
-        "message",
-        "prompt",
-        "text",
-      ]),
-    )
-  );
-}
-
-function extractCopilotQuestionChoices(activity: ToolActivity): string[] {
-  const args = asRecord(activity.args);
-  const titlePayload = copilotToolTitlePayload(activity.title);
-  const rawChoices = Array.isArray(args?.choices)
-    ? args?.choices
-    : Array.isArray(titlePayload?.choices)
-      ? titlePayload?.choices
-      : [];
-  return rawChoices
-    .map((choice) => (typeof choice === "string" ? choice.trim() : ""))
-    .filter((choice) => choice.length > 0);
-}
-
-function extractCopilotAnswerText(activity: ToolActivity): string | null {
-  const result = asRecord(activity.result);
-  const fromResult = normalizeCopilotCommentaryText(
-    readFirstString(result, ["answer", "response", "selected", "content", "text"]),
-  );
-  if (fromResult) {
-    return fromResult;
-  }
-  const output = normalizeCopilotCommentaryText(activity.output);
-  if (!output) {
-    return null;
-  }
-  return output
-    .replace(/^User\s+(selected|responded):\s*/i, "")
-    .replace(/^Answer:\s*/i, "")
-    .trim();
-}
-
-function copilotToolTitlePayload(
-  title: string | null,
-): Record<string, unknown> | null {
-  const match = /\{[\s\S]*\}\s*$/.exec(title ?? "");
-  if (!match) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(match[0]) as unknown;
-    return asRecord(parsed);
-  } catch {
-    return null;
-  }
 }
 
 function copilotToolNameFromTitle(title: string | null): string | null {
