@@ -13,9 +13,13 @@ import '../live_activity_service.dart';
 import '../local_notification_service.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/notification_permission_banner.dart';
+import '../onboarding_store.dart';
+import '../theme/theme_controller.dart';
+import 'desktop_welcome_overlay.dart';
 import 'create_session_sheet.dart';
 import 'home_screen.dart';
 import 'host_detail_screen.dart';
@@ -34,6 +38,140 @@ class DesktopShell extends StatefulWidget {
 }
 
 enum _SidebarSection { recent, inbox, hosts }
+
+
+class _OnboardingEmptyState extends StatelessWidget {
+  const _OnboardingEmptyState({
+    required this.colors,
+    required this.onAddHost,
+  });
+
+  final AppColors colors;
+  final VoidCallback onAddHost;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(32),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: colors.accentMuted,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: colors.accent.withValues(alpha: 0.4),
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.hub_rounded,
+                  size: 32,
+                  color: colors.accent,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Connect to your first machine',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: colors.textPrimary,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Sidemesh needs a small daemon running on your MacBook or server. Install it, then connect this app.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colors.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 24),
+              _CommandBlock(
+                text: 'npm install -g sidemesh',
+                colors: colors,
+              ),
+              const SizedBox(height: 6),
+              _CommandBlock(
+                text: 'sidemesh setup',
+                colors: colors,
+              ),
+              const SizedBox(height: 6),
+              _CommandBlock(
+                text: 'sidemesh pair',
+                colors: colors,
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: onAddHost,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Add your first host'),
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: onAddHost,
+                child: const Text('Enter host details manually'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CommandBlock extends StatelessWidget {
+  const _CommandBlock({
+    required this.text,
+    required this.colors,
+  });
+
+  final String text;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.codeBackground,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.codeBorder),
+      ),
+      child: Row(
+        children: [
+          Text(
+            '\$',
+            style: monoStyle(
+              color: colors.accent,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: monoStyle(
+                color: colors.codeForeground,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _ActiveSession {
   const _ActiveSession({
@@ -69,6 +207,7 @@ class _DesktopShellState extends State<DesktopShell> {
   // Used to trigger refresh of sidebar panes after a host/session mutation.
   int _refreshTick = 0;
   bool _handlingNotificationIntent = false;
+  bool _showWelcome = false;
 
   List<HostProfile> get _enabledHosts =>
       _hosts.where((host) => host.enabled).toList(growable: false);
@@ -90,6 +229,7 @@ class _DesktopShellState extends State<DesktopShell> {
   @override
   void initState() {
     super.initState();
+    _checkOnboarding();
     LocalNotificationService.instance.routeIntent.addListener(
       _onNotificationRouteIntent,
     );
@@ -123,6 +263,12 @@ class _DesktopShellState extends State<DesktopShell> {
     _searchFocus.dispose();
     _inspector.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkOnboarding() async {
+    final completed = await OnboardingStore.instance.isCompleted;
+    if (!mounted) return;
+    setState(() => _showWelcome = !completed);
   }
 
   Future<void> _loadHosts() async {
@@ -635,7 +781,9 @@ class _DesktopShellState extends State<DesktopShell> {
     final colors = context.colors;
     return Scaffold(
       backgroundColor: colors.canvas,
-      body: Shortcuts(
+      body: Stack(
+        children: [
+          Shortcuts(
         shortcuts: const <ShortcutActivator, Intent>{
           SingleActivator(LogicalKeyboardKey.keyR, meta: true):
               _RefreshIntent(),
@@ -828,6 +976,15 @@ class _DesktopShellState extends State<DesktopShell> {
             ),
           ),
         ),
+      ),
+          if (_showWelcome)
+            DesktopWelcomeOverlay(
+              themeController: ThemeScope.of(context),
+              onDismissed: () {
+                setState(() => _showWelcome = false);
+              },
+            ),
+        ],
       ),
     );
   }
@@ -1363,79 +1520,77 @@ class _DetailPaneState extends State<_DetailPane> {
         children: [
           SizedBox(height: widget.titlebarInset + 16),
           Expanded(
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: colors.accentMuted,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: colors.accent.withValues(alpha: 0.35),
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      Icons.terminal_rounded,
-                      color: colors.accent,
-                      size: 26,
+            child: widget.hosts.isEmpty
+                ? _OnboardingEmptyState(
+                    colors: colors,
+                    onAddHost: widget.onAddHost,
+                  )
+                : Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: colors.accentMuted,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: colors.accent.withValues(alpha: 0.35),
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.terminal_rounded,
+                            color: colors.accent,
+                            size: 26,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Ready to launch',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 360),
+                          child: Text(
+                            widget.enabledHosts.isEmpty
+                                ? 'Enable a saved host from the Hosts sidebar before launching an agent.'
+                                : 'Open an existing chat or launch a fresh agent session on any configured host.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: colors.textSecondary),
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        FilledButton.icon(
+                          onPressed: widget.enabledHosts.isEmpty
+                              ? null
+                              : _startSessionFromEmptyState,
+                          icon: Icon(
+                            widget.enabledHosts.isEmpty
+                                ? Icons.pause_circle_outline_rounded
+                                : Icons.play_arrow_rounded,
+                          ),
+                          label: Text(
+                            widget.enabledHosts.isEmpty
+                                ? 'No enabled hosts'
+                                : 'Start session',
+                          ),
+                        ),
+                        if (widget.hosts.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          MeshPill(
+                            label:
+                                '${widget.enabledHosts.length} of ${widget.hosts.length} hosts enabled',
+                            icon: Icons.hub_rounded,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Ready to launch',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 360),
-                    child: Text(
-                      widget.hosts.isEmpty
-                          ? 'Add a host first, then launch an agent from here.'
-                          : widget.enabledHosts.isEmpty
-                          ? 'Enable a saved host from the Hosts sidebar before launching an agent.'
-                          : 'Open an existing chat or launch a fresh agent session on any configured host.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: colors.textSecondary),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  FilledButton.icon(
-                    onPressed:
-                        widget.enabledHosts.isEmpty && widget.hosts.isNotEmpty
-                        ? null
-                        : _startSessionFromEmptyState,
-                    icon: Icon(
-                      widget.hosts.isEmpty
-                          ? Icons.add_rounded
-                          : widget.enabledHosts.isEmpty
-                          ? Icons.pause_circle_outline_rounded
-                          : Icons.play_arrow_rounded,
-                    ),
-                    label: Text(
-                      widget.hosts.isEmpty
-                          ? 'Add host'
-                          : widget.enabledHosts.isEmpty
-                          ? 'No enabled hosts'
-                          : 'Start session',
-                    ),
-                  ),
-                  if (widget.hosts.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    MeshPill(
-                      label:
-                          '${widget.enabledHosts.length} of ${widget.hosts.length} hosts enabled',
-                      icon: Icons.hub_rounded,
-                    ),
-                  ],
-                ],
-              ),
-            ),
           ),
         ],
       ),
