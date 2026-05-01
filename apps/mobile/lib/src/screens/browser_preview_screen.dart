@@ -13,6 +13,8 @@ import '../theme/app_theme.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../host_reconnect_scheduler.dart';
+import '../host_status_store.dart';
+import '../relative_time_ticker.dart';
 
 class BrowserPreviewScreen extends StatelessWidget {
   const BrowserPreviewScreen({
@@ -263,6 +265,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       _firstFrameTimer?.cancel();
       _firstFrameReconnects = 0;
       HostReconnectScheduler.instance.markConnected(widget.host.id);
+      HostStatusStore.instance.markEvent(widget.host.id);
       setState(() {
         _frameBytes = bytes;
         _frameWidth = _intValue(frame['width'], _frameWidth);
@@ -534,6 +537,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       children: [
         if (widget.showHeader)
           _PreviewHeader(
+            hostId: widget.host.id,
             preview: _preview,
             connected: _error == null && _status == null,
             streamPaused: _clientPaused,
@@ -1065,6 +1069,7 @@ class _ViewportPresetButton extends StatelessWidget {
 
 class _PreviewHeader extends StatelessWidget {
   const _PreviewHeader({
+    required this.hostId,
     required this.preview,
     required this.connected,
     required this.streamPaused,
@@ -1077,6 +1082,7 @@ class _PreviewHeader extends StatelessWidget {
     this.onMinimize,
   });
 
+  final String hostId;
   final HostBrowserPreviewInfo preview;
   final bool connected;
   final bool streamPaused;
@@ -1139,18 +1145,28 @@ class _PreviewHeader extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      MeshPill(
-                        label: streamPaused
-                            ? 'paused'
-                            : connected
-                            ? 'live'
-                            : preview.status,
-                        tone: streamPaused
-                            ? MeshPillTone.warning
-                            : connected
-                            ? MeshPillTone.success
-                            : MeshPillTone.neutral,
-                        mono: true,
+                      ListenableBuilder(
+                        listenable: Listenable.merge([
+                          HostStatusStore.instance,
+                          RelativeTimeTicker.instance,
+                        ]),
+                        builder: (context, _) {
+                          final status = HostStatusStore.instance.statusFor(hostId);
+                          final pill = _browserPreviewPill(status);
+                          return MeshPill(
+                            label: streamPaused
+                                ? 'paused'
+                                : connected
+                                ? (pill.label ?? 'live')
+                                : preview.status,
+                            tone: streamPaused
+                                ? MeshPillTone.warning
+                                : connected
+                                ? (pill.tone ?? MeshPillTone.success)
+                                : MeshPillTone.neutral,
+                            mono: true,
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -1203,6 +1219,37 @@ class _PreviewHeader extends StatelessWidget {
       ),
     );
   }
+
+  _BrowserPill _browserPreviewPill(HostStatus status) {
+    if (status.reachability == HostReachability.offline) {
+      final last = status.lastEventAt ?? status.lastOnlineAt;
+      if (last != null) {
+        final elapsed = DateTime.now().difference(last);
+        if (elapsed.inHours >= 1) {
+          return const _BrowserPill(label: 'Reconnecting', tone: MeshPillTone.warning);
+        }
+        String ago;
+        if (elapsed.inMinutes < 1) {
+          ago = '${elapsed.inSeconds}s ago';
+        } else {
+          ago = '${elapsed.inMinutes}m ago';
+        }
+        return _BrowserPill(label: 'Last frame $ago', tone: MeshPillTone.warning);
+      }
+      return const _BrowserPill(label: 'Reconnecting', tone: MeshPillTone.warning);
+    }
+    if (status.reachability == HostReachability.probing) {
+      return const _BrowserPill(label: 'Reconnecting', tone: MeshPillTone.warning);
+    }
+    return const _BrowserPill();
+  }
+}
+
+@immutable
+class _BrowserPill {
+  const _BrowserPill({this.label, this.tone});
+  final String? label;
+  final MeshPillTone? tone;
 }
 
 class _PausedPreviewOverlay extends StatelessWidget {
