@@ -1,19 +1,21 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../onboarding_store.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/theme_picker.dart';
 
-/// Shows a non-blocking desktop welcome overlay.
+/// A native-feeling desktop welcome overlay.
 ///
-/// The overlay covers the whole window with a semi-transparent backdrop
-/// and a centered card. Users can dismiss it via "Get started" or "Skip".
-/// Tapping outside the card also dismisses it.
+/// Uses a blurred backdrop and a wide, low-profile card that respects
+/// the app's terminal-inspired aesthetic. Non-blocking — users can
+/// dismiss via the close button, clicking outside, or pressing Escape.
 class DesktopWelcomeOverlay extends StatefulWidget {
   const DesktopWelcomeOverlay({
     super.key,
@@ -37,7 +39,7 @@ class _DesktopWelcomeOverlayState extends State<DesktopWelcomeOverlay>
     super.initState();
     _anim = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 400),
+      duration: const Duration(milliseconds: 500),
     )..forward();
   }
 
@@ -59,29 +61,35 @@ class _DesktopWelcomeOverlayState extends State<DesktopWelcomeOverlay>
     return AnimatedBuilder(
       animation: _anim,
       builder: (context, child) {
-        final opacity = Curves.easeOutCubic.transform(_anim.value);
+        final t = Curves.easeOutCubic.transform(_anim.value);
         return GestureDetector(
           onTap: _dismiss,
           child: Container(
             constraints: const BoxConstraints.expand(),
-            color: colors.canvas.withValues(alpha: 0.72 * opacity),
-            child: Center(
-              child: GestureDetector(
-                onTap: () {}, // prevent tap-through
-                child: Opacity(
-                  opacity: opacity,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: 680,
-                      maxHeight: 640,
-                    ),
-                    child: MeshCard(
-                      tone: MeshCardTone.elevated,
-                      padding: const EdgeInsets.all(32),
-                      child: _Content(
-                        colors: colors,
-                        themeController: widget.themeController,
-                        onDismiss: _dismiss,
+            color: colors.canvas.withValues(alpha: 0.55 * t),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 12 * t, sigmaY: 12 * t),
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {}, // prevent tap-through
+                  child: Opacity(
+                    opacity: t,
+                    child: Padding(
+                      padding: const EdgeInsets.all(40),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxWidth: 960,
+                          minWidth: 640,
+                        ),
+                        child: MeshCard(
+                          tone: MeshCardTone.elevated,
+                          padding: const EdgeInsets.all(44),
+                          child: _Content(
+                            colors: colors,
+                            themeController: widget.themeController,
+                            onDismiss: _dismiss,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -112,114 +120,144 @@ class _Content extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Header
+        // Top bar: close button
         Row(
+          mainAxisAlignment: MainAxisAlignment.end,
           children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: colors.accentMuted,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: colors.accent.withValues(alpha: 0.4),
-                ),
-              ),
-              child: Icon(
-                Icons.hub_rounded,
-                size: 24,
-                color: colors.accent,
-              ),
+            _SubtleButton(
+              onTap: () async {
+                await OnboardingStore.instance.markCompleted();
+                onDismiss();
+              },
+              label: 'Skip',
+              colors: colors,
             ),
-            const SizedBox(width: 16),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Two-column body
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Left column: branding + headline + description
             Expanded(
+              flex: 5,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Brand mark
+                  Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: colors.accentMuted,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: colors.accent.withValues(alpha: 0.35),
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.hub_rounded,
+                          size: 20,
+                          color: colors.accent,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Sidemesh',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: colors.textSecondary,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+                  // Headline
                   Text(
-                    'Welcome to Sidemesh',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    'Your coding agents,\nin your pocket.',
+                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: colors.textPrimary,
+                      height: 1.15,
+                      letterSpacing: -0.8,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Your coding agents, in your pocket.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: colors.textSecondary,
+                  const SizedBox(height: 16),
+                  // Body
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 380),
+                    child: Text(
+                      'Run a small daemon on your machine, then control it remotely from this desktop app. Chat, approve changes, inspect files, and monitor sessions — all from one place.',
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: colors.textSecondary,
+                        height: 1.5,
+                      ),
                     ),
+                  ),
+                  const SizedBox(height: 32),
+                  // Shortcuts hint
+                  _ShortcutHint(colors: colors),
+                  const SizedBox(height: 32),
+                  // CTA
+                  Row(
+                    children: [
+                      FilledButton.icon(
+                        onPressed: () async {
+                          HapticFeedback.mediumImpact();
+                          await OnboardingStore.instance.markCompleted();
+                          onDismiss();
+                        },
+                        icon: const Icon(Icons.check_rounded, size: 18),
+                        label: const Text('Get started'),
+                      ),
+                      const SizedBox(width: 12),
+                      OutlinedButton(
+                        onPressed: () async {
+                          await OnboardingStore.instance.markCompleted();
+                          onDismiss();
+                        },
+                        child: const Text('Close'),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            MeshIconButton(
-              icon: Icons.close_rounded,
-              onTap: onDismiss,
-            ),
-          ],
-        ),
-        Divider(height: 32, color: colors.border),
-        // Value props
-        _PropRow(
-          icon: Icons.terminal_rounded,
-          title: 'One daemon, full control',
-          body:
-              'Run a small agent on your machine. This desktop app connects to it over your network.',
-          colors: colors,
-        ),
-        const SizedBox(height: 14),
-        _PropRow(
-          icon: Icons.chat_bubble_outline_rounded,
-          title: 'Chat, approve, inspect',
-          body:
-              'Start sessions, review code changes, approve actions, and browse files — all remotely.',
-          colors: colors,
-        ),
-        const SizedBox(height: 14),
-        _PropRow(
-          icon: Icons.keyboard_command_key_rounded,
-          title: 'Built for speed',
-          body:
-              'Keyboard shortcuts for everything: ⌘F search, ⌘R refresh, ⌘1/2/3 switch panes, ⌘/ help.',
-          colors: colors,
-        ),
-        Divider(height: 32, color: colors.border),
-        // Theme picker
-        Text(
-          'Pick your vibe',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: colors.textPrimary,
-          ),
-        ),
-        const SizedBox(height: 12),
-        ThemePicker(
-          controller: themeController,
-          height: 200,
-          cardWidth: 140,
-        ),
-        const SizedBox(height: 24),
-        // Actions
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            TextButton(
-              onPressed: () async {
-                await OnboardingStore.instance.markCompleted();
-                onDismiss();
-              },
-              child: const Text('Skip'),
-            ),
-            const SizedBox(width: 10),
-            FilledButton.icon(
-              onPressed: () async {
-                HapticFeedback.mediumImpact();
-                await OnboardingStore.instance.markCompleted();
-                onDismiss();
-              },
-              icon: const Icon(Icons.check_rounded),
-              label: const Text('Get started'),
+            const SizedBox(width: 48),
+            // Right column: theme picker
+            Expanded(
+              flex: 4,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Pick your vibe',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: colors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Choose a palette. You can change this anytime in Settings.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  ThemePicker(
+                    controller: themeController,
+                    height: 240,
+                    cardWidth: 120,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -228,61 +266,96 @@ class _Content extends StatelessWidget {
   }
 }
 
-class _PropRow extends StatelessWidget {
-  const _PropRow({
-    required this.icon,
-    required this.title,
-    required this.body,
-    required this.colors,
-  });
+class _ShortcutHint extends StatelessWidget {
+  const _ShortcutHint({required this.colors});
 
-  final IconData icon;
-  final String title;
-  final String body;
   final AppColors colors;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
       children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: colors.accent.withValues(alpha: 0.35),
-            ),
-          ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 18, color: colors.accent),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: colors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                body,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.4,
-                ),
-              ),
-            ],
+        _Kbd(text: '⌘F', colors: colors),
+        _Kbd(text: '⌘R', colors: colors),
+        _Kbd(text: '⌘1/2/3', colors: colors),
+        _Kbd(text: '⌘/', colors: colors),
+        const SizedBox(width: 4),
+        Text(
+          'search · refresh · panes · help',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: colors.textTertiary,
           ),
         ),
       ],
+    );
+  }
+}
+
+class _Kbd extends StatelessWidget {
+  const _Kbd({required this.text, required this.colors});
+
+  final String text;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: colors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 0,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Text(
+        text,
+        style: monoStyle(
+          color: colors.textSecondary,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _SubtleButton extends StatelessWidget {
+  const _SubtleButton({
+    required this.onTap,
+    required this.label,
+    required this.colors,
+  });
+
+  final VoidCallback onTap;
+  final String label;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: colors.textTertiary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
