@@ -2,6 +2,7 @@ import path from "node:path";
 
 import type {
   CommandActivity,
+  ContextCompactionActivity,
   FileChangeActivity,
   ImageGenerationActivity,
   SessionActivity,
@@ -173,6 +174,10 @@ export function buildActivityFromThreadItem(
     };
   }
 
+  if (item.type === "contextCompaction") {
+    return buildContextCompactionActivity(item, context);
+  }
+
   return null;
 }
 
@@ -254,6 +259,14 @@ export function mergeActivity(
       seq: existing.seq,
       revisedPrompt: incoming.revisedPrompt ?? existingImage.revisedPrompt,
       savedPath: incoming.savedPath ?? existingImage.savedPath,
+    };
+  }
+
+  if (incoming.type === "context_compaction") {
+    return {
+      ...incoming,
+      createdAt: existing.createdAt,
+      seq: existing.seq,
     };
   }
 
@@ -636,8 +649,27 @@ function isActivityThreadItem(item: ThreadItemRecord): boolean {
     item.type === "toolExecution" ||
     item.type === "fileChange" ||
     item.type === "webSearch" ||
-    item.type === "imageGeneration"
+    item.type === "imageGeneration" ||
+    item.type === "contextCompaction"
   );
+}
+
+function buildContextCompactionActivity(
+  item: ThreadItemRecord,
+  context: { turnId: string | null; createdAt: number; seq: number },
+): ContextCompactionActivity | null {
+  const id = asString(item.id);
+  if (!id) {
+    return null;
+  }
+  return {
+    id,
+    type: "context_compaction",
+    turnId: context.turnId,
+    createdAt: context.createdAt,
+    seq: context.seq,
+    status: normalizeStatus(item.status),
+  };
 }
 
 function buildWebSearchActivity(
