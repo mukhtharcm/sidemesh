@@ -26,6 +26,7 @@ describe("loadConfig", () => {
       configPath,
       env: {
         SIDEMESH_TOKEN: "test-token",
+        SIDEMESH_ENABLE_COPILOT: "1",
         SIDEMESH_PROVIDER: "copilot",
         SIDEMESH_PROVIDERS: "codex,copilot",
       },
@@ -39,7 +40,7 @@ describe("loadConfig", () => {
     );
   });
 
-  it("defaults to the first configured provider in the persisted config", async () => {
+  it("defaults to the first enabled provider in the persisted config", async () => {
     await writeFile(
       configPath,
       JSON.stringify({
@@ -54,7 +55,13 @@ describe("loadConfig", () => {
             workspaceRoot: null,
             capabilityProfile: "full",
           },
-          { kind: "copilot", bin: "copilot", stateDir: null, allowAll: false, configuredModel: null },
+          {
+            kind: "copilot",
+            bin: "copilot",
+            stateDir: null,
+            allowAll: false,
+            configuredModel: null,
+          },
         ],
       }),
     );
@@ -65,7 +72,7 @@ describe("loadConfig", () => {
     assert.equal(config.provider.kind, "fake");
     assert.deepEqual(
       config.providers.map((provider) => provider.kind),
-      ["fake", "copilot"],
+      ["fake"],
     );
     assert.equal(config.token, "file-token");
     assert.equal(config.tokenSource, "file");
@@ -229,6 +236,7 @@ describe("loadConfig", () => {
     const config = await loadConfig({
       configPath,
       env: {
+        SIDEMESH_ENABLE_COPILOT: "1",
         SIDEMESH_COPILOT_BIN: "/usr/local/bin/copilot",
         SIDEMESH_COPILOT_ALLOW_ALL: "1",
         SIDEMESH_COPILOT_MODEL: "auto",
@@ -243,6 +251,48 @@ describe("loadConfig", () => {
     assert.equal(config.provider.allowAll, true);
     assert.equal(config.provider.configuredModel, "auto");
     assert.equal(config.provider.stateDir, "/tmp/old-state");
+  });
+
+  it("ignores persisted Copilot config unless the experimental flag is enabled", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        defaultProviderKind: "copilot",
+        providers: [
+          {
+            kind: "copilot",
+            bin: "copilot",
+            stateDir: null,
+            allowAll: false,
+            configuredModel: null,
+          },
+        ],
+      }),
+    );
+
+    const config = await loadConfig({ configPath, env: {} });
+
+    assert.equal(config.defaultProviderKind, "codex");
+    assert.equal(config.provider.kind, "codex");
+    assert.deepEqual(
+      config.providers.map((provider) => provider.kind),
+      ["codex"],
+    );
+  });
+
+  it("rejects explicit Copilot selection unless the experimental flag is enabled", async () => {
+    await assert.rejects(
+      () =>
+        loadConfig({
+          configPath,
+          env: {
+            SIDEMESH_PROVIDER: "copilot",
+          },
+        }),
+      /Set SIDEMESH_ENABLE_COPILOT=1/,
+    );
   });
 
   it("persists a generated token when requested", async () => {
