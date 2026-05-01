@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../models.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/app_tokens.dart';
 import '../../widgets/mesh_widgets.dart';
 import 'inspector_controller.dart';
 
@@ -338,13 +339,13 @@ class _SearchFilterChip extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppShapes.pill,
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
             color: selected ? colors.accent : colors.surfaceMuted,
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: AppShapes.pill,
             border: Border.all(
               color: selected ? colors.accent : colors.border,
               width: 1,
@@ -354,7 +355,7 @@ class _SearchFilterChip extends StatelessWidget {
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: selected ? colors.accentOn : colors.textSecondary,
-              fontWeight: FontWeight.w700,
+              fontWeight: AppWeights.emphasis,
               letterSpacing: 0.3,
             ),
           ),
@@ -459,7 +460,7 @@ class _SearchResultRow extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.labelMedium?.copyWith(
                                 color: colors.textPrimary,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: AppWeights.emphasis,
                               ),
                             ),
                           ),
@@ -551,7 +552,7 @@ class _SnippetText extends StatelessWidget {
             text: match,
             style: baseStyle?.copyWith(
               color: colors.textPrimary,
-              fontWeight: FontWeight.w800,
+              fontWeight: AppWeights.title,
               backgroundColor: colors.accent.withValues(alpha: 0.25),
             ),
           ),
@@ -606,7 +607,7 @@ class _SearchResultExpanded extends StatelessWidget {
                   text: '$label ',
                   style: TextStyle(
                     color: colors.textTertiary,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.emphasis,
                   ),
                 ),
                 TextSpan(

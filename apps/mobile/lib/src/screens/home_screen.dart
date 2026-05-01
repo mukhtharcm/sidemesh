@@ -824,7 +824,7 @@ class _MeshNavBar extends StatelessWidget {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: AppShapes.input,
                     onTap: () => onTap(index),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 220),
@@ -834,7 +834,7 @@ class _MeshNavBar extends StatelessWidget {
                         color: selected
                             ? colors.accentMuted
                             : Colors.transparent,
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: AppShapes.input,
                         border: Border.all(
                           color: selected
                               ? colors.accent.withValues(alpha: 0.4)
@@ -857,7 +857,7 @@ class _MeshNavBar extends StatelessWidget {
                                   ? colors.accent
                                   : colors.textSecondary,
                               fontSize: 11,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: AppWeights.emphasis,
                             ).copyWith(letterSpacing: 0.3),
                           ),
                         ],
@@ -913,7 +913,7 @@ class _NavIconWithBadge extends StatelessWidget {
                 style: monoStyle(
                   color: Colors.white,
                   fontSize: 10,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: AppWeights.emphasis,
                 ).copyWith(height: 1.1),
               ),
             ),
@@ -1341,7 +1341,7 @@ class _RecentPaneState extends State<RecentPane> {
                       style: monoStyle(
                         color: colors.textSecondary,
                         fontSize: widget.dense ? 10 : 11,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.emphasis,
                       ),
                     ),
                   ),
@@ -1358,7 +1358,7 @@ class _RecentPaneState extends State<RecentPane> {
                       style: monoStyle(
                         color: colors.textTertiary,
                         fontSize: 10,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.emphasis,
                       ),
                     ),
                   ),
@@ -1484,7 +1484,7 @@ class _SessionRowCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.bodyMedium
                                   ?.copyWith(
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: AppWeights.body,
                                     height: 1.25,
                                     color: selected
                                         ? colors.accent
@@ -1588,7 +1588,7 @@ class _SessionRowCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: unread ? FontWeight.w800 : FontWeight.w700,
+                    fontWeight: unread ? AppWeights.title : AppWeights.emphasis,
                   ),
                 ),
               ),
@@ -1602,8 +1602,8 @@ class _SessionRowCard extends StatelessWidget {
                 tooltip: favorite ? 'Remove favorite' : 'Add favorite',
                 visualDensity: VisualDensity.compact,
                 iconSize: 20,
-                splashRadius: 18,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                splashRadius: 22,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 icon: Icon(
                   favorite ? Icons.star_rounded : Icons.star_outline_rounded,
                   color: favorite ? colors.warning : colors.textTertiary,
@@ -2234,7 +2234,7 @@ class _InboxSectionHeader extends StatelessWidget {
           height: 34,
           decoration: BoxDecoration(
             color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: AppShapes.input,
             border: Border.all(color: colors.accent.withValues(alpha: 0.25)),
           ),
           alignment: Alignment.center,
@@ -2249,7 +2249,7 @@ class _InboxSectionHeader extends StatelessWidget {
                 title,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   color: colors.textPrimary,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: AppWeights.title,
                 ),
               ),
               const SizedBox(height: 2),
@@ -2324,7 +2324,7 @@ class _PendingSendCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+                      fontWeight: AppWeights.emphasis,
                     ),
                   ),
                 ),
@@ -2432,7 +2432,7 @@ class _PendingSendCard extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
+                    fontWeight: AppWeights.title,
                     height: 1.25,
                   ),
                 ),
@@ -2552,9 +2552,9 @@ class _PendingSendActionChip extends StatelessWidget {
         : colors.surfaceMuted;
     return Material(
       color: bg,
-      borderRadius: BorderRadius.circular(999),
+      borderRadius: AppShapes.pill,
       child: InkWell(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppShapes.pill,
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2567,7 +2567,7 @@ class _PendingSendActionChip extends StatelessWidget {
                 label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: fg,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: AppWeights.emphasis,
                 ),
               ),
             ],
@@ -2775,7 +2775,7 @@ class _InboxCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.bodyMedium
                                   ?.copyWith(
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: AppWeights.body,
                                     height: 1.25,
                                   ),
                             ),
@@ -2827,7 +2827,7 @@ class _InboxCard extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.emphasis,
                     height: 1.25,
                   ),
                 ),
@@ -3239,7 +3239,7 @@ class _HostRowCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(
-                                  fontWeight: FontWeight.w600,
+                                  fontWeight: AppWeights.body,
                                   height: 1.25,
                                   color: host.enabled
                                       ? (selected ? colors.accent : null)
@@ -3348,7 +3348,7 @@ class _HostRowCard extends StatelessWidget {
                     Text(
                       host.label,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.emphasis,
                         color: host.enabled ? null : colors.textTertiary,
                       ),
                     ),
@@ -3375,7 +3375,7 @@ class _HostRowCard extends StatelessWidget {
                             style: monoStyle(
                               color: _statusColor(colors, status),
                               fontSize: 10.5,
-                              fontWeight: FontWeight.w600,
+                              fontWeight: AppWeights.body,
                             ),
                           );
                         },
@@ -3621,7 +3621,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                           height: 38,
                           decoration: BoxDecoration(
                             color: colors.accentMuted,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: AppShapes.input,
                             border: Border.all(
                               color: colors.accent.withValues(alpha: 0.24),
                             ),
@@ -3644,7 +3644,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                                 isEditing ? 'Edit host' : 'Add host',
                                 style: Theme.of(context).textTheme.titleLarge
                                     ?.copyWith(
-                                      fontWeight: FontWeight.w800,
+                                      fontWeight: AppWeights.title,
                                       letterSpacing: -0.4,
                                     ),
                               ),
@@ -3656,7 +3656,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                                 style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(
                                       color: colors.textSecondary,
-                                      fontWeight: FontWeight.w600,
+                                      fontWeight: AppWeights.body,
                                     ),
                               ),
                             ],
@@ -3795,13 +3795,13 @@ class _HostEditorActionCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: AppShapes.card,
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
           decoration: BoxDecoration(
             color: colors.surfaceMuted,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppShapes.input,
             border: Border.all(color: colors.border),
           ),
           child: Row(
@@ -3828,7 +3828,7 @@ class _HostEditorActionCard extends StatelessWidget {
                       title,
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: colors.textPrimary,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: AppWeights.title,
                       ),
                     ),
                     const SizedBox(height: 1),
@@ -3848,7 +3848,7 @@ class _HostEditorActionCard extends StatelessWidget {
                 actionLabel,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: colors.info,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: AppWeights.title,
                 ),
               ),
             ],
@@ -3902,7 +3902,7 @@ class _HostEditorFieldFrame extends StatelessWidget {
                   label,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: colors.textSecondary,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: AppWeights.title,
                     letterSpacing: 0.4,
                   ),
                 ),
@@ -3929,13 +3929,13 @@ class _HostEnabledCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         onTap: () => onChanged(!enabled),
         child: Container(
           padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
           decoration: BoxDecoration(
             color: colors.surfaceMuted,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppShapes.input,
             border: Border.all(color: colors.border),
           ),
           child: Row(
@@ -3954,7 +3954,7 @@ class _HostEnabledCard extends StatelessWidget {
                       enabled ? 'Host traffic enabled' : 'Host traffic paused',
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: colors.textPrimary,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: AppWeights.title,
                       ),
                     ),
                     const SizedBox(height: 1),
@@ -3997,7 +3997,7 @@ class _HostEditorToggle extends StatelessWidget {
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: value ? colors.accent : colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppShapes.pill,
         border: Border.all(color: value ? colors.accent : colors.borderStrong),
       ),
       child: AnimatedAlign(
@@ -4035,7 +4035,7 @@ class _HostEditorError extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: colors.dangerMuted,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.danger.withValues(alpha: 0.35)),
       ),
       child: Row(
@@ -4176,7 +4176,7 @@ class _RecentErrorBanner extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
       decoration: BoxDecoration(
         color: colors.warningMuted,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.warning.withValues(alpha: 0.35)),
       ),
       child: Row(
@@ -4189,7 +4189,7 @@ class _RecentErrorBanner extends StatelessWidget {
               style: TextStyle(
                 color: colors.warning,
                 fontSize: 12.5,
-                fontWeight: FontWeight.w600,
+                fontWeight: AppWeights.body,
               ),
             ),
           ),
@@ -4200,7 +4200,7 @@ class _RecentErrorBanner extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 10),
               minimumSize: const Size(0, 32),
               visualDensity: VisualDensity.compact,
-              textStyle: const TextStyle(fontWeight: FontWeight.w700),
+              textStyle: const TextStyle(fontWeight: AppWeights.emphasis),
             ),
             child: const Text('Retry'),
           ),
@@ -4240,7 +4240,7 @@ class _SubAgentBadge extends StatelessWidget {
       ),
       child: Text(
         'Sub-agent',
-        style: monoStyle(color: colors.info, fontSize: 9, fontWeight: FontWeight.w700),
+        style: monoStyle(color: colors.info, fontSize: 9, fontWeight: AppWeights.emphasis),
       ),
     );
   }

@@ -250,31 +250,39 @@ class MeshIconButton extends StatelessWidget {
     required this.onTap,
     this.tooltip,
     this.color,
+    this.semanticLabel,
   });
 
   final IconData icon;
   final VoidCallback onTap;
   final String? tooltip;
   final Color? color;
+  /// Accessibility label surfaced to screen readers. Defaults to [tooltip].
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final button = Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
+    final label = semanticLabel ?? tooltip;
+    final button = Semantics(
+      label: label,
+      button: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.border),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 18, color: color ?? colors.textSecondary),
           ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 18, color: color ?? colors.textSecondary),
         ),
       ),
     );

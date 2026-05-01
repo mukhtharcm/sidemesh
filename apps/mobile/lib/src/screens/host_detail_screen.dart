@@ -10,6 +10,7 @@ import '../session_read_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
 import '../widgets/mesh_widgets.dart';
 import 'create_session_sheet.dart';
 
@@ -338,7 +339,7 @@ class _EmbeddedHostHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.emphasis,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -411,7 +412,7 @@ class _NodeCard extends StatelessWidget {
                     Text(
                       node.label.isNotEmpty ? node.label : host.label,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.emphasis,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -533,7 +534,7 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
             'Provider contract',
             style: Theme.of(
               context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+            ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.title),
           ),
           subtitle: Text(
             '$selectedDisplayName - $selectedVersion',
@@ -698,7 +699,7 @@ class _ProviderDefinitionList extends StatelessWidget {
           'Daemon-supported providers',
           style: Theme.of(context).textTheme.labelLarge?.copyWith(
             color: colors.textSecondary,
-            fontWeight: FontWeight.w800,
+            fontWeight: AppWeights.title,
           ),
         ),
         const SizedBox(height: 4),
@@ -758,7 +759,7 @@ class _ProviderSelectPill extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppShapes.pill,
         child: AnimatedScale(
           duration: const Duration(milliseconds: 140),
           scale: selected ? 1.0 : 0.985,
@@ -790,7 +791,7 @@ class _CapabilityMatrix extends StatelessWidget {
           title,
           style: Theme.of(context).textTheme.labelLarge?.copyWith(
             color: colors.textSecondary,
-            fontWeight: FontWeight.w800,
+            fontWeight: AppWeights.title,
           ),
         ),
         const SizedBox(height: 8),
@@ -830,7 +831,7 @@ class _CapabilityGroupRow extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
       child: Column(
@@ -845,7 +846,7 @@ class _CapabilityGroupRow extends StatelessWidget {
                   group.title,
                   style: Theme.of(
                     context,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+                  ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
                 ),
               ),
               MeshPill(
@@ -905,7 +906,7 @@ class _SectionHeader extends StatelessWidget {
             title,
             style: Theme.of(
               context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+            ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.title),
           ),
           const Spacer(),
           Text(
@@ -1072,7 +1073,7 @@ class _WorkspaceCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(
                     context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                  ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.emphasis),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -1135,7 +1136,7 @@ class _SessionRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: unread ? FontWeight.w800 : FontWeight.w700,
+                        fontWeight: unread ? AppWeights.title : AppWeights.emphasis,
                       ),
                     ),
                   ),
