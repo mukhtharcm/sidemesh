@@ -2021,6 +2021,7 @@ function buildCopilotElicitationAction(
     canApprove: false,
     canApproveForSession: false,
     canDecline: request.mode !== "url" || Boolean(request.url),
+    recoverable: request.mode !== "url",
     sessionTitle: session.thread.name ?? session.thread.preview,
     cwd: session.thread.cwd,
     elicitation: {
