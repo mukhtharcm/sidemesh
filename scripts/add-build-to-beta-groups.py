@@ -46,7 +46,7 @@ def main():
     timeout = 600
     build_id = None
     while time.time() - start < timeout:
-        builds = api("GET", f"/builds?filter[app]={app_id}\u0026filter[version]={BUILD_VERSION}\u0026filter[buildNumber]={BUILD_NUMBER}\u0026limit=1")["data"]
+        builds = api("GET", f"/builds?filter[app]={app_id}\u0026filter[preReleaseVersion.version]={BUILD_VERSION}\u0026filter[buildNumber]={BUILD_NUMBER}\u0026limit=1")["data"]
         if builds:
             state = builds[0].get("attributes", {}).get("processingState", "")
             print(f"Build processing state: {state}")
