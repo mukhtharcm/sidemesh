@@ -1086,6 +1086,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       if (session.path && session.path.endsWith(".jsonl")) {
         try {
           const entry = await replayIndex.load(sessionId, session.path);
+          ensureSeqCursor(sessionId, entry.nextSeq);
           const delta = replayIndex.getDelta(entry, since);
           newMessages = delta.messages;
           newActivities = mergeSessionActivities(

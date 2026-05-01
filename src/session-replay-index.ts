@@ -256,6 +256,7 @@ export class SessionReplayIndex {
     const file = createReadStream(rolloutPath, {
       encoding: "utf8",
       start: startOffset,
+      end: endOffset - 1,
     });
     const lines = readline.createInterface({
       input: file,
