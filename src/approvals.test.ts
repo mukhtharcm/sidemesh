@@ -131,6 +131,8 @@ describe("provider-neutral approvals", () => {
       canApprove: true,
       canApproveForSession: true,
       canDecline: true,
+      state: "recovered",
+      recoverable: true,
       providerSecretFutureField: "must not leak",
       providerRequestId: 42,
       providerRequestKind: "provider/request",
@@ -154,6 +156,8 @@ describe("provider-neutral approvals", () => {
       canApprove: true,
       canApproveForSession: true,
       canDecline: true,
+      state: "recovered",
+      recoverable: true,
       approval: {
         category: "command",
         operation: "test.command",

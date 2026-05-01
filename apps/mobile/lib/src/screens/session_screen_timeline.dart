@@ -1599,6 +1599,9 @@ class _ActivityCardState extends State<_ActivityCard> {
   }
 
   List<Widget> _buildToolBody(BuildContext context, SessionActivity activity) {
+    if (activity.toolCategory == 'interaction') {
+      return _buildInteractionToolBody(context, activity);
+    }
     final widgets = <Widget>[];
     widgets.addAll(_buildToolSemanticBlocks(context, activity));
     if (widgets.isNotEmpty) {
@@ -1630,6 +1633,44 @@ class _ActivityCardState extends State<_ActivityCard> {
     }
 
     return widgets;
+  }
+
+  List<Widget> _buildInteractionToolBody(
+    BuildContext context,
+    SessionActivity activity,
+  ) {
+    final widgets = <Widget>[];
+    final question = _interactionQuestion(activity);
+    final intent = _interactionIntent(activity);
+    final choices = _interactionChoices(activity);
+    final answer = _interactionAnswer(activity);
+
+    if (question != null) {
+      widgets.add(_activityInfoBlock(context, 'Question', question));
+    }
+    if (intent != null) {
+      widgets.add(_activityInfoBlock(context, 'Intent', intent));
+    }
+    if (choices.isNotEmpty) {
+      widgets.add(_activityInfoBlock(context, 'Options', choices.join('\n')));
+    }
+    if (answer != null) {
+      widgets.add(_activityInfoBlock(context, 'Answer', answer));
+    }
+    final output = (activity.output ?? '').trim();
+    if (output.isNotEmpty && answer == null) {
+      widgets.add(_activityInfoBlock(context, 'Result', output));
+    }
+    if (widgets.isEmpty) {
+      widgets.add(_waitingText(context, 'Waiting for interaction details.'));
+      return widgets;
+    }
+    return [
+      for (var i = 0; i < widgets.length; i++) ...[
+        if (i > 0) const SizedBox(height: 12),
+        widgets[i],
+      ],
+    ];
   }
 
   Widget _activityCodeBlock(
@@ -1847,6 +1888,16 @@ class _ActivityCardState extends State<_ActivityCard> {
     if (activity.toolAction == 'mode_change' && mode.isNotEmpty) {
       return 'Switched to $mode mode';
     }
+    if (activity.toolCategory == 'interaction' &&
+        activity.toolAction == 'ask') {
+      final question = _interactionQuestion(activity);
+      return question == null ? 'Model asked a question' : 'Model asked: $question';
+    }
+    if (activity.toolCategory == 'interaction' &&
+        activity.toolAction == 'report') {
+      final intent = _interactionIntent(activity);
+      return intent == null ? 'Model reported intent' : 'Model reported intent: $intent';
+    }
     if (activity.toolCategory == 'filesystem' &&
         activity.toolAction == 'read' &&
         target.isNotEmpty) {
@@ -1899,6 +1950,15 @@ class _ActivityCardState extends State<_ActivityCard> {
     if (activity.toolAction == 'mode_change') {
       return 'Session runtime control';
     }
+    if (activity.toolCategory == 'interaction' &&
+        activity.toolAction == 'ask') {
+      final choices = _interactionChoices(activity);
+      return choices.isEmpty ? 'Waiting for your answer' : choices.join(' / ');
+    }
+    if (activity.toolCategory == 'interaction' &&
+        activity.toolAction == 'report') {
+      return 'Provider-neutral interaction signal';
+    }
     if (activity.toolCategory == 'filesystem' &&
         activity.toolAction == 'search' &&
         target.isNotEmpty &&
@@ -1922,6 +1982,11 @@ class _ActivityCardState extends State<_ActivityCard> {
       return 'MODE';
     }
     return switch (activity.toolCategory) {
+      'interaction' => switch (activity.toolAction) {
+        'ask' => 'QUESTION',
+        'report' => 'INTENT',
+        _ => 'INTERACTION',
+      },
       'filesystem' => switch (activity.toolAction) {
         'read' => 'FILE READ',
         'write' => 'FILE EDIT',
@@ -1947,6 +2012,11 @@ class _ActivityCardState extends State<_ActivityCard> {
       return Icons.tune_rounded;
     }
     return switch (activity.toolCategory) {
+      'interaction' => switch (activity.toolAction) {
+        'ask' => Icons.chat_bubble_outline_rounded,
+        'report' => Icons.flag_rounded,
+        _ => Icons.forum_rounded,
+      },
       'filesystem' => switch (activity.toolAction) {
         'write' => Icons.edit_note_rounded,
         'search' => Icons.manage_search_rounded,
@@ -1970,6 +2040,11 @@ class _ActivityCardState extends State<_ActivityCard> {
       return 'mode change';
     }
     return switch (activity.toolCategory) {
+      'interaction' => switch (activity.toolAction) {
+        'ask' => 'question',
+        'report' => 'intent',
+        _ => 'interaction',
+      },
       'filesystem' => switch (activity.toolAction) {
         'read' => 'file read',
         'write' => 'file edit',
@@ -2048,6 +2123,49 @@ class _ActivityCardState extends State<_ActivityCard> {
     return _relativeSessionPath(raw, sessionCwd);
   }
 
+  String? _interactionQuestion(SessionActivity activity) =>
+      _firstStringFromPayload(activity.toolArgs, const [
+        'question',
+        'prompt',
+        'message',
+        'text',
+      ]);
+
+  String? _interactionIntent(SessionActivity activity) =>
+      _firstStringFromPayload(activity.toolArgs, const [
+        'intent',
+        'intention',
+        'message',
+      ]);
+
+  String? _interactionAnswer(SessionActivity activity) =>
+      _firstStringFromPayload(activity.toolResult, const [
+        'answer',
+        'content',
+        'message',
+      ]);
+
+  List<String> _interactionChoices(SessionActivity activity) {
+    final raw = _firstPayloadValue(activity.toolArgs, const [
+      'choices',
+      'options',
+    ]);
+    if (raw is List) {
+      return raw
+          .map((item) {
+            if (item is String) return item.trim();
+            if (item is Map) {
+              final value = item['label'] ?? item['value'] ?? item['text'];
+              return value is String ? value.trim() : '';
+            }
+            return '';
+          })
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false);
+    }
+    return const [];
+  }
+
   String _toolCommandText(SessionActivity activity) {
     final args = activity.toolArgs;
     if (args is Map<String, dynamic>) {
@@ -2069,6 +2187,29 @@ class _ActivityCardState extends State<_ActivityCard> {
       }
     }
     return '';
+  }
+
+  String? _firstStringFromPayload(Object? payload, List<String> keys) {
+    final value = _firstPayloadValue(payload, keys);
+    if (value == null) return null;
+    if (value is String && value.trim().isNotEmpty) return value.trim();
+    return null;
+  }
+
+  Object? _firstPayloadValue(Object? payload, List<String> keys) {
+    if (payload is Map<String, dynamic>) {
+      for (final key in keys) {
+        final value = payload[key];
+        if (value != null) return value;
+      }
+    }
+    if (payload is Map) {
+      for (final key in keys) {
+        final value = payload[key];
+        if (value != null) return value;
+      }
+    }
+    return null;
   }
 
   String _formatActivityValue(Object? value) {

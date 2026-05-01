@@ -170,6 +170,10 @@ export function toPublicPendingAction(action: PendingAction): PendingAction {
       ? {}
       : { sessionTitle: action.sessionTitle }),
     ...(action.cwd === undefined ? {} : { cwd: action.cwd }),
+    ...(action.state === undefined ? {} : { state: action.state }),
+    ...(action.recoverable === undefined
+      ? {}
+      : { recoverable: action.recoverable }),
     ...(action.approval === undefined ? {} : { approval: action.approval }),
     ...(action.userInput === undefined ? {} : { userInput: action.userInput }),
     ...(action.elicitation === undefined
