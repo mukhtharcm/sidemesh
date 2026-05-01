@@ -338,7 +338,7 @@ async function walkDirectories(root: string, depth: number): Promise<string[]> {
   return files;
 }
 
-function parseMessage(parsed: any, seq: number): SessionMessage | null {
+export function parseMessage(parsed: any, seq: number): SessionMessage | null {
   const createdAt = parseTimestamp(parsed.timestamp);
   if (parsed.type === "event_msg") {
     const payloadType = parsed.payload?.type;
@@ -416,7 +416,7 @@ function parseMessageAttachments(payload: any): SessionMessageAttachment[] {
   return attachments;
 }
 
-function parseActivity(parsed: any, seq: number): SessionActivity | null {
+export function parseActivity(parsed: any, seq: number): SessionActivity | null {
   if (parsed.type !== "event_msg") {
     return null;
   }
@@ -451,7 +451,7 @@ function parseActivity(parsed: any, seq: number): SessionActivity | null {
   }
 }
 
-function parseRuntime(parsed: any): SessionRuntimeSummary | null {
+export function parseRuntime(parsed: any): SessionRuntimeSummary | null {
   if (!parsed) {
     return null;
   }
@@ -593,7 +593,7 @@ function parseRuntime(parsed: any): SessionRuntimeSummary | null {
   return runtime;
 }
 
-function mergeRuntime(
+export function mergeRuntime(
   previous: SessionRuntimeSummary | null,
   next: SessionRuntimeSummary,
 ): SessionRuntimeSummary {
@@ -635,7 +635,7 @@ function mergeTelemetry(
   };
 }
 
-function resolveCommittedTurnId(parsed: any): string | null {
+export function resolveCommittedTurnId(parsed: any): string | null {
   if (parsed?.type !== "event_msg") {
     return null;
   }
@@ -652,7 +652,7 @@ function resolveCommittedTurnId(parsed: any): string | null {
   return asOptionalString(payload.turn_id) || asOptionalString(payload.turnId) || null;
 }
 
-function resolveDiscardedTurnId(parsed: any): string | null {
+export function resolveDiscardedTurnId(parsed: any): string | null {
   if (parsed?.type !== "event_msg") {
     return null;
   }
@@ -685,7 +685,7 @@ function appendBounded<T>(entries: T[], next: T, limit: number | null): void {
   entries.push(next);
 }
 
-function parseJsonLine(line: string): any | null {
+export function parseJsonLine(line: string): any | null {
   try {
     return JSON.parse(line);
   } catch {
@@ -711,7 +711,7 @@ function formatCodexErrorMessage(raw: unknown): string | null {
   return message;
 }
 
-function parseTimestamp(raw: unknown): number {
+export function parseTimestamp(raw: unknown): number {
   if (typeof raw === "number") {
     return raw * 1000;
   }
