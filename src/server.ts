@@ -103,6 +103,8 @@ const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
 const RECENT_LIVE_LIMIT = 40;
 const RECENT_SESSIONS_CACHE_TTL_MS = 1_500;
 const RECENT_SESSION_RUNTIME_CONCURRENCY = 4;
+const SESSION_EVENT_DELTA_MAX_ITEMS = 220;
+const SESSION_EVENT_DELTA_MAX_BYTES = 256 * 1024;
 type SessionRuntimeListMode = "all" | "active" | "none";
 const HOST_CAPABILITIES: HostCapabilities = {
   workspace: {
@@ -269,6 +271,22 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       }
     }
     return providerEntryForKind(null);
+  }
+
+  async function getSessionCwd(sessionId: string): Promise<string | null> {
+    const sessionProvider = providerEntryForSessionId(sessionId);
+    if (
+      !sessionProvider ||
+      !hasProviderMethod(sessionProvider.provider, "readSessionThread")
+    ) {
+      return null;
+    }
+    const session = await readSession(
+      sessionProvider.provider,
+      sessionId,
+      false,
+    ).catch(() => null);
+    return session?.cwd || null;
   }
 
   function mergeRuntimeSummary(
@@ -690,6 +708,51 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     });
   });
 
+  app.get("/api/diagnostics", (_request, response) => {
+    let sessionLiveSockets = 0;
+    for (const sockets of socketsBySession.values()) {
+      sessionLiveSockets += sockets.size;
+    }
+    let liveActivityItems = 0;
+    for (const activities of liveActivities.values()) {
+      liveActivityItems += activities.size;
+    }
+
+    response.json({
+      label: config.label,
+      hostname: hostname(),
+      platform: platform(),
+      uptimeSeconds: Math.round(process.uptime()),
+      provider: config.defaultProviderKind,
+      memory: process.memoryUsage(),
+      resourceUsage: process.resourceUsage(),
+      caches: {
+        recentSessions: recentSessionsCache.size,
+        recentSessionBroadcastTimers: recentSessionBroadcastTimers.size,
+        runtime: runtimeCache.size,
+        logs: logCache.size,
+        replay: replayIndex.getStats(),
+        activeTurns: activeTurns.size,
+        pendingActions: pendingActions.size,
+        liveActivitySessions: liveActivities.size,
+        liveActivityItems,
+        sessionSeqCursors: sessionSeqCursor.size,
+        inputDedupe: sessionInputDedupe.size,
+      },
+      sockets: {
+        sessionRooms: socketsBySession.size,
+        sessionLiveSockets,
+        approvalLiveSockets: approvalSockets.size,
+        recentSessionsLiveSockets: recentSessionsSockets.size,
+      },
+      features: {
+        terminals: terminalRegistry.list().length,
+        portForwards: portForwardRegistry.list().length,
+        browserPreviews: browserPreviewRegistry.list().length,
+      },
+    });
+  });
+
   app.get("/api/debug/codex-rpc-audit", (_request, response) => {
     response.json(getCodexRpcAuditSnapshot());
   });
@@ -740,6 +803,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
 
   registerFsRoutes(app, {
     listSessions: () => listSessions(provider, runtimeCache, null, "none"),
+    getSessionCwd,
   });
 
   app.get("/api/terminals", (_request, response) => {
@@ -1142,6 +1206,27 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         }
         nextSeq = highestSeq;
         logRuntime = log.runtime;
+      }
+
+      const eventDeltaSize = measureSessionEventDelta(
+        newMessages,
+        newActivities,
+      );
+      if (
+        eventDeltaSize.items > SESSION_EVENT_DELTA_MAX_ITEMS ||
+        eventDeltaSize.bytes > SESSION_EVENT_DELTA_MAX_BYTES
+      ) {
+        response.status(410).json({
+          error: "stale_cursor",
+          reason: "delta_too_large",
+          since,
+          nextSeq,
+          maxItems: SESSION_EVENT_DELTA_MAX_ITEMS,
+          maxBytes: SESSION_EVENT_DELTA_MAX_BYTES,
+          actualItems: eventDeltaSize.items,
+          actualBytes: eventDeltaSize.bytes,
+        });
+        return;
       }
 
       response.json({
@@ -1971,6 +2056,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     }
 
     if (pathOnly === "/api/fs/live") {
+      const params = new URLSearchParams(queryString || "");
       wsServer.handleUpgrade(request, socket, head, (ws) => {
         try {
           ws.send(JSON.stringify({ type: "hello" }));
@@ -1979,6 +2065,8 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         }
         attachFsLiveSocket(ws, fsWatchRegistry, {
           listSessions: () => listSessions(provider, runtimeCache, null, "none"),
+          getSessionCwd,
+          sessionId: params.get("sessionId"),
         });
       });
       return;
@@ -3152,6 +3240,16 @@ function buildSubmittedUserMessageAttachments(
     }
   }
   return attachments;
+}
+
+function measureSessionEventDelta(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+): { items: number; bytes: number } {
+  return {
+    items: messages.length + activities.length,
+    bytes: Buffer.byteLength(JSON.stringify({ messages, activities }), "utf8"),
+  };
 }
 
 function parseCreateSessionOverrides(value: unknown): AgentSessionOverrides {

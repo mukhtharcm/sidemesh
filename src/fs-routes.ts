@@ -32,14 +32,20 @@ const WORKSPACE_ROOTS_TTL_MS = 5_000;
 
 interface FsRoutesOptions {
   listSessions: () => Promise<SessionSummary[]>;
+  getSessionCwd?: (sessionId: string) => Promise<string | null>;
 }
 
 export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
-  const resolveRoots = createWorkspaceRootsResolver(opts.listSessions);
+  const fallbackResolveRoots = createWorkspaceRootsResolver(opts.listSessions);
 
   app.get(
     "/api/fs/list",
     asyncRoute(async (request, response) => {
+      const resolveRoots = createRequestRootsResolver(
+        request,
+        opts,
+        fallbackResolveRoots,
+      );
       const target = await resolveIncomingPath(
         request.query.path,
         resolveRoots,
@@ -62,6 +68,11 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.get(
     "/api/fs/metadata",
     asyncRoute(async (request, response) => {
+      const resolveRoots = createRequestRootsResolver(
+        request,
+        opts,
+        fallbackResolveRoots,
+      );
       const target = await resolveIncomingPath(
         request.query.path,
         resolveRoots,
@@ -73,6 +84,11 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.get(
     "/api/fs/read",
     asyncRoute(async (request, response) => {
+      const resolveRoots = createRequestRootsResolver(
+        request,
+        opts,
+        fallbackResolveRoots,
+      );
       const target = await resolveIncomingPath(
         request.query.path,
         resolveRoots,
@@ -117,6 +133,11 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.get(
     "/api/fs/blob",
     asyncRoute(async (request, response) => {
+      const resolveRoots = createRequestRootsResolver(
+        request,
+        opts,
+        fallbackResolveRoots,
+      );
       const target = await resolveIncomingBlobPath(
         request.query.path,
         resolveRoots,
@@ -136,6 +157,11 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/write",
     asyncRoute(async (request, response) => {
+      const resolveRoots = createRequestRootsResolver(
+        request,
+        opts,
+        fallbackResolveRoots,
+      );
       const target = await resolveIncomingPath(
         request.body?.path,
         resolveRoots,
@@ -161,6 +187,11 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/createDir",
     asyncRoute(async (request, response) => {
+      const resolveRoots = createRequestRootsResolver(
+        request,
+        opts,
+        fallbackResolveRoots,
+      );
       const target = await resolveIncomingPath(
         request.body?.path,
         resolveRoots,
@@ -177,6 +208,11 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/remove",
     asyncRoute(async (request, response) => {
+      const resolveRoots = createRequestRootsResolver(
+        request,
+        opts,
+        fallbackResolveRoots,
+      );
       const target = await resolveIncomingPath(
         request.body?.path,
         resolveRoots,
@@ -191,6 +227,11 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
   app.post(
     "/api/fs/copy",
     asyncRoute(async (request, response) => {
+      const resolveRoots = createRequestRootsResolver(
+        request,
+        opts,
+        fallbackResolveRoots,
+      );
       const source = await resolveIncomingPath(
         request.body?.sourcePath,
         resolveRoots,
@@ -219,7 +260,12 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
 
   app.get(
     "/api/fs/roots",
-    asyncRoute(async (_request, response) => {
+    asyncRoute(async (request, response) => {
+      const resolveRoots = createRequestRootsResolver(
+        request,
+        opts,
+        fallbackResolveRoots,
+      );
       response.json({ roots: await resolveRoots() });
     }),
   );
@@ -390,9 +436,11 @@ export function attachFsLiveSocket(
   registry: FsWatchRegistry,
   opts: {
     listSessions: () => Promise<SessionSummary[]>;
+    getSessionCwd?: (sessionId: string) => Promise<string | null>;
+    sessionId?: string | null;
   },
 ): void {
-  const resolveRoots = createWorkspaceRootsResolver(opts.listSessions);
+  const resolveRoots = createSocketRootsResolver(opts);
   ws.on("message", async (raw) => {
     let message: any;
     try {
@@ -448,6 +496,7 @@ export function attachWatchUpgrade(
   registry: FsWatchRegistry,
   opts: {
     listSessions: () => Promise<SessionSummary[]>;
+    getSessionCwd?: (sessionId: string) => Promise<string | null>;
   },
 ) {
   return (request: any, socket: any, head: Buffer, pathOnly: string) => {
@@ -502,6 +551,58 @@ function createWorkspaceRootsResolver(
     expiresAt = now + WORKSPACE_ROOTS_TTL_MS;
     return promise;
   };
+}
+
+function createRequestRootsResolver(
+  request: Request,
+  opts: FsRoutesOptions,
+  fallbackResolveRoots: () => Promise<string[]>,
+): () => Promise<string[]> {
+  return createSessionScopedRootsResolver(
+    sessionIdFromRequest(request),
+    opts.getSessionCwd,
+    fallbackResolveRoots,
+  );
+}
+
+function createSocketRootsResolver(opts: {
+  listSessions: () => Promise<SessionSummary[]>;
+  getSessionCwd?: (sessionId: string) => Promise<string | null>;
+  sessionId?: string | null;
+}): () => Promise<string[]> {
+  return createSessionScopedRootsResolver(
+    opts.sessionId ?? null,
+    opts.getSessionCwd,
+    createWorkspaceRootsResolver(opts.listSessions),
+  );
+}
+
+function createSessionScopedRootsResolver(
+  sessionId: string | null,
+  getSessionCwd: ((sessionId: string) => Promise<string | null>) | undefined,
+  fallbackResolveRoots: () => Promise<string[]>,
+): () => Promise<string[]> {
+  const normalizedSessionId = sessionId?.trim();
+  if (!normalizedSessionId || !getSessionCwd) {
+    return fallbackResolveRoots;
+  }
+
+  let promise: Promise<string[]> | null = null;
+  return async () => {
+    promise ??= getSessionCwd(normalizedSessionId)
+      .then((cwd) => (cwd ? [cwd] : fallbackResolveRoots()))
+      .catch(() => fallbackResolveRoots());
+    return promise;
+  };
+}
+
+function sessionIdFromRequest(request: Request): string | null {
+  const query = request.query as Record<string, unknown>;
+  const body =
+    request.body && typeof request.body === "object"
+      ? (request.body as Record<string, unknown>)
+      : {};
+  return asString(query.sessionId) ?? asString(body.sessionId);
 }
 
 function isBinary(bytes: Buffer): boolean {

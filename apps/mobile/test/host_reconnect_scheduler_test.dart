@@ -15,7 +15,8 @@ void main() {
   });
 
   group('HostReconnectScheduler', () {
-    test('fires reconnect immediately for foreground session on first disconnect', () {
+    test('only reconnects the slots that are actually disconnected', () async {
+      HostReconnectScheduler.setRandomOverride(_FixedRandom(0.5));
       final fired = <String>[];
       HostReconnectScheduler.instance.registerSlot(
         'host-1',
@@ -23,19 +24,20 @@ void main() {
         ReconnectPriority.foregroundSession,
         () => fired.add('session-live'),
       );
+      HostReconnectScheduler.instance.registerSlot(
+        'host-1',
+        'recent-live',
+        ReconnectPriority.backgroundSocket,
+        () => fired.add('recent-live'),
+      );
 
-      HostReconnectScheduler.instance.markDisconnected('host-1');
+      HostReconnectScheduler.instance.markDisconnected(
+        'host-1',
+        'session-live',
+      );
 
-      // With jitter on a 0ms base delay, it should still fire within a reasonable time.
-      // For determinism in this test we override random to return 0.5 (no jitter).
-      HostReconnectScheduler.setRandomOverride(_FixedRandom(0.5));
-      HostReconnectScheduler.instance.markConnected('host-1');
-      HostReconnectScheduler.instance.markDisconnected('host-1');
-
-      // Because the delay is 0ms and jitter is ×1.0, the timer fires synchronously
-      // in fake-async test environments after pumping.
-      // Instead use a simpler approach — test with background socket which has a
-      // non-zero base delay and verify the timer exists.
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      expect(fired, ['session-live']);
     });
 
     test('schedules a timer when marked disconnected', () {
@@ -49,7 +51,11 @@ void main() {
       expect(
         HostReconnectScheduler.instance.retryStateFor('host-1'),
         emitsInOrder([
-          isA<HostRetryState>().having((s) => s.isConnected, 'connected', false),
+          isA<HostRetryState>().having(
+            (s) => s.isConnected,
+            'connected',
+            false,
+          ),
         ]),
       );
 
@@ -187,6 +193,42 @@ void main() {
       await Future<void>.delayed(const Duration(seconds: 3));
       expect(fired, isEmpty);
     });
+
+    test(
+      'markConnected for one slot does not clear another slot retry',
+      () async {
+        HostReconnectScheduler.setRandomOverride(_FixedRandom(0.5));
+        final fired = <String>[];
+
+        HostReconnectScheduler.instance.registerSlot(
+          'host-1',
+          'session-live',
+          ReconnectPriority.backgroundSocket,
+          () => fired.add('session-live'),
+        );
+        HostReconnectScheduler.instance.registerSlot(
+          'host-1',
+          'recent-live',
+          ReconnectPriority.backgroundSocket,
+          () => fired.add('recent-live'),
+        );
+
+        HostReconnectScheduler.instance.markDisconnected(
+          'host-1',
+          'session-live',
+        );
+        HostReconnectScheduler.instance.markDisconnected(
+          'host-1',
+          'recent-live',
+        );
+
+        await Future<void>.delayed(const Duration(seconds: 1));
+        HostReconnectScheduler.instance.markConnected('host-1', 'session-live');
+
+        await Future<void>.delayed(const Duration(seconds: 2));
+        expect(fired, ['recent-live']);
+      },
+    );
   });
 }
 

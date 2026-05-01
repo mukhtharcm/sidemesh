@@ -21,6 +21,7 @@ class FileBrowserTree extends StatefulWidget {
     required this.api,
     required this.root,
     this.agentProvider,
+    this.sessionId,
     this.onOpenFile,
     this.selectedPath,
   });
@@ -29,11 +30,12 @@ class FileBrowserTree extends StatefulWidget {
   final ApiClient api;
   final String root;
   final String? agentProvider;
+  final String? sessionId;
 
   /// Called when the user taps a file. When null, the tree defaults to
   /// pushing a [FileViewerScreen] route.
   final void Function(String path, Stream<FsChangeEvent>? liveStream)?
-      onOpenFile;
+  onOpenFile;
 
   /// Highlights the given path as selected (for split-pane layouts).
   final String? selectedPath;
@@ -54,6 +56,7 @@ class _FileBrowserTreeState extends State<FileBrowserTree> {
       widget.host,
       widget.api,
       agentProvider: widget.agentProvider,
+      sessionId: widget.sessionId,
     );
     _sub = _live!.stream.listen((event) {
       if (!mounted) return;
@@ -91,6 +94,7 @@ class _FileBrowserTreeState extends State<FileBrowserTree> {
           api: widget.api,
           path: path,
           agentProvider: widget.agentProvider,
+          sessionId: widget.sessionId,
           liveStream: _live?.stream,
         ),
       ),
@@ -107,6 +111,7 @@ class _FileBrowserTreeState extends State<FileBrowserTree> {
           api: widget.api,
           path: widget.root,
           agentProvider: widget.agentProvider,
+          sessionId: widget.sessionId,
           depth: 0,
           initiallyExpanded: true,
           changedPaths: _changed,
@@ -128,6 +133,7 @@ class FileBrowserScreen extends StatelessWidget {
     required this.api,
     required this.root,
     this.agentProvider,
+    this.sessionId,
     this.topPadding,
   });
 
@@ -135,6 +141,7 @@ class FileBrowserScreen extends StatelessWidget {
   final ApiClient api;
   final String root;
   final String? agentProvider;
+  final String? sessionId;
   final double? topPadding;
 
   @override
@@ -156,9 +163,9 @@ class FileBrowserScreen extends StatelessWidget {
               baseName(root),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 2),
             Text(
@@ -175,6 +182,7 @@ class FileBrowserScreen extends StatelessWidget {
         api: api,
         root: root,
         agentProvider: agentProvider,
+        sessionId: sessionId,
       ),
     );
     if (topPadding == null) return scaffold;
@@ -191,6 +199,7 @@ class _DirectoryNode extends StatefulWidget {
     required this.api,
     required this.path,
     required this.agentProvider,
+    required this.sessionId,
     required this.depth,
     required this.onOpenFile,
     required this.changedPaths,
@@ -203,6 +212,7 @@ class _DirectoryNode extends StatefulWidget {
   final ApiClient api;
   final String path;
   final String? agentProvider;
+  final String? sessionId;
   final int depth;
   final bool initiallyExpanded;
   final Set<String> changedPaths;
@@ -236,6 +246,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
         widget.host,
         widget.path,
         agentProvider: widget.agentProvider,
+        sessionId: widget.sessionId,
       );
       if (!mounted) return;
       setState(() {
@@ -260,9 +271,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
       children: [
         _Row(
           indent: indent,
-          icon: _expanded
-              ? Icons.folder_open_rounded
-              : Icons.folder_rounded,
+          icon: _expanded ? Icons.folder_open_rounded : Icons.folder_rounded,
           iconColor: colors.accent,
           title: _baseName(widget.path),
           modified: widget.changedPaths.any((p) => p.startsWith(widget.path)),
@@ -289,10 +298,9 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
             padding: EdgeInsets.fromLTRB(indent + 22, 4, 8, 8),
             child: Text(
               friendlyError(_error!),
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: colors.danger),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.danger),
             ),
           ),
         if (_expanded && _listing != null)
@@ -303,6 +311,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
                 api: widget.api,
                 path: entry.path,
                 agentProvider: widget.agentProvider,
+                sessionId: widget.sessionId,
                 depth: widget.depth + 1,
                 changedPaths: widget.changedPaths,
                 selectedPath: widget.selectedPath,
@@ -370,9 +379,8 @@ class _Row extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight:
-                            selected ? FontWeight.w700 : FontWeight.w500,
-                      ),
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
                 ),
               ),
               if (modified) ...[
@@ -386,10 +394,7 @@ class _Row extends StatelessWidget {
                   ),
                 ),
               ],
-              if (trailing != null) ...[
-                const SizedBox(width: 6),
-                trailing!,
-              ],
+              if (trailing != null) ...[const SizedBox(width: 6), trailing!],
             ],
           ),
         ),
@@ -399,7 +404,9 @@ class _Row extends StatelessWidget {
 }
 
 String _baseName(String path) {
-  final trimmed = path.endsWith('/') ? path.substring(0, path.length - 1) : path;
+  final trimmed = path.endsWith('/')
+      ? path.substring(0, path.length - 1)
+      : path;
   final idx = trimmed.lastIndexOf('/');
   return idx >= 0 ? trimmed.substring(idx + 1) : trimmed;
 }

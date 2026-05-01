@@ -49,11 +49,15 @@ class _ReconnectSlot {
     required this.id,
     required this.priority,
     required this.onReconnect,
+    this.isConnected = true,
+    this.attemptCount = 0,
   });
 
   final String id;
   final ReconnectPriority priority;
   final VoidCallback onReconnect;
+  bool isConnected;
+  int attemptCount;
 }
 
 /// Per-host internal state.
@@ -63,8 +67,6 @@ class _HostRetryController {
   final String hostId;
   final Map<String, _ReconnectSlot> slots = {};
   Timer? timer;
-  int attemptCount = 0;
-  bool isConnected = true;
   DateTime? nextRetryAt;
 
   void dispose() {
@@ -82,8 +84,8 @@ class _HostRetryController {
 /// priority registered slot, adds jitter, and fires all callbacks when
 /// the timer expires.
 ///
-/// When any slot reports success via [markConnected], the attempt count
-/// resets to zero for that host and all slots benefit.
+/// Each slot tracks its own connected/disconnected state. This prevents a
+/// healthy Recent/Inbox socket from hiding a broken foreground session socket.
 class HostReconnectScheduler {
   HostReconnectScheduler._();
   static final HostReconnectScheduler instance = HostReconnectScheduler._();
@@ -97,8 +99,7 @@ class HostReconnectScheduler {
   }
 
   final Map<String, _HostRetryController> _controllers = {};
-  final _stateControllers =
-      <String, StreamController<HostRetryState>>{};
+  final _stateControllers = <String, StreamController<HostRetryState>>{};
 
   Random get _random => _randomOverride ?? Random();
 
@@ -117,10 +118,13 @@ class HostReconnectScheduler {
       hostId,
       () => _HostRetryController(hostId: hostId),
     );
+    final existing = controller.slots[slotId];
     controller.slots[slotId] = _ReconnectSlot(
       id: slotId,
       priority: priority,
       onReconnect: onReconnect,
+      isConnected: existing?.isConnected ?? true,
+      attemptCount: existing?.attemptCount ?? 0,
     );
   }
 
@@ -135,59 +139,93 @@ class HostReconnectScheduler {
     }
   }
 
-  /// Call when ANY connection to [hostId] succeeds.
-  /// Resets attempt count and cancels pending retry.
-  void markConnected(String hostId) {
+  /// Call when a connection succeeds.
+  ///
+  /// When [slotId] is provided, only that slot is marked healthy. Omitting
+  /// [slotId] keeps the old whole-host behavior for compatibility.
+  void markConnected(String hostId, [String? slotId]) {
     final controller = _controllers[hostId];
     if (controller == null) return;
-    controller.timer?.cancel();
-    controller.timer = null;
-    controller.attemptCount = 0;
-    controller.isConnected = true;
-    controller.nextRetryAt = null;
+
+    final slots = _slotsFor(controller, slotId);
+    for (final slot in slots) {
+      slot.isConnected = true;
+      slot.attemptCount = 0;
+    }
+
+    if (_disconnectedSlots(controller).isEmpty) {
+      controller.timer?.cancel();
+      controller.timer = null;
+      controller.nextRetryAt = null;
+    }
     _emit(hostId, controller);
   }
 
   /// Call when a slot loses its connection.
   /// If no retry is already pending, schedules one.
-  void markDisconnected(String hostId) {
+  void markDisconnected(String hostId, [String? slotId]) {
     final controller = _controllers[hostId];
     if (controller == null) return;
-    if (controller.timer != null || controller.slots.isEmpty) return;
+    if (controller.slots.isEmpty) return;
 
-    controller.isConnected = false;
-    controller.attemptCount += 1;
+    final slots = _slotsFor(controller, slotId);
+    var changed = false;
+    for (final slot in slots) {
+      if (!slot.isConnected) continue;
+      slot.isConnected = false;
+      slot.attemptCount += 1;
+      changed = true;
+    }
 
-    final delay = _computeDelay(controller);
-    final jittered = _applyJitter(delay);
-    controller.nextRetryAt = DateTime.now().add(jittered);
-    _emit(hostId, controller);
-
-    controller.timer = Timer(jittered, () {
-      controller.timer = null;
-      controller.nextRetryAt = null;
-      // Fire callbacks for ALL registered slots. Each widget decides
-      // whether it actually needs to reconnect (e.g. skip if already open).
-      for (final slot in controller.slots.values) {
-        slot.onReconnect();
-      }
-      _emit(hostId, controller);
-    });
+    if (_disconnectedSlots(controller).isEmpty) return;
+    _scheduleRetry(controller, allowEarlierReschedule: changed);
   }
 
   /// Stream of retry-state changes for UI countdowns.
   Stream<HostRetryState> retryStateFor(String hostId) {
     return _stateControllers
-        .putIfAbsent(
-          hostId,
-          () => StreamController<HostRetryState>.broadcast(),
-        )
+        .putIfAbsent(hostId, () => StreamController<HostRetryState>.broadcast())
         .stream;
+  }
+
+  void _scheduleRetry(
+    _HostRetryController controller, {
+    required bool allowEarlierReschedule,
+  }) {
+    final delay = _computeDelay(controller);
+    final jittered = _applyJitter(delay);
+    final nextRetryAt = DateTime.now().add(jittered);
+
+    if (controller.timer != null) {
+      if (!allowEarlierReschedule ||
+          controller.nextRetryAt == null ||
+          !nextRetryAt.isBefore(controller.nextRetryAt!)) {
+        _emit(controller.hostId, controller);
+        return;
+      }
+      controller.timer?.cancel();
+      controller.timer = null;
+    }
+
+    controller.nextRetryAt = nextRetryAt;
+    _emit(controller.hostId, controller);
+
+    controller.timer = Timer(jittered, () {
+      controller.timer = null;
+      controller.nextRetryAt = null;
+      final slots = List<_ReconnectSlot>.from(_disconnectedSlots(controller));
+      for (final slot in slots) {
+        if (controller.slots[slot.id] == slot && !slot.isConnected) {
+          slot.onReconnect();
+        }
+      }
+      _emit(controller.hostId, controller);
+    });
   }
 
   Duration _computeDelay(_HostRetryController controller) {
     final priority = _highestPriority(controller);
-    final attempt = controller.attemptCount;
+    final attempt = _maxDisconnectedAttempt(controller);
 
     switch (priority) {
       case ReconnectPriority.foregroundSession:
@@ -234,7 +272,7 @@ class HostReconnectScheduler {
 
   ReconnectPriority _highestPriority(_HostRetryController controller) {
     ReconnectPriority? best;
-    for (final slot in controller.slots.values) {
+    for (final slot in _disconnectedSlots(controller)) {
       if (best == null || slot.priority.index < best.index) {
         best = slot.priority;
       }
@@ -248,11 +286,32 @@ class HostReconnectScheduler {
     streamController.add(
       HostRetryState(
         hostId: hostId,
-        isConnected: controller.isConnected,
+        isConnected: _disconnectedSlots(controller).isEmpty,
         nextRetryAt: controller.nextRetryAt,
-        attemptCount: controller.attemptCount,
+        attemptCount: _maxDisconnectedAttempt(controller),
       ),
     );
+  }
+
+  Iterable<_ReconnectSlot> _disconnectedSlots(
+    _HostRetryController controller,
+  ) => controller.slots.values.where((slot) => !slot.isConnected);
+
+  Iterable<_ReconnectSlot> _slotsFor(
+    _HostRetryController controller,
+    String? slotId,
+  ) {
+    if (slotId == null) return controller.slots.values;
+    final slot = controller.slots[slotId];
+    return slot == null ? const <_ReconnectSlot>[] : <_ReconnectSlot>[slot];
+  }
+
+  int _maxDisconnectedAttempt(_HostRetryController controller) {
+    var attempt = 0;
+    for (final slot in _disconnectedSlots(controller)) {
+      attempt = max(attempt, slot.attemptCount);
+    }
+    return attempt;
   }
 
   /// Dispose everything. Useful in tests.
