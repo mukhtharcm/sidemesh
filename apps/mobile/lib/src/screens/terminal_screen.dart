@@ -12,6 +12,8 @@ import '../theme/app_colors.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../host_reconnect_scheduler.dart';
+import '../host_status_store.dart';
+import '../relative_time_ticker.dart';
 
 class TerminalScreen extends StatefulWidget {
   const TerminalScreen({
@@ -290,6 +292,7 @@ class _TerminalPaneState extends State<TerminalPane> {
         if (data is String && data.isNotEmpty) {
           _terminal.write(data);
         }
+        HostStatusStore.instance.markEvent(widget.host.id);
         return;
       case 'exit':
         final seq = _intOrNull(frame['seq']);
@@ -424,6 +427,7 @@ class _TerminalPaneState extends State<TerminalPane> {
     return Column(
       children: [
         _TerminalStatusStrip(
+          hostId: widget.host.id,
           starting: _starting,
           connecting: _connecting,
           stopping: _stopping,
@@ -526,6 +530,7 @@ Color _brightTerminalColor(Color color) =>
 
 class _TerminalStatusStrip extends StatelessWidget {
   const _TerminalStatusStrip({
+    required this.hostId,
     required this.starting,
     required this.connecting,
     required this.stopping,
@@ -535,6 +540,7 @@ class _TerminalStatusStrip extends StatelessWidget {
     required this.onRestart,
   });
 
+  final String hostId;
   final bool starting;
   final bool connecting;
   final bool stopping;
@@ -553,7 +559,7 @@ class _TerminalStatusStrip extends StatelessWidget {
         !connecting &&
         (terminal != null || error != null);
     final limitedBackend = terminal?.backend == 'pipe';
-    final label =
+    final baseLabel =
         error ??
         (starting
             ? 'Starting terminal'
@@ -591,14 +597,27 @@ class _TerminalStatusStrip extends StatelessWidget {
             ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: error == null ? colors.textSecondary : colors.danger,
-                fontWeight: FontWeight.w700,
-              ),
+            child: ListenableBuilder(
+              listenable: Listenable.merge([
+                HostStatusStore.instance,
+                RelativeTimeTicker.instance,
+              ]),
+              builder: (context, _) {
+                final status = HostStatusStore.instance.statusFor(hostId);
+                final freshness = _terminalFreshness(status);
+                final label = freshness != null
+                    ? '$baseLabel · $freshness'
+                    : baseLabel;
+                return Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: error == null ? colors.textSecondary : colors.danger,
+                    fontWeight: FontWeight.w700,
+                  ),
+                );
+              },
             ),
           ),
           if (terminal != null)
@@ -636,6 +655,16 @@ class _TerminalStatusStrip extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String? _terminalFreshness(HostStatus status) {
+    final last = status.lastEventAt ?? status.lastOnlineAt;
+    if (last == null) return null;
+    final elapsed = DateTime.now().difference(last);
+    if (elapsed.inSeconds < 5) return null;
+    if (elapsed.inMinutes < 1) return 'last output ${elapsed.inSeconds}s ago';
+    if (elapsed.inHours < 1) return 'last output ${elapsed.inMinutes}m ago';
+    return 'last output ${elapsed.inHours}h ago';
   }
 }
 

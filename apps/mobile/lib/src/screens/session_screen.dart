@@ -57,6 +57,7 @@ import '../widgets/diff_view.dart';
 import '../widgets/mesh_widgets.dart';
 import 'package:sidemesh_mobile/src/host_reconnect_scheduler.dart';
 import '../widgets/provider_badge.dart';
+import '../relative_time_ticker.dart';
 import '../widgets/syntax_code_block.dart';
 
 part 'session_screen_header.dart';
@@ -4876,16 +4877,21 @@ class _SessionScreenState extends State<SessionScreen>
         if (freshnessMode != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: _CachedTranscriptStrip(
-              mode: freshnessMode,
-              refreshing:
-                  _snapshotRefreshing ||
-                  (freshnessMode == _TranscriptFreshnessMode.reconnecting &&
-                      _resumeSyncing),
-              lastConnectedLabel: _lastConnectedLabel,
-              onRetry: freshnessMode == _TranscriptFreshnessMode.offline
-                  ? _retryFreshnessSync
-                  : null,
+            child: ListenableBuilder(
+              listenable: RelativeTimeTicker.instance,
+              builder: (context, _) {
+                return _CachedTranscriptStrip(
+                  mode: freshnessMode,
+                  refreshing:
+                      _snapshotRefreshing ||
+                      (freshnessMode == _TranscriptFreshnessMode.reconnecting &&
+                          _resumeSyncing),
+                  lastConnectedLabel: _lastConnectedLabel,
+                  onRetry: freshnessMode == _TranscriptFreshnessMode.offline
+                      ? _retryFreshnessSync
+                      : null,
+                );
+              },
             ),
           ),
         Expanded(
