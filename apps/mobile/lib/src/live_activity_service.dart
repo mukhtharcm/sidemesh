@@ -468,6 +468,84 @@ class LiveActivityService {
         badge: 'IMG',
       );
     }
+    if (activity.isPlan) {
+      return _LiveActivitySummary(
+        headline: 'Updating plan',
+        detail: _shorten(
+          _nonEmpty(
+            activity.summary,
+            fallback: _nonEmpty(activity.toolTitle, fallback: 'Plan activity'),
+          ),
+          96,
+        ),
+        status: 'plan',
+        badge: 'PLAN',
+      );
+    }
+    if (activity.isTask) {
+      return _LiveActivitySummary(
+        headline: activity.status == 'failed' ? 'Task failed' : 'Task update',
+        detail: _shorten(
+          _nonEmpty(
+            activity.summary,
+            fallback: _nonEmpty(activity.toolTitle, fallback: 'Task activity'),
+          ),
+          96,
+        ),
+        status: 'task',
+        badge: 'TASK',
+      );
+    }
+    if (activity.isSubagent) {
+      return _LiveActivitySummary(
+        headline: 'Subagent activity',
+        detail: _shorten(
+          _nonEmpty(
+            activity.agentDisplayName,
+            fallback: _nonEmpty(activity.agentName, fallback: 'Subagent'),
+          ),
+          96,
+        ),
+        status: 'subagent',
+        badge: 'SUB',
+      );
+    }
+    if (activity.isReasoning) {
+      return _LiveActivitySummary(
+        headline: 'Reasoning',
+        detail: _shorten(
+          _nonEmpty(
+            activity.content,
+            fallback: _nonEmpty(
+              activity.summary,
+              fallback: 'Thinking through the task.',
+            ),
+          ),
+          96,
+        ),
+        status: 'reasoning',
+        badge: 'THINK',
+      );
+    }
+    if (activity.isSystemEvent) {
+      return _LiveActivitySummary(
+        headline: activity.level == 'warning'
+            ? 'Needs attention'
+            : 'Session event',
+        detail: _shorten(
+          _nonEmpty(
+            activity.detail,
+            fallback: _nonEmpty(
+              activity.toolTitle,
+              fallback: 'Session state changed.',
+            ),
+          ),
+          96,
+        ),
+        status: activity.level == 'warning' ? 'warning' : 'system',
+        badge: activity.level == 'warning' ? 'WARN' : 'INFO',
+      );
+    }
     if (activity.isFileChange || activity.changes.isNotEmpty) {
       final files = activity.changes
           .map((change) => _relativePath(change.path, sessionCwd))
@@ -525,7 +603,9 @@ class LiveActivityService {
       };
     }
     if (activity.toolCategory == 'network') {
-      return activity.toolAction == 'search' ? 'Searching web' : 'Fetching page';
+      return activity.toolAction == 'search'
+          ? 'Searching web'
+          : 'Fetching page';
     }
     if (activity.toolCategory == 'command') {
       return 'Running command tool';

@@ -219,6 +219,46 @@ describe("loadSessionRuntime", () => {
     assert.equal(runtime?.telemetry?.contextWindow?.currentTokens, 42000);
   });
 
+  it("maps Codex task rollout events into neutral task activities", async () => {
+    const lines = [
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "thread-1", cwd: "/tmp/project" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:01.000Z",
+        type: "event_msg",
+        payload: {
+          type: "task_started",
+          turn_id: "turn-1",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:02.000Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+          turn_id: "turn-1",
+          last_agent_message: "Done",
+        },
+      }),
+    ];
+
+    await writeFile(rolloutPath, `${lines.join("\n")}\n`, "utf8");
+
+    const log = await loadRolloutLog("thread-1", rolloutPath, null);
+
+    assert.equal(log.activities.length, 2);
+    assert.equal(log.activities[0]?.type, "task");
+    assert.equal(log.activities[1]?.type, "task");
+    if (log.activities[1]?.type !== "task") {
+      assert.fail("Expected task activity");
+    }
+    assert.equal(log.activities[1].action, "completed");
+    assert.equal(log.activities[1].summary, "Done");
+  });
+
   it("lists large recent rollout files without scanning full transcripts", async () => {
     const codexHome = nodePath.join(tempDir, "codex-home");
     const now = new Date();

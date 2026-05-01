@@ -98,6 +98,46 @@ Providers should emit `liveEvent` events for streaming UI updates:
 Provider adapters should translate native agent events into Sidemesh activity
 types instead of leaking provider-specific wire payloads to the Flutter app.
 
+## Shared UX Concepts
+
+Sidemesh should present the same UX concepts regardless of provider. Adapters
+must translate provider-native events into these shared concepts instead of
+surfacing raw tool or SDK names.
+
+Shared concepts:
+
+- assistant commentary / progress
+- final assistant answers
+- tool activity
+- approval requests
+- question requests (`user_input`)
+- structured form requests (`elicitation`)
+- plan review / approval requests
+- plan / todo updates
+- task start / completion / failure
+- subagent and background-agent status
+- reasoning/progress blocks
+- auth or external continuation requests
+- session/system events such as handoff, truncation, and warnings
+
+Rules:
+
+- Internal provider tool names like `ask_user`, `report_intent`, or
+  `update_plan` should not appear in the session timeline unless they are the
+  actual user-facing concept.
+- Reasoning, plan review, subagent, auth-continuation, and warning events
+  should use the neutral activity types (`reasoning`, `plan`, `subagent`,
+  `system_event`) rather than fake `tool` cards.
+- Question and form responses are timeline-owned by Sidemesh. When the user
+  answers a pending question or submits a form, the daemon should emit a normal
+  user message entry so all providers share the same post-submit UX.
+- Sidemesh-owned timeline entries must be written to the daemon overlay store,
+  not only kept in memory, so they survive daemon restarts.
+- Provider adapters may keep native metadata privately, but the Flutter client
+  should render only the shared concept shape.
+- Raw provider event names and payload summaries belong in inspector/debug
+  surfaces, not in the primary timeline card title.
+
 ## HTTP Behavior
 
 Server routes check both capability flags and method presence. A provider that
@@ -150,9 +190,11 @@ Copilot SDK for session discovery, transcript replay, turns, model controls,
 permission requests, and tool execution events. It intentionally does not read
 Copilot's on-disk session files directly and does not ship a hand-written model
 catalog; model controls are advertised from SDK `listModels()` metadata, with
-explicit host defaults layered on top when configured. Images, skills,
-filesystem, and richer native tool translation should be enabled only when the
-adapter can report honest capabilities and translate SDK events into Sidemesh
-event types. The Copilot adapter uses `auto` as the Sidemesh default for
-app-started turns, so a costly persistent Copilot setting is not consumed by
-accident.
+explicit host defaults layered on top when configured. Native Copilot events
+such as reasoning blocks, subagent lifecycle, plan review, MCP OAuth/sampling,
+warnings, and inbox notifications are translated into shared Sidemesh activity
+types. Images, skills, filesystem, and richer native tool translation should be
+enabled only when the adapter can report honest capabilities and translate SDK
+events into Sidemesh event types. The Copilot adapter uses `auto` as the
+Sidemesh default for app-started turns, so a costly persistent Copilot setting
+is not consumed by accident.
