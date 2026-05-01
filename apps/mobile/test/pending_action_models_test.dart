@@ -16,6 +16,7 @@ void main() {
       'canDecline': false,
       'state': 'recovered',
       'recoverable': true,
+      'relatedActivityId': 'tool-ask-1',
       'userInput': {
         'question': 'Which environment?',
         'choices': ['staging', 'production'],
@@ -26,6 +27,7 @@ void main() {
     expect(action.isUserInput, isTrue);
     expect(action.isRecovered, isTrue);
     expect(action.recoverable, isTrue);
+    expect(action.relatedActivityId, 'tool-ask-1');
     expect(action.userInput?.choices, ['staging', 'production']);
   });
 
