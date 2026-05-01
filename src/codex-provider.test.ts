@@ -266,6 +266,127 @@ describe("codex provider resume runtime restore", () => {
     });
   });
 
+  it("bridges Codex request_user_input requests into pending actions", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const events: any[] = [];
+    const responses: any[] = [];
+    provider.bridge = {
+      respond: (id: string, result: unknown) => responses.push({ id, result }),
+    };
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest("request-1", "item/tool/requestUserInput", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "call-1",
+      questions: [
+        {
+          id: "mode",
+          header: "Mode",
+          question: "Which mode should I use?",
+          isOther: false,
+          isSecret: false,
+          options: [{ label: "plan", description: "Plan first" }],
+        },
+      ],
+    });
+
+    assert.equal(events.length, 1);
+    const action = events[0].action;
+    assert.equal(events[0].type, "action_opened");
+    assert.equal(action.kind, "user_input");
+    assert.equal(action.userInput.question, "Which mode should I use?");
+    assert.deepEqual(action.userInput.choices, ["plan"]);
+    assert.equal(action.userInput.allowFreeform, false);
+
+    assert.equal(
+      provider.respondToPendingAction(action, {
+        answer: "plan",
+        wasFreeform: false,
+      }),
+      true,
+    );
+    assert.deepEqual(responses, [
+      {
+        id: "request-1",
+        result: { answers: { mode: { answers: ["plan"] } } },
+      },
+    ]);
+  });
+
+  it("bridges Codex MCP elicitations into pending form actions", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const events: any[] = [];
+    const responses: any[] = [];
+    provider.bridge = {
+      respond: (id: string, result: unknown) => responses.push({ id, result }),
+    };
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest("request-2", "mcpServer/elicitation/request", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      serverName: "deploy",
+      mode: "form",
+      message: "Choose deployment options",
+      requestedSchema: {
+        type: "object",
+        required: ["region"],
+        properties: {
+          region: {
+            type: "string",
+            title: "Region",
+            oneOf: [{ const: "us-east", title: "US East" }],
+          },
+          dryRun: {
+            type: "boolean",
+            title: "Dry run",
+            default: true,
+          },
+        },
+      },
+    });
+
+    assert.equal(events.length, 1);
+    const action = events[0].action;
+    assert.equal(action.kind, "elicitation");
+    assert.equal(action.elicitation.message, "Choose deployment options");
+    assert.deepEqual(action.elicitation.fields, [
+      {
+        key: "region",
+        type: "string",
+        title: "Region",
+        required: true,
+        options: [{ value: "us-east", label: "US East" }],
+      },
+      {
+        key: "dryRun",
+        type: "boolean",
+        title: "Dry run",
+        required: false,
+        defaultValue: true,
+      },
+    ]);
+
+    assert.equal(
+      provider.respondToPendingAction(action, {
+        action: "accept",
+        content: { region: "us-east", dryRun: true },
+      }),
+      true,
+    );
+    assert.deepEqual(responses, [
+      {
+        id: "request-2",
+        result: {
+          action: "accept",
+          content: { region: "us-east", dryRun: true },
+          _meta: null,
+        },
+      },
+    ]);
+  });
+
   it("restores persisted runtime before compacting an unloaded session", async () => {
     const provider = new CodexAgentProvider("codex") as any;
     const thread = createThread();
