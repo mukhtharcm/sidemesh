@@ -983,6 +983,7 @@ class _DesktopShellState extends State<DesktopShell> {
               onDismissed: () {
                 setState(() => _showWelcome = false);
               },
+              onAddHost: () => _showHostEditor(),
             ),
         ],
       ),
