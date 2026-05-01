@@ -885,6 +885,7 @@ describe("Copilot provider", () => {
       const action = await opened;
       assert.equal(action.elicitation?.mode, "form");
       assert.equal(action.elicitation?.fields.length, 2);
+      assert.equal(action.recoverable, true);
       assert.equal(
         provider.respondToPendingAction(action, {
           action: "accept",
