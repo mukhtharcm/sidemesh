@@ -16,6 +16,7 @@ String? agentProviderDisplayLabel(String? providerKind, {NodeInfo? nodeInfo}) {
 
   return switch (kind) {
     'codex' => 'Codex',
+    'pi' => 'Pi',
     'copilot' => 'GitHub Copilot',
     'fake' => 'Fake',
     _ => _titleCaseProviderKind(kind),
