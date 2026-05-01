@@ -1387,7 +1387,11 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
             sessionId,
             delta.activities,
           ).filter((a) => (a.seq ?? 0) > since);
-          nextSeq = delta.nextSeq;
+          nextSeq = highestSessionEventSeq(
+            delta.nextSeq,
+            newMessages,
+            newActivities,
+          );
           logRuntime = delta.runtime;
         } catch (error: any) {
           if (error.code === "STALE_CURSOR") {
@@ -2996,6 +3000,25 @@ function mergeActivityPreferIncomingOrder(
     createdAt: incoming.createdAt,
     seq: incoming.seq,
   };
+}
+
+function highestSessionEventSeq(
+  initial: number,
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+): number {
+  let highestSeq = initial;
+  for (const message of messages) {
+    if ((message.seq ?? 0) > highestSeq) {
+      highestSeq = message.seq ?? highestSeq;
+    }
+  }
+  for (const activity of activities) {
+    if ((activity.seq ?? 0) > highestSeq) {
+      highestSeq = activity.seq ?? highestSeq;
+    }
+  }
+  return highestSeq;
 }
 
 function syncSessionActivityOverlaysFromStore(
