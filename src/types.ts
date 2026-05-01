@@ -99,6 +99,7 @@ export interface SessionSummary {
   rolloutPath: string | null;
   runtime: SessionRuntimeSummary | null;
   gitInfo: GitInfoSummary | null;
+  isSubAgent?: boolean;
 }
 
 export interface GitInfoSummary {
