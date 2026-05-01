@@ -83,6 +83,7 @@ interface PiPreparedInput {
   preview: string;
   attachments: SessionMessageAttachment[];
   images: PiImageInput[];
+  warnings: string[];
 }
 
 interface PiSessionState {
@@ -409,6 +410,7 @@ export class PiAgentProvider
     const active = this.activeTurns.get(request.sessionId);
     if (active) {
       const prepared = await preparePiInput(request.input);
+      this.reportPreparedInputWarnings(prepared);
       this.appendUserMessage(session, prepared);
       try {
         await session.session!.steer(prepared.text, prepared.images);
@@ -677,6 +679,7 @@ export class PiAgentProvider
       throw new Error(`Pi session ${session.thread.id} is not loaded.`);
     }
     const prepared = await preparePiInput(input);
+    this.reportPreparedInputWarnings(prepared);
     this.appendUserMessage(session, prepared);
     const turnId = `pi-turn-${randomUUID()}`;
     session.turns.push({
@@ -1076,6 +1079,12 @@ export class PiAgentProvider
     });
   }
 
+  private reportPreparedInputWarnings(prepared: PiPreparedInput): void {
+    for (const warning of prepared.warnings) {
+      this.emit("stderr", warning);
+    }
+  }
+
   private appendSystemMessage(
     session: PiSessionState,
     text: string,
@@ -1315,10 +1324,17 @@ export class PiAgentProvider
   }
 
   private async persistSoon(): Promise<void> {
-    this.saveChain = this.saveChain
-      .catch(() => undefined)
-      .then(() => this.saveState());
-    await this.saveChain;
+    const previous = this.saveChain;
+    const next = (async () => {
+      try {
+        await previous;
+      } catch {
+        // Keep the persistence queue moving after an earlier failure.
+      }
+      await this.saveState();
+    })();
+    this.saveChain = next;
+    await next;
   }
 
   private persistEventually(): void {
@@ -2062,6 +2078,8 @@ async function preparePiInput(
   const promptParts: string[] = [];
   const images: PiImageInput[] = [];
   const attachments: SessionMessageAttachment[] = [];
+  const warnings: string[] = [];
+  let ignoredImageUrlCount = 0;
 
   for (const item of input) {
     switch (item.type) {
@@ -2080,8 +2098,17 @@ async function preparePiInput(
         break;
       }
       case "image":
-        throw new Error("Pi does not support image URL attachments.");
+        ignoredImageUrlCount += 1;
+        break;
     }
+  }
+
+  if (ignoredImageUrlCount > 0) {
+    warnings.push(
+      ignoredImageUrlCount === 1
+        ? "Ignoring 1 image URL attachment because Pi only supports local image attachments."
+        : `Ignoring ${ignoredImageUrlCount} image URL attachments because Pi only supports local image attachments.`,
+    );
   }
 
   const preview = previewFromInput(input);
@@ -2090,6 +2117,11 @@ async function preparePiInput(
     text = "Please inspect the attached image.";
   } else if (!text && images.length > 1) {
     text = `Please inspect the ${images.length} attached images.`;
+  } else if (!text && ignoredImageUrlCount > 0) {
+    text =
+      ignoredImageUrlCount === 1
+        ? "The request only included an unsupported image URL attachment. Tell the user that Pi only supports local image attachments."
+        : "The request only included unsupported image URL attachments. Tell the user that Pi only supports local image attachments.";
   }
 
   return {
@@ -2097,6 +2129,7 @@ async function preparePiInput(
     preview,
     attachments,
     images,
+    warnings,
   };
 }
 
@@ -2487,7 +2520,30 @@ function cloneMessage(message: SessionMessage): SessionMessage {
 }
 
 function cloneActivity(activity: SessionActivity): SessionActivity {
-  return JSON.parse(JSON.stringify(activity)) as SessionActivity;
+  switch (activity.type) {
+    case "command":
+      return {
+        ...activity,
+        commandActions: activity.commandActions.map((action) => ({ ...action })),
+      };
+    case "tool":
+      return {
+        ...activity,
+        args: cloneStructuredValue(activity.args),
+        result: cloneStructuredValue(activity.result),
+        semantic: activity.semantic ? cloneToolActivitySemantic(activity.semantic) : null,
+      };
+    case "file_change":
+      return {
+        ...activity,
+        changes: activity.changes.map(cloneActivityChange),
+      };
+    case "turn_diff":
+    case "web_search":
+    case "image_generation":
+    case "context_compaction":
+      return { ...activity };
+  }
 }
 
 function cloneRuntime(
@@ -2523,4 +2579,27 @@ function asRecord(
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function cloneActivityChange(change: SessionActivityChange): SessionActivityChange {
+  return { ...change };
+}
+
+function cloneToolActivitySemantic(
+  semantic: ToolActivitySemantic,
+): ToolActivitySemantic {
+  return {
+    ...semantic,
+    targets: semantic.targets.map(cloneToolActivitySemanticTarget),
+  };
+}
+
+function cloneToolActivitySemanticTarget(
+  target: ToolActivitySemanticTarget,
+): ToolActivitySemanticTarget {
+  return { ...target };
+}
+
+function cloneStructuredValue<T>(value: T): T {
+  return value === undefined ? value : structuredClone(value);
 }
