@@ -139,6 +139,14 @@ describe("Codex activity compatibility", () => {
       1003,
       4,
     );
+    const compaction = buildActivityFromThreadItem(
+      {
+        id: "compact-1",
+        type: "contextCompaction",
+        status: "completed",
+      },
+      { turnId: "turn-1", createdAt: 1004, seq: 5 },
+    );
 
     assert.equal(command?.type, "command");
     assert.equal(command?.exitCode, 0);
@@ -148,6 +156,8 @@ describe("Codex activity compatibility", () => {
     assert.equal(webSearch?.query, "sidemesh");
     assert.equal(image?.type, "image_generation");
     assert.equal(image?.savedPath, "/repo/image.png");
+    assert.equal(compaction?.type, "context_compaction");
+    assert.equal(compaction?.status, "completed");
   });
 
   it("preserves generalized tool semantics when merging tool activities", () => {
