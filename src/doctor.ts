@@ -1,8 +1,11 @@
 import { execFile } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
+import { homedir } from "node:os";
 import nodePath from "node:path";
 import { promisify } from "node:util";
+
+import { VERSION as PI_VERSION } from "@mariozechner/pi-coding-agent";
 
 import { createCopilotSdkClient } from "./copilot-sdk-client.js";
 import type {
@@ -10,6 +13,7 @@ import type {
   CopilotProviderConfig,
   FakeProviderConfig,
   NodeConfig,
+  PiProviderConfig,
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -107,6 +111,8 @@ async function inspectProvider(
   switch (provider.kind) {
     case "codex":
       return inspectCommandProvider("codex", "Codex", provider.bin, ["--version"]);
+    case "pi":
+      return inspectPiProvider(provider);
     case "fake":
       return inspectFakeProvider(provider, stateDir);
     case "copilot":
@@ -186,6 +192,58 @@ async function inspectFakeProvider(
     command: "builtin",
     resolvedCommandPath: "builtin",
     version: "builtin",
+    auth: null,
+    checks,
+  };
+}
+
+async function inspectPiProvider(
+  provider: PiProviderConfig,
+): Promise<DoctorProviderReport> {
+  const agentDir = nodePath.resolve(
+    provider.agentDir || nodePath.join(homedir(), ".pi", "agent"),
+  );
+  const providerStateDir = nodePath.resolve(
+    provider.stateDir || nodePath.join(homedir(), ".sidemesh", "pi-provider"),
+  );
+  const sessionsDir = nodePath.join(agentDir, "sessions");
+  const checks: DoctorCheck[] = [
+    {
+      severity: "ok",
+      label: "sdk",
+      detail: `Using Pi SDK ${PI_VERSION}`,
+    },
+    {
+      severity: (await pathExists(agentDir)) ? "ok" : "warn",
+      label: "agentDir",
+      detail: `Pi agent dir: ${agentDir}`,
+      remedy: (await pathExists(agentDir))
+        ? undefined
+        : "Create the Pi agent directory by running Pi once or configuring SIDEMESH_PI_AGENT_DIR.",
+    },
+    {
+      severity: (await pathExists(sessionsDir)) ? "ok" : "warn",
+      label: "sessions",
+      detail: `Pi sessions dir: ${sessionsDir}`,
+      remedy: (await pathExists(sessionsDir))
+        ? undefined
+        : "Pi will create the sessions directory after the first persisted session.",
+    },
+    {
+      severity: (await pathExists(providerStateDir)) ? "ok" : "warn",
+      label: "state",
+      detail: `Sidemesh Pi state dir: ${providerStateDir}`,
+      remedy: (await pathExists(providerStateDir))
+        ? undefined
+        : "The state directory will be created automatically on first use.",
+    },
+  ];
+  return {
+    kind: "pi",
+    displayName: "Pi",
+    command: null,
+    resolvedCommandPath: null,
+    version: `Pi ${PI_VERSION}`,
     auth: null,
     checks,
   };
@@ -293,6 +351,15 @@ async function inspectCopilotProvider(
     auth,
     checks,
   };
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function checkStateDir(stateDir: string): Promise<DoctorCheck> {

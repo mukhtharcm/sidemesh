@@ -1,7 +1,8 @@
-export type AgentProviderKind = "codex" | "fake" | "copilot";
+export type AgentProviderKind = "codex" | "pi" | "fake" | "copilot";
 
 export type AgentProviderConfig =
   | CodexProviderConfig
+  | PiProviderConfig
   | FakeProviderConfig
   | CopilotProviderConfig;
 
@@ -16,6 +17,12 @@ export interface FakeProviderConfig {
   seedSessions: boolean;
   workspaceRoot: string | null;
   capabilityProfile: FakeCapabilityProfile;
+}
+
+export interface PiProviderConfig {
+  kind: "pi";
+  agentDir: string | null;
+  stateDir: string | null;
 }
 
 export interface CopilotProviderConfig {

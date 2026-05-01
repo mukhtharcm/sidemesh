@@ -129,6 +129,9 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
       case "codex":
         resolvedProviders.push(await promptCodexProvider(existing));
         break;
+      case "pi":
+        resolvedProviders.push(await promptPiProvider(existing, stateDir));
+        break;
       case "copilot":
         resolvedProviders.push(await promptCopilotProvider(existing, stateDir));
         break;
@@ -391,6 +394,37 @@ async function promptCopilotProvider(
     stateDir: copilotStateDir.trim() || null,
     allowAll,
     configuredModel: configuredModel.trim() || null,
+  };
+}
+
+async function promptPiProvider(
+  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
+  stateDir: string,
+): Promise<AgentProviderConfig> {
+  const current =
+    existing?.providers.find((provider) => provider.kind === "pi") ?? null;
+  const agentDir = await promptText({
+    message: "Pi agent directory",
+    defaultValue:
+      current?.kind === "pi"
+        ? (current.agentDir ?? nodePath.join(homedir(), ".pi", "agent"))
+        : nodePath.join(homedir(), ".pi", "agent"),
+    validate: (value) =>
+      value.trim() ? undefined : "Pi agent directory cannot be empty.",
+  });
+  const piStateDir = await promptText({
+    message: "Pi provider state directory",
+    defaultValue:
+      current?.kind === "pi"
+        ? (current.stateDir ?? nodePath.join(stateDir, "pi-provider"))
+        : nodePath.join(stateDir, "pi-provider"),
+    validate: (value) =>
+      value.trim() ? undefined : "Pi provider state directory cannot be empty.",
+  });
+  return {
+    kind: "pi",
+    agentDir: agentDir.trim() || null,
+    stateDir: piStateDir.trim() || null,
   };
 }
 

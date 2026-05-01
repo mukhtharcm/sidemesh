@@ -30,6 +30,12 @@ const codexProviderConfigSchema = z.object({
   bin: z.string().trim().min(1),
 });
 
+const piProviderConfigSchema = z.object({
+  kind: z.literal("pi"),
+  agentDir: z.string().trim().min(1).nullable(),
+  stateDir: z.string().trim().min(1).nullable(),
+});
+
 const copilotProviderConfigSchema = z.object({
   kind: z.literal("copilot"),
   bin: z.string().trim().min(1),
@@ -73,6 +79,7 @@ const browserPreviewConfigSchema = z.object({
 
 const persistedProviderConfigSchema = z.discriminatedUnion("kind", [
   codexProviderConfigSchema,
+  piProviderConfigSchema,
   copilotProviderConfigSchema,
   fakeProviderConfigSchema,
 ]);
@@ -86,7 +93,7 @@ const persistedNodeConfigSchema = z.object({
   terminal: terminalConfigSchema.optional(),
   portForwarding: portForwardingConfigSchema.optional(),
   browserPreview: browserPreviewConfigSchema.optional(),
-  defaultProviderKind: z.enum(["codex", "copilot", "fake"]).optional(),
+  defaultProviderKind: z.enum(["codex", "pi", "copilot", "fake"]).optional(),
   providers: z.array(persistedProviderConfigSchema).default([]),
 });
 
@@ -210,6 +217,12 @@ export function normalizePersistedProviderConfig(
         stateDir: provider.stateDir,
         allowAll: provider.allowAll,
         configuredModel: provider.configuredModel,
+      };
+    case "pi":
+      return {
+        kind: "pi",
+        agentDir: provider.agentDir,
+        stateDir: provider.stateDir,
       };
     case "fake":
       return {

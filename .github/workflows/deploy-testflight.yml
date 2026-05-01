@@ -330,6 +330,36 @@ jobs:
           SIDEMESH_SUPPORT_URL: ${{ vars.SIDEMESH_SUPPORT_URL }}
         run: python3 scripts/update-asc-metadata.py
 
+      - name: Set App Store Connect age rating
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: python3 scripts/set-age-rating.py
+
+      - name: Set app review details
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          SIDEMESH_REVIEW_CONTACT_FIRST: ${{ vars.SIDEMESH_REVIEW_CONTACT_FIRST }}
+          SIDEMESH_REVIEW_CONTACT_LAST: ${{ vars.SIDEMESH_REVIEW_CONTACT_LAST }}
+          SIDEMESH_REVIEW_CONTACT_EMAIL: ${{ vars.SIDEMESH_REVIEW_CONTACT_EMAIL }}
+          SIDEMESH_REVIEW_CONTCT_PHONE: ${{ vars.SIDEMESH_REVIEW_CONTCT_PHONE }}
+          SIDEMESH_REVIEW_DEMO_ACCOUNT: ${{ vars.SIDEMESH_REVIEW_DEMO_ACCOUNT }}
+          SIDEMESH_REVIEW_DEMO_PASSWORD: ${{ vars.SIDEMESH_REVIEW_DEMO_PASSWORD }}
+          SIDEMESH_REVIE_NOTES: ${{ vars.SIDEMESH_REVIEW_NOTES }}
+        run: python3 scripts/set-app-review-details.py
+
+      - name: Set app category
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          SIDEMESH_PRIMARY_CATEGORY: ${{ vars.SIDEMESH_PRIMARY_CATEGORY }}
+          SIDEMESH_SECONDARY_CATEGORY: ${{ vars.SIDEMESH_SECONDARY_CATEGORY }}
+        run: python3 scripts/set-app-category.py
+
       - name: Add build to TestFlight beta groups
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
