@@ -809,9 +809,9 @@ class _LocalImageFallback extends StatelessWidget {
                   loading ? 'Loading image...' : _basename(path),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.emphasis),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: AppWeights.emphasis,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -1873,9 +1873,7 @@ class _ActivityCardState extends State<_ActivityCard> {
         'Codex tried to compact the session context, but the compaction failed.',
       _ => 'Codex is compacting older history to free context.',
     };
-    return [
-      _activityInfoBlock(context, 'What happened', message),
-    ];
+    return [_activityInfoBlock(context, 'What happened', message)];
   }
 
   String _toolActivityTitle(SessionActivity activity, String sessionCwd) {
@@ -1891,12 +1889,16 @@ class _ActivityCardState extends State<_ActivityCard> {
     if (activity.toolCategory == 'interaction' &&
         activity.toolAction == 'ask') {
       final question = _interactionQuestion(activity);
-      return question == null ? 'Model asked a question' : 'Model asked: $question';
+      return question == null
+          ? 'Model asked a question'
+          : 'Model asked: $question';
     }
     if (activity.toolCategory == 'interaction' &&
         activity.toolAction == 'report') {
       final intent = _interactionIntent(activity);
-      return intent == null ? 'Model reported intent' : 'Model reported intent: $intent';
+      return intent == null
+          ? 'Model reported intent'
+          : 'Model reported intent: $intent';
     }
     if (activity.toolCategory == 'filesystem' &&
         activity.toolAction == 'read' &&
@@ -2138,12 +2140,19 @@ class _ActivityCardState extends State<_ActivityCard> {
         'message',
       ]);
 
-  String? _interactionAnswer(SessionActivity activity) =>
-      _firstStringFromPayload(activity.toolResult, const [
-        'answer',
-        'content',
-        'message',
-      ]);
+  String? _interactionAnswer(SessionActivity activity) {
+    final text = _firstStringFromPayload(activity.toolResult, const [
+      'answer',
+      'content',
+      'message',
+    ]);
+    if (text != null) return text;
+
+    final content = _firstPayloadValue(activity.toolResult, const ['content']);
+    if (content == null) return null;
+    final formatted = _formatActivityValue(content).trim();
+    return formatted.isEmpty ? null : formatted;
+  }
 
   List<String> _interactionChoices(SessionActivity activity) {
     final raw = _firstPayloadValue(activity.toolArgs, const [

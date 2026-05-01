@@ -94,6 +94,7 @@ import {
   isRecoveredPendingAction,
   PendingActionStore,
 } from "./pending-action-store.js";
+import { SessionActivityOverlayStore } from "./session-activity-overlay-store.js";
 import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionReplayIndex } from "./session-replay-index.js";
@@ -105,6 +106,10 @@ const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
 const PENDING_ACTION_STORE_LIMIT = 200;
 const PENDING_ACTION_STORE_TTL_MS = 48 * 60 * 60 * 1000;
 const PENDING_ACTION_STORE_FILE = "pending-actions-v1.json";
+const SESSION_ACTIVITY_OVERLAY_STORE_LIMIT = 500;
+const SESSION_ACTIVITY_OVERLAY_STORE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_ACTIVITY_OVERLAY_STORE_FILE =
+  "session-activity-overlays-v1.json";
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
@@ -194,6 +199,10 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, SessionActivity>>();
+  const sessionActivityOverlays = new Map<
+    string,
+    Map<string, SessionActivity>
+  >();
   const replayIndex = new SessionReplayIndex();
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
   const logCache = new Map<string, SessionLogCacheEntry>();
@@ -222,6 +231,27 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   );
   for (const action of pendingActionStore.recoveredActions()) {
     pendingActions.set(action.id, action);
+  }
+  const sessionActivityOverlayStore = await SessionActivityOverlayStore.open(
+    nodePath.join(config.stateDir, SESSION_ACTIVITY_OVERLAY_STORE_FILE),
+    {
+      ttlMs: SESSION_ACTIVITY_OVERLAY_STORE_TTL_MS,
+      limit: SESSION_ACTIVITY_OVERLAY_STORE_LIMIT,
+    },
+  );
+  for (const entry of sessionActivityOverlayStore.entries()) {
+    upsertSessionActivityOverlay(
+      sessionActivityOverlays,
+      entry.sessionId,
+      entry.activity,
+    );
+    sessionSeqCursor.set(
+      entry.sessionId,
+      Math.max(
+        sessionSeqCursor.get(entry.sessionId) ?? 0,
+        entry.activity.seq + 1,
+      ),
+    );
   }
   let providerVersion = "unknown";
   const providerVersions = new Map<string, string>();
@@ -260,6 +290,23 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     if (minimum > current) {
       sessionSeqCursor.set(sessionId, minimum);
     }
+  }
+
+  function activitiesForSessionSnapshot(sessionId: string): SessionActivity[] {
+    return [
+      ...(sessionActivityOverlays.get(sessionId)?.values() ?? []),
+      ...(liveActivities.get(sessionId)?.values() ?? []),
+    ];
+  }
+
+  function mergeActivitiesForSessionSnapshot(
+    sessionId: string,
+    historical: SessionActivity[],
+  ): SessionActivity[] {
+    return mergeSessionActivities(
+      historical,
+      activitiesForSessionSnapshot(sessionId),
+    );
   }
 
   function sessionInputDedupeKey(
@@ -512,16 +559,22 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       decision,
     );
     if (completedActivity) {
-      const next = upsertLiveActivity(
-        liveActivities,
+      const next = upsertSessionActivityOverlay(
+        sessionActivityOverlays,
         action.sessionId,
-        materializeLiveActivityDraft(
+        materializeActivityOverlayDraft(
+          sessionActivityOverlays,
           liveActivities,
           action.sessionId,
           completedActivity,
           () => allocSeq(action.sessionId),
         ),
       );
+      try {
+        await sessionActivityOverlayStore.put(action.sessionId, next);
+      } catch (error) {
+        console.error("Failed to persist session activity overlay", error);
+      }
       broadcastLive(action.sessionId, {
         type: "activity_updated",
         sessionId: action.sessionId,
@@ -1163,7 +1216,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
             messages: cached.messages,
             activities: mergeSessionActivities(
               cached.activities,
-              liveActivities.get(sessionId)?.values() || [],
+              activitiesForSessionSnapshot(sessionId),
             ),
             pendingAction: findPendingActionForSession(
               pendingActions,
@@ -1181,9 +1234,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         activityLimit,
       });
       ensureSeqCursor(sessionId, log.nextSeq);
-      const activities = mergeSessionActivities(
+      const activities = mergeActivitiesForSessionSnapshot(
+        sessionId,
         log.activities,
-        liveActivities.get(sessionId)?.values() || [],
       );
       const history = buildSessionHistorySummary(
         log.totalMessages,
@@ -1262,7 +1315,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
           newMessages = delta.messages;
           newActivities = mergeSessionActivities(
             delta.activities,
-            liveActivities.get(sessionId)?.values() || [],
+            activitiesForSessionSnapshot(sessionId),
           ).filter((a) => (a.seq ?? 0) > since);
           nextSeq = delta.nextSeq;
           logRuntime = delta.runtime;
@@ -1278,9 +1331,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
           // Fallback to provider readSessionLog on any other error
           const log = await provider.readSessionLog!(session);
           ensureSeqCursor(sessionId, log.nextSeq);
-          const activities = mergeSessionActivities(
+          const activities = mergeActivitiesForSessionSnapshot(
+            sessionId,
             log.activities,
-            liveActivities.get(sessionId)?.values() || [],
           );
           newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
           newActivities = activities.filter((a) => (a.seq ?? 0) > since);
@@ -1297,9 +1350,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       } else {
         const log = await provider.readSessionLog!(session);
         ensureSeqCursor(sessionId, log.nextSeq);
-        const activities = mergeSessionActivities(
+        const activities = mergeActivitiesForSessionSnapshot(
+          sessionId,
           log.activities,
-          liveActivities.get(sessionId)?.values() || [],
         );
         newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
         newActivities = activities.filter((a) => (a.seq ?? 0) > since);
@@ -1375,7 +1428,11 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         return;
       }
       response.json(
-        await readSessionResources(provider, sessionId, liveActivities),
+        await readSessionResources(
+          provider,
+          sessionId,
+          activitiesForSessionSnapshot(sessionId),
+        ),
       );
     }),
   );
@@ -2812,6 +2869,35 @@ function upsertLiveActivity(
   return merged;
 }
 
+function upsertSessionActivityOverlay(
+  activityOverlays: Map<string, Map<string, SessionActivity>>,
+  sessionId: string,
+  activity: SessionActivity,
+): SessionActivity {
+  const sessionActivities =
+    activityOverlays.get(sessionId) || new Map<string, SessionActivity>();
+  const merged = mergeActivity(sessionActivities.get(activity.id), activity);
+  sessionActivities.set(activity.id, merged);
+  activityOverlays.set(sessionId, sessionActivities);
+  return merged;
+}
+
+function materializeActivityOverlayDraft(
+  activityOverlays: Map<string, Map<string, SessionActivity>>,
+  liveActivities: Map<string, Map<string, SessionActivity>>,
+  sessionId: string,
+  draft: AgentSessionActivityDraft,
+  allocSeq: () => number,
+): SessionActivity {
+  const existing =
+    activityOverlays.get(sessionId)?.get(draft.id) ??
+    liveActivities.get(sessionId)?.get(draft.id);
+  return materializeAgentActivityDraft(draft, {
+    createdAt: existing?.createdAt ?? Date.now(),
+    seq: existing?.seq ?? allocSeq(),
+  });
+}
+
 function materializeLiveActivityDraft(
   liveActivities: Map<string, Map<string, SessionActivity>>,
   sessionId: string,
@@ -3316,7 +3402,7 @@ function buildSessionHistorySummary(
 async function readSessionResources(
   provider: AgentProvider,
   sessionId: string,
-  liveActivities: Map<string, Map<string, SessionActivity>>,
+  activityOverlays: Iterable<SessionActivity>,
 ): Promise<SessionResourcesResponse> {
   const session = await readSession(provider, sessionId, false);
   const readLog = requireProviderMethod(
@@ -3325,10 +3411,7 @@ async function readSessionResources(
     "session resources",
   );
   const log = await readLog.call(provider, session);
-  const activities = mergeSessionActivities(
-    log.activities,
-    liveActivities.get(sessionId)?.values() || [],
-  );
+  const activities = mergeSessionActivities(log.activities, activityOverlays);
   const resources: SessionResource[] = buildSessionResources(
     log.messages,
     activities,

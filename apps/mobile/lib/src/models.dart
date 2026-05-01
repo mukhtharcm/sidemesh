@@ -1989,6 +1989,7 @@ class PendingAction {
     this.cwd,
     this.state,
     this.recoverable = false,
+    this.relatedActivityId,
     this.approval,
     this.userInput,
     this.elicitation,
@@ -2007,6 +2008,7 @@ class PendingAction {
   final String? cwd;
   final String? state;
   final bool recoverable;
+  final String? relatedActivityId;
   final PendingActionApprovalDetails? approval;
   final PendingActionUserInputRequest? userInput;
   final PendingActionElicitationRequest? elicitation;
@@ -2034,6 +2036,7 @@ class PendingAction {
     cwd: json['cwd'] as String?,
     state: _stringOrNull(json['state']),
     recoverable: _boolValue(json['recoverable']),
+    relatedActivityId: _stringOrNull(json['relatedActivityId']),
     approval: json['approval'] is Map<String, dynamic>
         ? PendingActionApprovalDetails.fromJson(
             json['approval'] as Map<String, dynamic>,
@@ -2065,6 +2068,7 @@ class PendingAction {
     'cwd': cwd,
     'state': state,
     'recoverable': recoverable,
+    'relatedActivityId': relatedActivityId,
     'approval': approval?.toJson(),
     'userInput': userInput?.toJson(),
     'elicitation': elicitation?.toJson(),
