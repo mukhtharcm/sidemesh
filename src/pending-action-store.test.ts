@@ -66,7 +66,7 @@ describe("pending action store", () => {
     }
   });
 
-  it("only persists recoverable interaction requests", async () => {
+  it("only persists recoverable user-input requests", async () => {
     const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-actions-"));
     try {
       const store = await PendingActionStore.open(
@@ -109,6 +109,33 @@ describe("pending action store", () => {
         },
         providerRequestId: "question-1",
         providerRequestKind: "provider/ask_user",
+      });
+
+      await store.put({
+        id: "form-1",
+        sessionId: "session-1",
+        kind: "elicitation",
+        title: "Structured input",
+        detail: "Enter token",
+        requestedAt: 125,
+        canApprove: false,
+        canApproveForSession: false,
+        canDecline: true,
+        recoverable: true,
+        elicitation: {
+          mode: "form",
+          message: "Enter token",
+          fields: [
+            {
+              key: "token",
+              type: "string",
+              title: "Token",
+              required: true,
+            },
+          ],
+        },
+        providerRequestId: "form-1",
+        providerRequestKind: "provider/elicitation",
       });
 
       assert.deepEqual(store.recoveredActions(), []);
