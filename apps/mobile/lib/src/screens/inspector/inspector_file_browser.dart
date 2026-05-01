@@ -19,6 +19,7 @@ InspectorSurface buildInspectorWorkspaceBrowserSurface({
   required ApiClient api,
   required String root,
   String? agentProvider,
+  String? sessionId,
   String? selectedPath,
 }) {
   return InspectorSurface(
@@ -31,6 +32,7 @@ InspectorSurface buildInspectorWorkspaceBrowserSurface({
       api: api,
       root: root,
       agentProvider: agentProvider,
+      sessionId: sessionId,
       initialSelectedPath: selectedPath,
     ),
   );
@@ -46,6 +48,7 @@ class WorkspaceBrowserPane extends StatefulWidget {
     required this.api,
     required this.root,
     this.agentProvider,
+    this.sessionId,
     this.initialSelectedPath,
   });
 
@@ -53,6 +56,7 @@ class WorkspaceBrowserPane extends StatefulWidget {
   final ApiClient api;
   final String root;
   final String? agentProvider;
+  final String? sessionId;
   final String? initialSelectedPath;
 
   @override
@@ -123,6 +127,7 @@ class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
                 api: widget.api,
                 root: widget.root,
                 agentProvider: widget.agentProvider,
+                sessionId: widget.sessionId,
                 selectedPath: _selected,
                 onOpenFile: (path, liveStream) {
                   setState(() {
@@ -156,6 +161,7 @@ class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
                       api: widget.api,
                       path: _selected!,
                       agentProvider: widget.agentProvider,
+                      sessionId: widget.sessionId,
                       observable: _viewerObservable,
                       dense: true,
                       liveStream: _liveStream,

@@ -23,6 +23,7 @@ class FileViewerPane extends StatefulWidget {
     required this.api,
     required this.path,
     this.agentProvider,
+    this.sessionId,
     this.liveStream,
     this.dense = false,
     this.observable,
@@ -32,6 +33,7 @@ class FileViewerPane extends StatefulWidget {
   final ApiClient api;
   final String path;
   final String? agentProvider;
+  final String? sessionId;
   final Stream<FsChangeEvent>? liveStream;
 
   /// When true, uses tighter padding suitable for embedding in a desktop
@@ -120,6 +122,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
         widget.host,
         widget.path,
         agentProvider: widget.agentProvider,
+        sessionId: widget.sessionId,
       );
       if (!mounted) return;
       setState(() {
@@ -176,6 +179,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
         path: widget.path,
         contents: _editController.text,
         agentProvider: widget.agentProvider,
+        sessionId: widget.sessionId,
       );
       if (!mounted) return;
       setState(() {

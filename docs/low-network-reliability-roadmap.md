@@ -32,6 +32,17 @@ Known limitation:
   require the daemon to scan the rollout log server-side. This is better for the
   client network, but not yet optimal for low-CPU VPSes or very large sessions.
 
+Live investigation on `cortex-dev` also found these concrete issues:
+
+- Reconnect scheduling was host-scoped: one healthy socket could clear the retry
+  timer for another dead socket on the same host.
+- `/api/sessions/:sessionId/events?since=0` could return much more JSON than the
+  paged transcript snapshot when the client cursor was stale.
+- Workspace filesystem routes refreshed their allowed roots by listing sessions,
+  so file reads/listing were indirectly coupled to provider session-list latency.
+- We need a lightweight daemon health endpoint so memory/cache growth can be
+  inspected from the app without SSH.
+
 ## Priority 1: Connection Awareness UI
 
 Goal: make the app honest about connection freshness everywhere.

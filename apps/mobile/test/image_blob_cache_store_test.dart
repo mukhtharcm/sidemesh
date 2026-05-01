@@ -132,6 +132,7 @@ class _ImageApi extends ApiClient {
     HostProfile host,
     String path, {
     String? agentProvider,
+    String? sessionId,
   }) async {
     requestCount += 1;
     return bytes;
@@ -157,6 +158,7 @@ class _DelayedImageApi extends ApiClient {
     HostProfile host,
     String path, {
     String? agentProvider,
+    String? sessionId,
   }) async {
     requestCount += 1;
     if (!started.isCompleted) {

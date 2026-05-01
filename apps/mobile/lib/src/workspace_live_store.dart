@@ -21,11 +21,17 @@ class WorkspaceLiveStore {
     HostProfile host,
     ApiClient api, {
     String? agentProvider,
+    String? sessionId,
   }) {
-    final key = _sessionKey(host.id);
+    final key = _sessionKey(host.id, sessionId: sessionId);
     var session = _sessions[key];
     if (session == null) {
-      session = _LiveSession(host: host, api: api);
+      session = _LiveSession(
+        key: key,
+        host: host,
+        api: api,
+        sessionId: sessionId,
+      );
       _sessions[key] = session;
       session._connect();
     }
@@ -37,12 +43,13 @@ class WorkspaceLiveStore {
     final session = handle._session;
     session._refs--;
     if (session._refs <= 0) {
-      _sessions.remove(_sessionKey(session.host.id));
+      _sessions.remove(session.key);
       session._dispose();
     }
   }
 
-  String _sessionKey(String hostId) => hostId;
+  String _sessionKey(String hostId, {String? sessionId}) =>
+      [hostId, sessionId ?? ''].join('|');
 }
 
 class WorkspaceLiveHandle {
@@ -57,17 +64,25 @@ class WorkspaceLiveHandle {
 }
 
 class _LiveSession {
-  _LiveSession({required this.host, required this.api}) {
+  _LiveSession({
+    required this.key,
+    required this.host,
+    required this.api,
+    this.sessionId,
+  }) : _reconnectSlotId = 'workspace-fs-live:$key' {
     HostReconnectScheduler.instance.registerSlot(
       host.id,
-      'workspace-fs-live',
+      _reconnectSlotId,
       ReconnectPriority.backgroundSocket,
       _connect,
     );
   }
 
+  final String key;
   final HostProfile host;
   final ApiClient api;
+  final String? sessionId;
+  final String _reconnectSlotId;
 
   int _refs = 0;
   WebSocketChannel? _channel;
@@ -82,7 +97,7 @@ class _LiveSession {
   void _connect() {
     if (_disposed || !host.enabled) return;
     try {
-      _channel = api.openFsLive(host);
+      _channel = api.openFsLive(host, sessionId: sessionId);
     } catch (_) {
       if (!host.enabled) return;
       _scheduleReconnect();
@@ -93,7 +108,7 @@ class _LiveSession {
       onError: (_) => _scheduleReconnect(),
       onDone: _scheduleReconnect,
     );
-    HostReconnectScheduler.instance.markConnected(host.id);
+    HostReconnectScheduler.instance.markConnected(host.id, _reconnectSlotId);
     // Re-subscribe previously tracked paths after reconnect.
     final previous = List<String>.from(_pathToWatchId.keys);
     _pathToWatchId.clear();
@@ -105,7 +120,7 @@ class _LiveSession {
   void _scheduleReconnect() {
     if (_disposed || !host.enabled) return;
     _channel = null;
-    HostReconnectScheduler.instance.markDisconnected(host.id);
+    HostReconnectScheduler.instance.markDisconnected(host.id, _reconnectSlotId);
   }
 
   void _handleMessage(dynamic raw) {
@@ -178,7 +193,7 @@ class _LiveSession {
 
   void _dispose() {
     _disposed = true;
-    HostReconnectScheduler.instance.unregisterSlot(host.id, 'workspace-fs-live');
+    HostReconnectScheduler.instance.unregisterSlot(host.id, _reconnectSlotId);
     _channel?.sink.close();
     _controller.close();
   }
