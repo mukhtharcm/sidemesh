@@ -201,7 +201,7 @@ class _SessionActionSheet extends StatelessWidget {
                                   style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(
                                         color: colors.textPrimary,
-                                        fontWeight: FontWeight.w900,
+                                        fontWeight: FontWeight.w800,
                                         letterSpacing: -0.2,
                                       ),
                                 ),
@@ -552,7 +552,7 @@ class _GitSummaryPill extends StatelessWidget {
       onTap: onTap,
       child: MeshPill(
         label: label,
-        icon: Icons.account_tree_outlined,
+        icon: Icons.account_tree_rounded,
         tone: dirty ? MeshPillTone.warning : MeshPillTone.neutral,
         mono: true,
       ),
@@ -704,7 +704,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                 const SizedBox(width: 6),
                 _CompactMetaChip(
                   label: '${gitStatus?.changed ?? 0}',
-                  icon: Icons.account_tree_outlined,
+                  icon: Icons.account_tree_rounded,
                   color: colors.warning,
                   onTap: onGitDetails,
                 ),
@@ -896,7 +896,7 @@ class _GitDetailsSheet extends StatelessWidget {
               )
             else if (status != null && !status!.isRepo)
               MeshEmptyState(
-                icon: Icons.account_tree_outlined,
+                icon: Icons.account_tree_rounded,
                 title: 'No Git repo found',
                 body:
                     'This session working directory is not inside a Git worktree.',
@@ -908,7 +908,7 @@ class _GitDetailsSheet extends StatelessWidget {
                 children: [
                   MeshPill(
                     label: branch ?? 'detached',
-                    icon: Icons.account_tree_outlined,
+                    icon: Icons.account_tree_rounded,
                     tone: MeshPillTone.accent,
                     mono: true,
                   ),
@@ -982,12 +982,12 @@ class _GitDetailsSheet extends StatelessWidget {
                   ),
                   OutlinedButton.icon(
                     onPressed: () => onShowDiff('staged'),
-                    icon: const Icon(Icons.inventory_2_outlined, size: 18),
+                    icon: const Icon(Icons.inventory_2_rounded, size: 18),
                     label: const Text('Staged diff'),
                   ),
                   OutlinedButton.icon(
                     onPressed: () => onShowDiff('remote'),
-                    icon: const Icon(Icons.cloud_outlined, size: 18),
+                    icon: const Icon(Icons.cloud_rounded, size: 18),
                     label: const Text('Remote diff'),
                   ),
                 ],
@@ -1308,7 +1308,7 @@ class _PinnedMessageSheet extends StatelessWidget {
                 const SizedBox(width: 6),
                 TextButton.icon(
                   onPressed: onUnpin,
-                  icon: const Icon(Icons.push_pin_outlined, size: 17),
+                  icon: const Icon(Icons.push_pin_rounded, size: 17),
                   label: const Text('Unpin'),
                 ),
               ],
@@ -1321,7 +1321,7 @@ class _PinnedMessageSheet extends StatelessWidget {
                 MeshPill(
                   label: pin.roleLabel,
                   icon: pin.role == 'assistant'
-                      ? Icons.smart_toy_outlined
+                      ? Icons.smart_toy_rounded
                       : Icons.person_outline_rounded,
                 ),
                 MeshPill(
@@ -2026,7 +2026,7 @@ _PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {
   if (action.isElicitation) {
     return _PendingActionKindMeta(
       kicker: 'FORM REQUIRED',
-      icon: Icons.fact_check_outlined,
+      icon: Icons.fact_check_rounded,
       accent: colors.info,
     );
   }

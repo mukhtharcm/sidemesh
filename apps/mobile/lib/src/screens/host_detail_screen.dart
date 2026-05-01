@@ -239,7 +239,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                   const SizedBox(height: 8),
                   if (data.workspaces.isEmpty)
                     const MeshEmptyState(
-                      icon: Icons.folder_off_outlined,
+                      icon: Icons.folder_off_rounded,
                       title: 'No workspaces',
                       body: 'Start a session and this host will remember it.',
                     )
@@ -1087,7 +1087,7 @@ class _WorkspaceCard extends StatelessWidget {
           const SizedBox(width: 10),
           MeshPill(
             label: '${workspace.sessionCount}',
-            icon: Icons.forum_outlined,
+            icon: Icons.forum_rounded,
             tone: MeshPillTone.neutral,
             mono: true,
           ),

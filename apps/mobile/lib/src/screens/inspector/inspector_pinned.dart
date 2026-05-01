@@ -61,7 +61,7 @@ class PinnedListPanel extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                Icons.push_pin_outlined,
+                Icons.push_pin_rounded,
                 size: 32,
                 color: colors.textTertiary,
               ),
@@ -117,7 +117,7 @@ class _PinnedListTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final roleIcon = pin.role == 'assistant'
-        ? Icons.smart_toy_outlined
+        ? Icons.smart_toy_rounded
         : Icons.person_outline_rounded;
     return Material(
       color: Colors.transparent,

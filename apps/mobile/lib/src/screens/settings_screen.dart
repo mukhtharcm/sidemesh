@@ -375,7 +375,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.rocket_launch_outlined, color: colors.accent),
+                    Icon(Icons.rocket_launch_rounded, color: colors.accent),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(

@@ -678,7 +678,7 @@ class _PortForwardCard extends StatelessWidget {
           Row(
             children: [
               Icon(
-                running ? Icons.lan_rounded : Icons.stop_circle_outlined,
+                running ? Icons.lan_rounded : Icons.stop_circle_rounded,
                 color: running ? colors.success : colors.textSecondary,
                 size: 18,
               ),
@@ -761,7 +761,7 @@ class _PortForwardCard extends StatelessWidget {
               if (running)
                 TextButton.icon(
                   onPressed: onStop,
-                  icon: const Icon(Icons.stop_circle_outlined),
+                  icon: const Icon(Icons.stop_circle_rounded),
                   label: const Text('Stop'),
                 ),
             ],
