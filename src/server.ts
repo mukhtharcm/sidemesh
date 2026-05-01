@@ -53,6 +53,7 @@ import {
 import {
   parsePendingActionResponseBody,
   toPublicPendingAction,
+  type PendingActionElicitationResponse,
   type PendingActionResponseInput,
 } from "./approvals.js";
 import { summarizeProviderConfig } from "./config.js";
@@ -309,6 +310,22 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     );
   }
 
+  async function seedSessionSeqCursorFromLog(sessionId: string): Promise<void> {
+    if (
+      !hasProviderMethod(provider, "readSessionThread") ||
+      !hasProviderMethod(provider, "readSessionLog")
+    ) {
+      return;
+    }
+    try {
+      const session = await readSession(provider, sessionId, false);
+      const log = await provider.readSessionLog!(session);
+      ensureSeqCursor(sessionId, log.nextSeq);
+    } catch (error) {
+      console.error("Failed to seed session seq cursor", error);
+    }
+  }
+
   function sessionInputDedupeKey(
     sessionId: string,
     clientMessageId: string,
@@ -531,6 +548,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     const input: AgentSessionInputItem[] = [
       { type: "text", text, text_elements: [] },
     ];
+    await seedSessionSeqCursorFromLog(action.sessionId);
     const submittedMessage = buildSubmittedUserMessage(
       input,
       null,
@@ -2372,6 +2390,8 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       }
       await closeWebSocketServer(wsServer);
       await closeHttpServer(server);
+      await pendingActionStore.drain();
+      await sessionActivityOverlayStore.drain();
       await provider.close?.();
     },
   };
@@ -3197,10 +3217,7 @@ function buildRecoveredPendingActionResponseText(
     if (!responseAction) {
       return null;
     }
-    const content =
-      response && "content" in response && response.content !== undefined
-        ? JSON.stringify(response.content, null, 2)
-        : "(no content)";
+    const fieldCount = recoveredElicitationFieldNames(response).length;
     const prompt =
       action.elicitation?.message?.trim() || action.detail || action.title;
     return [
@@ -3208,8 +3225,9 @@ function buildRecoveredPendingActionResponseText(
       "",
       `Request: ${prompt}`,
       `Decision: ${responseAction}`,
-      "Content:",
-      content,
+      fieldCount > 0
+        ? `Structured field values supplied: ${fieldCount} value(s). Values were omitted from chat after restart.`
+        : "No structured field values were supplied.",
     ].join("\n");
   }
 
@@ -3284,7 +3302,7 @@ function buildRecoveredPendingActionActivityDraft(
         fields: action.elicitation?.fields ?? [],
       },
       output: responseAction,
-      result: response ?? null,
+      result: buildRecoveredElicitationResultSummary(response),
       isError: false,
       semantic: {
         category: "interaction",
@@ -3295,6 +3313,33 @@ function buildRecoveredPendingActionActivityDraft(
   }
 
   return null;
+}
+
+function buildRecoveredElicitationResultSummary(
+  response: PendingActionElicitationResponse | null,
+): Record<string, unknown> | null {
+  if (!response) {
+    return null;
+  }
+  const fields = recoveredElicitationFieldNames(response);
+  return {
+    action: typeof response.action === "string" ? response.action : "cancel",
+    message:
+      fields.length > 0
+        ? `Structured response submitted with ${fields.length} field value(s); values omitted after restart.`
+        : "Structured response submitted without field values.",
+    ...(fields.length > 0 ? { fieldNames: fields } : {}),
+  };
+}
+
+function recoveredElicitationFieldNames(
+  response: PendingActionElicitationResponse | null,
+): string[] {
+  const content = response?.content;
+  if (!content || typeof content !== "object" || Array.isArray(content)) {
+    return [];
+  }
+  return Object.keys(content).filter((key) => key.trim().length > 0).sort();
 }
 
 async function loadCachedSessionRuntime(
