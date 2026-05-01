@@ -16,6 +16,7 @@ import '../theme/app_colors.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/appearance_sheet.dart';
+import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
 import '../onboarding_store.dart';
 import 'desktop_welcome_overlay.dart';
@@ -399,55 +400,28 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                   ),
                 ),
                 const SizedBox(height: 18),
-                _SectionLabel(text: 'Approval'),
-                const SizedBox(height: 8),
-                for (final policy in ApprovalPolicy.values)
-                  _ChoiceTile<ApprovalPolicy>(
-                    value: policy,
-                    groupValue: _draft.approval,
-                    title: policy.label,
-                    subtitle: policy.description,
-                    danger: policy == ApprovalPolicy.never,
-                    onSelected: (value) {
-                      setState(() => _draft = _draft.copyWith(approval: value));
-                    },
+                LaunchOptionsForm(
+                  capabilities: const LaunchOptionsCapabilities(
+                    supportsApprovalPolicy: true,
+                    supportsSandboxMode: true,
+                    supportsFastMode: true,
+                    supportsWebSearch: true,
                   ),
-                const SizedBox(height: 18),
-                _SectionLabel(text: 'Sandbox'),
-                const SizedBox(height: 8),
-                for (final sandbox in SandboxMode.values)
-                  _ChoiceTile<SandboxMode>(
-                    value: sandbox,
-                    groupValue: _draft.sandbox,
-                    title: sandbox.label,
-                    subtitle: sandbox.description,
-                    danger: sandbox == SandboxMode.dangerFullAccess,
-                    onSelected: (value) {
-                      setState(() => _draft = _draft.copyWith(sandbox: value));
-                    },
+                  value: LaunchOptionsValue(
+                    approval: _draft.approval,
+                    sandbox: _draft.sandbox,
+                    fastMode: _draft.fastMode,
+                    webSearch: _draft.webSearch,
                   ),
-                const SizedBox(height: 18),
-                _SectionLabel(text: 'Launch behavior'),
-                const SizedBox(height: 8),
-                _ToggleTile(
-                  icon: Icons.bolt_rounded,
-                  title: 'Fast mode',
-                  subtitle:
-                      'Ask for the fast service tier when the chosen model supports it.',
-                  value: _draft.fastMode,
-                  onChanged: (value) {
-                    setState(() => _draft = _draft.copyWith(fastMode: value));
-                  },
-                ),
-                const SizedBox(height: 10),
-                _ToggleTile(
-                  icon: Icons.public_rounded,
-                  title: 'Live web search',
-                  subtitle:
-                      'Start new sessions with provider web search enabled by default.',
-                  value: _draft.webSearch,
-                  onChanged: (value) {
-                    setState(() => _draft = _draft.copyWith(webSearch: value));
+                  onChanged: (next) {
+                    setState(() {
+                      _draft = _draft.copyWith(
+                        approval: next.approval,
+                        sandbox: next.sandbox,
+                        fastMode: next.fastMode,
+                        webSearch: next.webSearch,
+                      );
+                    });
                   },
                 ),
                 if (_draft.sandbox == SandboxMode.dangerFullAccess ||
@@ -1139,107 +1113,6 @@ class _ActionRow extends StatelessWidget {
               const SizedBox(width: 8),
               Icon(Icons.chevron_right_rounded, color: colors.textTertiary),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Text(
-      text.toUpperCase(),
-      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-        color: colors.textTertiary,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.1,
-      ),
-    );
-  }
-}
-
-class _ChoiceTile<T> extends StatelessWidget {
-  const _ChoiceTile({
-    required this.value,
-    required this.groupValue,
-    required this.title,
-    required this.subtitle,
-    required this.onSelected,
-    this.danger = false,
-  });
-
-  final T value;
-  final T groupValue;
-  final String title;
-  final String subtitle;
-  final ValueChanged<T> onSelected;
-  final bool danger;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final selected = value == groupValue;
-    final accent = danger ? colors.warning : colors.accent;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => onSelected(value),
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: selected
-                  ? accent.withValues(alpha: 0.09)
-                  : colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: selected ? accent.withValues(alpha: 0.5) : colors.border,
-              ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  selected
-                      ? Icons.radio_button_checked_rounded
-                      : Icons.radio_button_off_rounded,
-                  color: selected ? accent : colors.textTertiary,
-                  size: 18,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: colors.textPrimary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
           ),
         ),
       ),
