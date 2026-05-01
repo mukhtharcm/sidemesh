@@ -106,6 +106,10 @@ export class CodexAgentProvider
     await this.bridge.start();
   }
 
+  public async close(): Promise<void> {
+    await this.bridge.close();
+  }
+
   public async getVersion(): Promise<string> {
     try {
       return execFileSync(this.codexBin, ["--version"], { encoding: "utf8" }).trim();

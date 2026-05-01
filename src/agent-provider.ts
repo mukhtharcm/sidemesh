@@ -296,6 +296,7 @@ export interface AgentProviderCore extends EventEmitter<AgentProviderEvents> {
   readonly capabilities: AgentProviderCapabilities;
 
   start(): Promise<void>;
+  close?(): Promise<void>;
   getVersion(): Promise<string>;
 }
 
