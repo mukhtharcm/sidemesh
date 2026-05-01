@@ -16,6 +16,7 @@ void main() {
     await tester.pumpWidget(
       SidemeshApp(
         themeController: controller,
+        onboardingCompleted: true,
         launchState: const SidemeshWindowLaunchState(
           arguments: SidemeshWindowArguments.mainWindow(),
         ),
