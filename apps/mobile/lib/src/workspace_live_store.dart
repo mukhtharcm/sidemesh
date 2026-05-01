@@ -5,6 +5,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'api_client.dart';
 import 'fs_models.dart';
+import 'host_reconnect_scheduler.dart';
 import 'models.dart';
 
 /// Reference-counted per-host WebSocket to `/api/fs/live`. Consumers call
@@ -56,7 +57,14 @@ class WorkspaceLiveHandle {
 }
 
 class _LiveSession {
-  _LiveSession({required this.host, required this.api});
+  _LiveSession({required this.host, required this.api}) {
+    HostReconnectScheduler.instance.registerSlot(
+      host.id,
+      'workspace-fs-live',
+      ReconnectPriority.backgroundSocket,
+      _connect,
+    );
+  }
 
   final HostProfile host;
   final ApiClient api;
@@ -68,7 +76,6 @@ class _LiveSession {
   final Map<String, String> _pathToWatchId = {};
   int _nextId = 1;
   bool _disposed = false;
-  Timer? _reconnectTimer;
 
   Stream<FsChangeEvent> get stream => _controller.stream;
 
@@ -86,6 +93,7 @@ class _LiveSession {
       onError: (_) => _scheduleReconnect(),
       onDone: _scheduleReconnect,
     );
+    HostReconnectScheduler.instance.markConnected(host.id);
     // Re-subscribe previously tracked paths after reconnect.
     final previous = List<String>.from(_pathToWatchId.keys);
     _pathToWatchId.clear();
@@ -97,8 +105,7 @@ class _LiveSession {
   void _scheduleReconnect() {
     if (_disposed || !host.enabled) return;
     _channel = null;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 3), _connect);
+    HostReconnectScheduler.instance.markDisconnected(host.id);
   }
 
   void _handleMessage(dynamic raw) {
@@ -171,7 +178,7 @@ class _LiveSession {
 
   void _dispose() {
     _disposed = true;
-    _reconnectTimer?.cancel();
+    HostReconnectScheduler.instance.unregisterSlot(host.id, 'workspace-fs-live');
     _channel?.sink.close();
     _controller.close();
   }
