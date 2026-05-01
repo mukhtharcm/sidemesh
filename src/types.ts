@@ -598,6 +598,7 @@ export interface PendingAction {
   cwd?: string;
   state?: "pending" | "recovered";
   recoverable?: boolean;
+  relatedActivityId?: string;
   approval?: PendingActionApproval;
   userInput?: PendingActionUserInputRequest;
   elicitation?: PendingActionElicitationRequest;

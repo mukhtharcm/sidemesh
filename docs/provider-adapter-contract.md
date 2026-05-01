@@ -112,6 +112,10 @@ The daemon represents interactive requests as `PendingAction` records:
 - `state: "recovered"` for a request restored after daemon restart.
 - `recoverable: true` when Sidemesh can safely send the answer as a follow-up if
   the original provider callback is gone.
+- `recoverable: false` when an adapter knows the request must not be replayed
+  after restart.
+- `relatedActivityId` when the pending action corresponds to a timeline tool
+  activity that should be marked completed when a recovered response is sent.
 
 The daemon persists recoverable interaction requests in its state directory.
 When the provider process is still alive, `respondToPendingAction()` resolves
