@@ -814,6 +814,7 @@ function normalizeToolCategory(
     case "filesystem":
     case "network":
     case "command":
+    case "interaction":
     case "session":
     case "memory":
     case "task":
@@ -831,6 +832,8 @@ function normalizeToolAction(value: unknown): ToolActivitySemanticAction | null 
     case "search":
     case "list":
     case "fetch":
+    case "ask":
+    case "report":
     case "mode_change":
     case "invoke":
     case "unknown":

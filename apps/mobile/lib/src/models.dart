@@ -1987,6 +1987,8 @@ class PendingAction {
     required this.canDecline,
     this.sessionTitle,
     this.cwd,
+    this.state,
+    this.recoverable = false,
     this.approval,
     this.userInput,
     this.elicitation,
@@ -2003,6 +2005,8 @@ class PendingAction {
   final bool canDecline;
   final String? sessionTitle;
   final String? cwd;
+  final String? state;
+  final bool recoverable;
   final PendingActionApprovalDetails? approval;
   final PendingActionUserInputRequest? userInput;
   final PendingActionElicitationRequest? elicitation;
@@ -2014,6 +2018,7 @@ class PendingAction {
       kind == 'permissions';
   bool get isUserInput => kind == 'user_input' && userInput != null;
   bool get isElicitation => kind == 'elicitation' && elicitation != null;
+  bool get isRecovered => state == 'recovered';
 
   factory PendingAction.fromJson(Map<String, dynamic> json) => PendingAction(
     id: _stringValue(json['id']),
@@ -2027,6 +2032,8 @@ class PendingAction {
     canDecline: _boolValue(json['canDecline']),
     sessionTitle: json['sessionTitle'] as String?,
     cwd: json['cwd'] as String?,
+    state: _stringOrNull(json['state']),
+    recoverable: _boolValue(json['recoverable']),
     approval: json['approval'] is Map<String, dynamic>
         ? PendingActionApprovalDetails.fromJson(
             json['approval'] as Map<String, dynamic>,
@@ -2056,6 +2063,8 @@ class PendingAction {
     'canDecline': canDecline,
     'sessionTitle': sessionTitle,
     'cwd': cwd,
+    'state': state,
+    'recoverable': recoverable,
     'approval': approval?.toJson(),
     'userInput': userInput?.toJson(),
     'elicitation': elicitation?.toJson(),

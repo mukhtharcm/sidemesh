@@ -14,6 +14,8 @@ void main() {
       'canApprove': false,
       'canApproveForSession': false,
       'canDecline': false,
+      'state': 'recovered',
+      'recoverable': true,
       'userInput': {
         'question': 'Which environment?',
         'choices': ['staging', 'production'],
@@ -22,6 +24,8 @@ void main() {
     });
 
     expect(action.isUserInput, isTrue);
+    expect(action.isRecovered, isTrue);
+    expect(action.recoverable, isTrue);
     expect(action.userInput?.choices, ['staging', 'production']);
   });
 
