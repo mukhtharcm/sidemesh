@@ -55,6 +55,7 @@ import '../widgets/composer_paste_text_action.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/diff_view.dart';
 import '../widgets/mesh_widgets.dart';
+import 'package:sidemesh_mobile/src/host_reconnect_scheduler.dart';
 import '../widgets/provider_badge.dart';
 import '../widgets/syntax_code_block.dart';
 
@@ -599,8 +600,6 @@ class _SessionScreenState extends State<SessionScreen>
   Timer? _liveFlushTimer;
   Timer? _sessionCachePersistTimer;
   Timer? _pendingSendRetryTimer;
-  Timer? _reconnectTimer;
-  int _reconnectAttempts = 0;
   bool _disposed = false;
   bool _retryingPendingSend = false;
   final Set<String> _completedPendingSendIds = <String>{};
@@ -783,6 +782,21 @@ class _SessionScreenState extends State<SessionScreen>
     unawaited(_bootstrapSnapshot());
     unawaited(_loadNodeInfo());
     _connectLive();
+    HostReconnectScheduler.instance.registerSlot(
+      widget.host.id,
+      'session-live',
+      ReconnectPriority.foregroundSession,
+      () {
+        unawaited(
+          _loadSnapshot(
+            messageLimit: _messageLimit,
+            activityLimit: _activityLimit,
+            scrollToBottom: false,
+          ),
+        );
+        _connectLive();
+      },
+    );
   }
 
   Future<void> _bootstrapSnapshot() async {
@@ -1137,7 +1151,7 @@ class _SessionScreenState extends State<SessionScreen>
     _persistCurrentSessionLog();
     unawaited(_readStore.flush());
     WidgetsBinding.instance.removeObserver(this);
-    _reconnectTimer?.cancel();
+    HostReconnectScheduler.instance.unregisterSlot(widget.host.id, 'session-live');
     _sessionCachePersistTimer?.cancel();
     _pendingSendRetryTimer?.cancel();
     _composerController.removeListener(_handleComposerChanged);
@@ -1650,8 +1664,6 @@ class _SessionScreenState extends State<SessionScreen>
       // actually fails. Force a reconnect + re-sync on resume so the user
       // sees fresh state immediately — prefer the cheap events delta over
       // a full snapshot whenever we have a known lastSeq.
-      _reconnectAttempts = 0;
-      _reconnectTimer?.cancel();
       unawaited(_resyncAfterResume());
       _connectLive();
       _schedulePendingSendRetry();
@@ -2092,7 +2104,7 @@ class _SessionScreenState extends State<SessionScreen>
       );
       // Successful connect — reset the backoff counter. If the stream dies
       // immediately onDone will re-arm it.
-      _reconnectAttempts = 0;
+      HostReconnectScheduler.instance.markConnected(widget.host.id);
     } catch (_) {
       _channel = null;
       if (!widget.host.enabled) return;
@@ -2116,30 +2128,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _scheduleReconnect() {
     if (_disposed || !mounted || !widget.host.enabled) return;
-    _reconnectTimer?.cancel();
-    _reconnectAttempts = (_reconnectAttempts + 1).clamp(1, 6);
-    // 0.5s, 1s, 2s, 4s, 8s, 15s
-    final delayMs = switch (_reconnectAttempts) {
-      1 => 500,
-      2 => 1000,
-      3 => 2000,
-      4 => 4000,
-      5 => 8000,
-      _ => 15000,
-    };
-    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
-      if (!mounted || _disposed || !widget.host.enabled) return;
-      // Re-sync on every reconnect: the session may have advanced while we
-      // were disconnected, and we have no replay mechanism.
-      unawaited(
-        _loadSnapshot(
-          messageLimit: _messageLimit,
-          activityLimit: _activityLimit,
-          scrollToBottom: false,
-        ),
-      );
-      _connectLive();
-    });
+    HostReconnectScheduler.instance.markDisconnected(widget.host.id);
   }
 
   void _handleEvent(LiveEvent event) {
