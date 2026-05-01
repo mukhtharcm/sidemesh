@@ -381,7 +381,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                       child: Text(
                         'New session defaults',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
+                          fontWeight: AppWeights.title,
                         ),
                       ),
                     ),
@@ -432,7 +432,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: colors.warning.withValues(alpha: 0.11),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: AppShapes.input,
                       border: Border.all(
                         color: colors.warning.withValues(alpha: 0.3),
                       ),
@@ -822,7 +822,7 @@ class _SettingsContent extends StatelessWidget {
                 height: 38,
                 decoration: BoxDecoration(
                   color: colors.accentMuted,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: AppShapes.input,
                   border: Border.all(
                     color: colors.accent.withValues(alpha: 0.28),
                   ),
@@ -838,7 +838,7 @@ class _SettingsContent extends StatelessWidget {
                     Text(
                       'Settings',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
+                        fontWeight: AppWeights.title,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -1157,7 +1157,7 @@ class _ActionRow extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         onTap: busy ? null : onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
@@ -1191,7 +1191,7 @@ class _ActionRow extends StatelessWidget {
                     Text(
                       title,
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.emphasis,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -1237,7 +1237,7 @@ class _ToggleTile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
       child: Row(
@@ -1256,7 +1256,7 @@ class _ToggleTile extends StatelessWidget {
                   title,
                   style: Theme.of(
                     context,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.emphasis),
                 ),
                 const SizedBox(height: 2),
                 Text(

@@ -9,6 +9,7 @@ import '../session_message_seed_store.dart';
 import '../session_policy_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
 import '../widgets/launch_controls.dart';
 import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
@@ -138,7 +139,7 @@ class _HostPickerSurface extends StatelessWidget {
                     height: 38,
                     decoration: BoxDecoration(
                       color: colors.accentMuted,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: AppShapes.input,
                       border: Border.all(
                         color: colors.accent.withValues(alpha: 0.35),
                       ),
@@ -158,7 +159,7 @@ class _HostPickerSurface extends StatelessWidget {
                         Text(
                           'Choose host',
                           style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w800),
+                              ?.copyWith(fontWeight: AppWeights.title),
                         ),
                         Text(
                           'Pick where the new agent session should run.',
@@ -209,7 +210,7 @@ class _HostPickerSurface extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context).textTheme.titleSmall
-                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                      ?.copyWith(fontWeight: AppWeights.emphasis),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
@@ -1231,7 +1232,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           height: 38,
           decoration: BoxDecoration(
             color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppShapes.input,
             border: Border.all(color: colors.accent.withValues(alpha: 0.24)),
           ),
           alignment: Alignment.center,
@@ -1245,7 +1246,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               Text(
                 'New $_providerName session',
                 style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
+                  fontWeight: AppWeights.title,
                   letterSpacing: -0.4,
                 ),
               ),
@@ -1256,7 +1257,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: colors.textSecondary,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: AppWeights.body,
                 ),
               ),
             ],
@@ -1337,14 +1338,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         onTap: _submitting ? null : _toggleAdvanced,
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
           decoration: BoxDecoration(
             color: colors.surfaceMuted,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppShapes.input,
             border: Border.all(color: colors.border),
           ),
           child: Row(
@@ -1359,7 +1360,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                       'Tune launch',
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: colors.textPrimary,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: AppWeights.title,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -1794,7 +1795,7 @@ class _PanelHeading extends StatelessWidget {
               Text(
                 title,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
+                  fontWeight: AppWeights.title,
                   color: colors.textPrimary,
                 ),
               ),
@@ -1828,7 +1829,7 @@ class _ErrorPanel extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: colors.dangerMuted,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.danger.withValues(alpha: 0.35)),
       ),
       child: Row(
@@ -1902,7 +1903,7 @@ class _LaunchFieldFrame extends StatelessWidget {
                   label,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: colors.textSecondary,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: AppWeights.title,
                     letterSpacing: 0.4,
                   ),
                 ),
@@ -1972,7 +1973,7 @@ class _LaunchSelectorRow extends StatelessWidget {
                       label,
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: colors.textSecondary,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: AppWeights.title,
                         letterSpacing: 0.4,
                       ),
                     ),
@@ -1981,7 +1982,7 @@ class _LaunchSelectorRow extends StatelessWidget {
                       value,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: colors.textPrimary,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: AppWeights.title,
                       ),
                     ),
                     if (detail.trim().isNotEmpty) ...[
@@ -1993,7 +1994,7 @@ class _LaunchSelectorRow extends StatelessWidget {
                         style: monoStyle(
                           color: colors.textTertiary,
                           fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: AppWeights.emphasis,
                         ),
                       ),
                     ],
@@ -2069,13 +2070,13 @@ class _ModelSelectionCard extends StatelessWidget {
     final colors = context.colors;
     return InkWell(
       onTap: loading ? null : onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: AppShapes.input,
       child: Container(
         width: double.infinity,
         padding: EdgeInsets.all(compact ? 10 : 12),
         decoration: BoxDecoration(
           color: colors.surfaceMuted,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: AppShapes.input,
           border: Border.all(color: colors.border),
         ),
         child: Column(
@@ -2089,7 +2090,7 @@ class _ModelSelectionCard extends StatelessWidget {
                   child: Text(
                     title,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                      fontWeight: AppWeights.emphasis,
                     ),
                   ),
                 ),
@@ -2116,7 +2117,7 @@ class _ModelSelectionCard extends StatelessWidget {
                   value,
                   style: Theme.of(
                     context,
-                  ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                  ).textTheme.bodyLarge?.copyWith(fontWeight: AppWeights.body),
                 ),
                 ...badges.map((badge) => _InlineBadge(label: badge)),
               ],
@@ -2199,7 +2200,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                           height: 4,
                           decoration: BoxDecoration(
                             color: colors.borderStrong.withValues(alpha: 0.55),
-                            borderRadius: BorderRadius.circular(999),
+                            borderRadius: AppShapes.pill,
                           ),
                         ),
                       ),
@@ -2212,7 +2213,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                             height: 38,
                             decoration: BoxDecoration(
                               color: colors.accentMuted,
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: AppShapes.input,
                               border: Border.all(
                                 color: colors.accent.withValues(alpha: 0.24),
                               ),
@@ -2234,7 +2235,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                                   style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(
                                         color: colors.textPrimary,
-                                        fontWeight: FontWeight.w800,
+                                        fontWeight: AppWeights.title,
                                         letterSpacing: -0.2,
                                       ),
                                 ),
@@ -2244,7 +2245,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                                   style: Theme.of(context).textTheme.bodySmall
                                       ?.copyWith(
                                         color: colors.textSecondary,
-                                        fontWeight: FontWeight.w600,
+                                        fontWeight: AppWeights.body,
                                       ),
                                 ),
                               ],
@@ -2262,7 +2263,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                       DecoratedBox(
                         decoration: BoxDecoration(
                           color: colors.surface,
-                          borderRadius: BorderRadius.circular(18),
+                          borderRadius: AppShapes.card,
                           border: Border.all(color: colors.border),
                         ),
                         child: Column(
@@ -2357,7 +2358,7 @@ class _ProviderPickerTile extends StatelessWidget {
                   color: selected
                       ? colors.accentMuted
                       : colors.surfaceMuted.withValues(alpha: 0.8),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: AppShapes.input,
                   border: Border.all(
                     color: selected
                         ? colors.accent.withValues(alpha: 0.38)
@@ -2388,7 +2389,7 @@ class _ProviderPickerTile extends StatelessWidget {
                             style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(
                                   color: colors.textPrimary,
-                                  fontWeight: FontWeight.w800,
+                                  fontWeight: AppWeights.title,
                                 ),
                           ),
                         ),
@@ -2408,7 +2409,7 @@ class _ProviderPickerTile extends StatelessWidget {
                       style: monoStyle(
                         color: colors.textSecondary,
                         fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.emphasis,
                       ),
                     ),
                     const SizedBox(height: 7),
@@ -2504,7 +2505,7 @@ class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
               'Choose profile',
               style: Theme.of(
                 context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ).textTheme.titleLarge?.copyWith(fontWeight: AppWeights.emphasis),
             ),
             const SizedBox(height: 6),
             Text(
@@ -2661,7 +2662,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
               'Choose model',
               style: Theme.of(
                 context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ).textTheme.titleLarge?.copyWith(fontWeight: AppWeights.emphasis),
             ),
             const SizedBox(height: 6),
             Text(
@@ -2776,12 +2777,12 @@ class _ModelPickerTile extends StatelessWidget {
     final colors = context.colors;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: AppShapes.input,
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: colors.surfaceMuted,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: AppShapes.input,
           border: Border.all(color: selected ? colors.accent : colors.border),
         ),
         child: Column(
@@ -2793,7 +2794,7 @@ class _ModelPickerTile extends StatelessWidget {
                   child: Text(
                     title,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                      fontWeight: AppWeights.emphasis,
                     ),
                   ),
                 ),
@@ -2807,7 +2808,7 @@ class _ModelPickerTile extends StatelessWidget {
                 style: monoStyle(
                   color: colors.textSecondary,
                   fontSize: 12,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: AppWeights.body,
                 ),
               ),
             ],
@@ -2846,7 +2847,7 @@ class _InlineBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppShapes.pill,
         border: Border.all(color: colors.border),
       ),
       child: Text(
