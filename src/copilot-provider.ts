@@ -3276,9 +3276,10 @@ function normalizeStoredCopilotActivities(
       continue;
     }
 
+    const storedToolName = copilotStoredToolPresentationName(stored);
     const presentation = describeCopilotToolPresentation({
       toolCallId: stored.id,
-      toolName: stored.toolName,
+      toolName: storedToolName,
       args: stored.args,
       result: stored.result,
       metadata: null,
@@ -3308,6 +3309,39 @@ function normalizeStoredCopilotActivities(
     normalized.push(stored);
   }
   return normalized;
+}
+
+function copilotStoredToolPresentationName(
+  activity: ToolActivity,
+): string {
+  const toolName = activity.toolName.trim();
+  const toolKey = normalizeCopilotToolKey(toolName);
+  if (
+    toolKey &&
+    toolKey !== "tool" &&
+    toolKey !== "unknown" &&
+    toolKey !== "tool_execution"
+  ) {
+    return toolName;
+  }
+  const titleToolName = copilotToolNameFromTitle(activity.title);
+  return titleToolName ?? toolName;
+}
+
+function copilotToolNameFromTitle(title: string | null): string | null {
+  const firstToken = title?.trim().split(/\s+/)[0];
+  if (!firstToken) {
+    return null;
+  }
+  const key = normalizeCopilotToolKey(firstToken);
+  if (
+    COPILOT_HIDDEN_TOOL_KEYS.has(key) ||
+    COPILOT_COMMENTARY_TOOL_KEYS.has(key) ||
+    COPILOT_TASK_TOOL_KEYS.has(key)
+  ) {
+    return firstToken;
+  }
+  return null;
 }
 
 function normalizeCopilotToolKey(value: unknown): string {
