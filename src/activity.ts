@@ -5,14 +5,9 @@ import type {
   ContextCompactionActivity,
   FileChangeActivity,
   ImageGenerationActivity,
-  PlanActivity,
-  ReasoningActivity,
   SessionActivity,
   SessionCommandActionSummary,
   SessionActivityChange,
-  SubagentActivity,
-  SystemEventActivity,
-  TaskActivity,
   ToolActivity,
   ToolActivitySemantic,
   ToolActivitySemanticAction,
@@ -275,92 +270,15 @@ export function mergeActivity(
     };
   }
 
-  if (incoming.type === "file_change") {
-    const existingFileChange = existing as FileChangeActivity;
-    return {
-      ...incoming,
-      createdAt: existing.createdAt,
-      seq: existing.seq,
-      changes:
-        incoming.changes.length > 0
-          ? incoming.changes
-          : existingFileChange.changes,
-    };
-  }
-
-  if (incoming.type === "plan") {
-    const existingPlan = existing as PlanActivity;
-    return {
-      ...incoming,
-      createdAt: existing.createdAt,
-      seq: existing.seq,
-      title: incoming.title || existingPlan.title,
-      summary: incoming.summary ?? existingPlan.summary,
-      content: incoming.content ?? existingPlan.content,
-    };
-  }
-
-  if (incoming.type === "task") {
-    const existingTask = existing as TaskActivity;
-    return {
-      ...incoming,
-      createdAt: existing.createdAt,
-      seq: existing.seq,
-      title: incoming.title || existingTask.title,
-      summary: incoming.summary ?? existingTask.summary,
-    };
-  }
-
-  if (incoming.type === "subagent") {
-    const existingSubagent = existing as SubagentActivity;
-    return {
-      ...incoming,
-      createdAt: existing.createdAt,
-      seq: existing.seq,
-      agentId: incoming.agentId ?? existingSubagent.agentId,
-      agentName: incoming.agentName ?? existingSubagent.agentName,
-      agentDisplayName:
-        incoming.agentDisplayName ?? existingSubagent.agentDisplayName,
-      description: incoming.description ?? existingSubagent.description,
-      summary: incoming.summary ?? existingSubagent.summary,
-      durationMs: incoming.durationMs ?? existingSubagent.durationMs,
-      model: incoming.model ?? existingSubagent.model,
-      totalTokens: incoming.totalTokens ?? existingSubagent.totalTokens,
-      totalToolCalls:
-        incoming.totalToolCalls ?? existingSubagent.totalToolCalls,
-      error: incoming.error ?? existingSubagent.error,
-    };
-  }
-
-  if (incoming.type === "reasoning") {
-    const existingReasoning = existing as ReasoningActivity;
-    return {
-      ...incoming,
-      createdAt: existing.createdAt,
-      seq: existing.seq,
-      reasoningId: incoming.reasoningId ?? existingReasoning.reasoningId,
-      title: incoming.title ?? existingReasoning.title,
-      content: incoming.content ?? existingReasoning.content,
-    };
-  }
-
-  if (incoming.type === "system_event") {
-    const existingSystemEvent = existing as SystemEventActivity;
-    return {
-      ...incoming,
-      createdAt: existing.createdAt,
-      seq: existing.seq,
-      title: incoming.title || existingSystemEvent.title,
-      detail: incoming.detail ?? existingSystemEvent.detail,
-      level: incoming.level ?? existingSystemEvent.level,
-    };
-  }
-
-  const fallback = incoming as SessionActivity;
+  const existingFileChange = existing as FileChangeActivity;
   return {
-    ...fallback,
+    ...incoming,
     createdAt: existing.createdAt,
     seq: existing.seq,
+    changes:
+      incoming.changes.length > 0
+        ? incoming.changes
+        : existingFileChange.changes,
   };
 }
 
