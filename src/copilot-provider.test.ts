@@ -372,7 +372,7 @@ describe("Copilot provider", () => {
                 }),
                 storedToolActivity({
                   id: "report-intent-tool",
-                  toolName: "tool",
+                  toolName: "report_intent",
                   title: "report_intent {\"intent\":\"Working\"}",
                   args: { intent: "Working" },
                   seq: 1,
