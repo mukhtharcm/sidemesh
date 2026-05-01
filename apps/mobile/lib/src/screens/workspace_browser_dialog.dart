@@ -18,6 +18,7 @@ Future<void> showWorkspaceBrowserDialog(
   required ApiClient api,
   required String root,
   String? agentProvider,
+  String? sessionId,
 }) {
   return showDialog<void>(
     context: context,
@@ -27,6 +28,7 @@ Future<void> showWorkspaceBrowserDialog(
       api: api,
       root: root,
       agentProvider: agentProvider,
+      sessionId: sessionId,
     ),
   );
 }
@@ -37,12 +39,14 @@ class _WorkspaceBrowserDialog extends StatefulWidget {
     required this.api,
     required this.root,
     required this.agentProvider,
+    required this.sessionId,
   });
 
   final HostProfile host;
   final ApiClient api;
   final String root;
   final String? agentProvider;
+  final String? sessionId;
 
   @override
   State<_WorkspaceBrowserDialog> createState() =>
@@ -103,6 +107,7 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                         api: widget.api,
                         root: widget.root,
                         agentProvider: widget.agentProvider,
+                        sessionId: widget.sessionId,
                         selectedPath: _selected,
                         onOpenFile: (path, liveStream) {
                           setState(() {
@@ -129,6 +134,7 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                             api: widget.api,
                             path: _selected!,
                             agentProvider: widget.agentProvider,
+                            sessionId: widget.sessionId,
                             observable: _viewerObservable,
                             dense: true,
                             liveStream: _liveStream,
@@ -184,8 +190,9 @@ class _DialogHeader extends StatelessWidget {
                       : baseName(selectedPath),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w700),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Row(

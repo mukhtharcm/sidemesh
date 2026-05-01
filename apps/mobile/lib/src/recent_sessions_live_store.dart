@@ -371,6 +371,8 @@ class RecentSessionsStore extends ChangeNotifier {
 }
 
 class _RecentHostLiveConnection {
+  static const _reconnectSlotId = 'recent-sessions-live';
+
   _RecentHostLiveConnection({
     required this.host,
     required this.api,
@@ -382,7 +384,7 @@ class _RecentHostLiveConnection {
   }) {
     HostReconnectScheduler.instance.registerSlot(
       host.id,
-      'recent-sessions-live',
+      _reconnectSlotId,
       ReconnectPriority.backgroundSocket,
       connect,
     );
@@ -420,7 +422,10 @@ class _RecentHostLiveConnection {
         channel.ready
             .then((_) {
               if (_disposed || !identical(_channel, channel)) return;
-              HostReconnectScheduler.instance.markConnected(host.id);
+              HostReconnectScheduler.instance.markConnected(
+                host.id,
+                _reconnectSlotId,
+              );
             })
             .catchError((Object error) {
               if (_disposed || !identical(_channel, channel) || !host.enabled) {
@@ -474,7 +479,7 @@ class _RecentHostLiveConnection {
     _subscription = null;
     _channel = null;
     onOffline(host, error);
-    HostReconnectScheduler.instance.markDisconnected(host.id);
+    HostReconnectScheduler.instance.markDisconnected(host.id, _reconnectSlotId);
   }
 
   void _scheduleReconnectIfCurrent(WebSocketChannel channel, Object? error) {
@@ -486,7 +491,7 @@ class _RecentHostLiveConnection {
 
   void dispose() {
     _disposed = true;
-    HostReconnectScheduler.instance.unregisterSlot(host.id, 'recent-sessions-live');
+    HostReconnectScheduler.instance.unregisterSlot(host.id, _reconnectSlotId);
     unawaited(_subscription?.cancel() ?? Future<void>.value());
     final sink = _channel?.sink;
     if (sink != null) {

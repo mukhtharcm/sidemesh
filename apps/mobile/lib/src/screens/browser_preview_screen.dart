@@ -90,6 +90,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   StreamSubscription<dynamic>? _subscription;
   Timer? _firstFrameTimer;
   late HostBrowserPreviewInfo _preview;
+  late final String _reconnectSlotId;
   Uint8List? _frameBytes;
   int _frameWidth = 390;
   int _frameHeight = 844;
@@ -107,9 +108,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _reconnectSlotId = 'browser-preview-live:${widget.preview.id}';
     HostReconnectScheduler.instance.registerSlot(
       widget.host.id,
-      'browser-preview-live',
+      _reconnectSlotId,
       ReconnectPriority.visibleSupport,
       _connect,
     );
@@ -126,6 +128,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _inputFocusNode.dispose();
     _browserFocusNode.dispose();
     _firstFrameTimer?.cancel();
+    HostReconnectScheduler.instance.unregisterSlot(
+      widget.host.id,
+      _reconnectSlotId,
+    );
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     if (widget.stopOnDispose) {
@@ -264,7 +270,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       if (!mounted) return;
       _firstFrameTimer?.cancel();
       _firstFrameReconnects = 0;
-      HostReconnectScheduler.instance.markConnected(widget.host.id);
+      HostReconnectScheduler.instance.markConnected(
+        widget.host.id,
+        _reconnectSlotId,
+      );
       HostStatusStore.instance.markEvent(widget.host.id);
       setState(() {
         _frameBytes = bytes;
@@ -342,7 +351,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _scheduleStreamReconnect(String reason) {
     if (!mounted || _clientPaused || _remoteClosed) return;
-    HostReconnectScheduler.instance.markDisconnected(widget.host.id);
+    HostReconnectScheduler.instance.markDisconnected(
+      widget.host.id,
+      _reconnectSlotId,
+    );
   }
 
   HostBrowserPreviewInfo? _previewFromMessage(Map<dynamic, dynamic> decoded) {
@@ -1151,7 +1163,9 @@ class _PreviewHeader extends StatelessWidget {
                           RelativeTimeTicker.instance,
                         ]),
                         builder: (context, _) {
-                          final status = HostStatusStore.instance.statusFor(hostId);
+                          final status = HostStatusStore.instance.statusFor(
+                            hostId,
+                          );
                           final pill = _browserPreviewPill(status);
                           return MeshPill(
                             label: streamPaused
@@ -1226,7 +1240,10 @@ class _PreviewHeader extends StatelessWidget {
       if (last != null) {
         final elapsed = DateTime.now().difference(last);
         if (elapsed.inHours >= 1) {
-          return const _BrowserPill(label: 'Reconnecting', tone: MeshPillTone.warning);
+          return const _BrowserPill(
+            label: 'Reconnecting',
+            tone: MeshPillTone.warning,
+          );
         }
         String ago;
         if (elapsed.inMinutes < 1) {
@@ -1234,12 +1251,21 @@ class _PreviewHeader extends StatelessWidget {
         } else {
           ago = '${elapsed.inMinutes}m ago';
         }
-        return _BrowserPill(label: 'Last frame $ago', tone: MeshPillTone.warning);
+        return _BrowserPill(
+          label: 'Last frame $ago',
+          tone: MeshPillTone.warning,
+        );
       }
-      return const _BrowserPill(label: 'Reconnecting', tone: MeshPillTone.warning);
+      return const _BrowserPill(
+        label: 'Reconnecting',
+        tone: MeshPillTone.warning,
+      );
     }
     if (status.reachability == HostReachability.probing) {
-      return const _BrowserPill(label: 'Reconnecting', tone: MeshPillTone.warning);
+      return const _BrowserPill(
+        label: 'Reconnecting',
+        tone: MeshPillTone.warning,
+      );
     }
     return const _BrowserPill();
   }

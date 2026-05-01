@@ -361,6 +361,8 @@ class ApprovalInboxStore extends ChangeNotifier {
 }
 
 class _ApprovalHostLiveConnection {
+  static const _reconnectSlotId = 'approval-inbox-live';
+
   _ApprovalHostLiveConnection({
     required this.host,
     required this.api,
@@ -369,7 +371,14 @@ class _ApprovalHostLiveConnection {
     required this.onSnapshot,
     required this.onActionOpened,
     required this.onActionResolved,
-  });
+  }) {
+    HostReconnectScheduler.instance.registerSlot(
+      host.id,
+      _reconnectSlotId,
+      ReconnectPriority.backgroundSocket,
+      connect,
+    );
+  }
 
   final HostProfile host;
   final ApiClient api;
@@ -397,7 +406,7 @@ class _ApprovalHostLiveConnection {
         onError: (Object error) => _scheduleReconnect(error),
         onDone: () => _scheduleReconnect(null),
       );
-      HostReconnectScheduler.instance.markConnected(host.id);
+      HostReconnectScheduler.instance.markConnected(host.id, _reconnectSlotId);
     } catch (error) {
       if (!host.enabled) return;
       _scheduleReconnect(error);
@@ -449,13 +458,12 @@ class _ApprovalHostLiveConnection {
     _subscription = null;
     _channel = null;
     onOffline(host, error);
-    HostReconnectScheduler.instance.markDisconnected(host.id);
+    HostReconnectScheduler.instance.markDisconnected(host.id, _reconnectSlotId);
   }
-
 
   void dispose() {
     _disposed = true;
-    HostReconnectScheduler.instance.unregisterSlot(host.id, 'approval-inbox-live');
+    HostReconnectScheduler.instance.unregisterSlot(host.id, _reconnectSlotId);
     unawaited(_subscription?.cancel() ?? Future<void>.value());
     final sink = _channel?.sink;
     if (sink != null) {

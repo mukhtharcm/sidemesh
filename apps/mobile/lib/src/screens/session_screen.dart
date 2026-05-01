@@ -752,6 +752,8 @@ class _SessionScreenState extends State<SessionScreen>
       widget.screenAwakeSourceKey ??
       'session:${widget.host.id}:${widget.session.id}';
 
+  String get _reconnectSlotId => 'session-live:${widget.session.id}';
+
   void _syncScreenAwakeSource() {
     WindowScreenAwakeCoordinator.instance.setSourceActive(
       _screenAwakeSourceKey,
@@ -782,10 +784,9 @@ class _SessionScreenState extends State<SessionScreen>
     unawaited(_loadPendingSends());
     unawaited(_bootstrapSnapshot());
     unawaited(_loadNodeInfo());
-    _connectLive();
     HostReconnectScheduler.instance.registerSlot(
       widget.host.id,
-      'session-live',
+      _reconnectSlotId,
       ReconnectPriority.foregroundSession,
       () {
         unawaited(
@@ -798,6 +799,7 @@ class _SessionScreenState extends State<SessionScreen>
         _connectLive();
       },
     );
+    _connectLive();
   }
 
   Future<void> _bootstrapSnapshot() async {
@@ -1072,6 +1074,7 @@ class _SessionScreenState extends State<SessionScreen>
             api: widget.api,
             root: session.cwd,
             agentProvider: session.provider,
+            sessionId: session.id,
           ),
         );
         break;
@@ -1152,7 +1155,10 @@ class _SessionScreenState extends State<SessionScreen>
     _persistCurrentSessionLog();
     unawaited(_readStore.flush());
     WidgetsBinding.instance.removeObserver(this);
-    HostReconnectScheduler.instance.unregisterSlot(widget.host.id, 'session-live');
+    HostReconnectScheduler.instance.unregisterSlot(
+      widget.host.id,
+      _reconnectSlotId,
+    );
     _sessionCachePersistTimer?.cancel();
     _pendingSendRetryTimer?.cancel();
     _composerController.removeListener(_handleComposerChanged);
@@ -2105,7 +2111,10 @@ class _SessionScreenState extends State<SessionScreen>
       );
       // Successful connect — reset the backoff counter. If the stream dies
       // immediately onDone will re-arm it.
-      HostReconnectScheduler.instance.markConnected(widget.host.id);
+      HostReconnectScheduler.instance.markConnected(
+        widget.host.id,
+        _reconnectSlotId,
+      );
     } catch (_) {
       _channel = null;
       if (!widget.host.enabled) return;
@@ -2129,7 +2138,10 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _scheduleReconnect() {
     if (_disposed || !mounted || !widget.host.enabled) return;
-    HostReconnectScheduler.instance.markDisconnected(widget.host.id);
+    HostReconnectScheduler.instance.markDisconnected(
+      widget.host.id,
+      _reconnectSlotId,
+    );
   }
 
   void _handleEvent(LiveEvent event) {
@@ -4185,6 +4197,7 @@ class _SessionScreenState extends State<SessionScreen>
           api: widget.api,
           root: session.cwd,
           agentProvider: session.provider,
+          sessionId: session.id,
           selectedPath: path,
         ),
       );
@@ -4197,6 +4210,7 @@ class _SessionScreenState extends State<SessionScreen>
           api: widget.api,
           path: path,
           agentProvider: session.provider,
+          sessionId: session.id,
         ),
       ),
     );
@@ -4599,6 +4613,7 @@ class _SessionScreenState extends State<SessionScreen>
               api: widget.api,
               root: session.cwd,
               agentProvider: session.provider,
+              sessionId: session.id,
             ),
           );
         } else if (isDesktop) {
@@ -4608,6 +4623,7 @@ class _SessionScreenState extends State<SessionScreen>
             api: widget.api,
             root: session.cwd,
             agentProvider: session.provider,
+            sessionId: session.id,
           );
         } else {
           Navigator.of(context).push(
@@ -4617,6 +4633,7 @@ class _SessionScreenState extends State<SessionScreen>
                 api: widget.api,
                 root: session.cwd,
                 agentProvider: session.provider,
+                sessionId: session.id,
               ),
             ),
           );

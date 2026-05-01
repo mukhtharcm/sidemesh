@@ -18,6 +18,7 @@ class FileViewerScreen extends StatefulWidget {
     required this.api,
     required this.path,
     this.agentProvider,
+    this.sessionId,
     this.topPadding,
     this.liveStream,
   });
@@ -26,6 +27,7 @@ class FileViewerScreen extends StatefulWidget {
   final ApiClient api;
   final String path;
   final String? agentProvider;
+  final String? sessionId;
   final double? topPadding;
   final Stream<FsChangeEvent>? liveStream;
 
@@ -69,8 +71,8 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Row(
@@ -112,6 +114,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         api: widget.api,
         path: widget.path,
         agentProvider: widget.agentProvider,
+        sessionId: widget.sessionId,
         liveStream: widget.liveStream,
         observable: _observable,
       ),

@@ -80,6 +80,7 @@ class _FakeWorkspaceApi extends ApiClient {
     HostProfile host,
     String path, {
     String? agentProvider,
+    String? sessionId,
   }) async {
     final entries = files.keys
         .where((entryPath) => entryPath.startsWith('$path/'))
@@ -101,6 +102,7 @@ class _FakeWorkspaceApi extends ApiClient {
     HostProfile host,
     String path, {
     String? agentProvider,
+    String? sessionId,
   }) async {
     readPaths.add(path);
     final contents = files[path];
@@ -120,7 +122,11 @@ class _FakeWorkspaceApi extends ApiClient {
   }
 
   @override
-  IOWebSocketChannel openFsLive(HostProfile host, {String? agentProvider}) {
+  IOWebSocketChannel openFsLive(
+    HostProfile host, {
+    String? agentProvider,
+    String? sessionId,
+  }) {
     throw StateError('WebSocket not needed in this test');
   }
 }

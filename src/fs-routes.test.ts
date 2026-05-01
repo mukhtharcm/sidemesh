@@ -70,6 +70,35 @@ describe("filesystem routes", () => {
       await close(server);
     }
   });
+
+  it("uses session cwd without listing all sessions when sessionId is provided", async () => {
+    const root = await tempRoot(tempRoots);
+    await writeFile(nodePath.join(root, "session.txt"), "a", "utf8");
+    let listCalls = 0;
+    let cwdCalls = 0;
+    const app = express();
+    registerFsRoutes(app, {
+      listSessions: async () => {
+        listCalls += 1;
+        return [];
+      },
+      getSessionCwd: async (sessionId) => {
+        cwdCalls += 1;
+        return sessionId === "session-a" ? root : null;
+      },
+    });
+    const server = await listen(app);
+    try {
+      const response = await fetch(
+        `${baseUrl(server)}/api/fs/list?path=${encodeURIComponent(root)}&sessionId=session-a`,
+      );
+      assert.equal(response.status, 200);
+      assert.equal(listCalls, 0);
+      assert.equal(cwdCalls, 1);
+    } finally {
+      await close(server);
+    }
+  });
 });
 
 function testApp(root: string): express.Express {

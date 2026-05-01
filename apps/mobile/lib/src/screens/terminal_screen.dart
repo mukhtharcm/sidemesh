@@ -96,6 +96,8 @@ class TerminalPane extends StatefulWidget {
 }
 
 class _TerminalPaneState extends State<TerminalPane> {
+  late final String _reconnectSlotId =
+      'terminal-live:${identityHashCode(this)}';
   late final xterm.Terminal _terminal;
   final FocusNode _focusNode = FocusNode();
   WebSocketChannel? _channel;
@@ -120,7 +122,7 @@ class _TerminalPaneState extends State<TerminalPane> {
     _terminal.write('Opening Sidemesh terminal...\r\n');
     HostReconnectScheduler.instance.registerSlot(
       widget.host.id,
-      'terminal-live',
+      _reconnectSlotId,
       ReconnectPriority.visibleSupport,
       _connectLive,
     );
@@ -137,6 +139,18 @@ class _TerminalPaneState extends State<TerminalPane> {
         oldWidget.sessionId == widget.sessionId) {
       return;
     }
+    if (oldWidget.host.id != widget.host.id) {
+      HostReconnectScheduler.instance.unregisterSlot(
+        oldWidget.host.id,
+        _reconnectSlotId,
+      );
+      HostReconnectScheduler.instance.registerSlot(
+        widget.host.id,
+        _reconnectSlotId,
+        ReconnectPriority.visibleSupport,
+        _connectLive,
+      );
+    }
     _subscription?.cancel();
     _channel?.sink.close();
     _subscription = null;
@@ -149,7 +163,10 @@ class _TerminalPaneState extends State<TerminalPane> {
 
   @override
   void dispose() {
-    HostReconnectScheduler.instance.unregisterSlot(widget.host.id, 'terminal-live');
+    HostReconnectScheduler.instance.unregisterSlot(
+      widget.host.id,
+      _reconnectSlotId,
+    );
     _subscription?.cancel();
     _channel?.sink.close();
     _focusNode.dispose();
@@ -238,7 +255,10 @@ class _TerminalPaneState extends State<TerminalPane> {
       setState(() {
         _connecting = false;
       });
-      HostReconnectScheduler.instance.markConnected(widget.host.id);
+      HostReconnectScheduler.instance.markConnected(
+        widget.host.id,
+        _reconnectSlotId,
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -258,7 +278,10 @@ class _TerminalPaneState extends State<TerminalPane> {
       _connecting = false;
       _error = 'Terminal disconnected. Reconnecting...';
     });
-    HostReconnectScheduler.instance.markDisconnected(widget.host.id);
+    HostReconnectScheduler.instance.markDisconnected(
+      widget.host.id,
+      _reconnectSlotId,
+    );
   }
 
   void _handleRawFrame(dynamic raw) {
