@@ -155,7 +155,7 @@ class _ComposerStatusStrip extends StatelessWidget {
                     'Working',
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
                       color: colors.textPrimary,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: AppWeights.emphasis,
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -266,7 +266,7 @@ class _PendingSendStrip extends StatelessWidget {
                           style: Theme.of(context).textTheme.labelLarge
                               ?.copyWith(
                                 color: colors.textPrimary,
-                                fontWeight: FontWeight.w800,
+                                fontWeight: AppWeights.title,
                               ),
                         ),
                         const SizedBox(height: 2),
@@ -410,7 +410,7 @@ class _MessageBubble extends StatelessWidget {
                             style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
                                   color: colors.textTertiary,
-                                  fontWeight: FontWeight.w800,
+                                  fontWeight: AppWeights.title,
                                   letterSpacing: 1.1,
                                 ),
                           ),
@@ -795,7 +795,7 @@ class _LocalImageFallback extends StatelessWidget {
       child: Row(
         children: [
           Icon(
-            loading ? Icons.downloading_rounded : Icons.image_outlined,
+            loading ? Icons.downloading_rounded : Icons.image_rounded,
             color: colors.accent,
             size: 18,
           ),
@@ -811,7 +811,7 @@ class _LocalImageFallback extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(
                     context,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.emphasis),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -840,7 +840,7 @@ class _AttachmentLoadError extends StatelessWidget {
       color: colors.surfaceMuted,
       alignment: Alignment.center,
       child: Icon(
-        Icons.broken_image_outlined,
+        Icons.broken_image_rounded,
         color: colors.textTertiary,
         size: 28,
       ),
@@ -898,7 +898,7 @@ class _MessageCopyButtonState extends State<_MessageCopyButton> {
               _copied ? 'Copied' : 'Copy',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: color,
-                fontWeight: FontWeight.w700,
+                fontWeight: AppWeights.emphasis,
                 letterSpacing: 0.6,
               ),
             ),
@@ -934,7 +934,7 @@ class _MessagePinButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+              pinned ? Icons.push_pin_rounded : Icons.push_pin_rounded,
               size: 13,
               color: color,
             ),
@@ -943,7 +943,7 @@ class _MessagePinButton extends StatelessWidget {
               pinned ? 'Pinned' : 'Pin',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: color,
-                fontWeight: FontWeight.w700,
+                fontWeight: AppWeights.emphasis,
                 letterSpacing: 0.6,
               ),
             ),
@@ -1385,7 +1385,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                                 style: monoStyle(
                                   color: colors.accent,
                                   fontSize: 10.5,
-                                  fontWeight: FontWeight.w800,
+                                  fontWeight: AppWeights.title,
                                 ).copyWith(letterSpacing: 1.2),
                               ),
                               const SizedBox(height: 3),
@@ -1402,7 +1402,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                                             : Theme.of(
                                                 context,
                                               ).textTheme.titleSmall?.copyWith(
-                                                fontWeight: FontWeight.w700,
+                                                fontWeight: AppWeights.emphasis,
                                               ))
                                         ?.copyWith(height: 1.35),
                               ),
@@ -1615,7 +1615,7 @@ class _ActivityCardState extends State<_ActivityCard> {
             style: monoStyle(
               color: colors.textSecondary,
               fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontWeight: AppWeights.emphasis,
             ).copyWith(letterSpacing: 0.8),
           ),
         ),
@@ -1702,7 +1702,7 @@ class _ActivityCardState extends State<_ActivityCard> {
           style: monoStyle(
             color: colors.textSecondary,
             fontSize: 11,
-            fontWeight: FontWeight.w700,
+            fontWeight: AppWeights.emphasis,
           ).copyWith(letterSpacing: 0.8),
         ),
         const SizedBox(height: 8),
@@ -1778,7 +1778,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
       child: Column(
@@ -1789,7 +1789,7 @@ class _ActivityCardState extends State<_ActivityCard> {
             style: monoStyle(
               color: colors.textSecondary,
               fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontWeight: AppWeights.emphasis,
             ).copyWith(letterSpacing: 0.8),
           ),
           const SizedBox(height: 6),
@@ -1831,7 +1831,7 @@ class _ActivityCardState extends State<_ActivityCard> {
             style: monoStyle(
               color: colors.textSecondary,
               fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontWeight: AppWeights.emphasis,
             ).copyWith(letterSpacing: 0.8),
           ),
           const SizedBox(height: 8),
@@ -1840,7 +1840,7 @@ class _ActivityCardState extends State<_ActivityCard> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: AppShapes.input,
               border: Border.all(color: colors.border),
             ),
             child: SelectableText(
@@ -2308,7 +2308,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
       child: Text(
@@ -2439,7 +2439,7 @@ class _DiffToggle extends StatelessWidget {
                 style: monoStyle(
                   color: colors.accent,
                   fontSize: 12,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: AppWeights.body,
                 ),
               ),
             ],
@@ -2487,7 +2487,7 @@ class _ExpandToggle extends StatelessWidget {
               style: monoStyle(
                 color: colors.accent,
                 fontSize: 12,
-                fontWeight: FontWeight.w600,
+                fontWeight: AppWeights.body,
               ),
             ),
           ],
@@ -2524,7 +2524,7 @@ class _FileChangeBlock extends StatelessWidget {
     final canOpen = onOpen != null && !isDeleted;
     final pathRow = Row(
       children: [
-        Icon(Icons.description_outlined, size: 16, color: colors.textSecondary),
+        Icon(Icons.description_rounded, size: 16, color: colors.textSecondary),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
@@ -2533,7 +2533,7 @@ class _FileChangeBlock extends StatelessWidget {
                 monoStyle(
                   color: canOpen ? colors.accent : colors.textPrimary,
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: AppWeights.body,
                 ).copyWith(
                   decoration: canOpen ? TextDecoration.underline : null,
                   decorationColor: canOpen ? colors.accent : null,
@@ -2594,7 +2594,7 @@ class _DetailRow extends StatelessWidget {
             style: monoStyle(
               color: colors.textSecondary,
               fontSize: 10.5,
-              fontWeight: FontWeight.w800,
+              fontWeight: AppWeights.title,
             ).copyWith(letterSpacing: 1.2),
           ),
           const SizedBox(height: 4),
@@ -2735,7 +2735,7 @@ class _SessionRuntimeDetails extends StatelessWidget {
                 'Runtime',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   color: colors.textPrimary,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: AppWeights.title,
                 ),
               ),
             ],
@@ -2793,7 +2793,7 @@ class _RuntimeSection extends StatelessWidget {
             style: monoStyle(
               color: colors.textSecondary,
               fontSize: 9.5,
-              fontWeight: FontWeight.w800,
+              fontWeight: AppWeights.title,
             ).copyWith(letterSpacing: 1.1),
           ),
           const SizedBox(height: 8),
@@ -2831,7 +2831,7 @@ class _RuntimeExpansionSection extends StatelessWidget {
           title,
           style: Theme.of(context).textTheme.labelLarge?.copyWith(
             color: colors.textPrimary,
-            fontWeight: FontWeight.w800,
+            fontWeight: AppWeights.title,
           ),
         ),
         subtitle: Text(
@@ -2877,7 +2877,7 @@ class _RuntimeDetailChip extends StatelessWidget {
             style: monoStyle(
               color: colors.textSecondary,
               fontSize: 10.5,
-              fontWeight: FontWeight.w800,
+              fontWeight: AppWeights.title,
             ),
           ),
           const SizedBox(width: 7),
@@ -2888,7 +2888,7 @@ class _RuntimeDetailChip extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colors.textPrimary,
-                fontWeight: FontWeight.w700,
+                fontWeight: AppWeights.emphasis,
               ),
             ),
           ),
@@ -3053,7 +3053,7 @@ class _DaySeparator extends StatelessWidget {
               label,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: colors.textTertiary,
-                fontWeight: FontWeight.w700,
+                fontWeight: AppWeights.emphasis,
                 letterSpacing: 0.6,
               ),
             ),

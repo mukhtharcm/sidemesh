@@ -46,14 +46,14 @@ void main() {
       await tester.pump();
 
       expect(find.text('Settings'), findsOneWidget);
-      expect(find.text('App preferences'), findsOneWidget);
+      expect(find.text('Appearance & display'), findsOneWidget);
       expect(find.text('Appearance'), findsOneWidget);
       expect(find.text('Display'), findsOneWidget);
       expect(find.text('Keep screen awake while agent runs'), findsOneWidget);
       expect(find.text('Notifications'), findsOneWidget);
       expect(find.text('New session defaults'), findsOneWidget);
       expect(find.text('Storage & recovery'), findsOneWidget);
-      expect(find.text('About this build'), findsOneWidget);
+      expect(find.text('About'), findsOneWidget);
     } finally {
       debugDefaultTargetPlatformOverride = null;
       tester.view.resetPhysicalSize();
@@ -108,7 +108,7 @@ void main() {
 
       expect(find.byType(Dialog), findsOneWidget);
       expect(find.text('Settings'), findsOneWidget);
-      expect(find.text('App preferences'), findsOneWidget);
+      expect(find.text('Appearance & display'), findsOneWidget);
       expect(find.text('Replay onboarding'), findsNothing);
     } finally {
       debugDefaultTargetPlatformOverride = null;

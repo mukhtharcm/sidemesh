@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../session_pins_store.dart';
 import '../../theme/app_colors.dart';
+import '../../theme/app_tokens.dart';
 import '../../widgets/mesh_widgets.dart';
 import 'inspector_controller.dart';
 
@@ -61,7 +62,7 @@ class PinnedListPanel extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                Icons.push_pin_outlined,
+                Icons.push_pin_rounded,
                 size: 32,
                 color: colors.textTertiary,
               ),
@@ -70,7 +71,7 @@ class PinnedListPanel extends StatelessWidget {
                 'No pinned messages',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   color: colors.textPrimary,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: AppWeights.emphasis,
                 ),
               ),
               const SizedBox(height: 4),
@@ -117,18 +118,18 @@ class _PinnedListTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final roleIcon = pin.role == 'assistant'
-        ? Icons.smart_toy_outlined
+        ? Icons.smart_toy_rounded
         : Icons.person_outline_rounded;
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         onTap: onOpen,
         child: Container(
           padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
           decoration: BoxDecoration(
             color: colors.surface,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppShapes.input,
             border: Border.all(color: colors.border),
           ),
           child: Column(
@@ -145,7 +146,7 @@ class _PinnedListTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: colors.textSecondary,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.emphasis,
                         letterSpacing: 0.4,
                       ),
                     ),

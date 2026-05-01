@@ -321,7 +321,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
             }
             return _Row(
               indent: indent + 14.0,
-              icon: Icons.description_outlined,
+              icon: Icons.description_rounded,
               iconColor: colors.textSecondary,
               title: entry.name,
               modified: widget.changedPaths.contains(entry.path),
