@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacy Policy — Sidemesh</title>
+<meta name="description" content="Sidemesh privacy policy. Your data stays on your devices and your own hosts." />
+<meta name="theme-color" content="#e9edf0" />
+<link rel="icon" type="image/png" href="/assets/favicon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper: #e9edf0;
+    --ink: #101616;
+    --ink-soft: #323d3c;
+    --muted: #65706f;
+    --line: rgba(16, 22, 22, 0.14);
+    --surface-solid: #fafcf7;
+    --sage: #2e7666;
+    --wrap: min(1220px, calc(100% - 40px));
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; text-size-adjust: 100%; }
+  body {
+    min-height: 100dvh;
+    margin: 0;
+    color: var(--ink);
+    background: var(--paper);
+    font-family: "Manrope", sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--sage); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { width: var(--wrap); margin: 0 auto; }
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(18px);
+    background: rgba(233, 237, 240, 0.78);
+    border-bottom: 1px solid rgba(16, 22, 22, 0.08);
+  }
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 22px;
+    min-height: 76px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 11px;
+    font-weight: 800;
+    letter-spacing: -0.045em;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .brand-logo {
+    width: 34px;
+    height: 34px;
+    display: block;
+    object-fit: cover;
+    border-radius: 12px;
+    box-shadow: 0 12px 24px rgba(16, 22, 22, 0.12);
+  }
+  .nav-back {
+    font-family: "Geist Mono", monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    padding: 9px 14px;
+    border-radius: 999px;
+    transition: color 180ms var(--ease), background 180ms var(--ease);
+  }
+  .nav-back:hover {
+    color: var(--ink);
+    background: rgba(250, 252, 247, 0.56);
+    text-decoration: none;
+  }
+  main { padding: 48px 0 96px; }
+  h1 {
+    font-family: "Instrument Serif", serif;
+    font-size: clamp(2rem, 4vw, 3rem);
+    font-weight: 400;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin: 0 0 24px;
+  }
+  h2 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 40px 0 12px;
+    letter-spacing: -0.01em;
+  }
+  p, ul { color: var(--ink-soft); margin: 0 0 16px; }
+  ul { padding-left: 22px; }
+  li { margin-bottom: 8px; }
+  .updated {
+    font-family: "Geist Mono", monospace;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 32px;
+    display: block;
+  }
+  .section { max-width: 720px; }
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 24px 0 48px;
+    font-size: 13px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  footer a { color: var(--muted); }
+  footer a:hover { color: var(--ink); }
+  @media (max-width: 640px) {
+    .nav-inner { min-height: 64px; }
+    main { padding: 32px 0 64px; }
+  }
+</style>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="/">
+        <img class="brand-logo" src="/assets/app-icon.png" alt="" width="34" height="34" />
+        Sidemesh
+      </a>
+      <a class="nav-back" href="/">← Back</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="section">
+      <h1>Privacy Policy</h1>
+      <span class="updated">Last updated: May 2026</span>
+
+      <p>Sidemesh is designed so your data stays with you. This policy explains what information the app handles and how it is protected.</p>
+
+      <h2>What we collect</h2>
+      <p>Sidemesh does not operate a central cloud service and does not collect personal data on our servers. The app stores the following locally on your device:</p>
+      <ul>
+        <li><strong>Host profiles</strong> — addresses and tokens for hosts you choose to pair with.</li>
+        <li><strong>Session content</strong> — chat transcripts, file listings, and terminal output retrieved from your own hosts.</li>
+        <li><strong>Preferences</strong> — theme, typography, and notification settings.</li>
+      </ul>
+
+      <h2>How it is stored</h2>
+      <p>Host tokens and sensitive credentials are stored in the platform keychain (iOS Keychain / macOS Keychain / Android Keystore). Other app data is stored in local encrypted databases and preferences. Nothing is transmitted to Sidemesh-owned infrastructure.</p>
+
+      <h2>Network access</h2>
+      <p>The app connects only to hosts you explicitly pair with. All communication happens directly between your device and your own machines over your network (private LAN, Tailscale, or another secure route you control). We do not proxy, inspect, or log this traffic.</p>
+
+      <h2>Analytics and tracking</h2>
+      <p>Sidemesh does not include third-party analytics, advertising SDKs, or tracking pixels. Crash reports may be collected through platform-native mechanisms if you have opted into them at the operating-system level.</p>
+
+      <h2>Changes to this policy</h2>
+      <p>We will update this page if the data practices change materially. The updated date at the top of the page reflects the latest revision.</p>
+
+      <h2>Contact</h2>
+      <p>If you have questions about this policy, reach out through <a href="/support.html">the support page</a>.</p>
+    </div>
+  </main>
+
+  <footer class="wrap">
+    <span>© Sidemesh</span>
+    <nav aria-label="Footer">
+      <a href="/">Home</a>
+      <a href="/support.html">Support</a>
+    </nav>
+  </footer>
+</body>
+</html>
