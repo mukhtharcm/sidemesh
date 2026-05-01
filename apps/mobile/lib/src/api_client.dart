@@ -575,17 +575,27 @@ class ApiClient {
     );
   }
 
-  Future<void> respondToAction(
+  Future<SessionMessage?> respondToAction(
     HostProfile host, {
     required String actionId,
     required PendingActionResponseDraft response,
   }) async {
-    await _post(
-      host,
-      '/api/actions/$actionId/respond',
-      body: response.payload,
-      operation: 'respond to agent request',
+    final result = _decodeObject(
+      await _post(
+        host,
+        '/api/actions/$actionId/respond',
+        body: response.payload,
+        operation: 'respond to agent request',
+      ),
     );
+    final messageItem = result['messageItem'];
+    if (messageItem is Map<String, dynamic>) {
+      return SessionMessage.fromJson(messageItem);
+    }
+    if (messageItem is Map) {
+      return SessionMessage.fromJson(messageItem.cast<String, dynamic>());
+    }
+    return null;
   }
 
   WebSocketChannel openLive(HostProfile host, String sessionId) {

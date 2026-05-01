@@ -1246,6 +1246,14 @@ class _ActivityCardState extends State<_ActivityCard> {
       'web_search' => _webSearchTitle(activity),
       'image_generation' => 'Generated image',
       'context_compaction' => 'Context compacted',
+      'plan' => _plainActivityTitle(activity, fallback: 'Plan updated'),
+      'task' => _plainActivityTitle(activity, fallback: 'Task activity'),
+      'subagent' => _subagentActivityTitle(activity),
+      'reasoning' => _plainActivityTitle(activity, fallback: 'Reasoning'),
+      'system_event' => _plainActivityTitle(
+        activity,
+        fallback: 'Session event',
+      ),
       _ => 'Activity',
     };
 
@@ -1261,6 +1269,11 @@ class _ActivityCardState extends State<_ActivityCard> {
             : 'Image generation output',
       'context_compaction' =>
         'Older conversation history was summarized to free context.',
+      'plan' => activity.summary,
+      'task' => activity.summary,
+      'subagent' => _subagentActivitySubtitle(activity),
+      'reasoning' => activity.summary,
+      'system_event' => activity.detail,
       _ => null,
     };
 
@@ -1272,6 +1285,15 @@ class _ActivityCardState extends State<_ActivityCard> {
       'web_search' => 'WEB SEARCH',
       'image_generation' => 'IMAGE',
       'context_compaction' => 'COMPACTION',
+      'plan' => 'PLAN',
+      'task' => 'TASK',
+      'subagent' => 'SUBAGENT',
+      'reasoning' => 'REASONING',
+      'system_event' => switch (activity.level) {
+        'warning' => 'WARNING',
+        'error' => 'ERROR',
+        _ => 'SESSION',
+      },
       _ => 'ACTIVITY',
     };
 
@@ -1283,6 +1305,15 @@ class _ActivityCardState extends State<_ActivityCard> {
       'web_search' => Icons.travel_explore_rounded,
       'image_generation' => Icons.image_rounded,
       'context_compaction' => Icons.compress_rounded,
+      'plan' => Icons.checklist_rounded,
+      'task' => Icons.task_alt_rounded,
+      'subagent' => Icons.account_tree_rounded,
+      'reasoning' => Icons.psychology_alt_rounded,
+      'system_event' => switch (activity.level) {
+        'warning' => Icons.warning_amber_rounded,
+        'error' => Icons.error_outline_rounded,
+        _ => Icons.info_outline_rounded,
+      },
       _ => Icons.bolt_rounded,
     };
 
@@ -1503,6 +1534,20 @@ class _ActivityCardState extends State<_ActivityCard> {
                           tone: MeshPillTone.info,
                           mono: true,
                         ),
+                      if ((activity.activityAction ?? '').trim().isNotEmpty)
+                        MeshPill(
+                          label: activity.activityAction!.trim(),
+                          tone: MeshPillTone.info,
+                          mono: true,
+                        ),
+                      if (activity.isSubagent &&
+                          (activity.model ?? '').trim().isNotEmpty)
+                        MeshPill(label: activity.model!.trim(), mono: true),
+                      if (activity.isSubagent && activity.durationMs != null)
+                        MeshPill(
+                          label: _formatDuration(activity.durationMs!),
+                          mono: true,
+                        ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -1516,6 +1561,16 @@ class _ActivityCardState extends State<_ActivityCard> {
                     _buildImageGenerationBody(context, activity),
                   ] else if (activity.isContextCompaction) ...[
                     ..._buildContextCompactionBody(context, activity),
+                  ] else if (activity.isPlan) ...[
+                    ..._buildNarrativeActivityBody(context, activity),
+                  ] else if (activity.isTask) ...[
+                    ..._buildNarrativeActivityBody(context, activity),
+                  ] else if (activity.isSubagent) ...[
+                    ..._buildSubagentBody(context, activity),
+                  ] else if (activity.isReasoning) ...[
+                    ..._buildNarrativeActivityBody(context, activity),
+                  ] else if (activity.isSystemEvent) ...[
+                    ..._buildNarrativeActivityBody(context, activity),
                   ] else if (activity.isTurnDiff) ...[
                     if ((activity.diff ?? '').isNotEmpty)
                       _buildLazyDiff(
@@ -1832,8 +1887,112 @@ class _ActivityCardState extends State<_ActivityCard> {
         'Codex tried to compact the session context, but the compaction failed.',
       _ => 'Codex is compacting older history to free context.',
     };
+    return [_activityInfoBlock(context, 'What happened', message)];
+  }
+
+  String _plainActivityTitle(
+    SessionActivity activity, {
+    required String fallback,
+  }) {
+    final title = (activity.toolTitle ?? '').trim();
+    if (title.isNotEmpty) return title;
+    final summary = (activity.summary ?? '').trim();
+    if (summary.isNotEmpty) return summary;
+    return fallback;
+  }
+
+  String _subagentActivityTitle(SessionActivity activity) {
+    final displayName = (activity.agentDisplayName ?? '').trim();
+    final name = displayName.isNotEmpty
+        ? displayName
+        : (activity.agentName ?? '').trim();
+    final label = name.isEmpty ? 'Subagent' : name;
+    return switch (activity.activityAction) {
+      'started' => 'Started $label',
+      'completed' => 'Completed $label',
+      'failed' => '$label failed',
+      'selected' => 'Selected $label',
+      'deselected' => 'Deselected subagent',
+      _ => label,
+    };
+  }
+
+  String? _subagentActivitySubtitle(SessionActivity activity) {
+    final description = (activity.description ?? '').trim();
+    if (description.isNotEmpty) return description;
+    final error = (activity.errorText ?? '').trim();
+    if (error.isNotEmpty) return error;
+    return activity.summary;
+  }
+
+  List<Widget> _buildNarrativeActivityBody(
+    BuildContext context,
+    SessionActivity activity,
+  ) {
+    final widgets = <Widget>[];
+    final summary = (activity.summary ?? '').trim();
+    final detail = (activity.detail ?? '').trim();
+    final content = (activity.content ?? '').trimRight();
+    final text = (activity.output ?? activity.errorText ?? '').trimRight();
+
+    if (summary.isNotEmpty) {
+      widgets.add(_activityInfoBlock(context, 'Summary', summary));
+    }
+    if (detail.isNotEmpty && detail != summary) {
+      widgets.add(_activityInfoBlock(context, 'Detail', detail));
+    }
+    if (text.isNotEmpty && text != summary && text != detail) {
+      widgets.add(_activityInfoBlock(context, 'Output', text));
+    }
+    if (content.isNotEmpty) {
+      widgets.add(_activityCodeBlock(context, 'Content', content, 'markdown'));
+    }
+    if (widgets.isEmpty) {
+      widgets.add(_waitingText(context, 'Waiting for details.'));
+    }
+    return _withGaps(widgets);
+  }
+
+  List<Widget> _buildSubagentBody(
+    BuildContext context,
+    SessionActivity activity,
+  ) {
+    final widgets = <Widget>[];
+    final description = (activity.description ?? '').trim();
+    final error = (activity.errorText ?? '').trim();
+    final parts = <String>[
+      if ((activity.agentId ?? '').trim().isNotEmpty)
+        'ID: ${activity.agentId!.trim()}',
+      if ((activity.model ?? '').trim().isNotEmpty)
+        'Model: ${activity.model!.trim()}',
+      if (activity.totalTokens != null) 'Tokens: ${activity.totalTokens}',
+      if (activity.totalToolCalls != null)
+        'Tool calls: ${activity.totalToolCalls}',
+    ];
+    if (description.isNotEmpty) {
+      widgets.add(_activityInfoBlock(context, 'Description', description));
+    }
+    if (error.isNotEmpty) {
+      widgets.add(_activityInfoBlock(context, 'Error', error));
+    }
+    if (parts.isNotEmpty) {
+      widgets.add(_activityInfoBlock(context, 'Details', parts.join('\n')));
+    }
+    if (widgets.isEmpty) {
+      widgets.add(_waitingText(context, 'Waiting for subagent details.'));
+    }
+    return _withGaps(widgets);
+  }
+
+  List<Widget> _withGaps(List<Widget> widgets) {
+    if (widgets.length < 2) {
+      return widgets;
+    }
     return [
-      _activityInfoBlock(context, 'What happened', message),
+      for (var index = 0; index < widgets.length; index++) ...[
+        if (index > 0) const SizedBox(height: 12),
+        widgets[index],
+      ],
     ];
   }
 
