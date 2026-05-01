@@ -3226,6 +3226,7 @@ function buildRecoveredPendingActionResponseText(
       return null;
     }
     const fieldCount = recoveredElicitationFieldNames(response).length;
+    const fieldLines = recoveredElicitationFieldLines(response);
     const prompt =
       action.elicitation?.message?.trim() || action.detail || action.title;
     return [
@@ -3234,7 +3235,10 @@ function buildRecoveredPendingActionResponseText(
       `Request: ${prompt}`,
       `Decision: ${responseAction}`,
       fieldCount > 0
-        ? `Structured field values supplied: ${fieldCount} value(s). Values were omitted from chat after restart.`
+        ? [
+            `Structured field values supplied: ${fieldCount} value(s).`,
+            ...fieldLines,
+          ].join("\n")
         : "No structured field values were supplied.",
     ].join("\n");
   }
@@ -3348,6 +3352,19 @@ function recoveredElicitationFieldNames(
     return [];
   }
   return Object.keys(content).filter((key) => key.trim().length > 0).sort();
+}
+
+function recoveredElicitationFieldLines(
+  response: PendingActionElicitationResponse | null,
+): string[] {
+  const content = response?.content;
+  if (!content || typeof content !== "object" || Array.isArray(content)) {
+    return [];
+  }
+  return recoveredElicitationFieldNames(response).map((key) => {
+    const encoded = JSON.stringify(content[key]);
+    return `- ${key}: ${encoded ?? "null"}`;
+  });
 }
 
 async function loadCachedSessionRuntime(
