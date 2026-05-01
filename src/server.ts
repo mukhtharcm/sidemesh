@@ -549,6 +549,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       { type: "text", text, text_elements: [] },
     ];
     await seedSessionSeqCursorFromLog(action.sessionId);
+    const state = await loadRunState(provider, action.sessionId, activeTurns);
     const submittedMessage = buildSubmittedUserMessage(
       input,
       null,
@@ -557,13 +558,16 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     const submitted = await provider.submitInput!({
       sessionId: action.sessionId,
       input,
-      activeTurnId: null,
+      activeTurnId: state.turnId,
       overrides: emptyAgentSessionOverrides(),
     });
     if (submitted.turnId) {
+      const previousStartedAt = state.turnId
+        ? activeTurns.get(action.sessionId)?.startedAt
+        : undefined;
       activeTurns.set(action.sessionId, {
         turnId: submitted.turnId,
-        startedAt: Date.now(),
+        startedAt: previousStartedAt ?? Date.now(),
       });
     }
     broadcastLive(action.sessionId, {
@@ -2183,7 +2187,11 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       }
 
       pendingActions.delete(actionId);
-      await pendingActionStore.delete(actionId);
+      try {
+        await pendingActionStore.delete(actionId);
+      } catch (error) {
+        console.error("Failed to clear persisted pending action", error);
+      }
       broadcastLive(action.sessionId, {
         type: "action_resolved",
         sessionId: action.sessionId,
@@ -2809,7 +2817,7 @@ function normalizeOpenedPendingAction(
 }
 
 function isRecoverablePendingAction(action: AgentPendingAction): boolean {
-  return action.kind === "user_input" || action.kind === "elicitation";
+  return action.kind === "user_input";
 }
 
 async function readSession(

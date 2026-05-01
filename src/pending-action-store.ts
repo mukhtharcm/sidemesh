@@ -164,10 +164,7 @@ export function isRecoveredPendingAction(action: AgentPendingAction): boolean {
 }
 
 function shouldPersistPendingAction(action: PendingAction): boolean {
-  return (
-    (action.kind === "user_input" || action.kind === "elicitation") &&
-    action.recoverable !== false
-  );
+  return action.kind === "user_input" && action.recoverable !== false;
 }
 
 function toRecoveredAction(action: PendingAction): AgentPendingAction {
@@ -253,13 +250,6 @@ function normalizePendingAction(value: unknown): PendingAction | null {
       return null;
     }
     action.userInput = userInput;
-  }
-  if (kind === "elicitation") {
-    const elicitation = normalizeElicitation(typed.elicitation);
-    if (!elicitation) {
-      return null;
-    }
-    action.elicitation = elicitation;
   }
   return action;
 }
@@ -441,8 +431,8 @@ function normalizeElicitationFormat(
 
 function isPersistedPendingActionKind(
   value: string | null,
-): value is "user_input" | "elicitation" {
-  return value === "user_input" || value === "elicitation";
+): value is "user_input" {
+  return value === "user_input";
 }
 
 function fallbackTitle(kind: "user_input" | "elicitation"): string {
