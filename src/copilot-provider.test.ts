@@ -336,106 +336,6 @@ describe("Copilot provider", () => {
     }
   });
 
-  it("migrates persisted Copilot pseudo-tool activities on load", async () => {
-    const dir = await mkdtemp(
-      nodePath.join(tmpdir(), "sidemesh-copilot-stored-pseudo-tools-"),
-    );
-    try {
-      const stateDir = nodePath.join(dir, "state");
-      const sessionId = "stored-pseudo-tools";
-      await mkdir(stateDir, { recursive: true });
-      await writeFile(
-        nodePath.join(stateDir, "sessions.json"),
-        JSON.stringify({
-          sessions: [
-            {
-              thread: {
-                id: sessionId,
-                name: null,
-                preview: "stored",
-                cwd: dir,
-                createdAt: 1,
-                updatedAt: 1,
-                source: "copilot",
-                path: null,
-                status: { type: "idle" },
-                turns: [],
-              },
-              messages: [],
-              activities: [
-                storedToolActivity({
-                  id: "ask-user-tool",
-                  toolName: "ask_user",
-                  title: "ask_user {\"question\":\"Should I start?\"}",
-                  args: { question: "Should I start?" },
-                  seq: 0,
-                }),
-                storedToolActivity({
-                  id: "report-intent-tool",
-                  toolName: "report_intent",
-                  title: "report_intent {\"intent\":\"Working\"}",
-                  args: { intent: "Working" },
-                  seq: 1,
-                }),
-                storedToolActivity({
-                  id: "plan-tool",
-                  toolName: "update_plan",
-                  title: "update_plan",
-                  result: { content: "Plan updated" },
-                  seq: 2,
-                }),
-                storedToolActivity({
-                  id: "read-tool",
-                  toolName: "view",
-                  title: "Read README.md",
-                  args: { path: "README.md" },
-                  seq: 3,
-                }),
-              ],
-              turns: [],
-              runtime: null,
-              nextSeq: 4,
-              copilotSessionId: sessionId,
-              copilotSessionCreated: false,
-            },
-          ],
-        }),
-      );
-      const provider = new CopilotAgentProvider({
-        stateDir,
-        sdkClientFactory: fakeSdkFactory(new FakeCopilotSdkClient()),
-      });
-      await provider.start();
-
-      const log = await provider.readSessionLog!({
-        id: sessionId,
-        name: null,
-        preview: "",
-        cwd: dir,
-        createdAt: 0,
-        updatedAt: 0,
-        source: "copilot",
-        path: null,
-        status: { type: "idle" },
-      });
-
-      assert.deepEqual(
-        log.activities.map((activity) => ({
-          id: activity.id,
-          type: activity.type,
-          title: activity.type === "tool" ? activity.title : undefined,
-        })),
-        [
-          { id: "plan-tool", type: "plan", title: undefined },
-          { id: "read-tool", type: "tool", title: "Read README.md" },
-        ],
-      );
-    } finally {
-      await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
   it("maps Copilot reasoning, subagents, plan review, and system events into neutral activities", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-neutral-events-history-"),
@@ -2175,31 +2075,6 @@ function sdkModel(
       ? ["low", "medium", "high"]
       : undefined,
     defaultReasoningEffort: reasoning ? "medium" : undefined,
-  };
-}
-
-function storedToolActivity(options: {
-  id: string;
-  toolName: string;
-  title: string;
-  args?: unknown;
-  result?: unknown;
-  seq: number;
-}) {
-  return {
-    id: options.id,
-    type: "tool",
-    turnId: null,
-    createdAt: Date.now(),
-    seq: options.seq,
-    status: "completed",
-    toolName: options.toolName,
-    title: options.title,
-    args: options.args ?? null,
-    output: null,
-    result: options.result ?? null,
-    isError: false,
-    semantic: null,
   };
 }
 
