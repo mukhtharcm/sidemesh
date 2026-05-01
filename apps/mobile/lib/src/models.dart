@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class HostProfile {
   const HostProfile({
     required this.id,
@@ -1824,17 +1826,25 @@ class SessionActivity {
     final rawType = _stringValue(json['type']);
     final toolName = _stringOrNull(json['toolName']);
     final toolTitle = _stringOrNull(json['title']);
+    final questionActivity = rawType == 'tool'
+        ? _providerQuestionActivityPresentation(json, toolName, toolTitle)
+        : null;
     final providerControlKind = rawType == 'tool'
         ? _providerControlActivityKind(toolName, toolTitle)
         : null;
-    final normalizedType =
-        providerControlKind == _ProviderControlActivityKind.task
+    final normalizedId = questionActivity == null
+        ? _stringValue(json['id'])
+        : 'question:${_stringValue(json['id'])}';
+    final normalizedType = questionActivity != null
+        ? 'system_event'
+        : providerControlKind == _ProviderControlActivityKind.task
         ? 'plan'
         : rawType;
     final normalizedToolTitle =
-        providerControlKind == _ProviderControlActivityKind.task
-        ? 'Plan updated'
-        : toolTitle;
+        questionActivity?.title ??
+        (providerControlKind == _ProviderControlActivityKind.task
+            ? 'Plan updated'
+            : toolTitle);
     final normalizedSummary =
         providerControlKind == _ProviderControlActivityKind.task
         ? _providerControlActivitySummary(
@@ -1845,7 +1855,7 @@ class SessionActivity {
         : _stringOrNull(json['summary']);
 
     return SessionActivity(
-      id: _stringValue(json['id']),
+      id: normalizedId,
       type: normalizedType,
       createdAt: _dateValue(json['createdAt']),
       seq: _intOrNull(json['seq']) ?? 0,
@@ -1892,8 +1902,8 @@ class SessionActivity {
       activityAction: _stringOrNull(json['action']),
       summary: normalizedSummary,
       content: _stringOrNull(json['content']) ?? _stringOrNull(json['text']),
-      detail: _stringOrNull(json['detail']),
-      level: _stringOrNull(json['level']),
+      detail: questionActivity?.detail ?? _stringOrNull(json['detail']),
+      level: questionActivity == null ? _stringOrNull(json['level']) : 'info',
       reasoningId: _stringOrNull(json['reasoningId']),
       agentId: _stringOrNull(json['agentId']),
       agentName: _stringOrNull(json['agentName']),
@@ -1956,6 +1966,19 @@ class SessionActivity {
 
 enum _ProviderControlActivityKind { hidden, commentary, task }
 
+class _QuestionActivityPresentation {
+  const _QuestionActivityPresentation({required this.title, this.detail});
+
+  final String title;
+  final String? detail;
+}
+
+const _questionProviderControlToolKeys = {
+  'ask_user',
+  'request_user_input',
+  'user_input',
+};
+
 const _hiddenProviderControlToolKeys = {
   'ask_user',
   'request_user_input',
@@ -1984,19 +2007,23 @@ _ProviderControlActivityKind? _providerControlActivityKind(
   String? toolName,
   String? title,
 ) {
+  return _providerControlActivityKindForKey(
+    _providerControlActivityToolKey(toolName, title),
+  );
+}
+
+String? _providerControlActivityToolKey(String? toolName, String? title) {
   final toolKey = _providerControlToolKey(toolName);
   if (toolKey != null && !_genericProviderControlToolKeys.contains(toolKey)) {
-    return _providerControlActivityKindForKey(toolKey);
+    return toolKey;
   }
 
   final titleToolName = _providerControlToolNameFromTitle(title);
   if (titleToolName != null) {
-    return _providerControlActivityKindForKey(
-      _providerControlToolKey(titleToolName),
-    );
+    return _providerControlToolKey(titleToolName);
   }
 
-  return _providerControlActivityKindForKey(toolKey);
+  return toolKey;
 }
 
 String? _providerControlToolNameFromTitle(String? title) {
@@ -2014,6 +2041,104 @@ String? _providerControlToolKey(String? value) {
       .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
       .replaceAll(RegExp(r'^_+|_+$'), '');
   return normalized.isEmpty ? null : normalized;
+}
+
+_QuestionActivityPresentation? _providerQuestionActivityPresentation(
+  Map<String, dynamic> json,
+  String? toolName,
+  String? title,
+) {
+  final toolKey = _providerControlActivityToolKey(toolName, title);
+  if (!_questionProviderControlToolKeys.contains(toolKey)) {
+    return null;
+  }
+  final args = _mapOrNull(json['args']);
+  final result = _mapOrNull(json['result']);
+  final titlePayload = _providerControlTitlePayload(title);
+  final question =
+      _readFirstString(args, const ['question', 'message', 'prompt', 'text']) ??
+      _readFirstString(result, const [
+        'question',
+        'message',
+        'prompt',
+        'text',
+      ]) ??
+      _readFirstString(titlePayload, const [
+        'question',
+        'message',
+        'prompt',
+        'text',
+      ]);
+  if (question == null) {
+    return null;
+  }
+  final choices =
+      _readStringList(args?['choices']) ??
+      _readStringList(titlePayload?['choices']) ??
+      const <String>[];
+  final answer =
+      _readFirstString(result, const [
+        'answer',
+        'response',
+        'selected',
+        'content',
+        'text',
+      ]) ??
+      _providerQuestionAnswerFromOutput(_stringOrNull(json['output']));
+  final detailParts = [
+    if (choices.isNotEmpty) 'Options: ${choices.join(' / ')}',
+    if (answer != null) 'You answered: $answer',
+  ];
+  return _QuestionActivityPresentation(
+    title: 'Model asked: $question',
+    detail: detailParts.isEmpty ? null : detailParts.join('\n'),
+  );
+}
+
+Map<String, dynamic>? _providerControlTitlePayload(String? title) {
+  final match = RegExp(r'\{[\s\S]*\}\s*$').firstMatch(title ?? '');
+  if (match == null) return null;
+  try {
+    return _mapOrNull(jsonDecode(match.group(0)!));
+  } catch (_) {
+    return null;
+  }
+}
+
+Map<String, dynamic>? _mapOrNull(Object? value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) return value.cast<String, dynamic>();
+  return null;
+}
+
+String? _readFirstString(Map<String, dynamic>? map, List<String> keys) {
+  if (map == null) return null;
+  for (final key in keys) {
+    final value = _stringOrNull(map[key])?.trim();
+    if (value != null && value.isNotEmpty) return value;
+  }
+  return null;
+}
+
+List<String>? _readStringList(Object? value) {
+  if (value is! List) return null;
+  final strings = value
+      .map((item) => item is String ? item.trim() : '')
+      .where((item) => item.isNotEmpty)
+      .toList(growable: false);
+  return strings.isEmpty ? null : strings;
+}
+
+String? _providerQuestionAnswerFromOutput(String? output) {
+  final value = output?.trim();
+  if (value == null || value.isEmpty) return null;
+  return value
+      .replaceFirst(
+        RegExp(r'^User\s+(selected|responded):\s*', caseSensitive: false),
+        '',
+      )
+      .replaceFirst(RegExp(r'^Answer:\s*', caseSensitive: false), '')
+      .trim();
 }
 
 _ProviderControlActivityKind? _providerControlActivityKindForKey(String? key) {
