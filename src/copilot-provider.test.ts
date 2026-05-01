@@ -818,6 +818,7 @@ describe("Copilot provider", () => {
       const action = await opened;
       assert.equal(action.userInput?.question, "Which environment should I use?");
       assert.deepEqual(action.userInput?.choices, ["staging", "production"]);
+      assert.equal(action.relatedActivityId, "tool-ask-user-1");
       assert.equal(
         provider.respondToPendingAction(action, {
           answer: "staging",
@@ -1442,6 +1443,16 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
       }
     }
     if (options.prompt.includes("ask user")) {
+      this.emit(
+        event("tool.execution_start", {
+          toolCallId: "tool-ask-user-1",
+          toolName: "ask_user",
+          arguments: {
+            question: "Which environment should I use?",
+            choices: ["staging", "production"],
+          },
+        }),
+      );
       userInputResult = await this.config.onUserInputRequest!(
         {
           question: "Which environment should I use?",

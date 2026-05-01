@@ -29,6 +29,7 @@ describe("pending action store", () => {
         canApprove: false,
         canApproveForSession: false,
         canDecline: false,
+        relatedActivityId: "tool-ask-1",
         userInput: {
           question: "Which environment?",
           choices: ["staging", "production"],
@@ -50,6 +51,7 @@ describe("pending action store", () => {
       assert.equal(recovered[0]?.id, "question-1");
       assert.equal(recovered[0]?.state, "recovered");
       assert.equal(recovered[0]?.recoverable, true);
+      assert.equal(recovered[0]?.relatedActivityId, "tool-ask-1");
       assert.equal(isRecoveredPendingAction(recovered[0]!), true);
       assert.deepEqual(recovered[0]?.providerPayload, {
         recovered: true,
@@ -87,6 +89,26 @@ describe("pending action store", () => {
         canDecline: true,
         providerRequestId: "approval-1",
         providerRequestKind: "provider/approval",
+      });
+
+      await store.put({
+        id: "question-1",
+        sessionId: "session-1",
+        kind: "user_input",
+        title: "Agent question",
+        detail: "Unsafe to replay",
+        requestedAt: 124,
+        canApprove: false,
+        canApproveForSession: false,
+        canDecline: false,
+        recoverable: false,
+        userInput: {
+          question: "Unsafe to replay",
+          choices: [],
+          allowFreeform: true,
+        },
+        providerRequestId: "question-1",
+        providerRequestKind: "provider/ask_user",
       });
 
       assert.deepEqual(store.recoveredActions(), []);

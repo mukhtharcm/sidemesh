@@ -507,9 +507,57 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       turnId: submitted.turnId || undefined,
       messageItem: submittedMessage,
     });
+    const completedActivity = buildRecoveredPendingActionActivityDraft(
+      action,
+      decision,
+    );
+    if (completedActivity) {
+      const next = upsertLiveActivity(
+        liveActivities,
+        action.sessionId,
+        materializeLiveActivityDraft(
+          liveActivities,
+          action.sessionId,
+          completedActivity,
+          () => allocSeq(action.sessionId),
+        ),
+      );
+      broadcastLive(action.sessionId, {
+        type: "activity_updated",
+        sessionId: action.sessionId,
+        activity: next,
+      });
+    }
     clearSessionLogCache(logCache, action.sessionId);
     scheduleRecentSessionUpsert(action.sessionId, 0);
     return true;
+  }
+
+  async function publishOpenedPendingAction(
+    action: AgentPendingAction,
+  ): Promise<void> {
+    let visibleAction = action;
+    if (action.recoverable) {
+      try {
+        await pendingActionStore.put(action);
+      } catch (error) {
+        console.error("Failed to persist pending action", error);
+        visibleAction = { ...action, recoverable: false };
+      }
+    }
+
+    pendingActions.set(visibleAction.id, visibleAction);
+    const publicAction = toPublicPendingAction(visibleAction);
+    broadcastLive(visibleAction.sessionId, {
+      type: "action_opened",
+      sessionId: visibleAction.sessionId,
+      action: publicAction,
+    });
+    broadcastApprovalLive({
+      type: "action_opened",
+      action: publicAction,
+    });
+    scheduleRecentSessionUpsert(visibleAction.sessionId);
   }
 
   provider.on("stderr", (line) => {
@@ -682,21 +730,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         return;
       case "action_opened":
         const openedAction = normalizeOpenedPendingAction(event.action);
-        pendingActions.set(openedAction.id, openedAction);
-        void pendingActionStore.put(openedAction).catch((error) => {
-          console.error("Failed to persist pending action", error);
+        void publishOpenedPendingAction(openedAction).catch((error) => {
+          console.error("Failed to publish pending action", error);
         });
-        const publicAction = toPublicPendingAction(openedAction);
-        broadcastLive(openedAction.sessionId, {
-          type: "action_opened",
-          sessionId: openedAction.sessionId,
-          action: publicAction,
-        });
-        broadcastApprovalLive({
-          type: "action_opened",
-          action: publicAction,
-        });
-        scheduleRecentSessionUpsert(openedAction.sessionId);
         return;
     }
   });
@@ -2038,7 +2074,14 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
 
       let handled = false;
       if (hasProviderMethod(provider, "respondToPendingAction")) {
-        handled = provider.respondToPendingAction!(action, decision);
+        try {
+          handled = provider.respondToPendingAction!(action, decision);
+        } catch (error) {
+          if (!isRecoveredPendingAction(action)) {
+            throw error;
+          }
+          console.error("Failed to resume recovered pending action", error);
+        }
       }
       if (!handled && isRecoveredPendingAction(action)) {
         handled = await submitRecoveredPendingActionResponse(action, decision);
@@ -3066,6 +3109,87 @@ function buildRecoveredPendingActionResponseText(
       "Content:",
       content,
     ].join("\n");
+  }
+
+  return null;
+}
+
+function buildRecoveredPendingActionActivityDraft(
+  action: AgentPendingAction,
+  decision: PendingActionResponseInput,
+): AgentSessionActivityDraft | null {
+  const activityId = action.relatedActivityId?.trim();
+  if (!activityId) {
+    return null;
+  }
+  if (action.kind === "user_input") {
+    const response =
+      decision && typeof decision === "object" && "answer" in decision
+        ? decision
+        : null;
+    const answer =
+      response && typeof response.answer === "string"
+        ? response.answer.trim()
+        : "";
+    const question =
+      action.userInput?.question?.trim() || action.detail || action.title;
+    return {
+      id: activityId,
+      type: "tool",
+      turnId: null,
+      status: "completed",
+      toolName: "ask_user",
+      title: `Model asked: ${question}`,
+      args: {
+        question,
+        choices: action.userInput?.choices ?? [],
+        allowFreeform: action.userInput?.allowFreeform ?? true,
+      },
+      output: answer,
+      result: response ?? null,
+      isError: false,
+      semantic: {
+        category: "interaction",
+        action: "ask",
+        targets: question ? [{ type: "query", value: question }] : [],
+      },
+    };
+  }
+
+  if (action.kind === "elicitation") {
+    const response =
+      decision && typeof decision === "object" && "action" in decision
+        ? decision
+        : null;
+    const prompt =
+      action.elicitation?.message?.trim() || action.detail || action.title;
+    const responseAction =
+      response && typeof response.action === "string"
+        ? response.action
+        : "cancel";
+    return {
+      id: activityId,
+      type: "tool",
+      turnId: null,
+      status: "completed",
+      toolName: "elicitation",
+      title: `Structured input completed: ${prompt}`,
+      args: {
+        mode: action.elicitation?.mode ?? "form",
+        message: prompt,
+        source: action.elicitation?.source,
+        url: action.elicitation?.url,
+        fields: action.elicitation?.fields ?? [],
+      },
+      output: responseAction,
+      result: response ?? null,
+      isError: false,
+      semantic: {
+        category: "interaction",
+        action: "ask",
+        targets: prompt ? [{ type: "query", value: prompt }] : [],
+      },
+    };
   }
 
   return null;
