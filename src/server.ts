@@ -473,6 +473,22 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     broadcastRecentSessionsLive({ type: "remove", sessionId });
   }
 
+  function persistOverlayActivity(
+    sessionId: string,
+    activity: SessionActivity,
+  ): void {
+    appendOverlayActivity(overlayActivitiesBySession, sessionId, activity);
+    clearSessionLogCache(logCache, sessionId);
+    void timelineOverlayStore.upsertActivity(sessionId, activity).catch(
+      (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(
+          `Failed to persist timeline activity for ${sessionId}: ${message}\n`,
+        );
+      },
+    );
+  }
+
   provider.on("stderr", (line) => {
     process.stderr.write(line);
   });
@@ -549,6 +565,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
             () => allocSeq(event.sessionId),
           ),
         );
+        persistOverlayActivity(event.sessionId, next);
         broadcastLive(event.sessionId, {
           type: "activity_updated",
           sessionId: event.sessionId,
@@ -3182,6 +3199,18 @@ function appendInteractionMessage(
   next.push(message);
   next.sort((left, right) => left.seq - right.seq);
   store.set(sessionId, next);
+}
+
+function appendOverlayActivity(
+  store: Map<string, SessionActivity[]>,
+  sessionId: string,
+  activity: SessionActivity,
+): void {
+  const existing = store.get(sessionId) ?? [];
+  const next = existing.filter((item) => item.id !== activity.id);
+  next.push(activity);
+  next.sort((left, right) => left.seq - right.seq);
+  store.set(sessionId, next.slice(-SESSION_TIMELINE_OVERLAY_MAX_ACTIVITIES));
 }
 
 async function readSessionResources(
