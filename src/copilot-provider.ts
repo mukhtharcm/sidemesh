@@ -122,7 +122,6 @@ interface PendingCopilotPermission {
 
 interface PendingCopilotUserInput {
   action: AgentPendingAction;
-  activityId: string;
   resolve(result: CopilotSdkUserInputResponse): void;
 }
 
@@ -610,22 +609,6 @@ export class CopilotAgentProvider
         return false;
       }
       this.pendingUserInputs.delete(action.id);
-      const session = this.sessions.get(action.sessionId);
-      if (session) {
-        const active = this.activeTurns.get(action.sessionId);
-        this.upsertAndEmitActivity(
-          session,
-          active?.turnId ?? null,
-          buildCopilotQuestionActivity({
-            activityId: inputRequest.activityId,
-            turnId: active?.turnId ?? null,
-            question: action.userInput?.question ?? action.detail,
-            choices: action.userInput?.choices ?? [],
-            answer: decision.answer,
-            status: "completed",
-          }),
-        );
-      }
       inputRequest.resolve(decision);
       return true;
     }
@@ -1581,26 +1564,12 @@ export class CopilotAgentProvider
     }
 
     const action = buildCopilotUserInputAction(session, request);
-    const activityId = `copilot-question-${action.id}`;
-    const active = this.activeTurns.get(sessionId);
-    this.upsertAndEmitActivity(
-      session,
-      active?.turnId ?? null,
-      buildCopilotQuestionActivity({
-        activityId,
-        turnId: active?.turnId ?? null,
-        question:
-          action.userInput?.question ?? questionFromUserInputRequest(request),
-        choices: action.userInput?.choices ?? [],
-        status: "in_progress",
-      }),
-    );
     this.emit("liveEvent", {
       type: "action_opened",
       action,
     });
     return new Promise<CopilotSdkUserInputResponse>((resolve) => {
-      this.pendingUserInputs.set(action.id, { action, activityId, resolve });
+      this.pendingUserInputs.set(action.id, { action, resolve });
     });
   }
 

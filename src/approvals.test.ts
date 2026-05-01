@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  buildPendingActionQuestionMessage,
   buildPendingActionResponseMessage,
   parsePendingActionDecision,
   parsePendingActionResponseBody,
@@ -298,6 +299,65 @@ describe("provider-neutral approvals", () => {
         },
       ),
       null,
+    );
+  });
+
+  it("builds durable assistant question messages for user input and forms", () => {
+    assert.deepEqual(
+      buildPendingActionQuestionMessage(
+        {
+          kind: "user_input",
+          title: "Agent question",
+          detail: "Which environment?",
+          userInput: {
+            question: "Which environment?",
+            choices: ["staging", "production"],
+            allowFreeform: false,
+          },
+        },
+        { id: "question-msg-1", createdAt: 123, seq: 7 },
+      ),
+      {
+        id: "question-msg-1",
+        role: "assistant",
+        text: "**Model asked:** Which environment?\n\n**Options:**\n- staging\n- production",
+        attachments: [],
+        createdAt: 123,
+        seq: 7,
+        phase: "question",
+      },
+    );
+
+    assert.deepEqual(
+      buildPendingActionQuestionMessage(
+        {
+          kind: "elicitation",
+          title: "Structured input requested",
+          detail: "Choose deployment options",
+          elicitation: {
+            mode: "form",
+            message: "Choose deployment options",
+            fields: [
+              {
+                key: "region",
+                type: "string",
+                title: "Region",
+                required: true,
+              },
+            ],
+          },
+        },
+        { id: "question-msg-2", createdAt: 456, seq: 8 },
+      ),
+      {
+        id: "question-msg-2",
+        role: "assistant",
+        text: "**Model requested input:** Choose deployment options\n\n**Fields:**\n- Region (required)",
+        attachments: [],
+        createdAt: 456,
+        seq: 8,
+        phase: "question",
+      },
     );
   });
 });
