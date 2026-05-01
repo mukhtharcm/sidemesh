@@ -95,6 +95,40 @@ describe("loadConfig", () => {
     });
   });
 
+  it("loads Pi provider config from env and persisted values", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        defaultProviderKind: "pi",
+        providers: [
+          {
+            kind: "pi",
+            agentDir: "/tmp/pi-agent-old",
+            stateDir: "/tmp/pi-state-old",
+          },
+        ],
+      }),
+    );
+
+    const config = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_PROVIDER: "pi",
+        SIDEMESH_PI_AGENT_DIR: "/tmp/pi-agent",
+      },
+    });
+
+    assert.equal(config.defaultProviderKind, "pi");
+    assert.equal(config.provider.kind, "pi");
+    if (config.provider.kind !== "pi") {
+      throw new Error("expected pi provider");
+    }
+    assert.equal(config.provider.agentDir, "/tmp/pi-agent");
+    assert.equal(config.provider.stateDir, "/tmp/pi-state-old");
+  });
+
   it("loads terminal settings from persisted config and env overrides", async () => {
     await writeFile(
       configPath,

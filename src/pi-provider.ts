@@ -1,0 +1,2410 @@
+import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { constants as fsConstants } from "node:fs";
+import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import nodePath from "node:path";
+
+import {
+  SessionManager,
+  VERSION as PI_VERSION,
+  createAgentSessionFromServices,
+  createAgentSessionServices,
+  type AgentSession,
+  type AgentSessionEvent,
+  type AgentSessionServices,
+  type ResourceDiagnostic,
+  type Skill as PiSkill,
+} from "@mariozechner/pi-coding-agent";
+
+import { mergeActivity, normalizeStoredSessionActivity } from "./activity.js";
+import {
+  materializeAgentActivityDraft,
+  type AgentCreateSessionRequest,
+  type AgentCreateSessionResult,
+  type AgentModelListOptions,
+  type AgentProvider,
+  type AgentProviderCapabilities,
+  type AgentProviderEvents,
+  type AgentSessionActivityDraft,
+  type AgentSessionInputItem,
+  type AgentSessionListOptions,
+  type AgentSessionLogOptions,
+  type AgentSessionResumeOptions,
+  type AgentSubmitInputRequest,
+  type AgentSubmitInputResult,
+  type AgentSkillListOptions,
+} from "./agent-provider.js";
+import type {
+  ModelSummary,
+  SessionActivity,
+  SessionActivityChange,
+  SessionLogSnapshot,
+  SessionMessage,
+  SessionMessageAttachment,
+  SessionRuntimeSummary,
+  SkillCatalogEntry,
+  SkillSummary,
+  ThreadRecord,
+  ToolActivity,
+  ToolActivitySemantic,
+  ToolActivitySemanticTarget,
+  TurnRecord,
+} from "./types.js";
+
+type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+interface PiImageInput {
+  type: "image";
+  data: string;
+  mimeType: string;
+}
+
+interface PiModelLike {
+  id: string;
+  name: string;
+  provider: string;
+  reasoning: boolean;
+  input: string[];
+}
+
+interface PiSessionSummary {
+  id: string;
+  path: string;
+  cwd: string;
+  name: string | null;
+  preview: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface PiPreparedInput {
+  text: string;
+  preview: string;
+  attachments: SessionMessageAttachment[];
+  images: PiImageInput[];
+}
+
+interface PiSessionState {
+  thread: ThreadRecord;
+  messages: SessionMessage[];
+  activities: Map<string, SessionActivity>;
+  turns: TurnRecord[];
+  runtime: SessionRuntimeSummary | null;
+  archived: boolean;
+  nextSeq: number;
+  session?: AgentSession | null;
+  services?: AgentSessionServices | null;
+  sessionManager?: SessionManager | null;
+  unsubscribe?: (() => void) | null;
+  pendingCompactionActivityId?: string | null;
+}
+
+interface ActivePiTurn {
+  turnId: string;
+  status: string | null;
+}
+
+export interface PiAgentProviderOptions {
+  agentDir?: string | null;
+  stateDir?: string | null;
+  createServices?: typeof createAgentSessionServices;
+  createSessionFromServices?: typeof createAgentSessionFromServices;
+}
+
+const DEFAULT_PI_AGENT_DIR = nodePath.join(homedir(), ".pi", "agent");
+const DEFAULT_PI_STATE_DIR = nodePath.join(
+  homedir(),
+  ".sidemesh",
+  "pi-provider",
+);
+const PI_MODEL_REASONING_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const satisfies readonly PiThinkingLevel[];
+
+export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
+  sessions: {
+    create: true,
+    resume: true,
+    rename: true,
+    archive: true,
+    compact: true,
+    interrupt: true,
+    history: true,
+    eventReplay: true,
+    recentFallback: true,
+  },
+  input: {
+    text: true,
+    imageUrl: false,
+    localImage: true,
+    skills: true,
+  },
+  interaction: {
+    userInput: false,
+    elicitation: false,
+  },
+  approvals: {
+    command: false,
+    tool: false,
+    fileChange: false,
+    permissions: false,
+    approveForSession: false,
+  },
+  configuration: {
+    models: true,
+    profiles: false,
+    skills: true,
+    skillManagement: false,
+  },
+  runtimeControls: {
+    model: true,
+    mode: false,
+    reasoningEffort: true,
+    fastMode: false,
+    approvalPolicy: false,
+    sandboxMode: false,
+    networkAccess: false,
+    webSearch: false,
+  },
+  workspace: {
+    filesystem: false,
+    remoteGitDiff: false,
+  },
+};
+
+export class PiAgentProvider
+  extends EventEmitter<AgentProviderEvents>
+  implements AgentProvider
+{
+  public readonly kind = "pi";
+  public readonly displayName = "Pi";
+  public readonly capabilities = PI_PROVIDER_CAPABILITIES;
+
+  private readonly agentDir: string;
+  private readonly stateDir: string;
+  private readonly createServicesFactory: typeof createAgentSessionServices;
+  private readonly createSessionFromServicesFactory: typeof createAgentSessionFromServices;
+  private readonly sessions = new Map<string, PiSessionState>();
+  private readonly archivedSessionIds = new Set<string>();
+  private readonly loadedSessionIds = new Set<string>();
+  private readonly activeTurns = new Map<string, ActivePiTurn>();
+  private saveChain: Promise<void> = Promise.resolve();
+
+  public constructor(options: PiAgentProviderOptions = {}) {
+    super();
+    this.agentDir = nodePath.resolve(
+      options.agentDir?.trim() || DEFAULT_PI_AGENT_DIR,
+    );
+    this.stateDir = nodePath.resolve(
+      options.stateDir?.trim() || DEFAULT_PI_STATE_DIR,
+    );
+    this.createServicesFactory =
+      options.createServices ?? createAgentSessionServices;
+    this.createSessionFromServicesFactory =
+      options.createSessionFromServices ?? createAgentSessionFromServices;
+  }
+
+  public async start(): Promise<void> {
+    await mkdir(this.stateDir, { recursive: true });
+    await this.loadState();
+  }
+
+  public async close(): Promise<void> {
+    for (const session of this.sessions.values()) {
+      this.unloadSession(session);
+    }
+  }
+
+  public async getVersion(): Promise<string> {
+    return `Pi ${PI_VERSION}`;
+  }
+
+  public async listSessionThreads(
+    options: AgentSessionListOptions,
+  ): Promise<ThreadRecord[]> {
+    const summaries = await this.listPiSessionSummaries();
+    const summaryIds = new Set(summaries.map((summary) => summary.id));
+    const threads = summaries
+      .filter((summary) => this.isArchived(summary.id) === options.archived)
+      .map((summary) =>
+        cloneThreadRecord(
+          mergeThreadWithSummary(
+            summary,
+            this.sessions.get(summary.id),
+            false,
+          ),
+        ),
+      );
+    for (const state of this.sessions.values()) {
+      if (summaryIds.has(state.thread.id)) {
+        continue;
+      }
+      if (state.archived !== options.archived) {
+        continue;
+      }
+      threads.push(cloneThread(state, false));
+    }
+    return threads
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, options.limit);
+  }
+
+  public async listRecentUnindexedSessionThreads(
+    limit: number,
+  ): Promise<ThreadRecord[]> {
+    return this.listSessionThreads({ limit, archived: false });
+  }
+
+  public async readSessionThread(
+    threadId: string,
+    includeTurns: boolean,
+  ): Promise<ThreadRecord> {
+    const existing = this.sessions.get(threadId);
+    if (existing) {
+      const summary = await this.findPiSessionSummary(threadId);
+      if (!summary) {
+        return cloneThread(existing, includeTurns);
+      }
+      return cloneThreadRecord(
+        mergeThreadWithSummary(summary, existing, includeTurns),
+      );
+    }
+    const summary = await this.findPiSessionSummary(threadId);
+    if (!summary) {
+      throw new Error(`Unknown Pi session: ${threadId}`);
+    }
+    return cloneThreadRecord(
+      mergeThreadWithSummary(summary, undefined, includeTurns),
+    );
+  }
+
+  public async readSessionLog(
+    thread: ThreadRecord,
+    options: AgentSessionLogOptions = {},
+  ): Promise<SessionLogSnapshot> {
+    const state = this.activeTurns.has(thread.id)
+      ? await this.ensureLoadedSession(thread.id)
+      : await this.loadSessionStateFromHistory(thread.id);
+    const messages = limitTail(state.messages, options.messageLimit ?? null);
+    const activities = limitTail(
+      [...state.activities.values()].sort((left, right) => left.seq - right.seq),
+      options.activityLimit ?? null,
+    );
+    return {
+      messages: messages.map(cloneMessage),
+      activities: activities.map(cloneActivity),
+      runtime: cloneRuntime(state.runtime),
+      totalMessages: state.messages.length,
+      totalActivities: state.activities.size,
+      nextSeq: state.nextSeq,
+    };
+  }
+
+  public async readSessionRuntime(
+    thread: ThreadRecord,
+  ): Promise<SessionRuntimeSummary | null> {
+    const state = this.activeTurns.has(thread.id)
+      ? await this.ensureLoadedSession(thread.id)
+      : await this.loadSessionStateFromHistory(thread.id);
+    return cloneRuntime(state.runtime);
+  }
+
+  public async listLoadedSessionIds(): Promise<string[]> {
+    return [...this.loadedSessionIds];
+  }
+
+  public async resumeSessionThread(
+    threadId: string,
+    _options?: AgentSessionResumeOptions,
+  ): Promise<unknown> {
+    await this.ensureLoadedSession(threadId);
+    this.loadedSessionIds.add(threadId);
+    return { resumed: true };
+  }
+
+  public async setSessionName(
+    threadId: string,
+    name: string,
+  ): Promise<unknown> {
+    const session = await this.ensureSessionState(threadId);
+    const normalized = name.trim();
+    if (session.session) {
+      session.session.setSessionName(normalized);
+    } else if (session.thread.path) {
+      const manager = SessionManager.open(
+        session.thread.path,
+        nodePath.dirname(session.thread.path),
+        session.thread.cwd,
+      );
+      manager.appendSessionInfo(normalized);
+    } else {
+      throw new Error(`Pi session ${threadId} is missing a session path.`);
+    }
+    session.thread.name = normalized || null;
+    session.thread.updatedAt = nowSeconds();
+    await this.persistSoon();
+    return { renamed: true };
+  }
+
+  public async archiveSession(threadId: string): Promise<unknown> {
+    this.archivedSessionIds.add(threadId);
+    const session = await this.ensureSessionState(threadId);
+    session.archived = true;
+    const active = this.activeTurns.get(threadId);
+    if (active) {
+      await this.interruptTurn(threadId, active.turnId);
+    }
+    this.unloadSession(session);
+    await this.persistSoon();
+    return { archived: true };
+  }
+
+  public async unarchiveSession(threadId: string): Promise<unknown> {
+    this.archivedSessionIds.delete(threadId);
+    const session = await this.ensureSessionState(threadId);
+    session.archived = false;
+    session.thread.updatedAt = nowSeconds();
+    await this.persistSoon();
+    return { unarchived: true };
+  }
+
+  public async compactSession(threadId: string): Promise<unknown> {
+    const session = await this.ensureLoadedSession(threadId);
+    const result = await session.session!.compact();
+    await this.persistSoon();
+    return result;
+  }
+
+  public async createSession(
+    request: AgentCreateSessionRequest,
+  ): Promise<AgentCreateSessionResult> {
+    const session = await this.createLoadedSession(request.cwd);
+    await this.applyOverrides(session, request.overrides);
+    let activeTurnId: string | null = null;
+    if (request.input.length > 0) {
+      activeTurnId = await this.startTurn(session, request.input);
+    }
+    await this.persistSoon();
+    return {
+      thread: cloneThread(session, false),
+      activeTurnId,
+      runtime: cloneRuntime(session.runtime),
+    };
+  }
+
+  public async submitInput(
+    request: AgentSubmitInputRequest,
+  ): Promise<AgentSubmitInputResult> {
+    const session = await this.ensureLoadedSession(request.sessionId);
+    await this.applyOverrides(session, request.overrides);
+    const active = this.activeTurns.get(request.sessionId);
+    if (active) {
+      const prepared = await preparePiInput(request.input);
+      this.appendUserMessage(session, prepared);
+      try {
+        await session.session!.steer(prepared.text, prepared.images);
+      } catch (error) {
+        this.emit(
+          "stderr",
+          error instanceof Error
+            ? `Pi steer failed: ${error.message}`
+            : "Pi steer failed.",
+        );
+        throw error;
+      }
+      this.touch(session);
+      await this.persistSoon();
+      return { mode: "steer", turnId: active.turnId };
+    }
+    const turnId = await this.startTurn(session, request.input);
+    await this.persistSoon();
+    return { mode: "turn", turnId };
+  }
+
+  public async interruptTurn(
+    threadId: string,
+    turnId: string,
+  ): Promise<unknown> {
+    const active = this.activeTurns.get(threadId);
+    if (!active || active.turnId !== turnId) {
+      return { interrupted: false };
+    }
+    const session = await this.ensureLoadedSession(threadId);
+    await session.session!.abort().catch(() => undefined);
+    if (this.activeTurns.get(threadId)?.turnId === turnId) {
+      this.completeActiveTurn(threadId, "interrupted");
+    }
+    await this.persistSoon();
+    return { interrupted: true };
+  }
+
+  public async listModels(
+    options: AgentModelListOptions,
+  ): Promise<ModelSummary[]> {
+    const services = await this.createServices(options.cwd ?? process.cwd());
+    const available = services.modelRegistry.getAvailable();
+    const all = services.modelRegistry.getAll();
+    const models = (available.length > 0 ? available : all)
+      .filter(isPiModelLike)
+      .sort((left, right) =>
+        formatPiModelRef(left.provider, left.id).localeCompare(
+          formatPiModelRef(right.provider, right.id),
+        ),
+      );
+    const defaultProvider = services.settingsManager.getDefaultProvider();
+    const defaultModel = services.settingsManager.getDefaultModel();
+    const defaultRef =
+      defaultProvider && defaultModel
+        ? formatPiModelRef(defaultProvider, defaultModel)
+        : null;
+    const defaultThinking =
+      services.settingsManager.getDefaultThinkingLevel() ?? "medium";
+    return models.map((model, index) => {
+      const ref = formatPiModelRef(model.provider, model.id);
+      const reasoningEfforts = model.reasoning
+        ? PI_MODEL_REASONING_LEVELS.map((reasoningEffort) => ({
+            reasoningEffort,
+            description: `Pi ${reasoningEffort} reasoning effort.`,
+          }))
+        : [];
+      return {
+        id: `pi:${ref}`,
+        model: ref,
+        displayName: model.name || titleCaseModelName(model.id),
+        description: `Pi model via ${services.modelRegistry.getProviderDisplayName(model.provider)}.`,
+        defaultReasoningEffort: model.reasoning ? defaultThinking : "off",
+        supportedReasoningEfforts: reasoningEfforts,
+        reasoningEffortControl: model.reasoning ? "client" : "provider",
+        supportsPersonality: false,
+        additionalSpeedTiers: [],
+        inputModalities: model.input.includes("image") ? ["text", "image"] : ["text"],
+        isDefault: defaultRef ? ref === defaultRef : index === 0,
+        sortOrder: index,
+        source: "pi",
+      };
+    });
+  }
+
+  public async listSkills(
+    options: AgentSkillListOptions,
+  ): Promise<SkillCatalogEntry> {
+    const services = await this.createServices(options.cwd);
+    const { skills, diagnostics } = services.resourceLoader.getSkills();
+    return {
+      cwd: options.cwd,
+      skills: skills.map((skill) => piSkillToSummary(skill, options.cwd, this.agentDir)),
+      errors: diagnostics.map(resourceDiagnosticToSkillError),
+    };
+  }
+
+  private async createServices(cwd: string): Promise<AgentSessionServices> {
+    return this.createServicesFactory({
+      cwd,
+      agentDir: this.agentDir,
+    });
+  }
+
+  private async createLoadedSession(cwd: string): Promise<PiSessionState> {
+    const services = await this.createServices(cwd);
+    const sessionManager = SessionManager.create(
+      cwd,
+      piSessionDirForCwd(cwd, this.agentDir),
+    );
+    const { session } = await this.createSessionFromServicesFactory({
+      services,
+      sessionManager,
+    });
+    const thread: ThreadRecord = {
+      id: session.sessionId,
+      name: sessionManager.getSessionName() ?? null,
+      preview: "Pi session",
+      createdAt: nowSeconds(),
+      updatedAt: nowSeconds(),
+      cwd,
+      source: "pi",
+      path: session.sessionFile ?? null,
+      status: { type: "idle" },
+      turns: [],
+    };
+    const state: PiSessionState = {
+      thread,
+      messages: [],
+      activities: new Map(),
+      turns: [],
+      runtime: runtimeFromLoadedSession(session, null, null),
+      archived: false,
+      nextSeq: 0,
+      session,
+      services,
+      sessionManager,
+      unsubscribe: null,
+      pendingCompactionActivityId: null,
+    };
+    this.sessions.set(thread.id, state);
+    this.attachSession(state);
+    this.loadedSessionIds.add(thread.id);
+    return state;
+  }
+
+  private async ensureSessionState(threadId: string): Promise<PiSessionState> {
+    const existing = this.sessions.get(threadId);
+    if (existing) {
+      return existing;
+    }
+    return this.loadSessionStateFromHistory(threadId);
+  }
+
+  private async ensureLoadedSession(threadId: string): Promise<PiSessionState> {
+    const existing = await this.ensureSessionState(threadId);
+    if (existing.session) {
+      this.loadedSessionIds.add(threadId);
+      return existing;
+    }
+    const path =
+      existing.thread.path ??
+      (await this.findPiSessionSummary(threadId))?.path ??
+      null;
+    if (!path) {
+      throw new Error(`Unknown Pi session: ${threadId}`);
+    }
+    const threadCwd =
+      existing.thread.cwd ||
+      (await this.findPiSessionSummary(threadId))?.cwd ||
+      process.cwd();
+    const services = await this.createServices(threadCwd);
+    const sessionManager = SessionManager.open(path, nodePath.dirname(path), threadCwd);
+    const { session } = await this.createSessionFromServicesFactory({
+      services,
+      sessionManager,
+    });
+    existing.thread.path = session.sessionFile ?? existing.thread.path;
+    existing.session = session;
+    existing.services = services;
+    existing.sessionManager = sessionManager;
+    existing.runtime = runtimeFromLoadedSession(session, existing.runtime, this.activeTurns.get(threadId)?.turnId ?? null);
+    existing.pendingCompactionActivityId = null;
+    this.attachSession(existing);
+    this.loadedSessionIds.add(threadId);
+    return existing;
+  }
+
+  private attachSession(state: PiSessionState): void {
+    state.unsubscribe?.();
+    state.unsubscribe = state.session?.subscribe((event) => {
+      this.handleSessionEvent(state, event);
+    }) ?? null;
+  }
+
+  private unloadSession(state: PiSessionState): void {
+    state.unsubscribe?.();
+    state.unsubscribe = null;
+    state.session?.dispose();
+    state.session = null;
+    state.services = null;
+    state.sessionManager = null;
+    this.loadedSessionIds.delete(state.thread.id);
+  }
+
+  private async loadSessionStateFromHistory(
+    threadId: string,
+  ): Promise<PiSessionState> {
+    const summary = await this.findPiSessionSummary(threadId);
+    const existing = this.sessions.get(threadId);
+    if (!summary) {
+      if (existing) {
+        return existing;
+      }
+      throw new Error(`Unknown Pi session: ${threadId}`);
+    }
+    const manager = SessionManager.open(
+      summary.path,
+      nodePath.dirname(summary.path),
+      summary.cwd,
+    );
+    const parsed = parsePiSessionHistory(manager, summary);
+    const state: PiSessionState = existing ?? {
+      thread: buildThreadFromSummary(summary, false),
+      messages: [],
+      activities: new Map(),
+      turns: [],
+      runtime: null,
+      archived: this.isArchived(threadId),
+      nextSeq: 0,
+      pendingCompactionActivityId: null,
+    };
+    state.thread = mergeThreadWithSummary(summary, state, false);
+    state.messages = parsed.messages;
+    state.activities = new Map(
+      parsed.activities.map((activity) => [
+        activity.id,
+        normalizeStoredSessionActivity(activity),
+      ]),
+    );
+    state.runtime = parsed.runtime;
+    state.nextSeq = parsed.nextSeq;
+    state.thread.name = parsed.threadName ?? state.thread.name;
+    state.thread.preview = parsed.preview || state.thread.preview;
+    state.thread.path = summary.path;
+    state.thread.updatedAt = summary.updatedAt;
+    state.archived = this.isArchived(threadId);
+    this.sessions.set(threadId, state);
+    await this.persistSoon();
+    return state;
+  }
+
+  private async startTurn(
+    session: PiSessionState,
+    input: AgentSessionInputItem[],
+  ): Promise<string> {
+    const prepared = await preparePiInput(input);
+    this.appendUserMessage(session, prepared);
+    const turnId = `pi-turn-${randomUUID()}`;
+    session.turns.push({
+      id: turnId,
+      status: "in_progress",
+      startedAt: nowSeconds(),
+      completedAt: null,
+    });
+    session.thread.status = { type: "running", activeFlags: ["streaming"] };
+    this.activeTurns.set(session.thread.id, { turnId, status: null });
+    this.replaceRuntime(
+      session,
+      runtimeWithTurnId(
+        runtimeFromLoadedSession(session.session!, session.runtime, turnId),
+        turnId,
+      ),
+    );
+    this.touch(session);
+    this.emit("liveEvent", {
+      type: "turn_started",
+      sessionId: session.thread.id,
+      turnId,
+    });
+    void this.runPrompt(session, turnId, prepared);
+    return turnId;
+  }
+
+  private async runPrompt(
+    session: PiSessionState,
+    turnId: string,
+    prepared: PiPreparedInput,
+  ): Promise<void> {
+    try {
+      const options =
+        prepared.images.length > 0
+          ? ({
+              images: prepared.images,
+            } as Parameters<AgentSession["prompt"]>[1])
+          : undefined;
+      await session.session!.prompt(prepared.text, options);
+    } catch (error) {
+      if (this.activeTurns.get(session.thread.id)?.turnId !== turnId) {
+        return;
+      }
+      const message =
+        error instanceof Error ? error.message : "Pi prompt failed.";
+      this.emit("stderr", `Pi prompt failed: ${message}`);
+      this.appendAssistantMessage(session, {
+        text: message,
+        phase: "final_answer",
+        createdAt: Date.now(),
+      });
+      this.completeActiveTurn(session.thread.id, "failed");
+    } finally {
+      this.persistEventually();
+    }
+  }
+
+  private async applyOverrides(
+    session: PiSessionState,
+    overrides: AgentCreateSessionRequest["overrides"],
+  ): Promise<void> {
+    const activeTurnId = this.activeTurns.get(session.thread.id)?.turnId ?? null;
+    const loaded = session.session;
+    const services = session.services;
+    if (!loaded || !services) {
+      return;
+    }
+
+    if (overrides.model?.trim()) {
+      const model = resolvePiModel(services.modelRegistry.getAll(), overrides.model);
+      if (!model) {
+        throw new Error(`Unknown Pi model "${overrides.model}".`);
+      }
+      await loaded.setModel(model);
+    }
+
+    if (isPiThinkingLevel(overrides.reasoningEffort)) {
+      loaded.setThinkingLevel(overrides.reasoningEffort);
+    }
+
+    this.replaceRuntime(
+      session,
+      runtimeFromLoadedSession(loaded, session.runtime, activeTurnId),
+    );
+  }
+
+  private handleSessionEvent(
+    session: PiSessionState,
+    event: AgentSessionEvent,
+  ): void {
+    switch (event.type) {
+      case "session_info_changed":
+        session.thread.name = event.name?.trim() || null;
+        session.thread.updatedAt = nowSeconds();
+        this.persistEventually();
+        return;
+      case "thinking_level_changed":
+        this.replaceRuntime(
+          session,
+          runtimeFromLoadedSession(
+            session.session!,
+            session.runtime,
+            this.activeTurns.get(session.thread.id)?.turnId ?? null,
+          ),
+        );
+        this.persistEventually();
+        return;
+      case "compaction_start": {
+        const createdAt = Date.now();
+        const activityId = `pi-compaction:${createdAt}`;
+        session.pendingCompactionActivityId = activityId;
+        this.upsertActivity(session, {
+          id: activityId,
+          type: "context_compaction",
+          turnId: this.activeTurns.get(session.thread.id)?.turnId ?? null,
+          status: "in_progress",
+        }, createdAt);
+        this.replaceRuntime(session, {
+          ...(session.runtime ?? {}),
+          telemetry: {
+            ...(session.runtime?.telemetry ?? {}),
+            compaction: {
+              ...(session.runtime?.telemetry?.compaction ?? {}),
+              status: "running",
+              startedAt: createdAt,
+              updatedAt: createdAt,
+            },
+          },
+          updatedAt: createdAt,
+        });
+        this.persistEventually();
+        return;
+      }
+      case "compaction_end": {
+        const completedAt = Date.now();
+        const activityId =
+          session.pendingCompactionActivityId ?? `pi-compaction:${completedAt}`;
+        session.pendingCompactionActivityId = null;
+        this.upsertActivity(session, {
+          id: activityId,
+          type: "context_compaction",
+          turnId: this.activeTurns.get(session.thread.id)?.turnId ?? null,
+          status:
+            event.aborted || event.errorMessage
+              ? "failed"
+              : "completed",
+        }, completedAt);
+        this.replaceRuntime(session, {
+          ...(session.runtime ?? {}),
+          telemetry: {
+            ...(session.runtime?.telemetry ?? {}),
+            compaction: {
+              ...(session.runtime?.telemetry?.compaction ?? {}),
+              status:
+                event.aborted || event.errorMessage
+                  ? "failed"
+                  : "completed",
+              completedAt,
+              updatedAt: completedAt,
+              error: event.errorMessage,
+            },
+          },
+          updatedAt: completedAt,
+        });
+        this.persistEventually();
+        return;
+      }
+      case "message_update":
+        this.handleMessageUpdate(session, event);
+        return;
+      case "message_end":
+        this.handleMessageEnd(session, event);
+        return;
+      case "tool_execution_start":
+        this.handleToolExecutionStart(session, event);
+        return;
+      case "tool_execution_update":
+        this.handleToolExecutionUpdate(session, event);
+        return;
+      case "agent_end": {
+        const active = this.activeTurns.get(session.thread.id);
+        if (!active) {
+          return;
+        }
+        this.completeActiveTurn(session.thread.id, active.status ?? "completed");
+        this.persistEventually();
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  private handleMessageUpdate(
+    session: PiSessionState,
+    event: Extract<AgentSessionEvent, { type: "message_update" }>,
+  ): void {
+    if (event.assistantMessageEvent.type !== "text_delta") {
+      return;
+    }
+    const active = this.activeTurns.get(session.thread.id);
+    this.emit("liveEvent", {
+      type: "assistant_delta",
+      sessionId: session.thread.id,
+      turnId: active?.turnId,
+      delta: event.assistantMessageEvent.delta,
+    });
+  }
+
+  private handleMessageEnd(
+    session: PiSessionState,
+    event: Extract<AgentSessionEvent, { type: "message_end" }>,
+  ): void {
+    const message = event.message as unknown as Record<string, unknown>;
+    const role = stringValue(message.role);
+    if (!role) {
+      return;
+    }
+
+    if (role === "assistant") {
+      const createdAt = numberValue(message.timestamp) ?? Date.now();
+      const text = extractPiMessageText(message);
+      const errorMessage = stringValue(message.errorMessage);
+      const phase = detectPiAssistantPhase(message);
+      if (text || errorMessage) {
+        this.appendAssistantMessage(session, {
+          text: text || errorMessage || "",
+          phase,
+          createdAt,
+        });
+      }
+      const active = this.activeTurns.get(session.thread.id);
+      const stopReason = stringValue(message.stopReason);
+      if (active && (stopReason === "error" || stopReason === "aborted")) {
+        active.status = stopReason === "aborted" ? "interrupted" : "failed";
+      }
+      this.replaceRuntime(
+        session,
+        runtimeFromAssistantMessage(session.runtime, message, active?.turnId ?? null),
+      );
+      this.persistEventually();
+      return;
+    }
+
+    if (role === "toolResult") {
+      const createdAt = numberValue(message.timestamp) ?? Date.now();
+      this.finalizeToolResultActivity(session, message, createdAt);
+      this.persistEventually();
+      return;
+    }
+
+    if (role === "custom" || role === "branchSummary" || role === "compactionSummary") {
+      const text = customPiMessageText(message);
+      if (text) {
+        this.appendSystemMessage(session, text, numberValue(message.timestamp) ?? Date.now());
+        this.persistEventually();
+      }
+      return;
+    }
+
+    if (role === "bashExecution") {
+      const createdAt = numberValue(message.timestamp) ?? Date.now();
+      const activity = bashExecutionToActivity(message, {
+        turnId: this.activeTurns.get(session.thread.id)?.turnId ?? null,
+        createdAt,
+        seq: session.nextSeq++,
+      });
+      session.activities.set(activity.id, activity);
+      this.emit("liveEvent", {
+        type: "activity_updated",
+        sessionId: session.thread.id,
+        turnId: activity.turnId ?? undefined,
+        activity,
+      });
+      this.persistEventually();
+    }
+  }
+
+  private handleToolExecutionStart(
+    session: PiSessionState,
+    event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
+  ): void {
+    const createdAt = Date.now();
+    const draft = toolExecutionStartDraft(event, session.thread.cwd, this.activeTurns.get(session.thread.id)?.turnId ?? null);
+    this.upsertActivity(session, draft, createdAt);
+    this.persistEventually();
+  }
+
+  private handleToolExecutionUpdate(
+    session: PiSessionState,
+    event: Extract<AgentSessionEvent, { type: "tool_execution_update" }>,
+  ): void {
+    const activityId = activityIdForToolCall(event.toolName, event.toolCallId);
+    const existing = session.activities.get(activityId);
+    if (!existing) {
+      return;
+    }
+    const nextOutput = extractPiPartialToolText(event.partialResult);
+    if (!nextOutput) {
+      return;
+    }
+    if (existing.type === "command") {
+      const previous = existing.output ?? "";
+      const delta = appendOutputDelta(previous, nextOutput);
+      if (!delta) {
+        return;
+      }
+      const updated: SessionActivity = {
+        ...existing,
+        output: previous + delta,
+      };
+      session.activities.set(activityId, updated);
+      this.emit("liveEvent", {
+        type: "activity_output_delta",
+        sessionId: session.thread.id,
+        turnId: updated.turnId ?? undefined,
+        activityId,
+        delta,
+      });
+      return;
+    }
+    if (existing.type === "tool") {
+      const previous = existing.output ?? "";
+      const delta = appendOutputDelta(previous, nextOutput);
+      if (!delta) {
+        return;
+      }
+      const updated: SessionActivity = {
+        ...existing,
+        output: previous + delta,
+      };
+      session.activities.set(activityId, updated);
+      this.emit("liveEvent", {
+        type: "activity_output_delta",
+        sessionId: session.thread.id,
+        turnId: updated.turnId ?? undefined,
+        activityId,
+        delta,
+      });
+    }
+  }
+
+  private appendUserMessage(
+    session: PiSessionState,
+    prepared: PiPreparedInput,
+  ): void {
+    const message: SessionMessage = {
+      id: `pi-user:${randomUUID()}`,
+      role: "user",
+      text: prepared.text,
+      attachments: prepared.attachments,
+      createdAt: Date.now(),
+      seq: session.nextSeq++,
+    };
+    session.messages.push(message);
+    this.touch(session);
+  }
+
+  private appendAssistantMessage(
+    session: PiSessionState,
+    options: {
+      text: string;
+      phase?: SessionMessage["phase"];
+      createdAt: number;
+    },
+  ): void {
+    const message: SessionMessage = {
+      id: `pi-assistant:${randomUUID()}`,
+      role: "assistant",
+      text: options.text,
+      attachments: [],
+      createdAt: options.createdAt,
+      seq: session.nextSeq++,
+      phase: options.phase ?? "final_answer",
+    };
+    session.messages.push(message);
+    this.touch(session);
+    this.emit("liveEvent", {
+      type: "assistant_message_completed",
+      sessionId: session.thread.id,
+      turnId: this.activeTurns.get(session.thread.id)?.turnId,
+      message: {
+        id: message.id,
+        text: message.text,
+        phase: message.phase,
+      },
+    });
+  }
+
+  private appendSystemMessage(
+    session: PiSessionState,
+    text: string,
+    createdAt: number,
+  ): void {
+    session.messages.push({
+      id: `pi-system:${randomUUID()}`,
+      role: "system",
+      text,
+      attachments: [],
+      createdAt,
+      seq: session.nextSeq++,
+    });
+    this.touch(session);
+  }
+
+  private finalizeToolResultActivity(
+    session: PiSessionState,
+    message: Record<string, unknown>,
+    createdAt: number,
+  ): void {
+    const toolCallId = stringValue(message.toolCallId);
+    const toolName = stringValue(message.toolName) || "tool";
+    const activityId = activityIdForToolCall(toolName, toolCallId ?? randomUUID());
+    const existing = session.activities.get(activityId);
+    const output = extractPiContentText(message.content);
+    const isError = booleanValue(message.isError) ?? false;
+    const details = message.details;
+    if (existing?.type === "command") {
+      const updated: SessionActivity = {
+        ...existing,
+        status: isError ? "failed" : "completed",
+        output,
+        exitCode: parseExitCode(output),
+      };
+      session.activities.set(activityId, updated);
+      this.emit("liveEvent", {
+        type: "activity_updated",
+        sessionId: session.thread.id,
+        turnId: updated.turnId ?? undefined,
+        activity: updated,
+      });
+      return;
+    }
+
+    const args = existing?.type === "tool" ? existing.args : null;
+    const draft: AgentSessionActivityDraft = {
+      id: activityId,
+      type: "tool",
+      turnId: existing?.turnId ?? this.activeTurns.get(session.thread.id)?.turnId ?? null,
+      status: isError ? "failed" : "completed",
+      toolName,
+      title: existing?.type === "tool" ? existing.title : toolName,
+      args,
+      output,
+      result: details ?? { content: message.content ?? null },
+      isError,
+      semantic: inferPiToolSemantic(toolName, args, details),
+    };
+    const activity = this.upsertActivity(session, draft, createdAt);
+    if (existing?.type !== "tool") {
+      this.emit("liveEvent", {
+        type: "activity_updated",
+        sessionId: session.thread.id,
+        turnId: activity.turnId ?? undefined,
+        activity,
+      });
+    }
+
+    const fileChange = fileChangeFromPiTool(toolName, args, details, activity);
+    if (!fileChange) {
+      return;
+    }
+    this.upsertActivity(session, fileChange, createdAt);
+  }
+
+  private upsertActivity(
+    session: PiSessionState,
+    draft: AgentSessionActivityDraft,
+    createdAt: number,
+  ): SessionActivity {
+    const existing = session.activities.get(draft.id);
+    const materialized = existing
+      ? mergeActivity(
+          existing,
+          materializeAgentActivityDraft(draft, {
+            createdAt: existing.createdAt,
+            seq: existing.seq,
+          }),
+        )
+      : materializeAgentActivityDraft(draft, {
+          createdAt,
+          seq: session.nextSeq++,
+        });
+    session.activities.set(materialized.id, materialized);
+    this.emit("liveEvent", {
+      type: "activity_updated",
+      sessionId: session.thread.id,
+      turnId: materialized.turnId ?? undefined,
+      activity: materialized,
+    });
+    return materialized;
+  }
+
+  private replaceRuntime(
+    session: PiSessionState,
+    runtime: SessionRuntimeSummary | null,
+  ): void {
+    if (runtimeSummaryEquals(session.runtime, runtime)) {
+      return;
+    }
+    session.runtime = runtime ? { ...runtime } : null;
+    this.emit("liveEvent", {
+      type: "runtime_updated",
+      sessionId: session.thread.id,
+      runtime: cloneRuntime(session.runtime),
+    });
+  }
+
+  private completeActiveTurn(threadId: string, status: string): void {
+    const active = this.activeTurns.get(threadId);
+    const session = this.sessions.get(threadId);
+    if (!active || !session) {
+      return;
+    }
+    const turn = session.turns.find((candidate) => candidate.id === active.turnId);
+    if (turn) {
+      turn.status = status;
+      turn.completedAt = nowSeconds();
+    }
+    session.thread.status = { type: "idle" };
+    this.activeTurns.delete(threadId);
+    this.replaceRuntime(
+      session,
+      runtimeWithTurnId(
+        runtimeFromLoadedSession(session.session ?? null, session.runtime, null),
+        null,
+      ),
+    );
+    this.emit("liveEvent", {
+      type: "turn_completed",
+      sessionId: threadId,
+      turnId: active.turnId,
+      status,
+    });
+    this.touch(session);
+  }
+
+  private touch(session: PiSessionState): void {
+    session.thread.updatedAt = nowSeconds();
+    const preview = latestPreviewMessage(session.messages);
+    if (preview) {
+      session.thread.preview = preview;
+    }
+  }
+
+  private isArchived(threadId: string): boolean {
+    return (
+      this.archivedSessionIds.has(threadId) ||
+      this.sessions.get(threadId)?.archived === true
+    );
+  }
+
+  private get statePath(): string {
+    return nodePath.join(this.stateDir, "sessions.json");
+  }
+
+  private get sessionsRoot(): string {
+    return nodePath.join(this.agentDir, "sessions");
+  }
+
+  private async loadState(): Promise<void> {
+    try {
+      const raw = await readFile(this.statePath, "utf8");
+      const parsed = JSON.parse(raw) as {
+        archivedSessionIds?: string[];
+        sessions?: Array<{
+          thread: ThreadRecord;
+          messages?: SessionMessage[];
+          activities?: SessionActivity[];
+          turns?: TurnRecord[];
+          runtime?: SessionRuntimeSummary | null;
+          archived?: boolean;
+          nextSeq?: number;
+        }>;
+      };
+      for (const id of parsed.archivedSessionIds ?? []) {
+        this.archivedSessionIds.add(id);
+      }
+      for (const item of parsed.sessions ?? []) {
+        const state: PiSessionState = {
+          thread: item.thread,
+          messages: item.messages ?? [],
+          activities: new Map(
+            (item.activities ?? []).map((activity) => [
+              activity.id,
+              normalizeStoredSessionActivity(activity),
+            ]),
+          ),
+          turns: item.turns ?? [],
+          runtime: item.runtime ?? null,
+          archived: item.archived === true,
+          nextSeq:
+            item.nextSeq ??
+            Math.max(
+              ...[
+                ...((item.messages ?? []).map((message) => message.seq)),
+                ...((item.activities ?? []).map((activity) => activity.seq)),
+                -1,
+              ],
+            ) + 1,
+          pendingCompactionActivityId: null,
+        };
+        this.sessions.set(state.thread.id, state);
+      }
+    } catch {
+      // Ignore missing or corrupt sidecar state.
+    }
+  }
+
+  private async persistSoon(): Promise<void> {
+    this.saveChain = this.saveChain
+      .catch(() => undefined)
+      .then(() => this.saveState());
+    await this.saveChain;
+  }
+
+  private persistEventually(): void {
+    void this.persistSoon().catch((error: unknown) => {
+      this.emit(
+        "stderr",
+        error instanceof Error
+          ? `Pi provider state persistence failed: ${error.message}`
+          : "Pi provider state persistence failed.",
+      );
+    });
+  }
+
+  private async saveState(): Promise<void> {
+    await mkdir(this.stateDir, { recursive: true });
+    const payload = {
+      archivedSessionIds: [...this.archivedSessionIds],
+      sessions: [...this.sessions.values()].map((session) => ({
+        thread: cloneThread(session, true),
+        messages: session.messages.map(cloneMessage),
+        activities: [...session.activities.values()].map(cloneActivity),
+        turns: session.turns.map(cloneTurn),
+        runtime: cloneRuntime(session.runtime),
+        archived: session.archived,
+        nextSeq: session.nextSeq,
+      })),
+    };
+    await writeFile(this.statePath, JSON.stringify(payload, null, 2));
+  }
+
+  private async listPiSessionSummaries(): Promise<PiSessionSummary[]> {
+    const filePaths = await collectPiSessionFiles(this.sessionsRoot);
+    const summaries = await Promise.all(
+      filePaths.map((filePath) => readPiSessionSummary(filePath)),
+    );
+    return summaries.filter(
+      (summary): summary is PiSessionSummary => summary !== null,
+    );
+  }
+
+  private async findPiSessionSummary(
+    threadId: string,
+  ): Promise<PiSessionSummary | null> {
+    const summaries = await this.listPiSessionSummaries();
+    return summaries.find((summary) => summary.id === threadId) ?? null;
+  }
+}
+
+function runtimeFromLoadedSession(
+  session: AgentSession | null,
+  existing: SessionRuntimeSummary | null,
+  turnId: string | null,
+): SessionRuntimeSummary | null {
+  const base = existing ? { ...existing } : {};
+  if (!session) {
+    return runtimeWithTurnId(base, turnId);
+  }
+  const model = session.model;
+  const runtime: SessionRuntimeSummary = {
+    ...base,
+    updatedAt: Date.now(),
+    ...(model
+      ? {
+          model: formatPiModelRef(model.provider, model.id),
+          modelProvider: model.provider,
+        }
+      : {}),
+    ...(session.thinkingLevel
+      ? {
+          reasoningEffort: session.thinkingLevel,
+        }
+      : {}),
+  };
+  return runtimeWithTurnId(runtime, turnId);
+}
+
+function runtimeFromAssistantMessage(
+  existing: SessionRuntimeSummary | null,
+  message: Record<string, unknown>,
+  turnId: string | null,
+): SessionRuntimeSummary {
+  const provider = stringValue(message.provider);
+  const model = stringValue(message.model);
+  const usage = asRecord(message.usage);
+  const next: SessionRuntimeSummary = {
+    ...(existing ?? {}),
+    updatedAt: numberValue(message.timestamp) ?? Date.now(),
+    ...(provider && model
+      ? {
+          model: formatPiModelRef(provider, model),
+          modelProvider: provider,
+        }
+      : {}),
+  };
+  next.telemetry = {
+    ...(existing?.telemetry ?? {}),
+    lastUsage: {
+      model:
+        provider && model ? formatPiModelRef(provider, model) : undefined,
+      inputTokens: numberValue(usage?.input),
+      outputTokens: numberValue(usage?.output),
+      cacheReadTokens: numberValue(usage?.cacheRead),
+      cacheWriteTokens: numberValue(usage?.cacheWrite),
+      cost: numberValue(asRecord(usage?.cost)?.total),
+      updatedAt: numberValue(message.timestamp) ?? Date.now(),
+    },
+  };
+  return runtimeWithTurnId(next, turnId) ?? next;
+}
+
+function runtimeWithTurnId(
+  runtime: SessionRuntimeSummary | null,
+  turnId: string | null,
+): SessionRuntimeSummary | null {
+  if (!runtime) {
+    return null;
+  }
+  if (!turnId) {
+    const { turnId: _turnId, ...rest } = runtime;
+    return rest;
+  }
+  return {
+    ...runtime,
+    turnId,
+  };
+}
+
+function parsePiSessionHistory(
+  sessionManager: SessionManager,
+  summary: PiSessionSummary,
+): {
+  messages: SessionMessage[];
+  activities: SessionActivity[];
+  runtime: SessionRuntimeSummary | null;
+  nextSeq: number;
+  threadName: string | null;
+  preview: string;
+} {
+  const branch = sessionManager.getBranch();
+  const messages: SessionMessage[] = [];
+  const activities = new Map<string, SessionActivity>();
+  const toolCalls = new Map<string, { toolName: string; args: unknown }>();
+  let runtime: SessionRuntimeSummary | null = null;
+  let seq = 0;
+  let threadName = sessionManager.getSessionName() ?? null;
+  let preview = summary.preview;
+
+  for (const entry of branch) {
+    const createdAt = entryTimestampMillis(entry.timestamp);
+    if (entry.type === "session_info") {
+      threadName = entry.name?.trim() || null;
+      continue;
+    }
+    if (entry.type === "thinking_level_change") {
+      runtime = {
+        ...(runtime ?? {}),
+        reasoningEffort: entry.thinkingLevel,
+        updatedAt: createdAt,
+      };
+      continue;
+    }
+    if (entry.type === "model_change") {
+      runtime = {
+        ...(runtime ?? {}),
+        model: formatPiModelRef(entry.provider, entry.modelId),
+        modelProvider: entry.provider,
+        updatedAt: createdAt,
+      };
+      continue;
+    }
+    if (entry.type === "compaction") {
+      activities.set(entry.id, {
+        id: entry.id,
+        type: "context_compaction",
+        turnId: null,
+        createdAt,
+        seq: seq++,
+        status: "completed",
+      });
+      runtime = {
+        ...(runtime ?? {}),
+        telemetry: {
+          ...(runtime?.telemetry ?? {}),
+          compaction: {
+            ...(runtime?.telemetry?.compaction ?? {}),
+            status: "completed",
+            preCompactionTokens: entry.tokensBefore,
+            completedAt: createdAt,
+            updatedAt: createdAt,
+          },
+        },
+        updatedAt: createdAt,
+      };
+      continue;
+    }
+    if (entry.type === "branch_summary") {
+      const text = entry.summary.trim();
+      if (text) {
+        messages.push({
+          id: entry.id,
+          role: "system",
+          text,
+          attachments: [],
+          createdAt,
+          seq: seq++,
+        });
+        preview = text;
+      }
+      continue;
+    }
+    if (entry.type === "custom_message") {
+      if (entry.display) {
+        const text = extractPiContentText(entry.content);
+        if (text) {
+          messages.push({
+            id: entry.id,
+            role: "system",
+            text,
+            attachments: [],
+            createdAt,
+            seq: seq++,
+          });
+          preview = text;
+        }
+      }
+      continue;
+    }
+    if (entry.type !== "message") {
+      continue;
+    }
+    const message = entry.message as unknown as Record<string, unknown>;
+    const role = stringValue(message.role);
+    if (!role) {
+      continue;
+    }
+    if (role === "user") {
+      const text = extractPiMessageText(message);
+      messages.push({
+        id: entry.id,
+        role: "user",
+        text,
+        attachments: [],
+        createdAt,
+        seq: seq++,
+      });
+      if (text) {
+        preview = text;
+      }
+      continue;
+    }
+    if (role === "assistant") {
+      for (const toolCall of extractPiToolCalls(message.content)) {
+        toolCalls.set(toolCall.id, {
+          toolName: toolCall.name,
+          args: toolCall.arguments,
+        });
+      }
+      const text = extractPiMessageText(message);
+      const errorMessage = stringValue(message.errorMessage);
+      if (text || errorMessage) {
+        messages.push({
+          id: entry.id,
+          role: "assistant",
+          text: text || errorMessage || "",
+          attachments: [],
+          createdAt,
+          seq: seq++,
+          phase: detectPiAssistantPhase(message) ?? "final_answer",
+        });
+        preview = text || errorMessage || preview;
+      }
+      runtime = runtimeFromAssistantMessage(runtime, message, null);
+      continue;
+    }
+    if (role === "toolResult") {
+      const toolCallId = stringValue(message.toolCallId);
+      const resolved = toolCallId ? toolCalls.get(toolCallId) : null;
+      const toolName = stringValue(message.toolName) || resolved?.toolName || "tool";
+      const args = resolved?.args ?? null;
+      const activity = persistedPiToolResultActivity(
+        toolName,
+        toolCallId ?? entry.id,
+        args,
+        message,
+        createdAt,
+        seq++,
+      );
+      activities.set(activity.id, activity);
+      const fileChange = fileChangeFromPiTool(
+        toolName,
+        args,
+        message.details,
+        activity,
+      );
+      if (fileChange) {
+        activities.set(
+          fileChange.id,
+          materializeAgentActivityDraft(fileChange, {
+            createdAt,
+            seq: seq++,
+          }),
+        );
+      }
+      continue;
+    }
+    if (role === "bashExecution") {
+      activities.set(
+        entry.id,
+        bashExecutionToActivity(message, {
+          turnId: null,
+          createdAt,
+          seq: seq++,
+        }),
+      );
+      continue;
+    }
+    if (role === "custom" || role === "branchSummary" || role === "compactionSummary") {
+      const text = customPiMessageText(message);
+      if (text) {
+        messages.push({
+          id: entry.id,
+          role: "system",
+          text,
+          attachments: [],
+          createdAt,
+          seq: seq++,
+        });
+        preview = text;
+      }
+    }
+  }
+
+  return {
+    messages,
+    activities: [...activities.values()].sort((left, right) => left.seq - right.seq),
+    runtime,
+    nextSeq: seq,
+    threadName,
+    preview,
+  };
+}
+
+function persistedPiToolResultActivity(
+  toolName: string,
+  toolCallId: string,
+  args: unknown,
+  message: Record<string, unknown>,
+  createdAt: number,
+  seq: number,
+): SessionActivity {
+  const output = extractPiContentText(message.content);
+  const isError = booleanValue(message.isError) ?? false;
+  if (toolName === "bash") {
+    return {
+      id: activityIdForToolCall(toolName, toolCallId),
+      type: "command",
+      turnId: null,
+      createdAt,
+      seq,
+      status: isError ? "failed" : "completed",
+      command: stringValue(asRecord(args)?.command) || "",
+      cwd: "",
+      output,
+      exitCode: parseExitCode(output),
+      durationMs: null,
+      source: "tool",
+      processId: null,
+      commandActions: [],
+      terminalStatus: null,
+      terminalInput: null,
+    };
+  }
+  return {
+    id: activityIdForToolCall(toolName, toolCallId),
+    type: "tool",
+    turnId: null,
+    createdAt,
+    seq,
+    status: isError ? "failed" : "completed",
+    toolName,
+    title: toolName,
+    args,
+    output,
+    result: message.details ?? { content: message.content ?? null },
+    isError,
+    semantic: inferPiToolSemantic(toolName, args, message.details),
+  };
+}
+
+function toolExecutionStartDraft(
+  event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
+  cwd: string,
+  turnId: string | null,
+): AgentSessionActivityDraft {
+  if (event.toolName === "bash") {
+    return {
+      id: activityIdForToolCall(event.toolName, event.toolCallId),
+      type: "command",
+      turnId,
+      status: "in_progress",
+      command: stringValue(asRecord(event.args)?.command) || "",
+      cwd,
+      output: null,
+      exitCode: null,
+      durationMs: null,
+      source: "tool",
+      processId: null,
+      commandActions: [],
+      terminalStatus: null,
+      terminalInput: null,
+    };
+  }
+  return {
+    id: activityIdForToolCall(event.toolName, event.toolCallId),
+    type: "tool",
+    turnId,
+    status: "in_progress",
+    toolName: event.toolName,
+    title: event.toolName,
+    args: event.args ?? null,
+    output: null,
+    result: null,
+    isError: null,
+    semantic: inferPiToolSemantic(event.toolName, event.args, null),
+  };
+}
+
+function fileChangeFromPiTool(
+  toolName: string,
+  args: unknown,
+  details: unknown,
+  parent: SessionActivity,
+): AgentSessionActivityDraft | null {
+  if (toolName !== "edit") {
+    return null;
+  }
+  const typedArgs = asRecord(args);
+  const typedDetails = asRecord(details);
+  const path = stringValue(typedArgs?.path);
+  const diff = stringValue(typedDetails?.diff);
+  if (!path || !diff) {
+    return null;
+  }
+  const changes: SessionActivityChange[] = [
+    {
+      path,
+      kind: "update",
+      diff,
+    },
+  ];
+  return {
+    id: `${parent.id}:file-change`,
+    type: "file_change",
+    turnId: parent.turnId,
+    status: parent.status,
+    changes,
+  };
+}
+
+function inferPiToolSemantic(
+  toolName: string,
+  args: unknown,
+  _result: unknown,
+): ToolActivitySemantic {
+  const typedArgs = asRecord(args);
+  const path = stringValue(typedArgs?.path);
+  const query = stringValue(typedArgs?.query) ?? stringValue(typedArgs?.pattern);
+  switch (toolName) {
+    case "read":
+      return {
+        category: "filesystem",
+        action: "read",
+        targets: path
+          ? [{ type: "file", path, access: "read", role: "target" }]
+          : [],
+      };
+    case "grep":
+      return {
+        category: "filesystem",
+        action: "search",
+        targets: [
+          ...(query ? [{ type: "query", value: query } as const] : []),
+          ...(path
+            ? [{ type: "file", path, role: "target" } as const]
+            : []),
+        ],
+      };
+    case "find":
+    case "ls":
+      return {
+        category: "filesystem",
+        action: "list",
+        targets: path
+          ? [{ type: "file", path, role: "target" }]
+          : [],
+      };
+    case "edit":
+    case "write":
+      return {
+        category: "filesystem",
+        action: "write",
+        targets: path
+          ? [{ type: "file", path, access: "write", role: "target" }]
+          : [],
+      };
+    case "bash":
+      return {
+        category: "command",
+        action: "invoke",
+        targets: stringValue(typedArgs?.command)
+          ? [{ type: "command", command: stringValue(typedArgs?.command)! }]
+          : [],
+      };
+    default:
+      return {
+        category: "unknown",
+        action: "invoke",
+        targets: [],
+      };
+  }
+}
+
+function bashExecutionToActivity(
+  message: Record<string, unknown>,
+  context: { turnId: string | null; createdAt: number; seq: number },
+): SessionActivity {
+  const command = stringValue(message.command) || "";
+  const output = stringValue(message.output) ?? null;
+  const cancelled = booleanValue(message.cancelled) ?? false;
+  const exitCode = numberValue(message.exitCode) ?? null;
+  return {
+    id: `pi-bash:${context.createdAt}:${context.seq}`,
+    type: "command",
+    turnId: context.turnId,
+    createdAt: context.createdAt,
+    seq: context.seq,
+    status:
+      cancelled || (typeof exitCode === "number" && exitCode !== 0)
+        ? "failed"
+        : "completed",
+    command,
+    cwd: "",
+    output,
+    exitCode,
+    durationMs: null,
+    source: "shell",
+    processId: null,
+    commandActions: [],
+    terminalStatus: null,
+    terminalInput: null,
+  };
+}
+
+function mergeThreadWithSummary(
+  summary: PiSessionSummary,
+  state: PiSessionState | undefined,
+  includeTurns: boolean,
+): ThreadRecord {
+  if (!state) {
+    return buildThreadFromSummary(summary, includeTurns);
+  }
+  const preferState = state.thread.updatedAt >= summary.updatedAt;
+  const base = preferState ? state.thread : buildThreadFromSummary(summary, includeTurns);
+  return {
+    ...base,
+    name: preferState ? state.thread.name : (summary.name ?? state.thread.name),
+    preview: preferState ? state.thread.preview : summary.preview,
+    createdAt: summary.createdAt,
+    updatedAt: preferState ? state.thread.updatedAt : summary.updatedAt,
+    cwd: summary.cwd,
+    source: "pi",
+    path: state.thread.path ?? summary.path,
+    status: preferState ? { ...state.thread.status } : { ...base.status },
+    turns: includeTurns ? state.turns.map(cloneTurn) : undefined,
+  };
+}
+
+function buildThreadFromSummary(
+  summary: PiSessionSummary,
+  includeTurns: boolean,
+): ThreadRecord {
+  return {
+    id: summary.id,
+    name: summary.name,
+    preview: summary.preview,
+    createdAt: summary.createdAt,
+    updatedAt: summary.updatedAt,
+    cwd: summary.cwd,
+    source: "pi",
+    path: summary.path,
+    status: { type: "idle" },
+    turns: includeTurns ? [] : undefined,
+  };
+}
+
+async function collectPiSessionFiles(root: string): Promise<string[]> {
+  if (!(await pathExists(root))) {
+    return [];
+  }
+  const files: string[] = [];
+  const entries = await readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = nodePath.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await collectPiSessionFiles(fullPath)));
+      continue;
+    }
+    if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+async function readPiSessionSummary(
+  filePath: string,
+): Promise<PiSessionSummary | null> {
+  try {
+    const raw = await readFile(filePath, "utf8");
+    const entries = raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry): entry is Record<string, unknown> => entry !== null);
+    const header = entries[0];
+    if (!header || header.type !== "session" || typeof header.id !== "string") {
+      return null;
+    }
+    const cwd = stringValue(header.cwd) || "";
+    const createdAtMs = Date.parse(stringValue(header.timestamp) || "") || Date.now();
+    let updatedAtMs = createdAtMs;
+    let name: string | null = null;
+    let preview = cwd || "Pi session";
+    for (const entry of entries.slice(1)) {
+      const role = stringValue(asRecord(entry.message)?.role);
+      if (entry.type === "session_info") {
+        name = stringValue(entry.name) || null;
+      }
+      const text =
+        entry.type === "message"
+          ? role === "assistant" || role === "user"
+            ? extractPiMessageText(asRecord(entry.message))
+            : role === "custom" || role === "branchSummary" || role === "compactionSummary"
+              ? customPiMessageText(asRecord(entry.message))
+              : null
+          : entry.type === "branch_summary"
+            ? stringValue(entry.summary)
+            : null;
+      if (text && text.trim().length > 0) {
+        preview = text.trim();
+      }
+      updatedAtMs = Math.max(
+        updatedAtMs,
+        numberValue(asRecord(entry.message)?.timestamp) ??
+          entryTimestampMillis(stringValue(entry.timestamp)),
+      );
+    }
+    return {
+      id: header.id,
+      path: filePath,
+      cwd,
+      name,
+      preview: summarizePreview(preview),
+      createdAt: Math.trunc(createdAtMs / 1000),
+      updatedAt: Math.trunc(updatedAtMs / 1000),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function entryTimestampMillis(value: string | undefined): number {
+  const parsed = value ? Date.parse(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+async function preparePiInput(
+  input: AgentSessionInputItem[],
+): Promise<PiPreparedInput> {
+  const promptParts: string[] = [];
+  const images: PiImageInput[] = [];
+  const attachments: SessionMessageAttachment[] = [];
+
+  for (const item of input) {
+    switch (item.type) {
+      case "text":
+        if (item.text.trim()) {
+          promptParts.push(item.text.trim());
+        }
+        break;
+      case "skill":
+        promptParts.push(await inlinePiSkill(item.name, item.path));
+        break;
+      case "localImage": {
+        const image = await readLocalImage(item.path);
+        images.push(image);
+        attachments.push({ type: "localImage", path: item.path });
+        break;
+      }
+      case "image":
+        throw new Error("Pi does not support image URL attachments.");
+    }
+  }
+
+  const preview = previewFromInput(input);
+  let text = promptParts.join("\n\n").trim();
+  if (!text && images.length === 1) {
+    text = "Please inspect the attached image.";
+  } else if (!text && images.length > 1) {
+    text = `Please inspect the ${images.length} attached images.`;
+  }
+
+  return {
+    text,
+    preview,
+    attachments,
+    images,
+  };
+}
+
+async function inlinePiSkill(name: string, filePath: string): Promise<string> {
+  const content = await readFile(filePath, "utf8");
+  const body = stripFrontmatter(content).trim();
+  const baseDir = nodePath.dirname(filePath);
+  return `<skill name="${name}" location="${filePath}">\nReferences are relative to ${baseDir}.\n\n${body}\n</skill>`;
+}
+
+async function readLocalImage(path: string): Promise<PiImageInput> {
+  const absolutePath = nodePath.resolve(path);
+  const mimeType = imageMimeTypeFromPath(absolutePath);
+  if (!mimeType) {
+    throw new Error(`Unsupported image type for "${path}".`);
+  }
+  const buffer = await readFile(absolutePath);
+  return {
+    type: "image",
+    data: buffer.toString("base64"),
+    mimeType,
+  };
+}
+
+function piSessionDirForCwd(cwd: string, agentDir: string): string {
+  const safePath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+  return nodePath.join(agentDir, "sessions", safePath);
+}
+
+function imageMimeTypeFromPath(path: string): string | null {
+  switch (nodePath.extname(path).toLowerCase()) {
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    case ".svg":
+      return "image/svg+xml";
+    default:
+      return null;
+  }
+}
+
+function previewFromInput(input: AgentSessionInputItem[]): string {
+  const text = input
+    .map((item) => {
+      switch (item.type) {
+        case "text":
+          return item.text.trim();
+        case "skill":
+          return `/skill:${item.name.trim()}`;
+        default:
+          return "";
+      }
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  if (!text) {
+    return input.some((item) => item.type === "localImage") ? "Image prompt" : "Pi session";
+  }
+  return summarizePreview(text);
+}
+
+function summarizePreview(text: string): string {
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
+function extractPiToolCalls(
+  content: unknown,
+): Array<{ id: string; name: string; arguments: unknown }> {
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  return content.flatMap((block) => {
+    const typed = asRecord(block);
+    if (!typed || typed.type !== "toolCall") {
+      return [];
+    }
+    const id = stringValue(typed.id);
+    const name = stringValue(typed.name);
+    if (!id || !name) {
+      return [];
+    }
+    return [{ id, name, arguments: typed.arguments ?? null }];
+  });
+}
+
+function extractPiMessageText(
+  message: Record<string, unknown> | null | undefined,
+): string {
+  return extractPiContentText(message?.content);
+}
+
+function extractPiContentText(content: unknown): string {
+  if (typeof content === "string") {
+    return content.trim();
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((block) => {
+      const typed = asRecord(block);
+      if (!typed || typed.type !== "text") {
+        return "";
+      }
+      return stringValue(typed.text) || "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function customPiMessageText(
+  message: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!message) {
+    return null;
+  }
+  const role = stringValue(message.role);
+  if (role === "branchSummary" || role === "compactionSummary") {
+    return stringValue(message.summary) ?? null;
+  }
+  return extractPiMessageText(message) || null;
+}
+
+function detectPiAssistantPhase(
+  message: Record<string, unknown>,
+): SessionMessage["phase"] | undefined {
+  const content = Array.isArray(message.content) ? message.content : [];
+  let detected: SessionMessage["phase"] | undefined;
+  for (const block of content) {
+    const typed = asRecord(block);
+    if (!typed || typed.type !== "text") {
+      continue;
+    }
+    const rawSignature = stringValue(typed.textSignature);
+    if (!rawSignature) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(rawSignature) as { phase?: unknown };
+      if (parsed.phase === "commentary" || parsed.phase === "final_answer") {
+        detected = parsed.phase;
+      }
+    } catch {
+      // Ignore legacy non-JSON signatures.
+    }
+  }
+  return detected;
+}
+
+function extractPiPartialToolText(partialResult: unknown): string | null {
+  if (typeof partialResult === "string") {
+    return partialResult;
+  }
+  const typed = asRecord(partialResult);
+  if (!typed) {
+    return null;
+  }
+  const contentText = extractPiContentText(typed.content);
+  if (contentText) {
+    return contentText;
+  }
+  return stringValue(typed.text) ?? stringValue(typed.output) ?? null;
+}
+
+function appendOutputDelta(previous: string, nextOutput: string): string | null {
+  if (!nextOutput) {
+    return null;
+  }
+  if (!previous) {
+    return nextOutput;
+  }
+  if (nextOutput.startsWith(previous)) {
+    return nextOutput.slice(previous.length);
+  }
+  if (previous.endsWith(nextOutput)) {
+    return null;
+  }
+  return nextOutput;
+}
+
+function activityIdForToolCall(toolName: string, toolCallId: string): string {
+  const prefix = toolName === "bash" ? "pi-command" : "pi-tool";
+  return `${prefix}:${toolCallId}`;
+}
+
+function formatPiModelRef(provider: string, modelId: string): string {
+  return `${provider}/${modelId}`;
+}
+
+function resolvePiModel<T extends PiModelLike>(
+  models: T[],
+  requested: string,
+): T | null {
+  const normalized = requested.trim();
+  if (!normalized) {
+    return null;
+  }
+  const typedModels = models.filter(isPiModelLike) as T[];
+  if (normalized.includes("/")) {
+    const [provider, ...rest] = normalized.split("/");
+    const modelId = rest.join("/");
+    return (
+      typedModels.find(
+        (model) => model.provider === provider && model.id === modelId,
+      ) ?? null
+    );
+  }
+  const exactMatches = typedModels.filter((model) => model.id === normalized);
+  if (exactMatches.length === 1) {
+    return exactMatches[0]!;
+  }
+  return null;
+}
+
+function piSkillToSummary(
+  skill: PiSkill,
+  cwd: string,
+  agentDir: string,
+): SkillSummary {
+  const userSkillRoot = nodePath.join(agentDir, "skills");
+  const repoSkillRoot = nodePath.join(cwd, ".pi", "skills");
+  const normalizedPath = nodePath.resolve(skill.filePath);
+  const scope = normalizedPath.startsWith(nodePath.resolve(repoSkillRoot))
+    ? "repo"
+    : normalizedPath.startsWith(nodePath.resolve(userSkillRoot))
+      ? "user"
+      : "system";
+  return {
+    name: skill.name,
+    description: skill.description,
+    shortDescription: null,
+    interface: null,
+    path: normalizedPath,
+    scope,
+    enabled: true,
+  };
+}
+
+function resourceDiagnosticToSkillError(
+  diagnostic: ResourceDiagnostic,
+): { path: string; message: string } {
+  return {
+    path: diagnostic.path ?? diagnostic.collision?.loserPath ?? "<unknown>",
+    message: diagnostic.message,
+  };
+}
+
+function isPiModelLike(value: unknown): value is PiModelLike {
+  const typed = asRecord(value);
+  return (
+    !!typed &&
+    typeof typed.id === "string" &&
+    typeof typed.name === "string" &&
+    typeof typed.provider === "string" &&
+    typeof typed.reasoning === "boolean" &&
+    Array.isArray(typed.input)
+  );
+}
+
+function isPiThinkingLevel(value: unknown): value is PiThinkingLevel {
+  return (
+    value === "off" ||
+    value === "minimal" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh"
+  );
+}
+
+function titleCaseModelName(value: string): string {
+  return value
+    .split(/[-_:/\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function latestPreviewMessage(messages: SessionMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const text = messages[index]?.text.trim();
+    if (text) {
+      return summarizePreview(text);
+    }
+  }
+  return null;
+}
+
+function parseExitCode(output: string | null): number | null {
+  if (!output) {
+    return null;
+  }
+  const match = output.match(/Command exited with code (\d+)/);
+  if (!match) {
+    return null;
+  }
+  const parsed = Number.parseInt(match[1]!, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function stripFrontmatter(content: string): string {
+  if (!content.startsWith("---\n")) {
+    return content;
+  }
+  const end = content.indexOf("\n---\n", 4);
+  if (end === -1) {
+    return content;
+  }
+  return content.slice(end + 5);
+}
+
+function runtimeSummaryEquals(
+  left: SessionRuntimeSummary | null,
+  right: SessionRuntimeSummary | null,
+): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function nowSeconds(): number {
+  return Math.trunc(Date.now() / 1000);
+}
+
+function cloneThread(session: PiSessionState, includeTurns: boolean): ThreadRecord {
+  return {
+    ...session.thread,
+    status: { ...session.thread.status },
+    turns: includeTurns ? session.turns.map(cloneTurn) : undefined,
+  };
+}
+
+function cloneThreadRecord(thread: ThreadRecord): ThreadRecord {
+  return {
+    ...thread,
+    status: { ...thread.status },
+    turns: thread.turns?.map(cloneTurn),
+  };
+}
+
+function cloneTurn(turn: TurnRecord): TurnRecord {
+  return {
+    ...turn,
+    items: turn.items?.map((item) => ({ ...item })),
+  };
+}
+
+function cloneMessage(message: SessionMessage): SessionMessage {
+  return {
+    ...message,
+    attachments: message.attachments.map((attachment) => ({ ...attachment })),
+  };
+}
+
+function cloneActivity(activity: SessionActivity): SessionActivity {
+  return JSON.parse(JSON.stringify(activity)) as SessionActivity;
+}
+
+function cloneRuntime(
+  runtime: SessionRuntimeSummary | null,
+): SessionRuntimeSummary | null {
+  return runtime ? JSON.parse(JSON.stringify(runtime)) : null;
+}
+
+function limitTail<T>(items: T[], limit: number | null): T[] {
+  if (!limit || limit <= 0 || items.length <= limit) {
+    return [...items];
+  }
+  return items.slice(items.length - limit);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.trunc(value)
+    : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function asRecord(
+  value: unknown,
+): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}

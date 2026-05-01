@@ -14,6 +14,10 @@ import {
   FakeAgentProvider,
 } from "./fake-provider.js";
 import {
+  PI_PROVIDER_CAPABILITIES,
+  PiAgentProvider,
+} from "./pi-provider.js";
+import {
   DEFAULT_AGENT_PROVIDER_KIND,
   createAgentProviderFromConfig,
   isAgentProviderKind,
@@ -29,10 +33,12 @@ describe("provider registry", () => {
     assert.equal(DEFAULT_AGENT_PROVIDER_KIND, "codex");
     assert.deepEqual(supportedAgentProviderKinds(), [
       "codex",
+      "pi",
       "fake",
       "copilot",
     ]);
     assert.equal(isAgentProviderKind("codex"), true);
+    assert.equal(isAgentProviderKind("pi"), true);
     assert.equal(isAgentProviderKind("fake"), true);
     assert.equal(isAgentProviderKind("copilot"), true);
   });
@@ -54,6 +60,19 @@ describe("provider registry", () => {
           "never",
         ],
         capabilities: CODEX_PROVIDER_CAPABILITIES,
+        setupAudience: "public",
+      },
+      {
+        kind: "pi",
+        displayName: "Pi",
+        defaultCommand: "sdk",
+        commandEnvironmentVariables: [
+          "SIDEMESH_PI_AGENT_DIR",
+          "SIDEMESH_PI_STATE_DIR",
+          "PI_CODING_AGENT_DIR",
+        ],
+        supportedApprovalPolicies: [],
+        capabilities: PI_PROVIDER_CAPABILITIES,
         setupAudience: "public",
       },
       {
@@ -100,19 +119,19 @@ describe("provider registry", () => {
   it("hides dev-only providers from the normal setup wizard", () => {
     assert.deepEqual(
       listSetupAgentProviderDefinitionSummaries().map((summary) => summary.kind),
-      ["codex"],
+      ["codex", "pi"],
     );
     assert.deepEqual(
       listSetupAgentProviderDefinitionSummaries({
         includeKinds: ["fake"],
       }).map((summary) => summary.kind),
-      ["codex", "fake"],
+      ["codex", "pi", "fake"],
     );
     assert.deepEqual(
       listSetupAgentProviderDefinitionSummaries({
         includeDev: true,
       }).map((summary) => summary.kind),
-      ["codex", "fake", "copilot"],
+      ["codex", "pi", "fake", "copilot"],
     );
   });
 
@@ -182,6 +201,38 @@ describe("provider registry", () => {
     assert.equal(provider.displayName, "Fake Test Provider");
     assert.equal(provider.capabilities.input.text, true);
     assert.equal(provider.capabilities.input.imageUrl, false);
+  });
+
+  it("loads and constructs the Pi provider", () => {
+    const config = loadAgentProviderConfig("pi", {
+      SIDEMESH_PI_AGENT_DIR: "/tmp/pi-agent",
+      SIDEMESH_PI_STATE_DIR: "/tmp/sidemesh-pi",
+    });
+
+    assert.deepEqual(config, {
+      kind: "pi",
+      agentDir: "/tmp/pi-agent",
+      stateDir: "/tmp/sidemesh-pi",
+    });
+    assert.deepEqual(summarizeAgentProviderConfig(config), {
+      kind: "pi",
+      command: "sdk",
+    });
+
+    const provider = createAgentProviderFromConfig(config);
+    assert.ok(provider instanceof PiAgentProvider);
+    assert.equal(provider.kind, "pi");
+    assert.equal(provider.displayName, "Pi");
+    assert.equal(provider.capabilities.input.text, true);
+    assert.equal(provider.capabilities.input.imageUrl, false);
+    assert.equal(provider.capabilities.input.localImage, true);
+    assert.equal(provider.capabilities.input.skills, true);
+    assert.equal(provider.capabilities.configuration.models, true);
+    assert.equal(provider.capabilities.configuration.skills, true);
+    assert.equal(provider.capabilities.configuration.skillManagement, false);
+    assert.equal(provider.capabilities.runtimeControls.model, true);
+    assert.equal(provider.capabilities.runtimeControls.reasoningEffort, true);
+    assert.equal(provider.capabilities.interaction.userInput, false);
   });
 
   it("rejects unknown fake capability profiles", () => {
