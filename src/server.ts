@@ -51,8 +51,6 @@ import {
   mergeSessionActivities,
 } from "./activity.js";
 import {
-  buildPendingActionQuestionMessage,
-  buildPendingActionResponseMessage,
   parsePendingActionResponseBody,
   toPublicPendingAction,
 } from "./approvals.js";
@@ -91,7 +89,6 @@ import {
   SessionInputDedupeStore,
   type StoredSessionInputDedupeEntry,
 } from "./session-input-dedupe-store.js";
-import { SessionTimelineOverlayStore } from "./session-timeline-overlay-store.js";
 import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionReplayIndex } from "./session-replay-index.js";
@@ -100,10 +97,6 @@ const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
 const SESSION_INPUT_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
-const SESSION_TIMELINE_OVERLAY_FILE = "session-timeline-overlays-v1.json";
-const SESSION_TIMELINE_OVERLAY_MAX_SESSIONS = 500;
-const SESSION_TIMELINE_OVERLAY_MAX_MESSAGES = 200;
-const SESSION_TIMELINE_OVERLAY_MAX_ACTIVITIES = 400;
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
@@ -211,24 +204,6 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       createdAt: entry.createdAt,
       receipt: entry.receipt,
     });
-  }
-  const timelineOverlayStore = await SessionTimelineOverlayStore.open(
-    nodePath.join(config.stateDir, SESSION_TIMELINE_OVERLAY_FILE),
-    {
-      maxSessions: SESSION_TIMELINE_OVERLAY_MAX_SESSIONS,
-      maxMessagesPerSession: SESSION_TIMELINE_OVERLAY_MAX_MESSAGES,
-      maxActivitiesPerSession: SESSION_TIMELINE_OVERLAY_MAX_ACTIVITIES,
-    },
-  );
-  const interactionMessagesBySession = new Map<string, SessionMessage[]>();
-  const overlayActivitiesBySession = new Map<string, SessionActivity[]>();
-  for (const overlay of timelineOverlayStore.entries()) {
-    if (overlay.messages.length > 0) {
-      interactionMessagesBySession.set(overlay.sessionId, overlay.messages);
-    }
-    if (overlay.activities.length > 0) {
-      overlayActivitiesBySession.set(overlay.sessionId, overlay.activities);
-    }
   }
   let providerVersion = "unknown";
   const providerVersions = new Map<string, string>();
@@ -474,65 +449,6 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     broadcastRecentSessionsLive({ type: "remove", sessionId });
   }
 
-  function persistOverlayActivity(
-    sessionId: string,
-    activity: SessionActivity,
-  ): void {
-    appendOverlayActivity(overlayActivitiesBySession, sessionId, activity);
-    clearSessionLogCache(logCache, sessionId);
-    void timelineOverlayStore.upsertActivity(sessionId, activity).catch(
-      (error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        process.stderr.write(
-          `Failed to persist timeline activity for ${sessionId}: ${message}\n`,
-        );
-      },
-    );
-  }
-
-  function persistInteractionMessage(
-    sessionId: string,
-    message: SessionMessage,
-  ): void {
-    appendInteractionMessage(interactionMessagesBySession, sessionId, message);
-    clearSessionLogCache(logCache, sessionId);
-    void timelineOverlayStore.upsertMessage(sessionId, message).catch(
-      (error: unknown) => {
-        const text = error instanceof Error ? error.message : String(error);
-        process.stderr.write(
-          `Failed to persist timeline message for ${sessionId}: ${text}\n`,
-        );
-      },
-    );
-  }
-
-  function persistQuestionMessageForAction(action: AgentPendingAction): void {
-    if (action.kind !== "user_input" && action.kind !== "elicitation") {
-      return;
-    }
-    const id = `action-question:${action.id}`;
-    const existing = interactionMessagesBySession
-      .get(action.sessionId)
-      ?.find((message) => message.id === id);
-    const message = buildPendingActionQuestionMessage(action, {
-      id,
-      createdAt: existing?.createdAt ?? Date.now(),
-      seq: existing?.seq ?? allocSeq(action.sessionId),
-    });
-    if (!message) {
-      return;
-    }
-    persistInteractionMessage(action.sessionId, message);
-    if (!existing) {
-      broadcastLive(action.sessionId, {
-        type: "assistant_message_completed",
-        sessionId: action.sessionId,
-        seq: message.seq,
-        messageItem: message,
-      });
-    }
-  }
-
   provider.on("stderr", (line) => {
     process.stderr.write(line);
   });
@@ -609,7 +525,6 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
             () => allocSeq(event.sessionId),
           ),
         );
-        persistOverlayActivity(event.sessionId, next);
         broadcastLive(event.sessionId, {
           type: "activity_updated",
           sessionId: event.sessionId,
@@ -701,7 +616,6 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         return;
       case "action_opened":
         pendingActions.set(event.action.id, event.action);
-        persistQuestionMessageForAction(event.action);
         const publicAction = toPublicPendingAction(event.action);
         broadcastLive(event.action.sessionId, {
           type: "action_opened",
@@ -1138,23 +1052,13 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
             threadUpdatedAt: session.updatedAt,
             runtime: cached.runtime,
           });
-          const cachedActivities = mergeSessionActivities(
-            cached.activities,
-            liveActivities.get(sessionId)?.values() || [],
-          );
-          const cachedQuestionMessages = questionMessagesFromActivities(
-            cachedActivities,
-            cached.messages,
-          );
-          const cachedMessages = mergeSessionMessagesWithLimit(
-            cached.messages,
-            cachedQuestionMessages,
-            messageLimit,
-          );
           response.json({
             session: mapSession(session, cached.runtime),
-            messages: cachedMessages,
-            activities: filterQuestionActivities(cachedActivities),
+            messages: cached.messages,
+            activities: mergeSessionActivities(
+              cached.activities,
+              liveActivities.get(sessionId)?.values() || [],
+            ),
             pendingAction: findPendingActionForSession(
               pendingActions,
               sessionId,
@@ -1171,49 +1075,24 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         activityLimit,
       });
       ensureSeqCursor(sessionId, log.nextSeq);
-      const baseMessages = mergeSessionMessagesWithLimit(
-        log.messages,
-        interactionMessagesBySession.get(sessionId) ?? [],
-        messageLimit,
-      );
-      const historicalActivitiesWithQuestions = mergeSessionActivities(
+      const activities = mergeSessionActivities(
         log.activities,
-        overlayActivitiesBySession.get(sessionId) ?? [],
-      );
-      const activitiesWithQuestions = mergeSessionActivities(
-        historicalActivitiesWithQuestions,
         liveActivities.get(sessionId)?.values() || [],
       );
-      const questionMessages = questionMessagesFromActivities(
-        activitiesWithQuestions,
-        baseMessages,
-      );
-      const mergedMessages = mergeSessionMessagesWithLimit(
-        baseMessages,
-        questionMessages,
-        messageLimit,
-      );
-      const historicalActivities = filterQuestionActivities(
-        historicalActivitiesWithQuestions,
-      );
-      const activities = filterQuestionActivities(activitiesWithQuestions);
-      const nextSeq = Math.max(log.nextSeq, sessionSeqCursor.get(sessionId) ?? 0);
       const history = buildSessionHistorySummary(
-        log.totalMessages +
-          (interactionMessagesBySession.get(sessionId)?.length ?? 0),
-        mergedMessages.length,
-        log.totalActivities +
-          (overlayActivitiesBySession.get(sessionId)?.length ?? 0),
-        historicalActivities.length,
+        log.totalMessages,
+        log.messages.length,
+        log.totalActivities,
+        log.activities.length,
       );
 
       setSessionLogCacheEntry(logCache, cacheKey, {
         threadUpdatedAt: session.updatedAt,
-        messages: mergedMessages,
-        activities: historicalActivities,
+        messages: log.messages,
+        activities: log.activities,
         runtime: log.runtime,
         history,
-        nextSeq,
+        nextSeq: log.nextSeq,
       });
       runtimeCache.set(session.id, {
         threadUpdatedAt: session.updatedAt,
@@ -1221,7 +1100,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       });
       response.json({
         session: mapSession(session, log.runtime),
-        messages: mergedMessages,
+        messages: log.messages,
         activities,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
         history,
@@ -1274,19 +1153,12 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
           const entry = await replayIndex.load(sessionId, session.path);
           ensureSeqCursor(sessionId, entry.nextSeq);
           const delta = replayIndex.getDelta(entry, since);
-          newMessages = mergeSessionMessages(
-            delta.messages,
-            interactionMessagesBySession.get(sessionId) ?? [],
-          ).filter((m) => (m.seq ?? 0) > since);
-          const historicalActivities = mergeSessionActivities(
-            delta.activities,
-            overlayActivitiesBySession.get(sessionId) ?? [],
-          );
+          newMessages = delta.messages;
           newActivities = mergeSessionActivities(
-            historicalActivities,
+            delta.activities,
             liveActivities.get(sessionId)?.values() || [],
           ).filter((a) => (a.seq ?? 0) > since);
-          nextSeq = Math.max(delta.nextSeq, sessionSeqCursor.get(sessionId) ?? 0);
+          nextSeq = delta.nextSeq;
           logRuntime = delta.runtime;
         } catch (error: any) {
           if (error.code === "STALE_CURSOR") {
@@ -1301,16 +1173,10 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
           const log = await provider.readSessionLog!(session);
           ensureSeqCursor(sessionId, log.nextSeq);
           const activities = mergeSessionActivities(
-            mergeSessionActivities(
-              log.activities,
-              overlayActivitiesBySession.get(sessionId) ?? [],
-            ),
+            log.activities,
             liveActivities.get(sessionId)?.values() || [],
           );
-          newMessages = mergeSessionMessages(
-            log.messages,
-            interactionMessagesBySession.get(sessionId) ?? [],
-          ).filter((m) => (m.seq ?? 0) > since);
+          newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
           newActivities = activities.filter((a) => (a.seq ?? 0) > since);
           let highestSeq = since;
           for (const m of newMessages) {
@@ -1326,16 +1192,10 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         const log = await provider.readSessionLog!(session);
         ensureSeqCursor(sessionId, log.nextSeq);
         const activities = mergeSessionActivities(
-          mergeSessionActivities(
-            log.activities,
-            overlayActivitiesBySession.get(sessionId) ?? [],
-          ),
+          log.activities,
           liveActivities.get(sessionId)?.values() || [],
         );
-        newMessages = mergeSessionMessages(
-          log.messages,
-          interactionMessagesBySession.get(sessionId) ?? [],
-        ).filter((m) => (m.seq ?? 0) > since);
+        newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
         newActivities = activities.filter((a) => (a.seq ?? 0) > since);
         let highestSeq = since;
         for (const m of newMessages) {
@@ -1347,14 +1207,6 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         nextSeq = highestSeq;
         logRuntime = log.runtime;
       }
-
-      const questionDelta = normalizeQuestionEventDelta(
-        newMessages,
-        newActivities,
-        since,
-      );
-      newMessages = questionDelta.messages;
-      newActivities = questionDelta.activities;
 
       const eventDeltaSize = measureSessionEventDelta(
         newMessages,
@@ -1417,13 +1269,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         return;
       }
       response.json(
-        await readSessionResources(
-          provider,
-          sessionId,
-          liveActivities,
-          interactionMessagesBySession,
-          overlayActivitiesBySession,
-        ),
+        await readSessionResources(provider, sessionId, liveActivities),
       );
     }),
   );
@@ -2137,33 +1983,6 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         return;
       }
 
-      const responseMessage = buildPendingActionResponseMessage(
-        action,
-        decision,
-        {
-          id: `action-response:${action.id}`,
-          createdAt: Date.now(),
-          seq: allocSeq(action.sessionId),
-        },
-      );
-      if (responseMessage) {
-        await timelineOverlayStore.upsertMessage(
-          action.sessionId,
-          responseMessage,
-        );
-        appendInteractionMessage(
-          interactionMessagesBySession,
-          action.sessionId,
-          responseMessage,
-        );
-        clearSessionLogCache(logCache, action.sessionId);
-        broadcastLive(action.sessionId, {
-          type: "user_message_submitted",
-          sessionId: action.sessionId,
-          messageItem: responseMessage,
-        });
-      }
-
       pendingActions.delete(actionId);
       broadcastLive(action.sessionId, {
         type: "action_resolved",
@@ -2175,10 +1994,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         actionId,
       });
       scheduleRecentSessionUpsert(action.sessionId);
-      response.json({
-        ok: true,
-        ...(responseMessage ? { messageItem: responseMessage } : {}),
-      });
+      response.json({ ok: true });
     }),
   );
 
@@ -3236,177 +3052,10 @@ function buildSessionHistorySummary(
   };
 }
 
-function mergeSessionMessages(
-  historical: SessionMessage[],
-  synthetic: SessionMessage[],
-): SessionMessage[] {
-  if (synthetic.length === 0) {
-    return historical;
-  }
-  const merged = new Map<string, SessionMessage>();
-  for (const message of historical) {
-    merged.set(message.id, message);
-  }
-  for (const message of synthetic) {
-    merged.set(message.id, message);
-  }
-  return [...merged.values()].sort((left, right) => left.seq - right.seq);
-}
-
-function mergeSessionMessagesWithLimit(
-  historical: SessionMessage[],
-  synthetic: SessionMessage[],
-  limit: number | null,
-): SessionMessage[] {
-  const merged = mergeSessionMessages(historical, synthetic);
-  if (!limit || limit <= 0 || merged.length <= limit) {
-    return merged;
-  }
-  return merged.slice(-limit);
-}
-
-function questionMessagesFromActivities(
-  activities: SessionActivity[],
-  existingMessages: SessionMessage[],
-): SessionMessage[] {
-  const existingIds = new Set(existingMessages.map((message) => message.id));
-  const messages: SessionMessage[] = [];
-  for (const activity of activities) {
-    const message = questionMessageFromActivity(activity);
-    if (!message || existingIds.has(message.id)) {
-      continue;
-    }
-    existingIds.add(message.id);
-    messages.push(message);
-  }
-  return messages;
-}
-
-function questionMessageFromActivity(
-  activity: SessionActivity,
-): SessionMessage | null {
-  if (!isQuestionActivity(activity)) {
-    return null;
-  }
-  return {
-    id: questionMessageIdForActivity(activity),
-    role: "assistant",
-    text: formatQuestionActivityMessageText(activity.title, activity.detail),
-    attachments: [],
-    createdAt: activity.createdAt,
-    seq: activity.seq,
-    phase: "question",
-  };
-}
-
-function filterQuestionActivities(
-  activities: SessionActivity[],
-): SessionActivity[] {
-  return activities.filter((activity) => !isQuestionActivity(activity));
-}
-
-function normalizeQuestionEventDelta(
-  messages: SessionMessage[],
-  activities: SessionActivity[],
-  since: number,
-): { messages: SessionMessage[]; activities: SessionActivity[] } {
-  const questionMessages = questionMessagesFromActivities(activities, messages);
-  return {
-    messages: mergeSessionMessages(messages, questionMessages).filter(
-      (message) => (message.seq ?? 0) > since,
-    ),
-    activities: filterQuestionActivities(activities).filter(
-      (activity) => (activity.seq ?? 0) > since,
-    ),
-  };
-}
-
-function isQuestionActivity(activity: SessionActivity): activity is SessionActivity & {
-  type: "system_event";
-  title: string;
-  detail: string | null;
-} {
-  return (
-    activity.type === "system_event" &&
-    /^Model (asked|requested input):/i.test(activity.title.trim())
-  );
-}
-
-function questionMessageIdForActivity(activity: SessionActivity): string {
-  if (activity.id.startsWith("copilot-question-")) {
-    return `action-question:${activity.id.slice("copilot-question-".length)}`;
-  }
-  return `activity-question-message:${activity.id}`;
-}
-
-function formatQuestionActivityMessageText(
-  title: string,
-  detail: string | null,
-): string {
-  const titleMatch = title.match(/^Model (asked|requested input):\s*(.*)$/i);
-  const verb = titleMatch?.[1]?.toLowerCase() ?? "asked";
-  const body = titleMatch?.[2]?.trim() || "Agent question";
-  const lines = [
-    verb === "requested input"
-      ? `**Model requested input:** ${body}`
-      : `**Model asked:** ${body}`,
-  ];
-  for (const rawLine of (detail ?? "").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) {
-      continue;
-    }
-    const options = line.match(/^Options:\s*(.*)$/i);
-    if (options) {
-      const choices = options[1]!
-        .split(/\s+\/\s+/)
-        .map((choice) => choice.trim())
-        .filter((choice) => choice.length > 0);
-      if (choices.length > 0) {
-        lines.push("", "**Options:**", ...choices.map((choice) => `- ${choice}`));
-      }
-      continue;
-    }
-    const answer = line.match(/^You answered:\s*(.*)$/i);
-    if (answer) {
-      lines.push("", `**You answered:** ${answer[1]?.trim() ?? ""}`);
-      continue;
-    }
-    lines.push("", line);
-  }
-  return lines.join("\n");
-}
-
-function appendInteractionMessage(
-  store: Map<string, SessionMessage[]>,
-  sessionId: string,
-  message: SessionMessage,
-): void {
-  const existing = store.get(sessionId) ?? [];
-  const next = existing.filter((item) => item.id !== message.id);
-  next.push(message);
-  next.sort((left, right) => left.seq - right.seq);
-  store.set(sessionId, next);
-}
-
-function appendOverlayActivity(
-  store: Map<string, SessionActivity[]>,
-  sessionId: string,
-  activity: SessionActivity,
-): void {
-  const existing = store.get(sessionId) ?? [];
-  const next = existing.filter((item) => item.id !== activity.id);
-  next.push(activity);
-  next.sort((left, right) => left.seq - right.seq);
-  store.set(sessionId, next.slice(-SESSION_TIMELINE_OVERLAY_MAX_ACTIVITIES));
-}
-
 async function readSessionResources(
   provider: AgentProvider,
   sessionId: string,
   liveActivities: Map<string, Map<string, SessionActivity>>,
-  interactionMessagesBySession: Map<string, SessionMessage[]>,
-  overlayActivitiesBySession: Map<string, SessionActivity[]>,
 ): Promise<SessionResourcesResponse> {
   const session = await readSession(provider, sessionId, false);
   const readLog = requireProviderMethod(
@@ -3416,18 +3065,11 @@ async function readSessionResources(
   );
   const log = await readLog.call(provider, session);
   const activities = mergeSessionActivities(
-    mergeSessionActivities(
-      log.activities,
-      overlayActivitiesBySession.get(sessionId) ?? [],
-    ),
+    log.activities,
     liveActivities.get(sessionId)?.values() || [],
   );
-  const messages = mergeSessionMessages(
-    log.messages,
-    interactionMessagesBySession.get(sessionId) ?? [],
-  );
   const resources: SessionResource[] = buildSessionResources(
-    messages,
+    log.messages,
     activities,
   );
   return {

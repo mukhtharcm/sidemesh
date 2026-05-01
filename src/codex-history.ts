@@ -612,39 +612,6 @@ export function parseActivity(parsed: any, seq: number): SessionActivity | null 
       );
     case "guardian_assessment":
       return buildCommandActivityFromGuardianAssessment(payload, createdAt, seq);
-    case "task_started": {
-      const turnId = asOptionalString(payload.turn_id) || asOptionalString(payload.turnId) || null;
-      return {
-        id: `${createdAt}-task-started`,
-        type: "task",
-        turnId,
-        createdAt,
-        seq,
-        status: "in_progress",
-        action: "started",
-        title: "Task started",
-        summary: null,
-      };
-    }
-    case "task_complete": {
-      const turnId = asOptionalString(payload.turn_id) || asOptionalString(payload.turnId) || null;
-      const summary =
-        asOptionalString(payload.summary) ||
-        asOptionalString(payload.last_agent_message) ||
-        null;
-      const failed = payload.success === false || payload.ok === false;
-      return {
-        id: `${createdAt}-task-complete`,
-        type: "task",
-        turnId,
-        createdAt,
-        seq,
-        status: failed ? "failed" : "completed",
-        action: failed ? "failed" : "completed",
-        title: summary || (failed ? "Task failed" : "Task completed"),
-        summary,
-      };
-    }
     default:
       return null;
   }

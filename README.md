@@ -155,6 +155,7 @@ SIDEMESH_TOKEN=your-shared-token
 SIDEMESH_PROVIDER=codex
 SIDEMESH_CODEX_BIN=codex
 SIDEMESH_PROVIDER_COMMAND=codex
+SIDEMESH_ENABLE_COPILOT=0
 SIDEMESH_COPILOT_BIN=copilot
 SIDEMESH_COPILOT_STATE_DIR=~/.sidemesh/copilot-provider
 SIDEMESH_COPILOT_ALLOW_ALL=0
@@ -177,7 +178,8 @@ SIDEMESH_BROWSER_PREVIEW_FRAME_INTERVAL_MS=900
 SIDEMESH_BROWSER_PREVIEW_QUALITY=55
 ```
 
-`SIDEMESH_PROVIDER` defaults to `codex`. `SIDEMESH_PROVIDER_COMMAND` is a
+`SIDEMESH_PROVIDER` defaults to `codex`. Copilot is experimental and disabled
+unless `SIDEMESH_ENABLE_COPILOT=1` is set. `SIDEMESH_PROVIDER_COMMAND` is a
 provider-neutral command override; provider-specific command variables such as
 `SIDEMESH_CODEX_BIN` and `SIDEMESH_COPILOT_BIN` take precedence.
 
@@ -228,18 +230,20 @@ To run against GitHub Copilot CLI instead of Codex without using the setup
 wizard:
 
 ```bash
+SIDEMESH_ENABLE_COPILOT=1 \
 SIDEMESH_PROVIDER=copilot \
 SIDEMESH_LABEL=copilot-node \
 SIDEMESH_TOKEN=replace-me \
 npm run daemon
 ```
 
-The Copilot provider is the first real non-Codex adapter. It reads native
-Copilot SDK for session discovery, transcript replay, model metadata,
-streaming turns, resume, interruption, tool activity, permission requests,
-image input, skills, and interactive input. It does not read Copilot's on-disk
-session files directly. Sidemesh does not maintain a hand-written Copilot model
-catalog; the model picker is built from SDK
+The Copilot provider is the first real non-Codex adapter, but it stays behind
+the explicit `SIDEMESH_ENABLE_COPILOT=1` flag while its UX contract is being
+hardened. It reads native Copilot SDK for session discovery, transcript replay,
+model metadata, streaming turns, resume, interruption, tool activity,
+permission requests, image input, skills, and interactive input. It does not
+read Copilot's on-disk session files directly. Sidemesh does not maintain a
+hand-written Copilot model catalog; the model picker is built from SDK
 `listModels()` metadata and includes Copilot's `auto` selection. Sidemesh
 defaults new app-started Copilot turns to `auto` so an expensive persistent
 Copilot setting is not used accidentally. Set `SIDEMESH_COPILOT_MODEL`,
@@ -455,9 +459,9 @@ Current limits:
 - host tokens are stored in platform secure storage, but token revocation is
   not implemented yet
 - the iOS and Android builds allow plain `http://` traffic so Tailscale and private LAN nodes work immediately
-- Codex remains the fullest production provider; the Copilot adapter is an
-  early text-first provider, and the fake provider is the deterministic contract
-  test adapter
+- Codex remains the fullest production provider; the Copilot adapter is
+  experimental and disabled by default, and the fake provider is the
+  deterministic contract test adapter
 - provider registration is centralized in `src/provider-registry.ts`; future
   adapters should start there instead of adding new config/factory switches
 - the provider adapter contract is documented in

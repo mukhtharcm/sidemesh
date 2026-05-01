@@ -6,16 +6,11 @@ import type {
   ContextCompactionActivity,
   FileChangeActivity,
   ImageGenerationActivity,
-  PlanActivity,
   PendingAction,
-  ReasoningActivity,
   SessionLogSnapshot,
   SessionActivity,
   SessionMessage,
   SessionRuntimeSummary,
-  SubagentActivity,
-  SystemEventActivity,
-  TaskActivity,
   ToolActivity,
   ModelSummary,
   ProviderProfileCatalog,
@@ -38,12 +33,7 @@ export type AgentSessionActivityDraft =
   | Omit<TurnDiffActivity, "createdAt" | "seq">
   | Omit<WebSearchActivity, "createdAt" | "seq">
   | Omit<ImageGenerationActivity, "createdAt" | "seq">
-  | Omit<ContextCompactionActivity, "createdAt" | "seq">
-  | Omit<PlanActivity, "createdAt" | "seq">
-  | Omit<TaskActivity, "createdAt" | "seq">
-  | Omit<SubagentActivity, "createdAt" | "seq">
-  | Omit<ReasoningActivity, "createdAt" | "seq">
-  | Omit<SystemEventActivity, "createdAt" | "seq">;
+  | Omit<ContextCompactionActivity, "createdAt" | "seq">;
 
 export interface AgentMessageDraft {
   id: string;

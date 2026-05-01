@@ -80,6 +80,7 @@ describe("provider registry", () => {
         displayName: "GitHub Copilot",
         defaultCommand: "copilot",
         commandEnvironmentVariables: [
+          "SIDEMESH_ENABLE_COPILOT",
           "SIDEMESH_COPILOT_BIN",
           "SIDEMESH_PROVIDER_COMMAND",
           "SIDEMESH_COPILOT_STATE_DIR",
@@ -91,7 +92,7 @@ describe("provider registry", () => {
         ],
         supportedApprovalPolicies: ["on-request", "never"],
         capabilities: COPILOT_PROVIDER_CAPABILITIES,
-        setupAudience: "public",
+        setupAudience: "dev",
       },
     ]);
   });
@@ -99,13 +100,13 @@ describe("provider registry", () => {
   it("hides dev-only providers from the normal setup wizard", () => {
     assert.deepEqual(
       listSetupAgentProviderDefinitionSummaries().map((summary) => summary.kind),
-      ["codex", "copilot"],
+      ["codex"],
     );
     assert.deepEqual(
       listSetupAgentProviderDefinitionSummaries({
         includeKinds: ["fake"],
       }).map((summary) => summary.kind),
-      ["codex", "fake", "copilot"],
+      ["codex", "fake"],
     );
     assert.deepEqual(
       listSetupAgentProviderDefinitionSummaries({
