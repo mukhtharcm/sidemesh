@@ -2661,6 +2661,7 @@ function mapSession(
     rolloutPath: thread.path,
     runtime,
     gitInfo: mapGitInfo(thread.gitInfo),
+    isSubAgent: typeof thread.source === "object" && thread.source != null && (thread.source as Record<string, unknown>).subAgent != null,
   };
 }
 

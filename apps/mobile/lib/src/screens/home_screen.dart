@@ -1132,6 +1132,10 @@ class _SessionRowCard extends StatelessWidget {
                               compact: true,
                             ),
                           ],
+                          if (session.isSubAgent) ...[
+                            const SizedBox(width: 6),
+                            _SubAgentBadge(),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 3),
@@ -1258,6 +1262,10 @@ class _SessionRowCard extends StatelessWidget {
               if (session.provider != null) ...[
                 const SizedBox(width: 8),
                 AgentProviderBadge(providerKind: session.provider),
+              ],
+              if (session.isSubAgent) ...[
+                const SizedBox(width: 6),
+                _SubAgentBadge(),
               ],
               const SizedBox(width: 10),
               Expanded(
@@ -3925,6 +3933,27 @@ class _UnreadDot extends StatelessWidget {
       width: 8,
       height: 8,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+  }
+}
+
+class _SubAgentBadge extends StatelessWidget {
+  const _SubAgentBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: colors.info.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: colors.info.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        'Sub-agent',
+        style: monoStyle(color: colors.info, fontSize: 9, fontWeight: FontWeight.w700),
+      ),
     );
   }
 }
