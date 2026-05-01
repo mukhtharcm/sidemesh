@@ -116,4 +116,52 @@ describe("pending action store", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("deletes persisted actions for an archived session", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-actions-"));
+    try {
+      const filePath = nodePath.join(dir, "actions.json");
+      const store = await PendingActionStore.open(filePath, {
+        ttlMs: 60_000,
+        limit: 10,
+      });
+
+      await store.put(userInputAction("question-1", "session-1"));
+      await store.put(userInputAction("question-2", "session-2"));
+      await store.deleteForSession("session-1");
+
+      const reopened = await PendingActionStore.open(filePath, {
+        ttlMs: 60_000,
+        limit: 10,
+      });
+      const recovered = reopened.recoveredActions();
+
+      assert.equal(recovered.length, 1);
+      assert.equal(recovered[0]?.id, "question-2");
+      assert.equal(recovered[0]?.sessionId, "session-2");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
+
+function userInputAction(id: string, sessionId: string): AgentPendingAction {
+  return {
+    id,
+    sessionId,
+    kind: "user_input",
+    title: "Agent question",
+    detail: "Continue?",
+    requestedAt: Date.now(),
+    canApprove: false,
+    canApproveForSession: false,
+    canDecline: false,
+    userInput: {
+      question: "Continue?",
+      choices: ["yes", "no"],
+      allowFreeform: true,
+    },
+    providerRequestId: id,
+    providerRequestKind: "provider/ask_user",
+  };
+}

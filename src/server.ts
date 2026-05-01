@@ -590,6 +590,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     action: AgentPendingAction,
   ): Promise<void> {
     let visibleAction = action;
+    pendingActions.set(action.id, action);
     if (action.recoverable) {
       try {
         await pendingActionStore.put(action);
@@ -599,6 +600,14 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       }
     }
 
+    if (!pendingActions.has(action.id)) {
+      if (action.recoverable) {
+        void pendingActionStore.delete(action.id).catch((error) => {
+          console.error("Failed to clear stale pending action", error);
+        });
+      }
+      return;
+    }
     pendingActions.set(visibleAction.id, visibleAction);
     const publicAction = toPublicPendingAction(visibleAction);
     broadcastLive(visibleAction.sessionId, {
@@ -2079,6 +2088,13 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         return;
       }
       await provider.archiveSession!(sessionId);
+      await pendingActionStore.deleteForSession(sessionId);
+      clearActionsForSession(
+        pendingActions,
+        sessionId,
+        broadcastLive,
+        broadcastApprovalLive,
+      );
       activeTurns.delete(sessionId);
       liveActivities.delete(sessionId);
       clearSessionLogCache(logCache, sessionId);
