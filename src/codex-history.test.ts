@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { loadRolloutLog, loadSessionRuntime } from "./codex-history.js";
+import {
+  listRecentRolloutThreads,
+  loadRolloutLog,
+  loadSessionRuntime,
+} from "./codex-history.js";
 
 describe("loadSessionRuntime", () => {
   let tempDir = "";
@@ -175,6 +179,107 @@ describe("loadSessionRuntime", () => {
     });
     assert.equal(runtime?.model, "gpt-5.4");
     assert.equal(runtime?.turnId, "turn-1");
+  });
+
+  it("derives runtime from bounded slices of large rollout files", async () => {
+    const filler = JSON.stringify({
+      timestamp: "2026-04-29T00:00:01.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: "x".repeat(3 * 1024 * 1024),
+      },
+    });
+    const lines = [
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "thread-1", cwd: "/tmp/project", model_provider: "openai" },
+      }),
+      filler,
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:02.000Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: { total_tokens: 42000 },
+            model_context_window: 128000,
+          },
+        },
+      }),
+    ];
+
+    await writeFile(rolloutPath, `${lines.join("\n")}\n`, "utf8");
+
+    const runtime = await loadSessionRuntime("thread-1", rolloutPath, null);
+
+    assert.equal(runtime?.modelProvider, "openai");
+    assert.equal(runtime?.telemetry?.contextWindow?.currentTokens, 42000);
+  });
+
+  it("lists large recent rollout files without scanning full transcripts", async () => {
+    const codexHome = nodePath.join(tempDir, "codex-home");
+    const now = new Date();
+    const year = String(now.getFullYear());
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    const dayDir = nodePath.join(codexHome, "sessions", year, month, day);
+    await mkdir(dayDir, { recursive: true });
+    const largeRolloutPath = nodePath.join(
+      dayDir,
+      `rollout-${year}-${month}-${day}T00-00-00-thread-1.jsonl`,
+    );
+    const lines = [
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: "thread-1",
+          cwd: "/tmp/project",
+          source: {
+            subagent: {
+              thread_spawn: {
+                parent_thread_id: "parent-thread",
+                agent_role: "explorer",
+              },
+            },
+          },
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "hello" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:02.000Z",
+        type: "response_item",
+        payload: { content: "x".repeat(3 * 1024 * 1024) },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:03.000Z",
+        type: "event_msg",
+        payload: { type: "task_complete", last_agent_message: "Done" },
+      }),
+    ];
+    await writeFile(largeRolloutPath, `${lines.join("\n")}\n`, "utf8");
+
+    const threads = await listRecentRolloutThreads(codexHome, 10);
+
+    assert.equal(threads.length, 1);
+    assert.equal(threads[0]?.id, "thread-1");
+    assert.equal(threads[0]?.preview, "hello");
+    assert.equal(threads[0]?.status.type, "idle");
+    assert.deepEqual(threads[0]?.source, {
+      subagent: {
+        thread_spawn: {
+          parent_thread_id: "parent-thread",
+          agent_role: "explorer",
+        },
+      },
+    });
   });
 
   it("surfaces Codex rollout errors as system messages", async () => {

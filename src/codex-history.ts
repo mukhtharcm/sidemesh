@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, open, stat } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 
@@ -20,6 +20,9 @@ import type {
 } from "./types.js";
 
 const RECENT_ROLLOUT_SCAN_DAYS = 3;
+const LARGE_ROLLOUT_FAST_SCAN_THRESHOLD_BYTES = 2 * 1024 * 1024;
+const ROLLOUT_HEAD_SCAN_BYTES = 256 * 1024;
+const ROLLOUT_TAIL_SCAN_BYTES = 1024 * 1024;
 
 export async function loadRolloutLog(
   sessionId: string,
@@ -59,6 +62,9 @@ export async function loadSessionRuntime(
   }
 
   try {
+    if (await shouldUseFastRolloutScan(resolvedPath)) {
+      return await scanRolloutRuntimeFast(resolvedPath);
+    }
     const parsed = await scanRolloutFile(resolvedPath, {
       includeMessages: false,
       includeActivities: false,
@@ -247,6 +253,10 @@ async function findRolloutPath(sessionId: string, codexHomePath: string | null):
 }
 
 async function readRolloutThreadSummary(rolloutPath: string): Promise<ThreadRecord | null> {
+  if (await shouldUseFastRolloutScan(rolloutPath)) {
+    return readLargeRolloutThreadSummary(rolloutPath);
+  }
+
   const file = createReadStream(rolloutPath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: file, crlfDelay: Infinity });
   let meta: Record<string, any> | null = null;
@@ -304,6 +314,162 @@ async function readRolloutThreadSummary(rolloutPath: string): Promise<ThreadReco
     status: { type: inProgress ? "running" : "idle" },
     gitInfo: null,
   };
+}
+
+async function shouldUseFastRolloutScan(rolloutPath: string): Promise<boolean> {
+  try {
+    return (await stat(rolloutPath)).size > LARGE_ROLLOUT_FAST_SCAN_THRESHOLD_BYTES;
+  } catch {
+    return false;
+  }
+}
+
+async function readLargeRolloutThreadSummary(
+  rolloutPath: string,
+): Promise<ThreadRecord | null> {
+  const stats = await stat(rolloutPath);
+  const sections = await readRolloutSummarySections(rolloutPath, stats.size);
+  let meta: Record<string, any> | null = null;
+  let preview = "";
+  let latestTimestamp = stats.mtimeMs;
+  let inProgress = false;
+
+  for (const parsed of parseRolloutSections(sections)) {
+    latestTimestamp = Math.max(latestTimestamp, parseTimestamp(parsed.timestamp));
+    if (parsed.type === "session_meta" && parsed.payload && typeof parsed.payload === "object") {
+      meta = parsed.payload as Record<string, any>;
+      latestTimestamp = Math.max(latestTimestamp, parseTimestamp(meta.timestamp));
+      continue;
+    }
+
+    if (parsed.type !== "event_msg") {
+      continue;
+    }
+    if (parsed.payload?.type === "user_message" && !preview) {
+      preview = typeof parsed.payload.message === "string" ? parsed.payload.message : "";
+    }
+    if (parsed.payload?.type === "task_started") {
+      inProgress = true;
+    } else if (
+      parsed.payload?.type === "task_complete" ||
+      parsed.payload?.type === "turn_aborted"
+    ) {
+      inProgress = false;
+    }
+  }
+
+  const id = asOptionalString(meta?.id);
+  const cwd = asOptionalString(meta?.cwd);
+  if (!id || !cwd) {
+    return null;
+  }
+
+  const createdAt = Math.floor(parseTimestamp(meta?.timestamp) / 1000);
+  const updatedAt = Math.floor((latestTimestamp || parseTimestamp(meta?.timestamp)) / 1000);
+  return {
+    id,
+    name: null,
+    preview,
+    createdAt,
+    updatedAt,
+    cwd,
+    source: normalizeThreadSource(meta?.source),
+    path: rolloutPath,
+    status: { type: inProgress ? "running" : "idle" },
+    gitInfo: null,
+  };
+}
+
+async function scanRolloutRuntimeFast(
+  rolloutPath: string,
+): Promise<SessionRuntimeSummary | null> {
+  const stats = await stat(rolloutPath);
+  const sections = await readRolloutSummarySections(rolloutPath, stats.size);
+  let runtime: SessionRuntimeSummary | null = null;
+  const pendingTurnRuntime = new Map<string, SessionRuntimeSummary>();
+
+  for (const parsed of parseRolloutSections(sections)) {
+    const nextRuntime = parseRuntime(parsed);
+    if (nextRuntime) {
+      if (nextRuntime.turnId) {
+        pendingTurnRuntime.set(
+          nextRuntime.turnId,
+          mergeRuntime(pendingTurnRuntime.get(nextRuntime.turnId) ?? null, nextRuntime),
+        );
+      } else {
+        runtime = mergeRuntime(runtime, nextRuntime);
+      }
+    }
+
+    const committedTurnId = resolveCommittedTurnId(parsed);
+    if (committedTurnId) {
+      const committed = pendingTurnRuntime.get(committedTurnId);
+      if (committed) {
+        runtime = mergeRuntime(runtime, {
+          ...committed,
+          updatedAt: parseTimestamp(parsed.timestamp),
+        });
+      }
+      pendingTurnRuntime.delete(committedTurnId);
+    }
+
+    const discardedTurnId = resolveDiscardedTurnId(parsed);
+    if (discardedTurnId) {
+      pendingTurnRuntime.delete(discardedTurnId);
+    }
+  }
+
+  return runtime;
+}
+
+async function readRolloutSummarySections(
+  rolloutPath: string,
+  size: number,
+): Promise<string[]> {
+  if (size <= ROLLOUT_HEAD_SCAN_BYTES + ROLLOUT_TAIL_SCAN_BYTES) {
+    return [await readFileSlice(rolloutPath, 0, size)];
+  }
+  return [
+    await readFileSlice(rolloutPath, 0, ROLLOUT_HEAD_SCAN_BYTES),
+    await readFileSlice(
+      rolloutPath,
+      Math.max(0, size - ROLLOUT_TAIL_SCAN_BYTES),
+      ROLLOUT_TAIL_SCAN_BYTES,
+    ),
+  ];
+}
+
+async function readFileSlice(
+  filePath: string,
+  start: number,
+  length: number,
+): Promise<string> {
+  const handle = await open(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, start);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
+function parseRolloutSections(sections: string[]): any[] {
+  const parsed: any[] = [];
+  const seen = new Set<string>();
+  for (const section of sections) {
+    for (const line of section.split(/\r?\n/)) {
+      if (!line.startsWith("{") || seen.has(line)) {
+        continue;
+      }
+      seen.add(line);
+      const item = parseJsonLine(line);
+      if (item) {
+        parsed.push(item);
+      }
+    }
+  }
+  return parsed;
 }
 
 function normalizeThreadSource(source: unknown): ThreadRecord["source"] {
