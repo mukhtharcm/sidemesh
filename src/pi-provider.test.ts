@@ -246,6 +246,32 @@ describe("PiAgentProvider", () => {
       (activity) => activity.type === "file_change",
     );
     assert.ok(fileChange);
+
+    if (readActivity?.semantic?.targets[0]?.type === "file") {
+      readActivity.semantic.targets[0].path = "mutated.md";
+    }
+    if (fileChange?.type === "file_change") {
+      fileChange.changes[0]!.diff = "mutated diff";
+    }
+
+    const reloadedLog = await provider.readSessionLog(threads[0]!);
+    const reloadedReadActivity = reloadedLog.activities.find(
+      (activity) => activity.type === "tool" && activity.toolName === "read",
+    ) as Extract<(typeof reloadedLog.activities)[number], { type: "tool" }> | undefined;
+    const reloadedFileChange = reloadedLog.activities.find(
+      (activity) => activity.type === "file_change",
+    );
+    if (reloadedReadActivity?.semantic?.targets[0]?.type === "file") {
+      assert.equal(reloadedReadActivity.semantic.targets[0].path, "README.md");
+    } else {
+      throw new Error("expected file semantic target");
+    }
+    assert.equal(
+      reloadedFileChange?.type === "file_change"
+        ? reloadedFileChange.changes[0]?.diff
+        : null,
+      "@@ -1 +1 @@\n-Old\n+New",
+    );
   });
 
   it("maps live Pi session events onto Sidemesh events", async () => {
@@ -443,9 +469,243 @@ describe("PiAgentProvider", () => {
     const activity = log.activities.find((candidate) => candidate.type === "tool");
     assert.equal(activity?.type, "tool");
   });
+
+  it("only exposes authenticated Pi models and rejects unavailable overrides", async () => {
+    const availableModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const unavailableModel = {
+      id: "gpt-5",
+      name: "GPT-5",
+      provider: "openai",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const setModels: string[] = [];
+    const fakeSession = {
+      sessionId: "pi-model-1",
+      sessionFile: null,
+      sessionManager,
+      model: availableModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe() {
+        return () => {};
+      },
+      async prompt() {},
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel(level: string) {
+        this.thinkingLevel = level;
+      },
+      async setModel(model: typeof availableModel) {
+        setModels.push(`${model.provider}/${model.id}`);
+        this.model = model;
+      },
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [availableModel, unavailableModel],
+        getAvailable: () => [availableModel],
+        getProviderDisplayName: (provider: string) => provider,
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const models = await provider.listModels({
+      cwd: "/repo",
+      profile: null,
+      provider: null,
+    });
+    assert.deepEqual(models.map((model) => model.model), [
+      "anthropic/claude-sonnet-4-5",
+    ]);
+
+    await assert.rejects(
+      () =>
+        provider.createSession({
+          cwd: "/repo",
+          input: [],
+          overrides: {
+            ...emptyOverrides(),
+            model: "openai/gpt-5",
+          },
+        }),
+      /Unknown or unavailable Pi model "openai\/gpt-5"\./,
+    );
+    assert.deepEqual(setModels, []);
+  });
+
+  it("ignores image URL inputs with a warning instead of failing", async () => {
+    const warnings: string[] = [];
+    const prompts: Array<{ text: string; imageCount: number }> = [];
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const fakeSession = {
+      sessionId: "pi-image-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe() {
+        return () => {};
+      },
+      async prompt(
+        text: string,
+        options?: { images?: Array<{ type: string }> },
+      ) {
+        prompts.push({
+          text,
+          imageCount: options?.images?.length ?? 0,
+        });
+      },
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel(level: string) {
+        this.thinkingLevel = level;
+      },
+      async setModel(model: typeof fakeModel) {
+        this.model = model;
+      },
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    provider.on("stderr", (line) => warnings.push(line));
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "image", url: "https://example.com/image.png" }],
+      overrides: emptyOverrides(),
+    });
+
+    assert.ok(created.activeTurnId);
+    assert.deepEqual(prompts, [
+      {
+        text:
+          "The request only included an unsupported image URL attachment. Tell the user that Pi only supports local image attachments.",
+        imageCount: 0,
+      },
+    ]);
+    assert.deepEqual(warnings, [
+      "Ignoring 1 image URL attachment because Pi only supports local image attachments.",
+    ]);
+
+    const log = await provider.readSessionLog(created.thread);
+    assert.equal(log.messages[0]?.text, prompts[0]?.text);
+    assert.deepEqual(log.messages[0]?.attachments ?? [], []);
+  });
+
+  it("reports corrupt Pi sidecar state and continues startup", async () => {
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(nodePath.join(stateDir, "sessions.json"), "{broken-json");
+    const errors: string[] = [];
+
+    const provider = new PiAgentProvider({ agentDir, stateDir });
+    provider.on("stderr", (line) => errors.push(line));
+
+    await provider.start();
+
+    assert.equal(errors.length, 1);
+    assert.match(
+      errors[0] ?? "",
+      /Pi provider state reset after failing to load .*sessions\.json:/,
+    );
+    const threads = await provider.listSessionThreads({ limit: 10, archived: false });
+    assert.deepEqual(threads, []);
+  });
 });
 
 function piSessionDirForCwd(cwd: string, agentDir: string): string {
   const safePath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
   return nodePath.join(agentDir, "sessions", safePath);
+}
+
+function emptyOverrides(): AgentCreateSessionRequest["overrides"] {
+  return {
+    model: null,
+    mode: null,
+    reasoningEffort: null,
+    fastMode: null,
+    approvalPolicy: null,
+    sandboxMode: null,
+    networkAccess: null,
+    webSearch: null,
+    profile: null,
+  };
 }
