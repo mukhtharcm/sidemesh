@@ -202,6 +202,7 @@ class _DesktopShellState extends State<DesktopShell> {
   int _inboxCount = 0;
   int _sessionOpenSerial = 0;
   String _query = '';
+  SessionViewMode _recentViewMode = SessionViewMode.flat;
   double _sidebarWidth = _defaultSidebarWidth;
   Timer? _searchDebounce;
   // Used to trigger refresh of sidebar panes after a host/session mutation.
@@ -235,6 +236,7 @@ class _DesktopShellState extends State<DesktopShell> {
     );
     _loadHosts();
     _loadSidebarWidth();
+    _loadRecentViewMode();
     _loadInspectorWidth();
     _searchController.addListener(() {
       final next = _searchController.text;
@@ -263,6 +265,28 @@ class _DesktopShellState extends State<DesktopShell> {
     _searchFocus.dispose();
     _inspector.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadRecentViewMode() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('sidemesh_recent_view_mode');
+      if (raw != null) {
+        _recentViewMode = SessionViewMode.values.firstWhere(
+          (v) => v.name == raw,
+          orElse: () => SessionViewMode.flat,
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _setRecentViewMode(SessionViewMode mode) async {
+    if (_recentViewMode == mode) return;
+    setState(() => _recentViewMode = mode);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('sidemesh_recent_view_mode', mode.name);
+    } catch (_) {}
   }
 
   Future<void> _checkOnboarding() async {
@@ -918,6 +942,8 @@ class _DesktopShellState extends State<DesktopShell> {
                                 },
                                 onShowShortcuts: _showShortcutsSheet,
                                 onOpenSettings: _openSettings,
+                                recentViewMode: _recentViewMode,
+                                onRecentViewModeChanged: _setRecentViewMode,
                               ),
                             ),
                           ),
@@ -1046,6 +1072,8 @@ class _Sidebar extends StatelessWidget {
     required this.onInboxCountChanged,
     required this.onShowShortcuts,
     required this.onOpenSettings,
+    this.recentViewMode,
+    this.onRecentViewModeChanged,
   });
 
   final double titlebarInset;
@@ -1076,6 +1104,8 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<int> onInboxCountChanged;
   final VoidCallback onShowShortcuts;
   final VoidCallback onOpenSettings;
+  final SessionViewMode? recentViewMode;
+  final ValueChanged<SessionViewMode>? onRecentViewModeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1153,6 +1183,8 @@ class _Sidebar extends StatelessWidget {
                 controller: searchController,
                 focusNode: searchFocus,
                 onClear: onClearSearch,
+                viewMode: section == _SidebarSection.recent ? recentViewMode : null,
+                onViewModeChanged: section == _SidebarSection.recent ? onRecentViewModeChanged : null,
               ),
             ),
             const NotificationPermissionBanner(
@@ -1180,6 +1212,8 @@ class _Sidebar extends StatelessWidget {
                       onActiveCountChanged: onActiveCountChanged,
                       onInboxCountChanged: onInboxCountChanged,
                       onToggleHostEnabled: onToggleHostEnabled,
+                      recentViewMode: recentViewMode,
+                      onRecentViewModeChanged: onRecentViewModeChanged,
                     ),
             ),
           ],
@@ -1309,6 +1343,8 @@ class _SidebarPane extends StatelessWidget {
     required this.onToggleHostEnabled,
     required this.onActiveCountChanged,
     required this.onInboxCountChanged,
+    this.recentViewMode,
+    this.onRecentViewModeChanged,
   });
 
   final _SidebarSection section;
@@ -1327,6 +1363,8 @@ class _SidebarPane extends StatelessWidget {
   final HostProfileActionCallback onToggleHostEnabled;
   final ValueChanged<int> onActiveCountChanged;
   final ValueChanged<int> onInboxCountChanged;
+  final SessionViewMode? recentViewMode;
+  final ValueChanged<SessionViewMode>? onRecentViewModeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1345,7 +1383,8 @@ class _SidebarPane extends StatelessWidget {
           dense: true,
           hasSavedHosts: hosts.isNotEmpty,
           screenAwakeSourceKey: 'desktop-recent-sessions',
-          viewMode: SessionViewMode.flat,
+          viewMode: recentViewMode ?? SessionViewMode.flat,
+          onViewModeChanged: onRecentViewModeChanged,
         );
       case _SidebarSection.inbox:
         return InboxPane(
@@ -1721,11 +1760,15 @@ class _SidebarSearchField extends StatefulWidget {
     required this.controller,
     required this.focusNode,
     required this.onClear,
+    this.viewMode,
+    this.onViewModeChanged,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final VoidCallback onClear;
+  final SessionViewMode? viewMode;
+  final ValueChanged<SessionViewMode>? onViewModeChanged;
 
   @override
   State<_SidebarSearchField> createState() => _SidebarSearchFieldState();
@@ -1779,11 +1822,69 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
         children: [
-          Icon(
-            Icons.search_rounded,
-            size: 15,
-            color: _focused ? colors.accent : colors.textTertiary,
-          ),
+          widget.viewMode != null && widget.onViewModeChanged != null
+              ? PopupMenuButton<SessionViewMode>(
+                  icon: Icon(
+                    switch (widget.viewMode!) {
+                      SessionViewMode.flat => Icons.view_list_rounded,
+                      SessionViewMode.byCwd => Icons.folder_outlined,
+                      SessionViewMode.byHost => Icons.hub_outlined,
+                    },
+                    size: 15,
+                    color: _focused ? colors.accent : colors.textTertiary,
+                  ),
+                  tooltip: 'View mode',
+                  onSelected: widget.onViewModeChanged,
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: SessionViewMode.flat,
+                      child: Row(
+                        children: [
+                          Icon(Icons.view_list_rounded, size: 16),
+                          const SizedBox(width: 8),
+                          Text('Flat list'),
+                          if (widget.viewMode == SessionViewMode.flat) ...[
+                            const SizedBox(width: 6),
+                            Icon(Icons.check_rounded, size: 14),
+                          ],
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: SessionViewMode.byCwd,
+                      child: Row(
+                        children: [
+                          Icon(Icons.folder_outlined, size: 16),
+                          const SizedBox(width: 8),
+                          Text('By working dir'),
+                          if (widget.viewMode == SessionViewMode.byCwd) ...[
+                            const SizedBox(width: 6),
+                            Icon(Icons.check_rounded, size: 14),
+                          ],
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: SessionViewMode.byHost,
+                      child: Row(
+                        children: [
+                          Icon(Icons.hub_outlined, size: 16),
+                          const SizedBox(width: 8),
+                          Text('By host'),
+                          if (widget.viewMode == SessionViewMode.byHost) ...[
+                            const SizedBox(width: 6),
+                            Icon(Icons.check_rounded, size: 14),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                )
+              : Icon(
+                  Icons.search_rounded,
+                  size: 15,
+                  color: _focused ? colors.accent : colors.textTertiary,
+                ),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
