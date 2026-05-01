@@ -308,6 +308,24 @@ jobs:
             --apiKey "$ASC_KEY_ID" \
             --apiIssuer "$ASC_ISSUER_ID"
 
+      - name: Update App Store Connect metadata
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          SIDEMESH_PRIVACY_URL: ${{ vars.SIDEMESH_PRIVACY_URL }}
+          SIDEMESH_SUPPORT_URL: ${{ vars.SIDEMESH_SUPPORT_URL }}
+        run: python3 scripts/update-asc-metadata.py
+
+      - name: Add build to TestFlight beta groups
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+          run: python3 scripts/add-build-to-beta-groups.py
+
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         if: always()
