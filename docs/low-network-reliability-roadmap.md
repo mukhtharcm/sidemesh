@@ -50,14 +50,20 @@ Goal: make the app honest about connection freshness everywhere.
 The user should always know whether they are seeing live state, recently synced
 state, or cached/stale state.
 
-Current completed slice:
+Completed:
 
 - `HostStatusStore` now carries `lastOnlineAt` and `lastEventAt`.
 - Successful session live events update `lastEventAt`.
 - Session detail stale/reconnecting/offline banners can show the last connected
-  age.
+  age (`_CachedTranscriptStrip` with `_TranscriptFreshnessMode`).
 - Background resume no longer silently leaves an in-memory transcript looking
   fresh while resync is still happening.
+- `RelativeTimeTicker` provides a lightweight process-wide 1Hz ticker so relative
+  time labels (e.g. "last connected 12s ago") stay fresh without every widget
+  running its own timer.
+- `HostReconnectScheduler` provides centralized per-host reconnect scheduling
+  with priority-based slots (`foregroundSession`, `visibleSupport`,
+  `backgroundSocket`), exponential backoff tables, and ±30% jitter.
 
 Still missing from this priority:
 
@@ -70,8 +76,6 @@ Still missing from this priority:
 - We do not measure latency or RTT yet.
 - We do not yet have a centralized `ConnectionQualityStore`; the first slice
   extended `HostStatusStore`.
-- Relative time labels do not tick on their own. They update when the widget
-  rebuilds, so `12s ago` can become stale while the screen is idle.
 - We do not yet record a full connection timeline for debugging reconnect
   loops.
 
@@ -116,128 +120,88 @@ Why this matters:
 
 ## Priority 2: True Incremental Session Replay
 
-Goal: reconnect without rereading and reserializing whole transcripts.
+Goal: make delta replay cheap enough for small VPSes and large sessions.
 
-Current problem:
+Completed:
 
-- `/api/sessions/:sessionId/events?since=<seq>` sends only new events to the
-  client.
-- For Codex, the server may still parse the entire rollout `.jsonl` file to
-  compute those new events.
-- Large sessions on small VPSes can still cost CPU, disk IO, and latency.
+- `session-replay-index.ts` implements an incremental parser for Codex rollout
+  `.jsonl` files with bounded ring buffers.
+- Detects file rotation via `inode`/`dev`/`size`/`prefixHash` and rebuilds only
+  when needed; otherwise parses only appended bytes.
+- Emits a typed `STALE_CURSOR` error when a client requests a `since` seq older
+  than the retained ring buffer, signaling the client must re-sync.
+- `/api/sessions/:sessionId/events?since=<seq>` serves deltas without
+  re-scanning the whole file.
 
-Better architecture:
+Still missing:
 
-- Maintain a daemon-side per-session replay index:
-  - `sessionId`
-  - rollout file path
-  - file inode/device if available
-  - last byte offset read
-  - last parsed seq
-  - bounded event ring buffer
-  - latest runtime summary
-  - latest thread updatedAt
-- On first read, parse the file once and cache the normalized events.
-- On later reads, stat the file and parse only appended bytes.
-- If the file shrinks, rotates, or inode changes, invalidate and rebuild.
-- `/events?since=n` should serve directly from the ring buffer when possible.
-- If `since` is older than the retained ring buffer, return a specific
-  `410 stale_cursor`-style response so the client knows to request a snapshot.
-
-Data limits:
-
-- Keep only a bounded event ring per session.
-- Track memory usage and evict least-recently-used session indexes.
-- Keep active sessions warm; cold sessions can rebuild on demand.
-
-Expected impact:
-
-- Much faster app resume.
-- Less disk IO on VPSes.
-- Less CPU when multiple clients view the same session.
-- Cleaner foundation for “last connected N seconds ago” because server replay
-  becomes reliable and cheap.
+- Session-level resource cache so model/profile/skill metadata does not need
+  to be re-fetched on every reconnect.
+- A lightweight in-memory index that maps seq ranges to file offsets so the
+  daemon can serve a delta range without scanning from the start of the log.
+- Client-side cursor persistence so the app does not lose its place across
+  process restarts.
 
 ## Priority 3: Low Data Mode
 
-Goal: give users a mode that sacrifices freshness/detail for survival on weak
-networks.
+Goal: give users explicit control over background traffic and preview quality.
 
-App-level or host-level setting:
+Not yet started.
 
-- Reduce recent session limit, for example from 40 to 15.
-- Prefer websocket snapshots; delay HTTP fallback longer.
-- Disable automatic git status refresh unless the git panel is visible.
-- Disable automatic skills/profile refresh until composer uses `$` or settings
-  are opened.
-- Pause browser preview when minimized or offscreen.
-- Lower browser preview quality and frame rate.
-- Reduce terminal replay request size if a client is far behind.
-- Avoid downloading full image attachments until tapped.
+Features:
 
-Possible labels:
+- Toggle in settings: `Low Data Mode`.
+- When enabled:
+  - Pause browser preview auto-refresh; require manual tap to resume.
+  - Reduce background polling frequency for Recent/Inbox.
+  - Do not auto-attach terminals or browser previews when opening a session.
+  - Compress large file reads if the host supports it.
+- Show a persistent banner when Low Data Mode is active.
 
-- `Normal`
-- `Low Data`
-- `Survival`
+## Priority 4: Centralized Reconnect Scheduling
 
-Default:
+Goal: prevent one healthy socket from masking a broken one on the same host.
 
-- Keep `Normal` as default.
-- Auto-suggest Low Data when repeated timeouts or high reconnect counts are
-  observed.
+Completed:
 
-## Priority 4: Better Reconnect Backoff And Jitter
+- `HostReconnectScheduler` replaces independent per-pane reconnect timers with
+  a single per-host scheduler.
+- Each pane registers a `_ReconnectSlot` with a `ReconnectPriority`:
+  - `foregroundSession`: immediate reconnect, 0ms–8s backoff table.
+  - `visibleSupport`: 500ms–15s backoff table.
+  - `backgroundSocket`: 2s–30s backoff table.
+- Delay is computed from the highest-priority disconnected slot.
+- ±30% jitter applied, clamped to 100ms–30s.
+- `HostRetryState` exposes `isConnected`, `nextRetryAt`, `attemptCount`, and
+  `remaining` duration for UI countdowns.
+- `markConnected` / `markDisconnected` are slot-scoped by default so a healthy
+  background socket does not cancel retry for a broken foreground session.
 
-Goal: avoid reconnect storms across Recent, Inbox, Session, Terminal, Browser,
-and FS sockets.
+Still missing:
 
-Problems to avoid:
-
-- App resumes and every pane reconnects immediately.
-- Multiple hosts all perform HTTP fallback at the same time.
-- Slow VPS gets hammered by snapshot requests after a temporary outage.
-
-Improvements:
-
-- Centralize reconnect scheduling per host.
-- Use exponential backoff with jitter.
-- Use a per-host concurrency limiter for expensive snapshot/log requests.
-- Prioritize visible foreground session over background panes.
-- Let Recent/Inbox accept stale cache while the active session reconnects first.
-- Show retry countdowns in UI for clarity.
-
-Suggested policy:
-
-- Immediate reconnect for the visible session.
-- 500ms to 2s jitter for visible support sockets.
-- 2s to 10s jitter for Recent/Inbox background sockets.
-- Longer retry after repeated failures, capped at about 30s.
+- Connection timeline UI (connected → closed → scheduled → fallback → snapshot).
+- Per-host concurrency limiter for expensive snapshot/log requests.
+- Prioritize visible foreground session over background panes when scheduling
+  HTTP fallback requests.
 
 ## Priority 5: Payload Compression
 
 Goal: reduce JSON payload size for transcripts and metadata.
 
-Candidates:
+Completed:
 
-- Enable gzip/br compression for HTTP JSON responses.
-- Consider websocket per-message deflate for JSON event streams only.
-- Do not blindly compress binary/image/browser frames.
+- HTTP compression middleware (`compression`) is installed in `server.ts`.
+- `/healthz` is explicitly skipped (no compression overhead for probes).
+- Large JSON responses (e.g. session logs) are gzip-compressed when the client
+  accepts it.
+- Small responses below the default threshold are left uncompressed.
+- Test coverage in `compression.test.ts` validates the filter behavior.
 
-Risks:
+Still missing:
 
-- Compression costs CPU on small VPSes.
-- Browser preview frames are already compressed images, so generic compression
-  usually wastes CPU.
-- Websocket compression can increase memory usage if not configured carefully.
-
-Recommendation:
-
-- Start with HTTP compression for large JSON endpoints only:
-  - session log
-  - session resources
-  - file previews
-- Measure before enabling websocket compression globally.
+- Websocket per-message deflate for JSON event streams.
+- Do not enable websocket compression blindly; measure CPU/memory impact on
+  small VPSes first.
 
 ## Priority 6: Adaptive Browser Preview
 
@@ -248,6 +212,8 @@ Current risk:
 - Pixel streaming is inherently expensive compared with HTML port forwarding.
 - Low-quality networks need adaptive behavior, not a fixed frame cadence.
 
+Not yet started.
+
 Improvements:
 
 - Track dropped/late frames per preview client.
@@ -257,7 +223,7 @@ Improvements:
   - preview is minimized
   - another route covers the preview
 - Add a visible manual resume button.
-- Add “preview quality” presets:
+- Add "preview quality" presets:
   - `Readable`
   - `Balanced`
   - `Low data`
@@ -272,17 +238,28 @@ Do not do:
 
 Goal: user messages should survive temporary disconnects.
 
-Already partially present:
+Completed:
 
-- Pending send/outbox logic exists.
+- `SessionSendOutboxStore` persists queued sends to `SharedPreferences` with
+  host fingerprint scoping.
+- `SessionSendOutboxWorker` runs foreground-only retries every 30s with a max
+  of 3 sends per pass.
+- `PendingSessionSend` carries full context: host, session, client message ID,
+  text, input items, overrides, retry count, and last error.
+- `PendingSendAnalysis` classifies failures into `PendingSendIssueKind`:
+  `hostDisabled`, `hostMissing`, `hostChanged`, `unauthorized`, `timeout`,
+  `unreachable`, `server`, `rateLimited`, `unknown`.
+- `PendingSendDisplayState` exposes `queued`, `retrying`, `blocked`.
+- `pending_send_recovery.dart` provides recovery messages and action guidance.
 
-Needed:
+Still missing:
 
-- Show queued messages clearly when host is offline.
-- Retry with the same client message ID.
-- Keep a visible “queued / sending / accepted / failed” lifecycle.
-- Prevent duplicate sends after timeout.
+- Visible queued message UI in the session timeline (currently the outbox
+  stores the data but the timeline does not render pending sends inline).
+- Keep a visible "queued / sending / accepted / failed" lifecycle per message.
 - Allow user to cancel queued sends before reconnect.
+- Prevent duplicate sends after timeout (the dedupe store exists server-side
+  but the client does not yet surface this protection to the user).
 
 This is especially important for mobile because the OS can suspend sockets
 while the user is switching apps.
@@ -291,7 +268,20 @@ while the user is switching apps.
 
 Goal: make failures diagnosable without SSHing into the VPS every time.
 
-Add lightweight diagnostics:
+Completed:
+
+- `/api/diagnostics` returns a lightweight JSON payload with:
+  - `label`, `hostname`, `platform`, `uptimeSeconds`
+  - `memory` (`process.memoryUsage()`)
+  - `resourceUsage` (`process.resourceUsage()`)
+  - `caches`: sizes for recent sessions, logs, replay, active turns, pending
+    actions, live activity, session seq cursors, input dedupe
+  - `sockets`: session rooms, live sockets, approval sockets, recent session
+    sockets
+  - `features`: active terminals, port forwards, browser previews
+- `/api/debug/codex-rpc-audit` exposes Codex RPC audit snapshot.
+
+Still missing:
 
 - Per-host connection timeline:
   - connected
@@ -306,32 +296,22 @@ Add lightweight diagnostics:
   - terminal dropped clients
   - browser preview frame drops
   - port forward reconnects
-- Daemon health endpoint fields:
-  - uptime
-  - memory RSS
-  - active terminals
-  - active browser previews
-  - active port forwards
-  - active websocket counts
-  - provider health summary
-
-Do not log secrets:
-
-- Never log bearer tokens.
-- Never log full terminal input.
-- Never log full file paths in public diagnostics unless the user explicitly
-  opens local diagnostics.
+- Do not log secrets:
+  - Never log bearer tokens.
+  - Never log full terminal input.
+  - Never log full file paths in public diagnostics unless the user explicitly
+    opens local diagnostics.
 
 ## Recommended Execution Order
 
-1. Add connection freshness model and “last connected N seconds ago” UI.
-2. Add server-side per-session replay index for true cheap delta replay.
-3. Add Low Data Mode with browser preview and background refresh throttles.
-4. Add centralized per-host reconnect scheduling with jitter.
-5. Add targeted HTTP compression for large JSON endpoints.
-6. Add browser preview adaptive quality/fps.
-7. Harden offline send queue UI.
-8. Add diagnostics surfaces.
+1. ✅ Add connection freshness model and "last connected N seconds ago" UI.
+2. ✅ Add server-side per-session replay index for true cheap delta replay.
+3. ⬜ Add Low Data Mode with browser preview and background refresh throttles.
+4. ✅ Add centralized per-host reconnect scheduling with jitter.
+5. ✅ Add targeted HTTP compression for large JSON endpoints.
+6. ⬜ Add browser preview adaptive quality/fps.
+7. ⬜ Harden offline send queue UI (visible timeline rendering + cancel).
+8. ✅ Add diagnostics surface (`/api/diagnostics`); still needs per-host timeline.
 
 ## Acceptance Criteria
 
