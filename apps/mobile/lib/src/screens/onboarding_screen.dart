@@ -166,7 +166,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             // Bottom controls
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-              child: Row(
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                runSpacing: 12,
                 children: [
                   // Dots
                   Row(
@@ -187,19 +190,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       );
                     }),
                   ),
-                  const Spacer(),
                   // Next / Done button
                   if (_pageIndex < _pageCount - 1)
-                    FilledButton.icon(
+                    FilledButton(
                       onPressed: _nextPage,
-                      icon: const Icon(Icons.arrow_forward_rounded),
-                      label: const Text('Next'),
+                      child: const Text('Next'),
                     )
                   else
-                    FilledButton.icon(
+                    FilledButton(
                       onPressed: _skip,
-                      icon: const Icon(Icons.check_rounded),
-                      label: const Text('Get started'),
+                      child: const Text('Start'),
                     ),
                 ],
               ),
@@ -207,6 +207,31 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _OnboardingPageShell extends StatelessWidget {
+  const _OnboardingPageShell({
+    required this.child,
+    required this.horizontalPadding,
+  });
+
+  final Widget child;
+  final double horizontalPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: child,
+          ),
+        );
+      },
     );
   }
 }
@@ -222,8 +247,8 @@ class _WelcomePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
+    return _OnboardingPageShell(
+      horizontalPadding: 32,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -311,8 +336,8 @@ class _HowItWorksPageState extends State<_HowItWorksPage>
   @override
   Widget build(BuildContext context) {
     final colors = widget.colors;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
+    return _OnboardingPageShell(
+      horizontalPadding: 32,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -517,8 +542,8 @@ class _ActionsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+    return _OnboardingPageShell(
+      horizontalPadding: 24,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -546,18 +571,18 @@ class _ActionsPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
                     MeshPill(
                       label: 'codex',
                       tone: MeshPillTone.accent,
                       icon: Icons.memory_rounded,
                     ),
-                    const Spacer(),
                     MeshPill(
-                      label: 'pending approval',
+                      label: 'approval',
                       tone: MeshPillTone.warning,
-                      icon: Icons.pending_actions_rounded,
                     ),
                   ],
                 ),
@@ -594,22 +619,17 @@ class _ActionsPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: null,
-                        icon: const Icon(Icons.close_rounded, size: 18),
-                        label: const Text('Reject'),
-                      ),
+                    OutlinedButton(
+                      onPressed: null,
+                      child: const Text('Reject'),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: null,
-                        icon: const Icon(Icons.check_rounded, size: 18),
-                        label: const Text('Approve'),
-                      ),
+                    const SizedBox(height: 8),
+                    FilledButton(
+                      onPressed: null,
+                      child: const Text('Approve'),
                     ),
                   ],
                 ),
@@ -629,17 +649,17 @@ class _ActionsPage extends StatelessWidget {
               ),
               _FeatureChip(
                 icon: Icons.code_rounded,
-                label: 'Review diffs',
+                label: 'Diffs',
                 colors: colors,
               ),
               _FeatureChip(
                 icon: Icons.folder_open_outlined,
-                label: 'Browse files',
+                label: 'Files',
                 colors: colors,
               ),
               _FeatureChip(
                 icon: Icons.terminal_outlined,
-                label: 'Live terminal',
+                label: 'Terminal',
                 colors: colors,
               ),
             ],
@@ -747,8 +767,8 @@ class _ThemePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+    return _OnboardingPageShell(
+      horizontalPadding: 24,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -907,8 +927,8 @@ class _ConnectPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+    return _OnboardingPageShell(
+      horizontalPadding: 24,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -980,14 +1000,19 @@ class _ConnectPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: onScanQr,
-            icon: const Icon(Icons.qr_code_scanner_rounded),
-            label: const Text('Scan QR code'),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: onScanQr,
+              child: const Text('Scan QR code'),
+            ),
           ),
           const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 4,
+            runSpacing: 4,
             children: [
               TextButton(
                 onPressed: onManualEntry,

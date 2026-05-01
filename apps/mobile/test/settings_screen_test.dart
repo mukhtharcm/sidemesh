@@ -109,6 +109,7 @@ void main() {
       expect(find.byType(Dialog), findsOneWidget);
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('App preferences'), findsOneWidget);
+      expect(find.text('Replay onboarding'), findsNothing);
     } finally {
       debugDefaultTargetPlatformOverride = null;
       tester.view.resetPhysicalSize();

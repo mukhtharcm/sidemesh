@@ -275,6 +275,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final hasDesktopControls =
         widget.onResetSidebarWidth != null ||
         widget.onResetInspectorWidth != null;
+    final canReplayOnboarding =
+        kIsWeb || defaultTargetPlatform != TargetPlatform.macOS;
     final content = _SettingsContent(
       embedded: widget.embedded,
       onClose: widget.onClose,
@@ -296,7 +298,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onRunStorageAction: _runStorageAction,
       onResetSidebarWidth: widget.onResetSidebarWidth,
       onResetInspectorWidth: widget.onResetInspectorWidth,
-      onReplayOnboarding: _replayOnboarding,
+      onReplayOnboarding: canReplayOnboarding ? _replayOnboarding : null,
     );
     if (widget.embedded) {
       return content;
