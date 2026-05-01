@@ -174,13 +174,13 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   const approvalSockets = new Set<WebSocket>();
   const recentSessionsSockets = new Set<WebSocket>();
   const recentSessionBroadcastTimers = new Map<string, NodeJS.Timeout>();
-  let recentSessionsCache: {
+  const recentSessionsCache = new Map<string, {
     limit: number;
     runtimeMode: SessionRuntimeListMode;
     expiresAt: number;
     promise?: Promise<SessionSummary[]>;
     value?: SessionSummary[];
-  } | null = null;
+  }>();
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, SessionActivity>>();
@@ -345,7 +345,8 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   ): Promise<SessionSummary[]> {
     const limit = normalizedSessionListLimit(limitOverride);
     const now = Date.now();
-    const cached = recentSessionsCache;
+    const cacheKey = `${runtimeMode}:${limit}`;
+    const cached = recentSessionsCache.get(cacheKey);
     if (cached && cached.limit >= limit && cached.runtimeMode === runtimeMode) {
       if (cached.promise) {
         return (await cached.promise).slice(0, limit);
@@ -356,31 +357,31 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     }
 
     const promise = listSessions(provider, runtimeCache, limit, runtimeMode);
-    recentSessionsCache = {
+    recentSessionsCache.set(cacheKey, {
       limit,
       runtimeMode,
       expiresAt: now + RECENT_SESSIONS_CACHE_TTL_MS,
       promise,
-    };
+    });
     try {
       const value = await promise;
-      recentSessionsCache = {
+      recentSessionsCache.set(cacheKey, {
         limit,
         runtimeMode,
         expiresAt: Date.now() + RECENT_SESSIONS_CACHE_TTL_MS,
         value,
-      };
+      });
       return value.slice(0, limit);
     } catch (error) {
-      if (recentSessionsCache?.promise === promise) {
-        recentSessionsCache = null;
+      if (recentSessionsCache.get(cacheKey)?.promise === promise) {
+        recentSessionsCache.delete(cacheKey);
       }
       throw error;
     }
   }
 
   function invalidateRecentSessionsCache(): void {
-    recentSessionsCache = null;
+    recentSessionsCache.clear();
   }
 
   async function broadcastRecentSessionUpsert(
@@ -2338,6 +2339,25 @@ async function listSessions(
   runtimeMode: SessionRuntimeListMode = "active",
 ): Promise<SessionSummary[]> {
   const limit = normalizedSessionListLimit(limitOverride);
+  if (canUseRecentSessionFallback(provider)) {
+    const threads = await provider.listRecentUnindexedSessionThreads(
+      Math.max(limit, RECENT_UNINDEXED_SESSION_SCAN_LIMIT),
+    );
+    return mapWithConcurrency(
+      threads,
+      RECENT_SESSION_RUNTIME_CONCURRENCY,
+      async (thread) =>
+        mapSession(
+          thread,
+          await loadCachedSessionRuntime(
+            provider,
+            thread,
+            runtimeCache,
+            runtimeMode,
+          ),
+      ),
+    );
+  }
   const listThreads = requireProviderMethod(
     provider,
     "listSessionThreads",
@@ -2365,6 +2385,17 @@ async function listSessions(
           runtimeMode,
         ),
       ),
+  );
+}
+
+function canUseRecentSessionFallback(provider: AgentProvider): provider is AgentProvider & {
+  listRecentUnindexedSessionThreads: NonNullable<
+    AgentProvider["listRecentUnindexedSessionThreads"]
+  >;
+} {
+  return (
+    provider.capabilities.sessions.recentFallback &&
+    hasProviderMethod(provider, "listRecentUnindexedSessionThreads")
   );
 }
 
@@ -2661,8 +2692,16 @@ function mapSession(
     rolloutPath: thread.path,
     runtime,
     gitInfo: mapGitInfo(thread.gitInfo),
-    isSubAgent: typeof thread.source === "object" && thread.source != null && (thread.source as Record<string, unknown>).subAgent != null,
+    isSubAgent: isSubAgentThreadSource(thread.source),
   };
+}
+
+function isSubAgentThreadSource(source: ThreadRecord["source"]): boolean {
+  if (!source || typeof source !== "object") {
+    return false;
+  }
+  const typed = source as Record<string, unknown>;
+  return typed.subAgent != null || typed.subagent != null;
 }
 
 function providerKindForThread(thread: ThreadRecord): string | null {

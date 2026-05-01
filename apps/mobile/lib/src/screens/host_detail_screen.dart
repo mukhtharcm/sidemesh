@@ -73,7 +73,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   Future<_HostOverview> _load() async {
     final results = await Future.wait<Object>([
       widget.api.fetchNode(widget.host),
-      widget.api.fetchSessions(widget.host),
+      widget.api.fetchSessions(widget.host, limit: 40),
     ]);
     final node = results[0] as NodeInfo;
     final sessions = results[1] as List<SessionSummary>;
