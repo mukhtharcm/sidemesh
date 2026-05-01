@@ -247,7 +247,7 @@ class _BellBadge extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: Icon(
-        Icons.notifications_active_outlined,
+        Icons.notifications_active_rounded,
         size: size * 0.55,
         color: colors.accent,
       ),

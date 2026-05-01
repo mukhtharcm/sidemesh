@@ -9,6 +9,9 @@ import '../session_message_seed_store.dart';
 import '../session_policy_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
+import '../widgets/launch_controls.dart';
+import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
 
 enum CreateSessionPresentation { sheet, dialog }
@@ -136,7 +139,7 @@ class _HostPickerSurface extends StatelessWidget {
                     height: 38,
                     decoration: BoxDecoration(
                       color: colors.accentMuted,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: AppShapes.input,
                       border: Border.all(
                         color: colors.accent.withValues(alpha: 0.35),
                       ),
@@ -156,7 +159,7 @@ class _HostPickerSurface extends StatelessWidget {
                         Text(
                           'Choose host',
                           style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w800),
+                              ?.copyWith(fontWeight: AppWeights.title),
                         ),
                         Text(
                           'Pick where the new agent session should run.',
@@ -207,7 +210,7 @@ class _HostPickerSurface extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context).textTheme.titleSmall
-                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                      ?.copyWith(fontWeight: AppWeights.emphasis),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
@@ -1229,7 +1232,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           height: 38,
           decoration: BoxDecoration(
             color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppShapes.input,
             border: Border.all(color: colors.accent.withValues(alpha: 0.24)),
           ),
           alignment: Alignment.center,
@@ -1243,7 +1246,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               Text(
                 'New $_providerName session',
                 style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
+                  fontWeight: AppWeights.title,
                   letterSpacing: -0.4,
                 ),
               ),
@@ -1254,7 +1257,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: colors.textSecondary,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: AppWeights.body,
                 ),
               ),
             ],
@@ -1335,14 +1338,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         onTap: _submitting ? null : _toggleAdvanced,
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
           decoration: BoxDecoration(
             color: colors.surfaceMuted,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppShapes.input,
             border: Border.all(color: colors.border),
           ),
           child: Row(
@@ -1357,7 +1360,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                       'Tune launch',
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: colors.textPrimary,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: AppWeights.title,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -1394,7 +1397,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   Widget _buildAdvancedPanel(BuildContext context) {
     final colors = context.colors;
-    final theme = Theme.of(context);
     final effectiveReasoning = _effectiveReasoningEffort;
     String? reasoningDescription;
     for (final option in _supportedReasoningOptions) {
@@ -1426,225 +1428,178 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             ),
           ),
           const SizedBox(height: 14),
-          _CompactControlGroup(
-            icon: Icons.memory_rounded,
-            title: 'Brain',
-            children: [
-              if (_supportsProfiles) ...[
-                _ModelSelectionCard(
-                  title: 'Profile',
-                  icon: Icons.badge_outlined,
-                  value: _profileLabel,
-                  subtitle: _profileDescription,
-                  loading: _loadingProfiles,
-                  error: _profilesError,
-                  compact: true,
-                  badges: _profileBadges(),
-                  retryLabel: 'Retry loading profiles',
-                  onTap: _chooseProfile,
-                  onRetry: () => unawaited(_loadProfiles(force: true)),
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (_supportsMode) ...[
-                _MiniChoiceWrap<String?>(
-                  icon: Icons.alt_route_rounded,
-                  label: 'Mode',
-                  value: _modeToSubmit,
-                  options: const <String?>[null, ...kSessionModes],
-                  optionLabel: _sessionModeChoiceLabel,
-                  isDefault: (value) => value == null,
-                  onChanged: (value) {
-                    setState(() {
-                      _mode = value;
-                    });
-                  },
-                ),
-                const SizedBox(height: 6),
-                _CompactInfoLine(
-                  icon: Icons.info_outline_rounded,
-                  text: _sessionModeDescription(
-                    _modeToSubmit,
-                    providerName: _providerName,
-                  ),
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (_supportsModels && _supportsModelOverride) ...[
-                _ModelSelectionCard(
-                  title: 'Model',
-                  icon: Icons.memory_rounded,
-                  value: _modelLabel,
-                  subtitle: _modelDescription,
-                  loading: _loadingModels,
-                  error: _modelsError,
-                  compact: true,
-                  badges: <String>[
-                    if (_selectedModel != null) 'override',
-                    if (_selectedModel == null && _profileToSubmit != null)
-                      'profile default',
-                    if (_controlModel?.isAutoModel ?? false) 'auto',
-                    if (_controlModel?.isDefault ?? false) 'default',
-                    if (_profileToSubmit != null) 'profile scoped',
-                    if (_controlModel?.supportsFastMode ?? false) 'fast',
-                  ],
-                  onTap: _chooseModel,
-                  onRetry: () => unawaited(_loadModels()),
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (!_supportsProfiles &&
-                  (!_supportsModels || !_supportsModelOverride))
-                _CompactInfoLine(
-                  icon: Icons.info_outline_rounded,
-                  text:
-                      '$_providerName does not advertise profile or model controls.',
-                ),
-              if (_supportsReasoningEffort &&
-                  _supportsModels &&
-                  _supportsModelOverride) ...[
-                if (_loadingModels && _models.isEmpty)
-                  const LinearProgressIndicator(minHeight: 3)
-                else if (_controlModelIsAuto)
-                  _CompactInfoLine(
-                    icon: Icons.psychology_alt_rounded,
-                    text:
-                        'Auto thinking: ${_reasoningEffortLabel(effectiveReasoning ?? 'medium')}',
+          LaunchOptionsForm(
+            dense: true,
+            capabilities: LaunchOptionsCapabilities(
+              supportsApprovalPolicy: _supportsApprovalPolicy,
+              supportsSandboxMode: _supportsSandboxMode,
+              supportsFastMode: false,
+              supportsWebSearch: _supportsWebSearch,
+              supportsSessionMode: _supportsMode,
+              approvalOptions: _approvalOptions,
+            ),
+            value: LaunchOptionsValue(
+              approval: _effectiveApproval,
+              sandbox: _effectiveSandbox,
+              fastMode: _effectiveFastMode,
+              webSearch: _effectiveWebSearch,
+              sessionMode: _modeToSubmit,
+            ),
+            onApprovalChanged: (policy) => setState(() {
+              _approval = policy;
+              _approvalTouched = true;
+            }),
+            onSandboxChanged: (mode) => setState(() {
+              _sandbox = mode;
+              _sandboxTouched = true;
+            }),
+            onWebSearchChanged: (next) => setState(() {
+              _webSearch = next;
+              _webSearchTouched = true;
+            }),
+            onSessionModeChanged: (mode) => setState(() {
+              _mode = mode;
+            }),
+            permissionsTrailing: _supportsApprovalPolicy &&
+                    _approvalOptions.contains(ApprovalPolicy.never) &&
+                    _supportsSandboxMode
+                ? TextButton.icon(
+                    onPressed: _applyAutopilot,
+                    icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                    label: const Text('Autopilot'),
                   )
-                else if (_supportedReasoningOptions.isEmpty)
-                  const _CompactInfoLine(
-                    icon: Icons.psychology_alt_rounded,
-                    text: 'Pick a model to tune reasoning.',
-                  )
-                else ...[
-                  _MiniChoiceWrap<String>(
-                    icon: Icons.psychology_alt_rounded,
-                    label: 'Reasoning',
-                    value: effectiveReasoning,
-                    options: _supportedReasoningOptions
-                        .map((option) => option.reasoningEffort)
-                        .toList(),
-                    optionLabel: _reasoningEffortLabel,
-                    isDefault: (value) =>
-                        value == _controlModel?.defaultReasoningEffort,
-                    onChanged: (value) {
-                      setState(() {
-                        _reasoningEffort = value;
-                        _reasoningTouched = true;
-                      });
-                    },
-                  ),
-                  if (reasoningDescription != null &&
-                      reasoningDescription.trim().isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        reasoningDescription.trim(),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.3,
-                        ),
-                      ),
-                    ),
-                ],
-              ],
-              if (_supportsFastMode) ...[
-                const SizedBox(height: 10),
-                _CompactSwitchRow(
-                  icon: Icons.bolt_rounded,
-                  title: 'Fast mode',
-                  subtitle: _fastSupported
-                      ? 'Ask for the fast service tier.'
-                      : 'Not advertised by this model.',
-                  value: _effectiveFastMode,
-                  enabled: _fastSupported,
-                  onChanged: (value) => setState(() {
-                    _fastMode = value;
-                    _fastModeTouched = true;
-                  }),
-                ),
-              ],
-            ],
+                : null,
+            brainExtras: _buildBrainExtras(context, effectiveReasoning,
+                reasoningDescription),
           ),
-          if (_supportsApprovalPolicy || _supportsSandboxMode) ...[
-            const SizedBox(height: 12),
-            _CompactControlGroup(
-              icon: Icons.verified_user_rounded,
-              title: 'Permissions',
-              trailing:
-                  _supportsApprovalPolicy &&
-                      _approvalOptions.contains(ApprovalPolicy.never) &&
-                      _supportsSandboxMode
-                  ? TextButton.icon(
-                      onPressed: _applyAutopilot,
-                      icon: const Icon(Icons.auto_awesome_rounded, size: 16),
-                      label: const Text('Autopilot'),
-                    )
-                  : null,
-              children: [
-                if (_supportsApprovalPolicy) ...[
-                  _MiniChoiceWrap<ApprovalPolicy>(
-                    icon: Icons.verified_user_rounded,
-                    label: 'Approval',
-                    value: _effectiveApproval,
-                    options: _approvalOptions,
-                    optionLabel: (policy) => policy.label,
-                    onChanged: (value) => setState(() {
-                      _approval = value;
-                      _approvalTouched = true;
-                    }),
-                  ),
-                ],
-                if (_supportsApprovalPolicy && _supportsSandboxMode)
-                  const SizedBox(height: 10),
-                if (_supportsSandboxMode)
-                  _MiniChoiceWrap<SandboxMode>(
-                    icon: Icons.folder_special_rounded,
-                    label: 'Sandbox',
-                    value: _effectiveSandbox,
-                    options: SandboxMode.values,
-                    optionLabel: (sandbox) => sandbox.label,
-                    danger: (sandbox) =>
-                        sandbox == SandboxMode.dangerFullAccess,
-                    onChanged: (value) => setState(() {
-                      _sandbox = value;
-                      _sandboxTouched = true;
-                    }),
-                  ),
-                const SizedBox(height: 8),
-                _CompactInfoLine(
-                  icon: Icons.info_outline_rounded,
-                  text: [
-                    if (_supportsApprovalPolicy) _effectiveApproval.description,
-                    if (_supportsSandboxMode) _effectiveSandbox.description,
-                  ].join(' '),
-                ),
-              ],
-            ),
-          ],
-          if (_supportsWebSearch) ...[
-            const SizedBox(height: 12),
-            _CompactControlGroup(
-              icon: Icons.public_rounded,
-              title: 'Network',
-              children: [
-                _CompactSwitchRow(
-                  icon: Icons.public_rounded,
-                  title: 'Live web search',
-                  subtitle: 'Starts the thread with web search enabled.',
-                  value: _effectiveWebSearch,
-                  enabled: !_submitting,
-                  onChanged: (value) => setState(() {
-                    _webSearch = value;
-                    _webSearchTouched = true;
-                  }),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     );
+  }
+
+  List<Widget>? _buildBrainExtras(
+    BuildContext context,
+    String? effectiveReasoning,
+    String? reasoningDescription,
+  ) {
+    final theme = Theme.of(context);
+    final colors = context.colors;
+    final extras = <Widget>[];
+
+    if (_supportsProfiles) {
+      extras.add(_ModelSelectionCard(
+        title: 'Profile',
+        icon: Icons.badge_rounded,
+        value: _profileLabel,
+        subtitle: _profileDescription,
+        loading: _loadingProfiles,
+        error: _profilesError,
+        compact: true,
+        badges: _profileBadges(),
+        retryLabel: 'Retry loading profiles',
+        onTap: _chooseProfile,
+        onRetry: () => unawaited(_loadProfiles(force: true)),
+      ));
+    }
+
+    if (_supportsModels && _supportsModelOverride) {
+      extras.add(_ModelSelectionCard(
+        title: 'Model',
+        icon: Icons.memory_rounded,
+        value: _modelLabel,
+        subtitle: _modelDescription,
+        loading: _loadingModels,
+        error: _modelsError,
+        compact: true,
+        badges: <String>[
+          if (_selectedModel != null) 'override',
+          if (_selectedModel == null && _profileToSubmit != null)
+            'profile default',
+          if (_controlModel?.isAutoModel ?? false) 'auto',
+          if (_controlModel?.isDefault ?? false) 'default',
+          if (_profileToSubmit != null) 'profile scoped',
+          if (_controlModel?.supportsFastMode ?? false) 'fast',
+        ],
+        onTap: _chooseModel,
+        onRetry: () => unawaited(_loadModels()),
+      ));
+    }
+
+    if (!_supportsProfiles &&
+        (!_supportsModels || !_supportsModelOverride)) {
+      extras.add(LaunchInfoLine(
+        icon: Icons.info_outline_rounded,
+        text: '$_providerName does not advertise profile or model controls.',
+      ));
+    }
+
+    if (_supportsReasoningEffort &&
+        _supportsModels &&
+        _supportsModelOverride) {
+      if (_loadingModels && _models.isEmpty) {
+        extras.add(const LinearProgressIndicator(minHeight: 3));
+      } else if (_controlModelIsAuto) {
+        extras.add(LaunchInfoLine(
+          icon: Icons.psychology_alt_rounded,
+          text:
+              'Auto thinking: ${_reasoningEffortLabel(effectiveReasoning ?? 'medium')}',
+        ));
+      } else if (_supportedReasoningOptions.isEmpty) {
+        extras.add(const LaunchInfoLine(
+          icon: Icons.psychology_alt_rounded,
+          text: 'Pick a model to tune reasoning.',
+        ));
+      } else {
+        extras.add(LaunchChoiceWrap<String>(
+          icon: Icons.psychology_alt_rounded,
+          label: 'Reasoning',
+          value: effectiveReasoning,
+          options: _supportedReasoningOptions
+              .map((option) => option.reasoningEffort)
+              .toList(),
+          optionLabel: _reasoningEffortLabel,
+          isDefault: (value) =>
+              value == _controlModel?.defaultReasoningEffort,
+          onChanged: (value) {
+            setState(() {
+              _reasoningEffort = value;
+              _reasoningTouched = true;
+            });
+          },
+        ));
+        if (reasoningDescription != null &&
+            reasoningDescription.trim().isNotEmpty) {
+          extras.add(Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              reasoningDescription.trim(),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                height: 1.3,
+              ),
+            ),
+          ));
+        }
+      }
+    }
+
+    if (_supportsFastMode) {
+      extras.add(LaunchSwitchRow(
+        icon: Icons.bolt_rounded,
+        title: 'Fast mode',
+        subtitle: _fastSupported
+            ? 'Ask for the fast service tier.'
+            : 'Not advertised by this model.',
+        value: _effectiveFastMode,
+        enabled: _fastSupported,
+        onChanged: (value) => setState(() {
+          _fastMode = value;
+          _fastModeTouched = true;
+        }),
+      ));
+    }
+
+    return extras.isEmpty ? null : extras;
   }
 
   Widget _buildFooter(BuildContext context) {
@@ -1726,7 +1681,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (_supportsProfiles)
         MeshPill(
           label: _profileLabel,
-          icon: Icons.badge_outlined,
+          icon: Icons.badge_rounded,
           tone: _profileToSubmit == null
               ? MeshPillTone.neutral
               : MeshPillTone.accent,
@@ -1840,7 +1795,7 @@ class _PanelHeading extends StatelessWidget {
               Text(
                 title,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
+                  fontWeight: AppWeights.title,
                   color: colors.textPrimary,
                 ),
               ),
@@ -1874,7 +1829,7 @@ class _ErrorPanel extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: colors.dangerMuted,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.danger.withValues(alpha: 0.35)),
       ),
       child: Row(
@@ -1948,7 +1903,7 @@ class _LaunchFieldFrame extends StatelessWidget {
                   label,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: colors.textSecondary,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: AppWeights.title,
                     letterSpacing: 0.4,
                   ),
                 ),
@@ -2018,7 +1973,7 @@ class _LaunchSelectorRow extends StatelessWidget {
                       label,
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: colors.textSecondary,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: AppWeights.title,
                         letterSpacing: 0.4,
                       ),
                     ),
@@ -2027,7 +1982,7 @@ class _LaunchSelectorRow extends StatelessWidget {
                       value,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: colors.textPrimary,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: AppWeights.title,
                       ),
                     ),
                     if (detail.trim().isNotEmpty) ...[
@@ -2039,7 +1994,7 @@ class _LaunchSelectorRow extends StatelessWidget {
                         style: monoStyle(
                           color: colors.textTertiary,
                           fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: AppWeights.emphasis,
                         ),
                       ),
                     ],
@@ -2050,216 +2005,6 @@ class _LaunchSelectorRow extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _CompactControlGroup extends StatelessWidget {
-  const _CompactControlGroup({
-    required this.icon,
-    required this.title,
-    required this.children,
-    this.trailing,
-  });
-
-  final IconData icon;
-  final String title;
-  final List<Widget> children;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: colors.accent),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: colors.textPrimary,
-                  ),
-                ),
-              ),
-              ?trailing,
-            ],
-          ),
-          const SizedBox(height: 10),
-          ...children,
-        ],
-      ),
-    );
-  }
-}
-
-class _MiniChoiceWrap<T> extends StatelessWidget {
-  const _MiniChoiceWrap({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.options,
-    required this.optionLabel,
-    required this.onChanged,
-    this.isDefault,
-    this.danger,
-  });
-
-  final IconData icon;
-  final String label;
-  final T? value;
-  final List<T> options;
-  final String Function(T) optionLabel;
-  final bool Function(T)? isDefault;
-  final bool Function(T)? danger;
-  final ValueChanged<T> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 14, color: colors.textSecondary),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: colors.textSecondary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 7),
-        Wrap(
-          spacing: 7,
-          runSpacing: 7,
-          children: options.map((option) {
-            final selected = option == value;
-            final optionDanger = danger?.call(option) ?? false;
-            final accent = optionDanger ? colors.danger : colors.accent;
-            return InkWell(
-              onTap: () => onChanged(option),
-              borderRadius: BorderRadius.circular(999),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 7,
-                ),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? accent.withValues(alpha: 0.14)
-                      : colors.surfaceMuted,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: selected ? accent : colors.border),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      optionLabel(option),
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: selected ? accent : colors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    if (isDefault?.call(option) ?? false) ...[
-                      const SizedBox(width: 5),
-                      Text(
-                        'default',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: colors.textTertiary,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-}
-
-class _CompactSwitchRow extends StatelessWidget {
-  const _CompactSwitchRow({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.value,
-    required this.enabled,
-    required this.onChanged,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final bool value;
-  final bool enabled;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
-      decoration: BoxDecoration(
-        color: value
-            ? colors.accentMuted.withValues(alpha: 0.38)
-            : colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: value ? colors.accent : colors.border),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            size: 18,
-            color: value ? colors.accent : colors.textSecondary,
-          ),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: colors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.25,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Switch(value: value, onChanged: enabled ? onChanged : null),
-        ],
       ),
     );
   }
@@ -2325,13 +2070,13 @@ class _ModelSelectionCard extends StatelessWidget {
     final colors = context.colors;
     return InkWell(
       onTap: loading ? null : onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: AppShapes.input,
       child: Container(
         width: double.infinity,
         padding: EdgeInsets.all(compact ? 10 : 12),
         decoration: BoxDecoration(
           color: colors.surfaceMuted,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: AppShapes.input,
           border: Border.all(color: colors.border),
         ),
         child: Column(
@@ -2345,7 +2090,7 @@ class _ModelSelectionCard extends StatelessWidget {
                   child: Text(
                     title,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                      fontWeight: AppWeights.emphasis,
                     ),
                   ),
                 ),
@@ -2372,7 +2117,7 @@ class _ModelSelectionCard extends StatelessWidget {
                   value,
                   style: Theme.of(
                     context,
-                  ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                  ).textTheme.bodyLarge?.copyWith(fontWeight: AppWeights.body),
                 ),
                 ...badges.map((badge) => _InlineBadge(label: badge)),
               ],
@@ -2455,7 +2200,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                           height: 4,
                           decoration: BoxDecoration(
                             color: colors.borderStrong.withValues(alpha: 0.55),
-                            borderRadius: BorderRadius.circular(999),
+                            borderRadius: AppShapes.pill,
                           ),
                         ),
                       ),
@@ -2468,7 +2213,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                             height: 38,
                             decoration: BoxDecoration(
                               color: colors.accentMuted,
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: AppShapes.input,
                               border: Border.all(
                                 color: colors.accent.withValues(alpha: 0.24),
                               ),
@@ -2490,7 +2235,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                                   style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(
                                         color: colors.textPrimary,
-                                        fontWeight: FontWeight.w900,
+                                        fontWeight: AppWeights.title,
                                         letterSpacing: -0.2,
                                       ),
                                 ),
@@ -2500,7 +2245,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                                   style: Theme.of(context).textTheme.bodySmall
                                       ?.copyWith(
                                         color: colors.textSecondary,
-                                        fontWeight: FontWeight.w600,
+                                        fontWeight: AppWeights.body,
                                       ),
                                 ),
                               ],
@@ -2518,7 +2263,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                       DecoratedBox(
                         decoration: BoxDecoration(
                           color: colors.surface,
-                          borderRadius: BorderRadius.circular(18),
+                          borderRadius: AppShapes.card,
                           border: Border.all(color: colors.border),
                         ),
                         child: Column(
@@ -2613,7 +2358,7 @@ class _ProviderPickerTile extends StatelessWidget {
                   color: selected
                       ? colors.accentMuted
                       : colors.surfaceMuted.withValues(alpha: 0.8),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: AppShapes.input,
                   border: Border.all(
                     color: selected
                         ? colors.accent.withValues(alpha: 0.38)
@@ -2644,7 +2389,7 @@ class _ProviderPickerTile extends StatelessWidget {
                             style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(
                                   color: colors.textPrimary,
-                                  fontWeight: FontWeight.w900,
+                                  fontWeight: AppWeights.title,
                                 ),
                           ),
                         ),
@@ -2664,7 +2409,7 @@ class _ProviderPickerTile extends StatelessWidget {
                       style: monoStyle(
                         color: colors.textSecondary,
                         fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.emphasis,
                       ),
                     ),
                     const SizedBox(height: 7),
@@ -2760,7 +2505,7 @@ class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
               'Choose profile',
               style: Theme.of(
                 context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ).textTheme.titleLarge?.copyWith(fontWeight: AppWeights.emphasis),
             ),
             const SizedBox(height: 6),
             Text(
@@ -2917,7 +2662,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
               'Choose model',
               style: Theme.of(
                 context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ).textTheme.titleLarge?.copyWith(fontWeight: AppWeights.emphasis),
             ),
             const SizedBox(height: 6),
             Text(
@@ -3032,12 +2777,12 @@ class _ModelPickerTile extends StatelessWidget {
     final colors = context.colors;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: AppShapes.input,
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: colors.surfaceMuted,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: AppShapes.input,
           border: Border.all(color: selected ? colors.accent : colors.border),
         ),
         child: Column(
@@ -3049,7 +2794,7 @@ class _ModelPickerTile extends StatelessWidget {
                   child: Text(
                     title,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                      fontWeight: AppWeights.emphasis,
                     ),
                   ),
                 ),
@@ -3063,7 +2808,7 @@ class _ModelPickerTile extends StatelessWidget {
                 style: monoStyle(
                   color: colors.textSecondary,
                   fontSize: 12,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: AppWeights.body,
                 ),
               ),
             ],
@@ -3102,7 +2847,7 @@ class _InlineBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppShapes.pill,
         border: Border.all(color: colors.border),
       ),
       child: Text(
@@ -3150,20 +2895,6 @@ String _sessionModeChoiceLabel(String? value) {
     return 'provider default';
   }
   return sessionModeLabel(value);
-}
-
-String _sessionModeDescription(String? value, {required String providerName}) {
-  return switch (value) {
-    null =>
-      'Leave mode unset to let $providerName use its default session behavior.',
-    'interactive' =>
-      'Interactive keeps the session conversational and asks before risky actions.',
-    'plan' =>
-      'Plan focuses on outlining or analyzing before executing changes.',
-    'autopilot' =>
-      'Autopilot lets the provider run with its strongest self-directed execution mode.',
-    _ => '$providerName will start in ${sessionModeLabel(value)} mode.',
-  };
 }
 
 String _describeProviderProfile(ProviderProfileSummary profile) {

@@ -288,8 +288,9 @@ class _WelcomePage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          _TypewriterText(
-            text: 'Control your fleet from anywhere.',
+          Text(
+            'Control your fleet from anywhere.',
+            textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
               height: 1.4,
@@ -653,12 +654,12 @@ class _ActionsPage extends StatelessWidget {
                 colors: colors,
               ),
               _FeatureChip(
-                icon: Icons.folder_open_outlined,
+                icon: Icons.folder_open_rounded,
                 label: 'Files',
                 colors: colors,
               ),
               _FeatureChip(
-                icon: Icons.terminal_outlined,
+                icon: Icons.terminal_rounded,
                 label: 'Terminal',
                 colors: colors,
               ),
@@ -1105,61 +1106,6 @@ class _ManualHostSheetState extends State<_ManualHostSheet> {
           ),
         ),
       ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Typewriter text widget
-// ---------------------------------------------------------------------------
-
-class _TypewriterText extends StatefulWidget {
-  const _TypewriterText({required this.text, required this.style});
-
-  final String text;
-  final TextStyle? style;
-
-  @override
-  State<_TypewriterText> createState() => _TypewriterTextState();
-}
-
-class _TypewriterTextState extends State<_TypewriterText> {
-  late String _visible;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _visible = '';
-    _startTyping();
-  }
-
-  void _startTyping() {
-    var index = 0;
-    _timer = Timer.periodic(const Duration(milliseconds: 40), (timer) {
-      if (index >= widget.text.length) {
-        timer.cancel();
-        return;
-      }
-      setState(() {
-        _visible = widget.text.substring(0, index + 1);
-      });
-      index++;
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      _visible,
-      textAlign: TextAlign.center,
-      style: widget.style,
     );
   }
 }

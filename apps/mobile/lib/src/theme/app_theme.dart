@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
+import 'app_tokens.dart';
 import 'theme_controller.dart';
 
 /// Builds a light [ThemeData] from the given palette.
@@ -60,8 +61,8 @@ ThemeData _buildTheme(
       scrolledUnderElevation: 0,
       centerTitle: false,
       titleTextStyle: textTheme.titleLarge?.copyWith(
-        fontWeight: FontWeight.w700,
-        letterSpacing: -0.2,
+        fontWeight: AppWeights.title,
+        letterSpacing: AppLetterSpacing.headline,
       ),
     ),
     cardTheme: CardThemeData(
@@ -70,7 +71,7 @@ ThemeData _buildTheme(
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: AppShapes.card,
         side: BorderSide(color: palette.border),
       ),
     ),
@@ -79,11 +80,11 @@ ThemeData _buildTheme(
       backgroundColor: palette.surface,
       contentTextStyle: textTheme.bodyMedium?.copyWith(
         color: palette.textPrimary,
-        fontWeight: FontWeight.w500,
+        fontWeight: AppWeights.body,
       ),
       elevation: 6,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.input,
         side: BorderSide(color: palette.border),
       ),
       actionTextColor: palette.accent,
@@ -94,17 +95,17 @@ ThemeData _buildTheme(
       elevation: 10,
       shadowColor: palette.textPrimary.withValues(alpha: 0.12),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: AppShapes.card,
         side: BorderSide(color: palette.border),
       ),
       textStyle: textTheme.bodyMedium?.copyWith(
         color: palette.textPrimary,
-        fontWeight: FontWeight.w600,
+        fontWeight: AppWeights.emphasis,
       ),
       labelTextStyle: WidgetStateProperty.all(
         textTheme.bodyMedium?.copyWith(
           color: palette.textPrimary,
-          fontWeight: FontWeight.w600,
+          fontWeight: AppWeights.emphasis,
         ),
       ),
     ),
@@ -118,7 +119,7 @@ ThemeData _buildTheme(
         elevation: WidgetStateProperty.all(10),
         shape: WidgetStateProperty.all(
           RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: AppShapes.card,
             side: BorderSide(color: palette.border),
           ),
         ),
@@ -130,7 +131,7 @@ ThemeData _buildTheme(
       surfaceTintColor: Colors.transparent,
       indicatorColor: palette.accentMuted,
       indicatorShape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
       ),
       iconTheme: WidgetStateProperty.resolveWith((states) {
         final selected = states.contains(WidgetState.selected);
@@ -143,8 +144,8 @@ ThemeData _buildTheme(
         final selected = states.contains(WidgetState.selected);
         return textTheme.labelMedium?.copyWith(
           color: selected ? palette.accent : palette.textSecondary,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.2,
+          fontWeight: AppWeights.title,
+          letterSpacing: AppLetterSpacing.caps,
         );
       }),
       height: 68,
@@ -155,8 +156,8 @@ ThemeData _buildTheme(
         foregroundColor: palette.accentOn,
         disabledBackgroundColor: palette.surfaceMuted,
         disabledForegroundColor: palette.textTertiary,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        textStyle: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+        shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
+        textStyle: textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       ),
     ),
@@ -164,14 +165,14 @@ ThemeData _buildTheme(
       style: OutlinedButton.styleFrom(
         foregroundColor: palette.textPrimary,
         side: BorderSide(color: palette.border),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         foregroundColor: palette.accent,
-        textStyle: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+        textStyle: textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
@@ -182,15 +183,15 @@ ThemeData _buildTheme(
       fillColor: palette.surface,
       hoverColor: palette.surfaceElevated,
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppShapes.input,
         borderSide: BorderSide(color: palette.border),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppShapes.input,
         borderSide: BorderSide(color: palette.border),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppShapes.input,
         borderSide: BorderSide(color: palette.accent, width: 1.5),
       ),
       labelStyle: TextStyle(color: palette.textSecondary),
@@ -203,14 +204,12 @@ ThemeData _buildTheme(
       foregroundColor: palette.accentOn,
       elevation: 0,
       highlightElevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      shape: RoundedRectangleBorder(borderRadius: AppShapes.card),
     ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: palette.surface,
       surfaceTintColor: Colors.transparent,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: AppShapes.sheetTop),
     ),
     progressIndicatorTheme: ProgressIndicatorThemeData(color: palette.accent),
     chipTheme: ChipThemeData(
