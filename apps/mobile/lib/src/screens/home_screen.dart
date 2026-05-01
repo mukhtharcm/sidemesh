@@ -4094,19 +4094,25 @@ class _HomeSearchBar extends StatelessWidget {
               hintText: hintText,
               hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
               prefixIcon: viewMode != null && onViewModeChanged != null
-                  ? PopupMenuButton<SessionViewMode>(
-                      icon: Icon(
-                        switch (viewMode!) {
-                          SessionViewMode.flat => Icons.view_list_rounded,
-                          SessionViewMode.byCwd => Icons.folder_outlined,
-                          SessionViewMode.byHost => Icons.hub_outlined,
-                        },
-                        size: 18,
-                        color: colors.textSecondary,
+                  ? ConstrainedBox(
+                      constraints: const BoxConstraints.tightFor(
+                        width: 32,
+                        height: 32,
                       ),
-                      tooltip: 'View mode',
-                      onSelected: onViewModeChanged,
-                      itemBuilder: (context) => [
+                      child: PopupMenuButton<SessionViewMode>(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(
+                          switch (viewMode!) {
+                            SessionViewMode.flat => Icons.view_list_rounded,
+                            SessionViewMode.byCwd => Icons.folder_outlined,
+                            SessionViewMode.byHost => Icons.hub_outlined,
+                          },
+                          size: 18,
+                          color: colors.textSecondary,
+                        ),
+                        tooltip: 'View mode',
+                        onSelected: onViewModeChanged,
+                        itemBuilder: (context) => [
                         PopupMenuItem(
                           value: SessionViewMode.flat,
                           child: Row(
@@ -4150,6 +4156,7 @@ class _HomeSearchBar extends StatelessWidget {
                           ),
                         ),
                       ],
+                      ),
                     )
                   : Icon(
                       Icons.search_rounded,
@@ -4157,8 +4164,8 @@ class _HomeSearchBar extends StatelessWidget {
                       color: colors.textSecondary,
                     ),
               prefixIconConstraints: const BoxConstraints(
-                minWidth: 40,
-                minHeight: 40,
+                minWidth: 36,
+                minHeight: 36,
               ),
               suffixIcon: hasQuery
                   ? IconButton(
