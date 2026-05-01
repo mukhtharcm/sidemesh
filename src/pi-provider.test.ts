@@ -689,7 +689,601 @@ describe("PiAgentProvider", () => {
     const threads = await provider.listSessionThreads({ limit: 10, archived: false });
     assert.deepEqual(threads, []);
   });
+
+
+
+
+  it("steers an active Pi turn instead of starting a new one", async () => {
+    const liveEvents: Array<{ type: string; [key: string]: unknown }> = [];
+    const steerCalls: Array<{ text: string; images: unknown[] }> = [];
+    const listeners = new Set<(event: unknown) => void>();
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const fakeSession = {
+      sessionId: "pi-steer-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: true,
+      messages: [],
+      subscribe(listener: (event: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt(_text: string) {
+        // simulate a long-running prompt
+      },
+      async steer(text: string, images?: unknown[]) {
+        steerCalls.push({ text, images: images ?? [] });
+        for (const listener of listeners) {
+          listener({
+            type: "message_update",
+            message: { role: "assistant", content: [{ type: "text", text: "Steered." }] },
+            assistantMessageEvent: {
+              type: "text_delta",
+              contentIndex: 0,
+              delta: "Steered.",
+              partial: { role: "assistant", content: [{ type: "text", text: "Steered." }] },
+            },
+          });
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "Steered." }],
+              provider: "anthropic",
+              model: "claude-sonnet-4-5",
+              usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+              stopReason: "stop",
+              timestamp: 1_777_770_010_000,
+            },
+          });
+          listener({ type: "agent_end", messages: [] });
+        }
+      },
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    provider.on("liveEvent", (event) => liveEvents.push(event as never));
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "First", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    assert.ok(created.activeTurnId);
+
+    // steer while the turn is still active
+    const result = await provider.submitInput({
+      sessionId: created.thread.id,
+      input: [{ type: "text", text: "Steer me", text_elements: [] }],
+      activeTurnId: created.activeTurnId,
+      overrides: emptyOverrides(),
+    });
+    assert.equal(result.mode, "steer");
+    assert.equal(result.turnId, created.activeTurnId);
+    assert.equal(steerCalls.length, 1);
+    assert.equal(steerCalls[0]?.text, "Steer me");
+
+    const log = await provider.readSessionLog(created.thread);
+    assert.equal(log.messages.at(-1)?.text, "Steered.");
+  });
+
+  it("interrupts an active Pi turn", async () => {
+    const liveEvents: Array<{ type: string; [key: string]: unknown }> = [];
+    const listeners = new Set<(event: unknown) => void>();
+    const abortCalls: string[] = [];
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const fakeSession = {
+      sessionId: "pi-interrupt-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: true,
+      messages: [],
+      subscribe(listener: (event: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt(_text: string) {
+        // never completes
+      },
+      async steer() {},
+      async abort() {
+        abortCalls.push("abort");
+      },
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    provider.on("liveEvent", (event) => liveEvents.push(event as never));
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "Long task", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    assert.ok(created.activeTurnId);
+
+    const result = await provider.interruptTurn(created.thread.id, created.activeTurnId!);
+    assert.deepEqual(result, { interrupted: true });
+    assert.equal(abortCalls.length, 1);
+
+    const eventTypes = liveEvents.map((event) => event.type);
+    assert.ok(eventTypes.includes("turn_completed"));
+    const turnCompleted = liveEvents.find((event) => event.type === "turn_completed");
+    assert.equal(turnCompleted?.status, "interrupted");
+
+    // second interrupt should be a no-op
+    const result2 = await provider.interruptTurn(created.thread.id, created.activeTurnId!);
+    assert.deepEqual(result2, { interrupted: false });
+  });
+
+  it("archives and unarchives a Pi session", async () => {
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const fakeSession = {
+      sessionId: "pi-archive-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe() {
+        return () => {};
+      },
+      async prompt() {},
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "Hello", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+
+    await provider.archiveSession(created.thread.id);
+    const archived = await provider.listSessionThreads({ limit: 10, archived: true });
+    assert.equal(archived.length, 1);
+    assert.equal(archived[0]?.id, created.thread.id);
+
+    const unarchived = await provider.listSessionThreads({ limit: 10, archived: false });
+    assert.equal(unarchived.length, 0);
+
+    await provider.unarchiveSession(created.thread.id);
+    const restored = await provider.listSessionThreads({ limit: 10, archived: false });
+    assert.equal(restored.length, 1);
+    assert.equal(restored[0]?.id, created.thread.id);
+  });
+
+  it("compacts a Pi session", async () => {
+    const compactCalls: string[] = [];
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const fakeSession = {
+      sessionId: "pi-compact-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe() {
+        return () => {};
+      },
+      async prompt() {},
+      async steer() {},
+      async abort() {},
+      async compact() {
+        compactCalls.push("compact");
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "Hello", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+
+    const result = await provider.compactSession(created.thread.id);
+    assert.deepEqual(result, { ok: true });
+    assert.equal(compactCalls.length, 1);
+  });
+
+  it("sets a Pi session name via the path branch", async () => {
+    const cwd = nodePath.join(tempDir, "repo");
+    const sessionDir = piSessionDirForCwd(cwd, agentDir);
+    await mkdir(sessionDir, { recursive: true });
+    const sessionPath = nodePath.join(sessionDir, "2026-05-01_name-test.jsonl");
+    await writeFile(
+      sessionPath,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: "name-test",
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Hello" }],
+            timestamp: 1_777_770_001_000,
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const provider = new PiAgentProvider({ agentDir, stateDir });
+    await provider.start();
+
+    await provider.setSessionName("name-test", "Renamed via path");
+    const threads = await provider.listSessionThreads({ limit: 10, archived: false });
+    const thread = threads.find((t) => t.id === "name-test");
+    assert.equal(thread?.name, "Renamed via path");
+  });
+
+  it("restores Pi sidecar state across provider restarts", async () => {
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const fakeSession = {
+      sessionId: "pi-restore-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe() {
+        return () => {};
+      },
+      async prompt() {},
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "Hello", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    await provider.close();
+
+    // start a fresh provider instance pointing at the same state dir
+    const provider2 = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider2.start();
+
+    const threads = await provider2.listSessionThreads({ limit: 10, archived: false });
+    assert.equal(threads.length, 1);
+    assert.equal(threads[0]?.id, created.thread.id);
+  });
+
+  it("isolates multiple concurrent Pi sessions", async () => {
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const makeFakeSession = (id: string) => ({
+      sessionId: id,
+      sessionFile: null,
+      sessionManager: SessionManager.inMemory("/repo"),
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe() {
+        return () => {};
+      },
+      async prompt() {},
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    });
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: makeFakeSession("pi-multi-1"),
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const a = await provider.createSession({
+      cwd: "/repo/a",
+      input: [{ type: "text", text: "A", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    // override internal factory for second session to return a different ID
+    (provider as unknown as Record<string, unknown>)["createSessionFromServicesFactory"] = (async () => ({
+      session: makeFakeSession("pi-multi-2"),
+      extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+    })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices;
+
+    const b = await provider.createSession({
+      cwd: "/repo/b",
+      input: [{ type: "text", text: "B", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+
+    const threads = await provider.listSessionThreads({ limit: 10, archived: false });
+    assert.equal(threads.length, 2);
+    const ids = threads.map((t) => t.id).sort();
+    assert.deepEqual(ids, ["pi-multi-1", "pi-multi-2"]);
+
+    // archive one, the other remains
+    await provider.archiveSession(a.thread.id);
+    const active = await provider.listSessionThreads({ limit: 10, archived: false });
+    assert.equal(active.length, 1);
+    assert.equal(active[0]?.id, b.thread.id);
+  });
+
 });
+
 
 function piSessionDirForCwd(cwd: string, agentDir: string): string {
   const safePath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;

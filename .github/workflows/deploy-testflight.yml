@@ -334,6 +334,7 @@ jobs:
         run: python3 scripts/update-asc-metadata.py
 
       - name: Set App Store Connect age rating
+        continue-on-error: true
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
@@ -341,6 +342,7 @@ jobs:
         run: python3 scripts/set-age-rating.py
 
       - name: Set app review details
+        continue-on-error: true
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
@@ -355,6 +357,7 @@ jobs:
         run: python3 scripts/set-app-review-details.py
 
       - name: Set app category
+        continue-on-error: true
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
@@ -364,6 +367,7 @@ jobs:
         run: python3 scripts/set-app-category.py
 
       - name: Add build to TestFlight beta groups
+        continue-on-error: true
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
