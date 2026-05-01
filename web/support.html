@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Support — Sidemesh</title>
+<meta name="description" content="Get help with Sidemesh. Common issues, setup guidance, and how to reach us." />
+<meta name="theme-color" content="#e9edf0" />
+<link rel="icon" type="image/png" href="/assets/favicon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper: #e9edf0;
+    --ink: #101616;
+    --ink-soft: #323d3c;
+    --muted: #65706f;
+    --line: rgba(16, 22, 22, 0.14);
+    --surface-solid: #fafcf7;
+    --sage: #2e7666;
+    --wrap: min(1220px, calc(100% - 40px));
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; text-size-adjust: 100%; }
+  body {
+    min-height: 100dvh;
+    margin: 0;
+    color: var(--ink);
+    background: var(--paper);
+    font-family: "Manrope", sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--sage); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { width: var(--wrap); margin: 0 auto; }
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(18px);
+    background: rgba(233, 237, 240, 0.78);
+    border-bottom: 1px solid rgba(16, 22, 22, 0.08);
+  }
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 22px;
+    min-height: 76px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 11px;
+    font-weight: 800;
+    letter-spacing: -0.045em;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .brand-logo {
+    width: 34px;
+    height: 34px;
+    display: block;
+    object-fit: cover;
+    border-radius: 12px;
+    box-shadow: 0 12px 24px rgba(16, 22, 22, 0.12);
+  }
+  .nav-back {
+    font-family: "Geist Mono", monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    padding: 9px 14px;
+    border-radius: 999px;
+    transition: color 180ms var(--ease), background 180ms var(--ease);
+  }
+  .nav-back:hover {
+    color: var(--ink);
+    background: rgba(250, 252, 247, 0.56);
+    text-decoration: none;
+  }
+  main { padding: 48px 0 96px; }
+  h1 {
+    font-family: "Instrument Serif", serif;
+    font-size: clamp(2rem, 4vw, 3rem);
+    font-weight: 400;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin: 0 0 24px;
+  }
+  h2 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 40px 0 12px;
+    letter-spacing: -0.01em;
+  }
+  p, ul { color: var(--ink-soft); margin: 0 0 16px; }
+  ul { padding-left: 22px; }
+  li { margin-bottom: 8px; }
+  .card {
+    background: var(--surface-solid);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+  .card h3 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0 0 8px;
+  }
+  .card p { margin: 0; }
+  .section { max-width: 720px; }
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 24px 0 48px;
+    font-size: 13px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  footer a { color: var(--muted); }
+  footer a:hover { color: var(--ink); }
+  @media (max-width: 640px) {
+    .nav-inner { min-height: 64px; }
+    main { padding: 32px 0 64px; }
+  }
+</style>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="/">
+        <img class="brand-logo" src="/assets/app-icon.png" alt="" width="34" height="34" />
+        Sidemesh
+      </a>
+      <a class="nav-back" href="/">← Back</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="section">
+      <h1>Support</h1>
+      <p>Quick answers to common questions and how to get in touch if you need more help.</p>
+
+      <div class="card">
+        <h3>Getting started</h3>
+        <p>Install the daemon on a trusted host with <code>sidemesh setup</code>, then open the app and scan the pairing QR code or add the host manually. The app will connect directly to your host over your private network.</p>
+      </div>
+
+      <div class="card">
+        <h3>The app cannot reach my host</h3>
+        <p>Make sure your device and host are on the same network or connected through Tailscale. Verify the daemon is running with <code>sidemesh status</code>. Check that the host address and token in the app match what the daemon printed during setup.</p>
+      </div>
+
+      <div class="card">
+        <h3>Notifications are not arriving</h3>
+        <p>Enable notifications for Sidemesh in iOS Settings → Notifications. Background sync also requires Background App Refresh to be enabled. The app checks for updates periodically when in the background.</p>
+      </div>
+
+      <div class="card">
+        <h3>Port forwarding is not working</h3>
+        <p>Ensure the target port is actually listening on the host (<code>netstat -an | grep :PORT</code> or similar). The forwarded port binds to localhost on your device, so access it via <code>http://127.0.0.1:PORT</code> from the in-app browser or Safari.</p>
+      </div>
+
+      <div class="card">
+        <h3>Live Activities are not showing</h3>
+        <p>Live Activities require iOS 16.1 or later. Make sure they are enabled in Settings → Sidemesh → Live Activities. They appear when an agent session is active.</p>
+      </div>
+
+      <div class="card">
+        <h3>Contact us</h3>
+        <p>For bugs, feature requests, or security concerns, open an issue on <a href="https://github.com/your-org/sidemesh/issues">GitHub</a> or reach out through your existing private channel.</p>
+      </div>
+    </div>
+  </main>
+
+  <footer class="wrap">
+    <span>© Sidemesh</span>
+    <nav aria-label="Footer">
+      <a href="/">Home</a>
+      <a href="/privacy.html">Privacy</a>
+    </nav>
+  </footer>
+</body>
+</html>
