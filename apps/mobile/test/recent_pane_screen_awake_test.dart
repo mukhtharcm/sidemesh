@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -145,7 +146,10 @@ SessionSummary _summary(String id, {required String status}) {
 }
 
 class _FakeApiClient extends ApiClient {
-  _FakeApiClient._(this._sessions, this._error);
+  _FakeApiClient._(this._sessions, this._error)
+    : _channel = _IdleWebSocketChannel(
+        snapshot: _error == null ? _sessions : const <SessionSummary>[],
+      );
 
   factory _FakeApiClient.sessions(List<SessionSummary> sessions) {
     return _FakeApiClient._(sessions, null);
@@ -157,7 +161,7 @@ class _FakeApiClient extends ApiClient {
 
   final List<SessionSummary> _sessions;
   final Object? _error;
-  final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
+  final _IdleWebSocketChannel _channel;
 
   @override
   Future<List<SessionSummary>> fetchSessions(HostProfile host, {int? limit}) {
@@ -183,6 +187,20 @@ class _FakeScreenAwakeBinding implements ScreenAwakeBinding {
 
 class _IdleWebSocketChannel extends StreamChannelMixin<dynamic>
     implements WebSocketChannel {
+  _IdleWebSocketChannel({List<SessionSummary> snapshot = const []}) {
+    if (snapshot.isNotEmpty) {
+      scheduleMicrotask(() {
+        if (_incoming.isClosed) return;
+        _incoming.add(
+          jsonEncode({
+            'type': 'snapshot',
+            'sessions': snapshot.map((session) => session.toJson()).toList(),
+          }),
+        );
+      });
+    }
+  }
+
   final StreamController<dynamic> _incoming = StreamController<dynamic>();
   final StreamController<dynamic> _outgoing = StreamController<dynamic>();
 
