@@ -293,7 +293,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 _BrowserDockAction(
-                  icon: Icons.stop_circle_outlined,
+                  icon: Icons.stop_circle_rounded,
                   tooltip: 'Stop remote browser',
                   color: colors.danger,
                   onTap: onStop,
@@ -3941,7 +3941,7 @@ class _SessionScreenState extends State<SessionScreen>
                       Navigator.of(context).pop();
                       unawaited(_showGitSheet(session));
                     },
-                    icon: const Icon(Icons.account_tree_outlined, size: 18),
+                    icon: const Icon(Icons.account_tree_rounded, size: 18),
                     label: const Text('Open Git details'),
                   ),
                 ],
@@ -4721,7 +4721,7 @@ class _SessionScreenState extends State<SessionScreen>
               detail: 'View generated images and session assets.',
               icon: resourcesOpen
                   ? Icons.perm_media_rounded
-                  : Icons.perm_media_outlined,
+                  : Icons.perm_media_rounded,
               tone: resourcesOpen
                   ? _SessionActionTone.accent
                   : _SessionActionTone.neutral,
@@ -4748,7 +4748,7 @@ class _SessionScreenState extends State<SessionScreen>
             value: 'unread',
             label: 'Mark unread',
             detail: 'Return this thread to your attention queue.',
-            icon: Icons.mark_chat_unread_outlined,
+            icon: Icons.mark_chat_unread_rounded,
           ),
           if (gitAvailable)
             _SessionActionSpec(
@@ -4757,7 +4757,7 @@ class _SessionScreenState extends State<SessionScreen>
               detail: gitDirty
                   ? 'Working tree has changes.'
                   : 'Branch, upstream, and diff shortcuts.',
-              icon: Icons.account_tree_outlined,
+              icon: Icons.account_tree_rounded,
               tone: gitDirty
                   ? _SessionActionTone.warning
                   : _SessionActionTone.neutral,
@@ -4775,7 +4775,7 @@ class _SessionScreenState extends State<SessionScreen>
               value: 'browse',
               label: 'Browse files',
               detail: 'Open the workspace file browser.',
-              icon: Icons.folder_outlined,
+              icon: Icons.folder_rounded,
             ),
           if (widget.topPadding != null &&
               SidemeshSessionWindowManager.instance.isSupported)
@@ -4803,7 +4803,7 @@ class _SessionScreenState extends State<SessionScreen>
                 value: 'archive',
                 label: 'Archive',
                 detail: 'Move this session out of recents.',
-                icon: Icons.archive_outlined,
+                icon: Icons.archive_rounded,
                 tone: _SessionActionTone.danger,
               ),
           ],
@@ -5133,7 +5133,7 @@ class _SessionScreenState extends State<SessionScreen>
               padding: const EdgeInsets.only(right: 6),
               child: isCompact
                   ? MeshIconButton(
-                      icon: Icons.stop_circle_outlined,
+                      icon: Icons.stop_circle_rounded,
                       tooltip: 'Stop session',
                       color: colors.danger,
                       onTap: _stopSession,
@@ -5141,7 +5141,7 @@ class _SessionScreenState extends State<SessionScreen>
                   : TextButton.icon(
                       onPressed: _stopSession,
                       icon: Icon(
-                        Icons.stop_circle_outlined,
+                        Icons.stop_circle_rounded,
                         color: colors.danger,
                       ),
                       label: Text(
@@ -5205,7 +5205,7 @@ class _SessionScreenState extends State<SessionScreen>
             Padding(
               padding: const EdgeInsets.only(right: 10),
               child: MeshIconButton(
-                icon: Icons.account_tree_outlined,
+                icon: Icons.account_tree_rounded,
                 tooltip: 'Git details',
                 color: colors.warning,
                 onTap: () => _showGitSheet(session),
@@ -5231,7 +5231,7 @@ class _SessionScreenState extends State<SessionScreen>
               child: MeshIconButton(
                 icon: resourcesOpenInInspector
                     ? Icons.perm_media_rounded
-                    : Icons.perm_media_outlined,
+                    : Icons.perm_media_rounded,
                 tooltip: resourcesOpenInInspector
                     ? 'Close resources'
                     : 'Open resources',
@@ -5260,7 +5260,7 @@ class _SessionScreenState extends State<SessionScreen>
                 final customised =
                     !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
                 return MeshIconButton(
-                  icon: customised ? Icons.tune_rounded : Icons.tune_outlined,
+                  icon: customised ? Icons.tune_rounded : Icons.tune_rounded,
                   tooltip: 'Session controls',
                   color: customised ? colors.accent : colors.textSecondary,
                   onTap: () => _showSessionPolicySheet(session),
@@ -5309,7 +5309,7 @@ class _SessionScreenState extends State<SessionScreen>
                       value: 'resources',
                       child: Row(
                         children: [
-                          Icon(Icons.perm_media_outlined, size: 18),
+                          Icon(Icons.perm_media_rounded, size: 18),
                           SizedBox(width: 10),
                           Text('Resources'),
                         ],
@@ -5335,7 +5335,7 @@ class _SessionScreenState extends State<SessionScreen>
                     value: 'unread',
                     child: Row(
                       children: [
-                        Icon(Icons.mark_chat_unread_outlined, size: 18),
+                        Icon(Icons.mark_chat_unread_rounded, size: 18),
                         SizedBox(width: 10),
                         Text('Mark unread'),
                       ],
@@ -5346,7 +5346,7 @@ class _SessionScreenState extends State<SessionScreen>
                       value: 'git',
                       child: Row(
                         children: [
-                          Icon(Icons.account_tree_outlined, size: 18),
+                          Icon(Icons.account_tree_rounded, size: 18),
                           SizedBox(width: 10),
                           Text('Git details'),
                         ],
@@ -5368,7 +5368,7 @@ class _SessionScreenState extends State<SessionScreen>
                       value: 'browse',
                       child: Row(
                         children: [
-                          Icon(Icons.folder_outlined, size: 18),
+                          Icon(Icons.folder_rounded, size: 18),
                           SizedBox(width: 10),
                           Text('Browse files'),
                         ],
@@ -5415,7 +5415,7 @@ class _SessionScreenState extends State<SessionScreen>
                       value: 'archive',
                       child: Row(
                         children: [
-                          Icon(Icons.archive_outlined, size: 18),
+                          Icon(Icons.archive_rounded, size: 18),
                           SizedBox(width: 10),
                           Text('Archive'),
                         ],

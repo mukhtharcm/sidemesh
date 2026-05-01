@@ -314,7 +314,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
           'No local file artifacts found in this session yet.',
       };
       return _ResourcesEmptyState(
-        icon: Icons.perm_media_outlined,
+        icon: Icons.perm_media_rounded,
         title: 'Nothing here yet',
         detail: detail,
       );
@@ -818,7 +818,7 @@ class _MediaFallback extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       child: Row(
         children: [
-          Icon(Icons.image_outlined, color: colors.accent, size: 18),
+          Icon(Icons.image_rounded, color: colors.accent, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -911,7 +911,7 @@ IconData _resourceIcon(
   required bool preferFileOpen,
 }) {
   if (preferFileOpen && resource.hasPath) {
-    return Icons.insert_drive_file_outlined;
+    return Icons.insert_drive_file_rounded;
   }
   if (resource.isImage) {
     return Icons.image_rounded;
@@ -919,7 +919,7 @@ IconData _resourceIcon(
   if (resource.isLink) {
     return Icons.link_rounded;
   }
-  return Icons.insert_drive_file_outlined;
+  return Icons.insert_drive_file_rounded;
 }
 
 String _sourceLabel(SessionResource resource) {

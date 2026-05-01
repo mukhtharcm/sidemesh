@@ -759,7 +759,7 @@ class _DesktopShellState extends State<DesktopShell> {
         kind: InspectorSurfaceKind.debug,
         ownerKey: ownerKey,
         title: 'Inspector (debug)',
-        icon: Icons.bug_report_outlined,
+        icon: Icons.bug_report_rounded,
         bodyBuilder: (context) {
           final colors = context.colors;
           return Padding(
@@ -1833,8 +1833,8 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
                     icon: Icon(
                       switch (widget.viewMode!) {
                         SessionViewMode.flat => Icons.view_list_rounded,
-                        SessionViewMode.byCwd => Icons.folder_outlined,
-                        SessionViewMode.byHost => Icons.hub_outlined,
+                        SessionViewMode.byCwd => Icons.folder_rounded,
+                        SessionViewMode.byHost => Icons.hub_rounded,
                       },
                       size: 15,
                       color: _focused ? colors.accent : colors.textTertiary,
@@ -1860,7 +1860,7 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
                       value: SessionViewMode.byCwd,
                       child: Row(
                         children: [
-                          Icon(Icons.folder_outlined, size: 16),
+                          Icon(Icons.folder_rounded, size: 16),
                           const SizedBox(width: 8),
                           Text('By working dir'),
                           if (widget.viewMode == SessionViewMode.byCwd) ...[
@@ -1874,7 +1874,7 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
                       value: SessionViewMode.byHost,
                       child: Row(
                         children: [
-                          Icon(Icons.hub_outlined, size: 16),
+                          Icon(Icons.hub_rounded, size: 16),
                           const SizedBox(width: 8),
                           Text('By host'),
                           if (widget.viewMode == SessionViewMode.byHost) ...[

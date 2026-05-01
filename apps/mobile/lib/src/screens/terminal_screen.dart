@@ -612,7 +612,7 @@ class _TerminalStatusStrip extends StatelessWidget {
             )
           else
             Icon(
-              running ? Icons.bolt_rounded : Icons.stop_circle_outlined,
+              running ? Icons.bolt_rounded : Icons.stop_circle_rounded,
               size: 16,
               color: error == null
                   ? (running ? colors.success : colors.textSecondary)
@@ -661,7 +661,7 @@ class _TerminalStatusStrip extends StatelessWidget {
           if (running) ...[
             const SizedBox(width: 8),
             MeshIconButton(
-              icon: Icons.stop_circle_outlined,
+              icon: Icons.stop_circle_rounded,
               tooltip: 'Stop terminal',
               color: colors.danger,
               onTap: stopping ? () {} : onStop,

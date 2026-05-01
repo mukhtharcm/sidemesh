@@ -795,7 +795,7 @@ class _LocalImageFallback extends StatelessWidget {
       child: Row(
         children: [
           Icon(
-            loading ? Icons.downloading_rounded : Icons.image_outlined,
+            loading ? Icons.downloading_rounded : Icons.image_rounded,
             color: colors.accent,
             size: 18,
           ),
@@ -840,7 +840,7 @@ class _AttachmentLoadError extends StatelessWidget {
       color: colors.surfaceMuted,
       alignment: Alignment.center,
       child: Icon(
-        Icons.broken_image_outlined,
+        Icons.broken_image_rounded,
         color: colors.textTertiary,
         size: 28,
       ),
@@ -934,7 +934,7 @@ class _MessagePinButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+              pinned ? Icons.push_pin_rounded : Icons.push_pin_rounded,
               size: 13,
               color: color,
             ),
@@ -2365,7 +2365,7 @@ class _FileChangeBlock extends StatelessWidget {
     final canOpen = onOpen != null && !isDeleted;
     final pathRow = Row(
       children: [
-        Icon(Icons.description_outlined, size: 16, color: colors.textSecondary),
+        Icon(Icons.description_rounded, size: 16, color: colors.textSecondary),
         const SizedBox(width: 8),
         Expanded(
           child: Text(

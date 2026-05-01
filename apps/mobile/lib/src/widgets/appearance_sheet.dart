@@ -643,7 +643,7 @@ class _TypographyPreview extends StatelessWidget {
             children: [
               MeshPill(
                 label: typography.interfaceFont.label,
-                icon: Icons.font_download_outlined,
+                icon: Icons.font_download_rounded,
               ),
               MeshPill(
                 label: 'UI ${typography.interfaceScale.label.toLowerCase()}',

@@ -134,7 +134,7 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
         backgroundColor: colors.canvas,
         appBar: AppBar(title: Text(_session.title)),
         body: const MeshEmptyState(
-          icon: Icons.archive_outlined,
+          icon: Icons.archive_rounded,
           title: 'Session archived',
           body: 'This session was archived. You can close this window.',
         ),
@@ -146,7 +146,7 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
         backgroundColor: colors.canvas,
         appBar: AppBar(title: Text(_session.title)),
         body: MeshEmptyState(
-          icon: Icons.desktop_mac_outlined,
+          icon: Icons.desktop_mac_rounded,
           title: 'Session unavailable',
           body: _error ?? 'This session window could not be restored.',
         ),

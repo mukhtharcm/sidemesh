@@ -123,7 +123,7 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                     child: _selected == null
                         ? Center(
                             child: MeshEmptyState(
-                              icon: Icons.description_outlined,
+                              icon: Icons.description_rounded,
                               title: 'Select a file',
                               body: 'Pick a file on the left to view or edit.',
                             ),

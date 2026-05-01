@@ -54,13 +54,13 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     _TabDef(
       title: 'Inbox',
       subtitle: 'Pending approvals from every host',
-      icon: Icons.all_inbox_outlined,
+      icon: Icons.all_inbox_rounded,
       selectedIcon: Icons.all_inbox_rounded,
     ),
     _TabDef(
       title: 'Hosts',
       subtitle: 'Your mesh of agent nodes',
-      icon: Icons.hub_outlined,
+      icon: Icons.hub_rounded,
       selectedIcon: Icons.hub_rounded,
     ),
   ];
@@ -1327,8 +1327,8 @@ class _RecentPaneState extends State<RecentPane> {
                 children: [
                   Icon(
                     widget.viewMode == SessionViewMode.byCwd
-                        ? Icons.folder_outlined
-                        : Icons.hub_outlined,
+                        ? Icons.folder_rounded
+                        : Icons.hub_rounded,
                     size: 14,
                     color: colors.textSecondary,
                   ),
@@ -2388,7 +2388,7 @@ class _PendingSendCard extends StatelessWidget {
                   ),
                 if (onEditCopy != null)
                   _PendingSendActionChip(
-                    icon: Icons.edit_outlined,
+                    icon: Icons.edit_rounded,
                     label: 'Edit',
                     onTap: onEditCopy,
                   ),
@@ -2495,7 +2495,7 @@ class _PendingSendCard extends StatelessWidget {
                 ),
               if (onEditCopy != null)
                 _PendingSendActionChip(
-                  icon: Icons.edit_outlined,
+                  icon: Icons.edit_rounded,
                   label: 'Edit copy',
                   onTap: onEditCopy,
                 ),
@@ -3281,7 +3281,7 @@ class _HostRowCard extends StatelessWidget {
                       child: Padding(
                         padding: const EdgeInsets.all(6),
                         child: Icon(
-                          Icons.edit_outlined,
+                          Icons.edit_rounded,
                           size: 14,
                           color: colors.textTertiary,
                         ),
@@ -3399,7 +3399,7 @@ class _HostRowCard extends StatelessWidget {
                 tooltip: 'Edit host',
                 onPressed: onEdit,
                 icon: Icon(
-                  Icons.edit_outlined,
+                  Icons.edit_rounded,
                   size: 20,
                   color: colors.textSecondary,
                 ),
@@ -3644,7 +3644,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                                 isEditing ? 'Edit host' : 'Add host',
                                 style: Theme.of(context).textTheme.titleLarge
                                     ?.copyWith(
-                                      fontWeight: FontWeight.w900,
+                                      fontWeight: FontWeight.w800,
                                       letterSpacing: -0.4,
                                     ),
                               ),
