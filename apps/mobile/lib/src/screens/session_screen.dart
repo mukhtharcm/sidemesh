@@ -4323,9 +4323,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   List<SessionActivity> _sortActivities(List<SessionActivity> activities) {
-    final sorted = activities
-        .where((activity) => !activity.isHiddenProviderControlActivity)
-        .toList(growable: false);
+    final sorted = [...activities];
     sorted.sort((left, right) {
       final bySeq = left.seq.compareTo(right.seq);
       if (bySeq != 0) return bySeq;

@@ -308,51 +308,6 @@ void main() {
     expect(legacy.toolSemantic?.action, 'mode_change');
     expect(legacy.toolMode, 'autopilot');
   });
-
-  test('SessionActivity normalizes stale provider control tool activities', () {
-    final askUser = SessionActivity.fromJson({
-      'id': 'tool-ask',
-      'type': 'tool',
-      'createdAt': DateTime(2026, 5, 1).millisecondsSinceEpoch,
-      'seq': 1,
-      'status': 'completed',
-      'toolName': 'tool',
-      'title': 'ask_user {"question":"Start?"}',
-      'output': 'User selected: Yes',
-    });
-
-    expect(askUser.isHiddenProviderControlActivity, isTrue);
-
-    final reportIntent = SessionActivity.fromJson({
-      'id': 'tool-intent',
-      'type': 'tool',
-      'createdAt': DateTime(2026, 5, 1).millisecondsSinceEpoch,
-      'seq': 2,
-      'status': 'completed',
-      'toolName': 'report_intent',
-      'title': 'report_intent {"intent":"Working"}',
-      'output': 'Working',
-    });
-
-    expect(reportIntent.isHiddenProviderControlActivity, isTrue);
-
-    final updatePlan = SessionActivity.fromJson({
-      'id': 'tool-plan',
-      'type': 'tool',
-      'createdAt': DateTime(2026, 5, 1).millisecondsSinceEpoch,
-      'seq': 3,
-      'status': 'completed',
-      'toolName': 'tool',
-      'title': 'update_plan {"todos":[]}',
-      'output': 'Updated todo list',
-    });
-
-    expect(updatePlan.isPlan, isTrue);
-    expect(updatePlan.type, 'plan');
-    expect(updatePlan.toolTitle, 'Plan updated');
-    expect(updatePlan.summary, 'Updated todo list');
-    expect(updatePlan.isHiddenProviderControlActivity, isFalse);
-  });
 }
 
 Map<String, dynamic> _fakeNodePayload(

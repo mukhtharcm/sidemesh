@@ -1785,13 +1785,6 @@ class SessionActivity {
   bool get isSubagent => type == 'subagent';
   bool get isReasoning => type == 'reasoning';
   bool get isSystemEvent => type == 'system_event';
-  bool get isHiddenProviderControlActivity {
-    if (!isTool) return false;
-    final kind = _providerControlActivityKind(toolName, toolTitle);
-    return kind == _ProviderControlActivityKind.hidden ||
-        kind == _ProviderControlActivityKind.commentary;
-  }
-
   String? get toolCategory => toolSemantic?.category;
   String? get toolAction => toolSemantic?.action;
   List<SessionToolSemanticTarget> get toolSemanticTargets =>
@@ -1820,91 +1813,67 @@ class SessionActivity {
   String? get toolMode =>
       _firstSemanticTargetOfType(toolSemanticTargets, 'mode')?.value;
 
-  factory SessionActivity.fromJson(Map<String, dynamic> json) {
-    final rawType = _stringValue(json['type']);
-    final toolName = _stringOrNull(json['toolName']);
-    final toolTitle = _stringOrNull(json['title']);
-    final providerControlKind = rawType == 'tool'
-        ? _providerControlActivityKind(toolName, toolTitle)
-        : null;
-    final normalizedType =
-        providerControlKind == _ProviderControlActivityKind.task
-        ? 'plan'
-        : rawType;
-    final normalizedToolTitle =
-        providerControlKind == _ProviderControlActivityKind.task
-        ? 'Plan updated'
-        : toolTitle;
-    final normalizedSummary =
-        providerControlKind == _ProviderControlActivityKind.task
-        ? _providerControlActivitySummary(
-            json,
-            fallbackTitle: normalizedToolTitle,
-            fallbackToolName: toolName,
-          )
-        : _stringOrNull(json['summary']);
-
-    return SessionActivity(
-      id: _stringValue(json['id']),
-      type: normalizedType,
-      createdAt: _dateValue(json['createdAt']),
-      seq: _intOrNull(json['seq']) ?? 0,
-      status: _stringValue(json['status']),
-      turnId: _stringOrNull(json['turnId']),
-      command: _stringOrNull(json['command']),
-      cwd: _stringOrNull(json['cwd']),
-      output: _stringOrNull(json['output']),
-      exitCode: _intOrNull(json['exitCode']),
-      durationMs: _intOrNull(json['durationMs']),
-      source: _stringOrNull(json['source']),
-      processId: _stringOrNull(json['processId']),
-      commandActions: (json['commandActions'] as List<dynamic>? ?? [])
-          .map(
-            (item) => SessionCommandActionSummary.fromJson(
-              item as Map<String, dynamic>,
-            ),
-          )
-          .toList(),
-      terminalStatus: _stringOrNull(json['terminalStatus']),
-      terminalInput: _stringOrNull(json['terminalInput']),
-      toolName: toolName,
-      toolTitle: normalizedToolTitle,
-      toolArgs: json['args'],
-      toolResult: json['result'],
-      toolError: json['isError'] is bool ? json['isError'] as bool : null,
-      toolSemantic: _toolSemanticFromActivityJson(json),
-      changes: (json['changes'] as List<dynamic>? ?? [])
-          .map(
-            (item) =>
-                SessionActivityChange.fromJson(item as Map<String, dynamic>),
-          )
-          .toList(),
-      diff: _stringOrNull(json['diff']),
-      query: _stringOrNull(json['query']),
-      queries: (json['queries'] as List<dynamic>? ?? const <dynamic>[])
-          .map((item) => _stringValue(item))
-          .where((item) => item.isNotEmpty)
-          .toList(),
-      targetUrl: _stringOrNull(json['targetUrl']),
-      pattern: _stringOrNull(json['pattern']),
-      revisedPrompt: _stringOrNull(json['revisedPrompt']),
-      savedPath: _stringOrNull(json['savedPath']),
-      activityAction: _stringOrNull(json['action']),
-      summary: normalizedSummary,
-      content: _stringOrNull(json['content']) ?? _stringOrNull(json['text']),
-      detail: _stringOrNull(json['detail']),
-      level: _stringOrNull(json['level']),
-      reasoningId: _stringOrNull(json['reasoningId']),
-      agentId: _stringOrNull(json['agentId']),
-      agentName: _stringOrNull(json['agentName']),
-      agentDisplayName: _stringOrNull(json['agentDisplayName']),
-      description: _stringOrNull(json['description']),
-      model: _stringOrNull(json['model']),
-      totalTokens: _intOrNull(json['totalTokens']),
-      totalToolCalls: _intOrNull(json['totalToolCalls']),
-      errorText: _stringOrNull(json['error']),
-    );
-  }
+  factory SessionActivity.fromJson(Map<String, dynamic> json) =>
+      SessionActivity(
+        id: _stringValue(json['id']),
+        type: _stringValue(json['type']),
+        createdAt: _dateValue(json['createdAt']),
+        seq: _intOrNull(json['seq']) ?? 0,
+        status: _stringValue(json['status']),
+        turnId: _stringOrNull(json['turnId']),
+        command: _stringOrNull(json['command']),
+        cwd: _stringOrNull(json['cwd']),
+        output: _stringOrNull(json['output']),
+        exitCode: _intOrNull(json['exitCode']),
+        durationMs: _intOrNull(json['durationMs']),
+        source: _stringOrNull(json['source']),
+        processId: _stringOrNull(json['processId']),
+        commandActions: (json['commandActions'] as List<dynamic>? ?? [])
+            .map(
+              (item) => SessionCommandActionSummary.fromJson(
+                item as Map<String, dynamic>,
+              ),
+            )
+            .toList(),
+        terminalStatus: _stringOrNull(json['terminalStatus']),
+        terminalInput: _stringOrNull(json['terminalInput']),
+        toolName: _stringOrNull(json['toolName']),
+        toolTitle: _stringOrNull(json['title']),
+        toolArgs: json['args'],
+        toolResult: json['result'],
+        toolError: json['isError'] is bool ? json['isError'] as bool : null,
+        toolSemantic: _toolSemanticFromActivityJson(json),
+        changes: (json['changes'] as List<dynamic>? ?? [])
+            .map(
+              (item) =>
+                  SessionActivityChange.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(),
+        diff: _stringOrNull(json['diff']),
+        query: _stringOrNull(json['query']),
+        queries: (json['queries'] as List<dynamic>? ?? const <dynamic>[])
+            .map((item) => _stringValue(item))
+            .where((item) => item.isNotEmpty)
+            .toList(),
+        targetUrl: _stringOrNull(json['targetUrl']),
+        pattern: _stringOrNull(json['pattern']),
+        revisedPrompt: _stringOrNull(json['revisedPrompt']),
+        savedPath: _stringOrNull(json['savedPath']),
+        activityAction: _stringOrNull(json['action']),
+        summary: _stringOrNull(json['summary']),
+        content: _stringOrNull(json['content']) ?? _stringOrNull(json['text']),
+        detail: _stringOrNull(json['detail']),
+        level: _stringOrNull(json['level']),
+        reasoningId: _stringOrNull(json['reasoningId']),
+        agentId: _stringOrNull(json['agentId']),
+        agentName: _stringOrNull(json['agentName']),
+        agentDisplayName: _stringOrNull(json['agentDisplayName']),
+        description: _stringOrNull(json['description']),
+        model: _stringOrNull(json['model']),
+        totalTokens: _intOrNull(json['totalTokens']),
+        totalToolCalls: _intOrNull(json['totalToolCalls']),
+        errorText: _stringOrNull(json['error']),
+      );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -1952,94 +1921,6 @@ class SessionActivity {
     'totalToolCalls': totalToolCalls,
     'error': errorText,
   };
-}
-
-enum _ProviderControlActivityKind { hidden, commentary, task }
-
-const _hiddenProviderControlToolKeys = {
-  'ask_user',
-  'request_user_input',
-  'user_input',
-  'elicitation',
-  'request_elicitation',
-};
-
-const _commentaryProviderControlToolKeys = {
-  'report_intent',
-  'assistant_intent',
-  'report_progress',
-};
-
-const _taskProviderControlToolKeys = {
-  'update_plan',
-  'todo_write',
-  'todo_update',
-  'write_todo',
-  'write_todos',
-};
-
-const _genericProviderControlToolKeys = {'tool', 'unknown', 'tool_execution'};
-
-_ProviderControlActivityKind? _providerControlActivityKind(
-  String? toolName,
-  String? title,
-) {
-  final toolKey = _providerControlToolKey(toolName);
-  if (toolKey != null && !_genericProviderControlToolKeys.contains(toolKey)) {
-    return _providerControlActivityKindForKey(toolKey);
-  }
-
-  final titleToolName = _providerControlToolNameFromTitle(title);
-  if (titleToolName != null) {
-    return _providerControlActivityKindForKey(
-      _providerControlToolKey(titleToolName),
-    );
-  }
-
-  return _providerControlActivityKindForKey(toolKey);
-}
-
-String? _providerControlToolNameFromTitle(String? title) {
-  final trimmed = (title ?? '').trim();
-  if (trimmed.isEmpty) return null;
-  final firstToken = trimmed.split(RegExp(r'\s+')).first;
-  final key = _providerControlToolKey(firstToken);
-  return _providerControlActivityKindForKey(key) == null ? null : firstToken;
-}
-
-String? _providerControlToolKey(String? value) {
-  final normalized = (value ?? '')
-      .trim()
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
-      .replaceAll(RegExp(r'^_+|_+$'), '');
-  return normalized.isEmpty ? null : normalized;
-}
-
-_ProviderControlActivityKind? _providerControlActivityKindForKey(String? key) {
-  if (key == null) return null;
-  if (_hiddenProviderControlToolKeys.contains(key)) {
-    return _ProviderControlActivityKind.hidden;
-  }
-  if (_commentaryProviderControlToolKeys.contains(key)) {
-    return _ProviderControlActivityKind.commentary;
-  }
-  if (_taskProviderControlToolKeys.contains(key)) {
-    return _ProviderControlActivityKind.task;
-  }
-  return null;
-}
-
-String? _providerControlActivitySummary(
-  Map<String, dynamic> json, {
-  required String? fallbackTitle,
-  required String? fallbackToolName,
-}) {
-  for (final key in const ['summary', 'output', 'content', 'text']) {
-    final value = _stringOrNull(json[key]);
-    if (value != null) return value;
-  }
-  return fallbackTitle ?? fallbackToolName;
 }
 
 SessionToolSemantic? _toolSemanticFromActivityJson(Map<String, dynamic> json) {
