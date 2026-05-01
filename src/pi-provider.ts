@@ -193,6 +193,10 @@ export class PiAgentProvider
   private readonly archivedSessionIds = new Set<string>();
   private readonly loadedSessionIds = new Set<string>();
   private readonly activeTurns = new Map<string, ActivePiTurn>();
+  private readonly sessionSummariesById = new Map<string, PiSessionSummary>();
+  private readonly sessionSummariesByPath = new Map<string, PiSessionSummary>();
+  private readonly sessionSummaryFingerprints = new Map<string, string>();
+  private sessionSummaryRefresh: Promise<void> | null = null;
   private saveChain: Promise<void> = Promise.resolve();
 
   public constructor(options: PiAgentProviderOptions = {}) {
@@ -447,9 +451,7 @@ export class PiAgentProvider
     options: AgentModelListOptions,
   ): Promise<ModelSummary[]> {
     const services = await this.createServices(options.cwd ?? process.cwd());
-    const available = services.modelRegistry.getAvailable();
-    const all = services.modelRegistry.getAll();
-    const models = (available.length > 0 ? available : all)
+    const models = services.modelRegistry.getAvailable()
       .filter(isPiModelLike)
       .sort((left, right) =>
         formatPiModelRef(left.provider, left.id).localeCompare(
@@ -546,6 +548,17 @@ export class PiAgentProvider
       pendingCompactionActivityId: null,
     };
     this.sessions.set(thread.id, state);
+    if (thread.path) {
+      this.cacheSessionSummary({
+        id: thread.id,
+        path: thread.path,
+        cwd,
+        name: thread.name,
+        preview: thread.preview,
+        createdAt: thread.createdAt,
+        updatedAt: thread.updatedAt,
+      });
+    }
     this.attachSession(state);
     this.loadedSessionIds.add(thread.id);
     return state;
@@ -565,17 +578,15 @@ export class PiAgentProvider
       this.loadedSessionIds.add(threadId);
       return existing;
     }
-    const path =
-      existing.thread.path ??
-      (await this.findPiSessionSummary(threadId))?.path ??
-      null;
+    const summary =
+      existing.thread.path && existing.thread.cwd
+        ? null
+        : await this.findPiSessionSummary(threadId);
+    const path = existing.thread.path ?? summary?.path ?? null;
     if (!path) {
       throw new Error(`Unknown Pi session: ${threadId}`);
     }
-    const threadCwd =
-      existing.thread.cwd ||
-      (await this.findPiSessionSummary(threadId))?.cwd ||
-      process.cwd();
+    const threadCwd = existing.thread.cwd || summary?.cwd || process.cwd();
     const services = await this.createServices(threadCwd);
     const sessionManager = SessionManager.open(path, nodePath.dirname(path), threadCwd);
     const { session } = await this.createSessionFromServicesFactory({
@@ -661,6 +672,10 @@ export class PiAgentProvider
     session: PiSessionState,
     input: AgentSessionInputItem[],
   ): Promise<string> {
+    const loadedSession = session.session;
+    if (!loadedSession) {
+      throw new Error(`Pi session ${session.thread.id} is not loaded.`);
+    }
     const prepared = await preparePiInput(input);
     this.appendUserMessage(session, prepared);
     const turnId = `pi-turn-${randomUUID()}`;
@@ -675,7 +690,7 @@ export class PiAgentProvider
     this.replaceRuntime(
       session,
       runtimeWithTurnId(
-        runtimeFromLoadedSession(session.session!, session.runtime, turnId),
+        runtimeFromLoadedSession(loadedSession, session.runtime, turnId),
         turnId,
       ),
     );
@@ -685,23 +700,27 @@ export class PiAgentProvider
       sessionId: session.thread.id,
       turnId,
     });
-    void this.runPrompt(session, turnId, prepared);
+    void this.runPrompt(session, loadedSession, turnId, prepared);
     return turnId;
   }
 
   private async runPrompt(
     session: PiSessionState,
+    loadedSession: AgentSession,
     turnId: string,
     prepared: PiPreparedInput,
   ): Promise<void> {
     try {
+      if (this.activeTurns.get(session.thread.id)?.turnId !== turnId) {
+        return;
+      }
       const options =
         prepared.images.length > 0
           ? ({
               images: prepared.images,
             } as Parameters<AgentSession["prompt"]>[1])
           : undefined;
-      await session.session!.prompt(prepared.text, options);
+      await loadedSession.prompt(prepared.text, options);
     } catch (error) {
       if (this.activeTurns.get(session.thread.id)?.turnId !== turnId) {
         return;
@@ -732,9 +751,14 @@ export class PiAgentProvider
     }
 
     if (overrides.model?.trim()) {
-      const model = resolvePiModel(services.modelRegistry.getAll(), overrides.model);
+      const availableModels = services.modelRegistry
+        .getAvailable()
+        .filter(isPiModelLike);
+      const model = resolvePiModel(availableModels, overrides.model);
       if (!model) {
-        throw new Error(`Unknown Pi model "${overrides.model}".`);
+        throw new Error(
+          describePiModelLookupFailure(availableModels, overrides.model),
+        );
       }
       await loaded.setModel(model);
     }
@@ -1238,8 +1262,10 @@ export class PiAgentProvider
           nextSeq?: number;
         }>;
       };
+      const archivedSessionIds = new Set<string>();
+      const restoredSessions = new Map<string, PiSessionState>();
       for (const id of parsed.archivedSessionIds ?? []) {
-        this.archivedSessionIds.add(id);
+        archivedSessionIds.add(id);
       }
       for (const item of parsed.sessions ?? []) {
         const state: PiSessionState = {
@@ -1265,10 +1291,26 @@ export class PiAgentProvider
             ) + 1,
           pendingCompactionActivityId: null,
         };
-        this.sessions.set(state.thread.id, state);
+        restoredSessions.set(state.thread.id, state);
       }
-    } catch {
-      // Ignore missing or corrupt sidecar state.
+      this.archivedSessionIds.clear();
+      this.sessions.clear();
+      for (const id of archivedSessionIds) {
+        this.archivedSessionIds.add(id);
+      }
+      for (const [threadId, state] of restoredSessions) {
+        this.sessions.set(threadId, state);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+        return;
+      }
+      this.emit(
+        "stderr",
+        error instanceof Error
+          ? `Pi provider state reset after failing to load ${this.statePath}: ${error.message}`
+          : `Pi provider state reset after failing to load ${this.statePath}.`,
+      );
     }
   }
 
@@ -1308,20 +1350,67 @@ export class PiAgentProvider
   }
 
   private async listPiSessionSummaries(): Promise<PiSessionSummary[]> {
-    const filePaths = await collectPiSessionFiles(this.sessionsRoot);
-    const summaries = await Promise.all(
-      filePaths.map((filePath) => readPiSessionSummary(filePath)),
-    );
-    return summaries.filter(
-      (summary): summary is PiSessionSummary => summary !== null,
-    );
+    await this.refreshSessionSummaries();
+    return [...this.sessionSummariesById.values()];
   }
 
   private async findPiSessionSummary(
     threadId: string,
   ): Promise<PiSessionSummary | null> {
-    const summaries = await this.listPiSessionSummaries();
-    return summaries.find((summary) => summary.id === threadId) ?? null;
+    await this.refreshSessionSummaries();
+    return this.sessionSummariesById.get(threadId) ?? null;
+  }
+
+  private async refreshSessionSummaries(): Promise<void> {
+    if (!this.sessionSummaryRefresh) {
+      this.sessionSummaryRefresh = this.scanSessionSummaries().finally(() => {
+        this.sessionSummaryRefresh = null;
+      });
+    }
+    await this.sessionSummaryRefresh;
+  }
+
+  private async scanSessionSummaries(): Promise<void> {
+    const filePaths = await collectPiSessionFiles(this.sessionsRoot);
+    const seenPaths = new Set(filePaths);
+    for (const [filePath, summary] of this.sessionSummariesByPath) {
+      if (seenPaths.has(filePath)) {
+        continue;
+      }
+      this.sessionSummariesByPath.delete(filePath);
+      this.sessionSummaryFingerprints.delete(filePath);
+      if (this.sessionSummariesById.get(summary.id)?.path === filePath) {
+        this.sessionSummariesById.delete(summary.id);
+      }
+    }
+    await Promise.all(
+      filePaths.map(async (filePath) => {
+        const fileStats = await stat(filePath).catch(() => null);
+        if (!fileStats?.isFile()) {
+          return;
+        }
+        const fingerprint = `${fileStats.size}:${fileStats.mtimeMs}`;
+        if (this.sessionSummaryFingerprints.get(filePath) === fingerprint) {
+          return;
+        }
+        const summary = await readPiSessionSummary(filePath, fileStats);
+        this.sessionSummaryFingerprints.set(filePath, fingerprint);
+        const previous = this.sessionSummariesByPath.get(filePath);
+        if (previous && this.sessionSummariesById.get(previous.id)?.path === filePath) {
+          this.sessionSummariesById.delete(previous.id);
+        }
+        if (!summary) {
+          this.sessionSummariesByPath.delete(filePath);
+          return;
+        }
+        this.cacheSessionSummary(summary);
+      }),
+    );
+  }
+
+  private cacheSessionSummary(summary: PiSessionSummary): void {
+    this.sessionSummariesByPath.set(summary.path, summary);
+    this.sessionSummariesById.set(summary.id, summary);
   }
 }
 
@@ -1513,6 +1602,7 @@ function parsePiSessionHistory(
       continue;
     }
     if (role === "user") {
+      toolCalls.clear();
       const text = extractPiMessageText(message);
       messages.push({
         id: entry.id,
@@ -1554,6 +1644,9 @@ function parsePiSessionHistory(
     if (role === "toolResult") {
       const toolCallId = stringValue(message.toolCallId);
       const resolved = toolCallId ? toolCalls.get(toolCallId) : null;
+      if (toolCallId) {
+        toolCalls.delete(toolCallId);
+      }
       const toolName = stringValue(message.toolName) || resolved?.toolName || "tool";
       const args = resolved?.args ?? null;
       const activity = persistedPiToolResultActivity(
@@ -1893,6 +1986,7 @@ async function collectPiSessionFiles(root: string): Promise<string[]> {
 
 async function readPiSessionSummary(
   filePath: string,
+  fileStats?: { size: number; mtimeMs: number },
 ): Promise<PiSessionSummary | null> {
   try {
     const raw = await readFile(filePath, "utf8");
@@ -1948,7 +2042,9 @@ async function readPiSessionSummary(
       name,
       preview: summarizePreview(preview),
       createdAt: Math.trunc(createdAtMs / 1000),
-      updatedAt: Math.trunc(updatedAtMs / 1000),
+      updatedAt: Math.trunc(
+        Math.max(updatedAtMs, fileStats?.mtimeMs ?? updatedAtMs) / 1000,
+      ),
     };
   } catch {
     return null;
@@ -2221,6 +2317,26 @@ function resolvePiModel<T extends PiModelLike>(
     return exactMatches[0]!;
   }
   return null;
+}
+
+function describePiModelLookupFailure(
+  models: PiModelLike[],
+  requested: string,
+): string {
+  const normalized = requested.trim();
+  if (!normalized) {
+    return "Pi model cannot be empty.";
+  }
+  if (normalized.includes("/")) {
+    return `Unknown or unavailable Pi model "${requested}".`;
+  }
+  const exactMatches = models.filter((model) => model.id === normalized);
+  if (exactMatches.length > 1) {
+    return `Ambiguous Pi model "${requested}". Use one of: ${exactMatches
+      .map((model) => formatPiModelRef(model.provider, model.id))
+      .join(", ")}.`;
+  }
+  return `Unknown or unavailable Pi model "${requested}".`;
 }
 
 function piSkillToSummary(
