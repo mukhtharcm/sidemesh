@@ -176,32 +176,48 @@ class MeshEmptyState extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.body,
-  });
+  }) : compact = false;
+
+  /// In-list / inline variant — smaller icon bubble, tighter padding.
+  /// Use when the empty state lives inside a list, sheet, or pane that
+  /// already has its own outer padding.
+  const MeshEmptyState.compact({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.body,
+  }) : compact = true;
 
   final IconData icon;
   final String title;
   final String body;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final padding = compact ? 20.0 : 32.0;
+    final bubble = compact ? 52.0 : 72.0;
+    final bubbleRadius = compact ? 16.0 : 22.0;
+    final iconSize = compact ? 24.0 : 32.0;
+    final spacingTop = compact ? 12.0 : 18.0;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: EdgeInsets.all(padding),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 72,
-              height: 72,
+              width: bubble,
+              height: bubble,
               decoration: BoxDecoration(
                 color: colors.accentMuted,
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(bubbleRadius),
                 border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
               ),
-              child: Icon(icon, size: 32, color: colors.accent),
+              child: Icon(icon, size: iconSize, color: colors.accent),
             ),
-            const SizedBox(height: 18),
+            SizedBox(height: spacingTop),
             Text(
               title,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -234,31 +250,39 @@ class MeshIconButton extends StatelessWidget {
     required this.onTap,
     this.tooltip,
     this.color,
+    this.semanticLabel,
   });
 
   final IconData icon;
   final VoidCallback onTap;
   final String? tooltip;
   final Color? color;
+  /// Accessibility label surfaced to screen readers. Defaults to [tooltip].
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final button = Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
+    final label = semanticLabel ?? tooltip;
+    final button = Semantics(
+      label: label,
+      button: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.border),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 18, color: color ?? colors.textSecondary),
           ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 18, color: color ?? colors.textSecondary),
         ),
       ),
     );

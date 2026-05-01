@@ -125,7 +125,7 @@ class _Composer extends StatelessWidget {
               child: Container(
                 decoration: BoxDecoration(
                   color: colors.composerBackground,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: AppShapes.card,
                   border: Border.all(color: colors.border),
                 ),
                 padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
@@ -212,19 +212,19 @@ class _ComposerAttachButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: AppShapes.card,
           onTap: enabled ? onPressed : null,
           child: Container(
             width: 52,
             height: 52,
             decoration: BoxDecoration(
               color: colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: AppShapes.card,
               border: Border.all(color: colors.border),
             ),
             alignment: Alignment.center,
             child: Icon(
-              Icons.add_photo_alternate_outlined,
+              Icons.add_photo_alternate_rounded,
               color: enabled ? colors.accent : colors.textTertiary,
               size: 22,
             ),
@@ -249,14 +249,14 @@ class _ComposerPasteButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: AppShapes.card,
           onTap: enabled ? onPressed : null,
           child: Container(
             width: 52,
             height: 52,
             decoration: BoxDecoration(
               color: colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: AppShapes.card,
               border: Border.all(color: colors.border),
             ),
             alignment: Alignment.center,
@@ -302,14 +302,14 @@ class _SendButton extends StatelessWidget {
         return Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: AppShapes.card,
             onTap: canSend ? onSend : null,
             child: Container(
               width: 52,
               height: 52,
               decoration: BoxDecoration(
                 color: bgColor,
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: AppShapes.card,
                 boxShadow: showActive && canSend
                     ? [
                         BoxShadow(
@@ -357,7 +357,7 @@ class _ComposerAttachmentChip extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
       padding: const EdgeInsets.fromLTRB(6, 6, 8, 6),
@@ -386,7 +386,7 @@ class _ComposerAttachmentChip extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.emphasis,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -400,7 +400,7 @@ class _ComposerAttachmentChip extends StatelessWidget {
           const SizedBox(width: 4),
           InkWell(
             onTap: () => onRemove(attachment.id),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: AppShapes.input,
             child: Padding(
               padding: const EdgeInsets.all(4),
               child: Icon(
@@ -470,7 +470,7 @@ class _ComposerSkillSuggestionTrayState
         child: Row(
           children: [
             Icon(
-              Icons.auto_awesome_outlined,
+              Icons.auto_awesome_rounded,
               size: 16,
               color: colors.textTertiary,
             ),
@@ -512,7 +512,7 @@ class _ComposerSkillSuggestionTrayState
     return Container(
       decoration: BoxDecoration(
         color: colors.canvas,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
       clipBehavior: Clip.antiAlias,
@@ -524,7 +524,7 @@ class _ComposerSkillSuggestionTrayState
     final colors = context.colors;
     return InkWell(
       onTap: () => widget.onSelectSkill(skill),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: AppShapes.input,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
@@ -558,7 +558,7 @@ class _ComposerSkillSuggestionTrayState
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.labelLarge
-                              ?.copyWith(fontWeight: FontWeight.w700),
+                              ?.copyWith(fontWeight: AppWeights.emphasis),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -583,7 +583,7 @@ class _ComposerSkillSuggestionTrayState
               style: monoStyle(
                 color: colors.textTertiary,
                 fontSize: 11,
-                fontWeight: FontWeight.w600,
+                fontWeight: AppWeights.body,
               ),
             ),
           ],
@@ -606,7 +606,7 @@ class _SkillScopeBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         color: isWorkspace ? colors.accentMuted : colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppShapes.pill,
         border: Border.all(
           color: isWorkspace
               ? colors.accent.withValues(alpha: 0.35)
@@ -618,7 +618,7 @@ class _SkillScopeBadge extends StatelessWidget {
         style: monoStyle(
           color: isWorkspace ? colors.accent : colors.textTertiary,
           fontSize: 10,
-          fontWeight: FontWeight.w700,
+          fontWeight: AppWeights.emphasis,
         ),
       ),
     );
@@ -637,7 +637,7 @@ class _ComposerSkillChip extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
       padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
@@ -657,7 +657,7 @@ class _ComposerSkillChip extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.emphasis,
                   ),
                 ),
                 const SizedBox(height: 1),
@@ -671,7 +671,7 @@ class _ComposerSkillChip extends StatelessWidget {
           const SizedBox(width: 6),
           InkWell(
             onTap: () => onRemove(mention.skill.path),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: AppShapes.input,
             child: Padding(
               padding: const EdgeInsets.all(4),
               child: Icon(

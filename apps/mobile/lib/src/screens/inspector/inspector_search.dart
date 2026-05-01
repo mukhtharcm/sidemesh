@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../../models.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/app_tokens.dart';
+import '../../widgets/mesh_widgets.dart';
 import 'inspector_controller.dart';
 
 enum SearchRecordKind { message, activity }
@@ -337,13 +339,13 @@ class _SearchFilterChip extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppShapes.pill,
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
             color: selected ? colors.accent : colors.surfaceMuted,
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: AppShapes.pill,
             border: Border.all(
               color: selected ? colors.accent : colors.border,
               width: 1,
@@ -353,7 +355,7 @@ class _SearchFilterChip extends StatelessWidget {
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: selected ? colors.accentOn : colors.textSecondary,
-              fontWeight: FontWeight.w700,
+              fontWeight: AppWeights.emphasis,
               letterSpacing: 0.3,
             ),
           ),
@@ -374,43 +376,15 @@ class _SearchPanelEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final hasQuery = query.isNotEmpty;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              hasQuery ? Icons.search_off_rounded : Icons.search_rounded,
-              color: colors.textTertiary,
-              size: 36,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              hasQuery
-                  ? 'No matches for "$query"'
-                  : 'Search messages and activities',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: colors.textPrimary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              hasQuery
-                  ? 'Try a different term or switch filter.'
-                  : 'Searching $totalRecords loaded entries.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textTertiary,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return MeshEmptyState.compact(
+      icon: hasQuery ? Icons.search_off_rounded : Icons.search_rounded,
+      title: hasQuery
+          ? 'No matches for "$query"'
+          : 'Search messages and activities',
+      body: hasQuery
+          ? 'Try a different term or switch filter.'
+          : 'Searching $totalRecords loaded entries.',
     );
   }
 }
@@ -486,7 +460,7 @@ class _SearchResultRow extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.labelMedium?.copyWith(
                                 color: colors.textPrimary,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: AppWeights.emphasis,
                               ),
                             ),
                           ),
@@ -578,7 +552,7 @@ class _SnippetText extends StatelessWidget {
             text: match,
             style: baseStyle?.copyWith(
               color: colors.textPrimary,
-              fontWeight: FontWeight.w800,
+              fontWeight: AppWeights.title,
               backgroundColor: colors.accent.withValues(alpha: 0.25),
             ),
           ),
@@ -633,7 +607,7 @@ class _SearchResultExpanded extends StatelessWidget {
                   text: '$label ',
                   style: TextStyle(
                     color: colors.textTertiary,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.emphasis,
                   ),
                 ),
                 TextSpan(

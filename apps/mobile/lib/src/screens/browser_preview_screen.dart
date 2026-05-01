@@ -939,7 +939,7 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
               'Resize browser viewport',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 color: colors.textPrimary,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w800,
               ),
             ),
             const SizedBox(height: 6),
@@ -1053,7 +1053,7 @@ class _ViewportPresetButton extends StatelessWidget {
               preset.label,
               style: TextStyle(
                 color: selected ? colors.accent : colors.textPrimary,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w800,
               ),
             ),
             const SizedBox(height: 4),
@@ -1206,8 +1206,8 @@ class _PreviewHeader extends StatelessWidget {
             const SizedBox(width: 6),
             MeshIconButton(
               icon: inputRailOpen
-                  ? Icons.keyboard_hide_outlined
-                  : Icons.keyboard_alt_outlined,
+                  ? Icons.keyboard_hide_rounded
+                  : Icons.keyboard_alt_rounded,
               tooltip: inputRailOpen ? 'Hide keyboard' : 'Open keyboard',
               color: inputRailOpen ? colors.accent : colors.textSecondary,
               onTap: onToggleInput,
@@ -1223,7 +1223,7 @@ class _PreviewHeader extends StatelessWidget {
               const SizedBox(width: 6),
             ],
             MeshIconButton(
-              icon: Icons.stop_circle_outlined,
+              icon: Icons.stop_circle_rounded,
               tooltip: 'Stop remote browser',
               color: colors.danger,
               onTap: onStop,
@@ -1359,7 +1359,7 @@ class _PreviewFloatingControls extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
         child: TextButton.icon(
           onPressed: onToggleInput,
-          icon: const Icon(Icons.keyboard_alt_outlined, size: 18),
+          icon: const Icon(Icons.keyboard_alt_rounded, size: 18),
           label: const Text('Keyboard'),
         ),
       ),
@@ -1401,7 +1401,7 @@ class _InputRail extends StatelessWidget {
               Row(
                 children: [
                   Icon(
-                    Icons.keyboard_alt_outlined,
+                    Icons.keyboard_alt_rounded,
                     size: 18,
                     color: colors.textSecondary,
                   ),
