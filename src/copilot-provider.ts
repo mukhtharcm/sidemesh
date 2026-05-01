@@ -2768,6 +2768,10 @@ function parseSdkSessionEvents(
 
 function formatCopilotToolCommand(toolName: unknown, args: unknown): string {
   const name = copilotToolName(toolName);
+  const interactionTitle = formatCopilotInteractionToolTitle(name, args);
+  if (interactionTitle) {
+    return interactionTitle;
+  }
   if (!args || typeof args !== "object") return name;
   return `${name} ${JSON.stringify(args)}`;
 }
@@ -2852,6 +2856,32 @@ function inferCopilotToolSemantic(
     ["command", "cmd", "fullCommandText", "shellCommand"],
     typedResult,
   );
+
+  if (
+    normalizedName === "ask_user" ||
+    normalizedName === "askuser" ||
+    normalizedName === "question" ||
+    normalizedName === "user_input" ||
+    normalizedName === "prompt_user"
+  ) {
+    return {
+      category: "interaction",
+      action: "ask",
+      targets: query ? [{ type: "query", value: query }] : [],
+    };
+  }
+
+  if (
+    normalizedName === "report_intent" ||
+    normalizedName === "reportintent" ||
+    normalizedName === "intent"
+  ) {
+    return {
+      category: "interaction",
+      action: "report",
+      targets: query ? [{ type: "query", value: query }] : [],
+    };
+  }
 
   if (
     normalizedName === "view" ||
@@ -2990,6 +3020,40 @@ function inferCopilotToolSemantic(
   };
 }
 
+function formatCopilotInteractionToolTitle(
+  toolName: string,
+  args: unknown,
+): string | null {
+  const normalizedName = toolName.toLowerCase();
+  const typedArgs = asRecord(args);
+  if (
+    normalizedName === "ask_user" ||
+    normalizedName === "askuser" ||
+    normalizedName === "question" ||
+    normalizedName === "user_input" ||
+    normalizedName === "prompt_user"
+  ) {
+    const question = readFirstString(typedArgs, [
+      "question",
+      "prompt",
+      "message",
+      "text",
+    ]);
+    return question ? `Model asked: ${truncateLabel(question, 90)}` : "Model asked a question";
+  }
+  if (
+    normalizedName === "report_intent" ||
+    normalizedName === "reportintent" ||
+    normalizedName === "intent"
+  ) {
+    const intent = readFirstString(typedArgs, ["intent", "intention", "message"]);
+    return intent
+      ? `Model reported intent: ${truncateLabel(intent, 90)}`
+      : "Model reported intent";
+  }
+  return null;
+}
+
 function mergeCopilotToolSemantic(
   existing: ToolActivity | null,
   inferred: ToolActivitySemantic,
@@ -3083,6 +3147,13 @@ function readFirstString(
     }
   }
   return null;
+}
+
+function truncateLabel(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
 function mergeSemanticTargets(

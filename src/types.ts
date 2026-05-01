@@ -301,6 +301,7 @@ export type ToolActivitySemanticCategory =
   | "filesystem"
   | "network"
   | "command"
+  | "interaction"
   | "session"
   | "memory"
   | "task"
@@ -312,6 +313,8 @@ export type ToolActivitySemanticAction =
   | "search"
   | "list"
   | "fetch"
+  | "ask"
+  | "report"
   | "mode_change"
   | "invoke"
   | "unknown";
@@ -593,6 +596,8 @@ export interface PendingAction {
   canDecline: boolean;
   sessionTitle?: string;
   cwd?: string;
+  state?: "pending" | "recovered";
+  recoverable?: boolean;
   approval?: PendingActionApproval;
   userInput?: PendingActionUserInputRequest;
   elicitation?: PendingActionElicitationRequest;

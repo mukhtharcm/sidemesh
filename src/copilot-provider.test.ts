@@ -73,6 +73,20 @@ describe("Copilot provider", () => {
                 success: true,
                 result: { content: "README contents" },
               }),
+              event("tool.execution_start", {
+                toolCallId: "tool-ask-1",
+                toolName: "ask_user",
+                arguments: {
+                  question: "Which environment should I use?",
+                  choices: ["staging", "production"],
+                },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "tool-ask-1",
+                toolName: "ask_user",
+                success: true,
+                result: { answer: "staging" },
+              }),
               event("assistant.usage", {
                 model: "gpt-5.2",
                 inputTokens: 333,
@@ -131,7 +145,7 @@ describe("Copilot provider", () => {
       assert.equal(log.messages.length, 2);
       assert.equal(log.messages[0]?.text, "hello sdk");
       assert.equal(log.messages[1]?.text, "hello back");
-      assert.equal(log.activities.length, 2);
+      assert.equal(log.activities.length, 3);
       assert.equal(log.activities[0]?.type, "tool");
       assert.equal(log.activities[0]?.semantic?.action, "mode_change");
       assert.deepEqual(log.activities[0]?.semantic?.targets, [
@@ -143,6 +157,13 @@ describe("Copilot provider", () => {
       assert.deepEqual(log.activities[1]?.semantic?.targets, [
         { type: "file", path: "README.md", access: "read", role: "target" },
       ]);
+      assert.equal(log.activities[2]?.type, "tool");
+      assert.equal(
+        log.activities[2]?.title,
+        "Model asked: Which environment should I use?",
+      );
+      assert.equal(log.activities[2]?.semantic?.category, "interaction");
+      assert.equal(log.activities[2]?.semantic?.action, "ask");
       assert.equal(log.runtime?.model, "gpt-5.2");
       assert.equal(log.runtime?.mode, "autopilot");
       assert.equal(log.runtime?.telemetry?.contextWindow?.currentTokens, 3200);

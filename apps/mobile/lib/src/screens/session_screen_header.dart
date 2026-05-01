@@ -1538,6 +1538,10 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                         ),
                       ),
                     ],
+                    if (action.isRecovered) ...[
+                      const SizedBox(height: 10),
+                      _RecoveredActionNotice(recoverable: action.recoverable),
+                    ],
                     if (action.isUserInput) ...[
                       const SizedBox(height: 12),
                       _buildUserInputBody(context, action.userInput!),
@@ -2013,6 +2017,44 @@ class _PendingActionKindMeta {
   final String kicker;
   final IconData icon;
   final Color accent;
+}
+
+class _RecoveredActionNotice extends StatelessWidget {
+  const _RecoveredActionNotice({required this.recoverable});
+
+  final bool recoverable;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final text = recoverable
+        ? 'The daemon restarted while this request was open. Your response will be sent as a follow-up so the model can continue.'
+        : 'The daemon restarted while this request was open. This request may need to be retried.';
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: colors.warningMuted,
+        borderRadius: AppShapes.card,
+        border: Border.all(color: colors.warning.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.restart_alt_rounded, size: 18, color: colors.warning),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 _PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {

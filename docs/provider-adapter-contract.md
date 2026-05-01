@@ -98,6 +98,64 @@ Providers should emit `liveEvent` events for streaming UI updates:
 Provider adapters should translate native agent events into Sidemesh activity
 types instead of leaking provider-specific wire payloads to the Flutter app.
 
+## Provider-Neutral Interactions
+
+Agent questions, forms, OAuth/browser handoffs, todos, and planning state are
+provider-neutral UX concepts. Adapters must not rely on provider-specific raw
+tool JSON for these states.
+
+The daemon represents interactive requests as `PendingAction` records:
+
+- `kind: "user_input"` for a question with optional choices.
+- `kind: "elicitation"` for structured input or URL handoff.
+- `state: "pending"` for a live provider callback.
+- `state: "recovered"` for a request restored after daemon restart.
+- `recoverable: true` when Sidemesh can safely send the answer as a follow-up if
+  the original provider callback is gone.
+
+The daemon persists recoverable interaction requests in its state directory.
+When the provider process is still alive, `respondToPendingAction()` resolves
+the native callback. After a daemon restart, there is no provider promise left
+to resolve, so Sidemesh sends the response back into the same session as a
+normal follow-up message. This is intentionally explicit in the UI so the user
+can see that the daemon recovered from a restart rather than pretending the
+original tool call still exists.
+
+Tool activities should still be recorded, but interaction tools must be
+semantic:
+
+- `category: "interaction", action: "ask"` for question tools like
+  Copilot `ask_user` or other provider question/select dialogs.
+- `category: "interaction", action: "report"` for intent/status tools like
+  Copilot `report_intent`.
+
+The Flutter UI renders these as "Model asked ..." and "Model reported intent
+..." cards instead of raw tool-call JSON.
+
+## Reference Architecture
+
+Provider integrations should separate model/provider transport, the agent loop,
+tools/extensions, persisted session entries, and UI/RPC. Sidemesh should copy
+that separation, not provider-specific UI behavior.
+
+Relevant patterns:
+
+- Model providers produce normalized message/content blocks before they reach
+  the app UI.
+- Tool calls and tool results are durable transcript entries.
+- Questions return tool results; answers are not fake user messages while the
+  live tool call still exists.
+- Todo and plan state can be reconstructed from tool-result details or custom
+  session entries.
+- RPC UI requests are explicit interaction events (`select`, `confirm`,
+  `input`, `editor`) that a remote UI can render without knowing the terminal
+  implementation.
+
+Sidemesh should use this as the provider-contract target for future providers.
+Direct API providers can follow the same model/provider split. CLI or
+SDK-backed providers should translate their native events into the same
+Sidemesh events instead of introducing provider-specific timeline renderers.
+
 ## HTTP Behavior
 
 Server routes check both capability flags and method presence. A provider that

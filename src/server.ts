@@ -53,6 +53,7 @@ import {
 import {
   parsePendingActionResponseBody,
   toPublicPendingAction,
+  type PendingActionResponseInput,
 } from "./approvals.js";
 import { summarizeProviderConfig } from "./config.js";
 import {
@@ -89,6 +90,10 @@ import {
   SessionInputDedupeStore,
   type StoredSessionInputDedupeEntry,
 } from "./session-input-dedupe-store.js";
+import {
+  isRecoveredPendingAction,
+  PendingActionStore,
+} from "./pending-action-store.js";
 import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionReplayIndex } from "./session-replay-index.js";
@@ -97,6 +102,9 @@ const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
 const SESSION_INPUT_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
+const PENDING_ACTION_STORE_LIMIT = 200;
+const PENDING_ACTION_STORE_TTL_MS = 48 * 60 * 60 * 1000;
+const PENDING_ACTION_STORE_FILE = "pending-actions-v1.json";
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
@@ -204,6 +212,16 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       createdAt: entry.createdAt,
       receipt: entry.receipt,
     });
+  }
+  const pendingActionStore = await PendingActionStore.open(
+    nodePath.join(config.stateDir, PENDING_ACTION_STORE_FILE),
+    {
+      ttlMs: PENDING_ACTION_STORE_TTL_MS,
+      limit: PENDING_ACTION_STORE_LIMIT,
+    },
+  );
+  for (const action of pendingActionStore.recoveredActions()) {
+    pendingActions.set(action.id, action);
   }
   let providerVersion = "unknown";
   const providerVersions = new Map<string, string>();
@@ -449,6 +467,51 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     broadcastRecentSessionsLive({ type: "remove", sessionId });
   }
 
+  async function submitRecoveredPendingActionResponse(
+    action: AgentPendingAction,
+    decision: PendingActionResponseInput,
+  ): Promise<boolean> {
+    if (
+      !hasProviderMethod(provider, "submitInput") ||
+      !provider.capabilities.input.text
+    ) {
+      return false;
+    }
+    const text = buildRecoveredPendingActionResponseText(action, decision);
+    if (!text) {
+      return false;
+    }
+    const input: AgentSessionInputItem[] = [
+      { type: "text", text, text_elements: [] },
+    ];
+    const submittedMessage = buildSubmittedUserMessage(
+      input,
+      null,
+      allocSeq(action.sessionId),
+    );
+    const submitted = await provider.submitInput!({
+      sessionId: action.sessionId,
+      input,
+      activeTurnId: null,
+      overrides: emptyAgentSessionOverrides(),
+    });
+    if (submitted.turnId) {
+      activeTurns.set(action.sessionId, {
+        turnId: submitted.turnId,
+        startedAt: Date.now(),
+      });
+    }
+    broadcastLive(action.sessionId, {
+      type: "user_message_submitted",
+      sessionId: action.sessionId,
+      turnId: submitted.turnId || undefined,
+      messageItem: submittedMessage,
+    });
+    clearSessionLogCache(logCache, action.sessionId);
+    scheduleRecentSessionUpsert(action.sessionId, 0);
+    return true;
+  }
+
   provider.on("stderr", (line) => {
     process.stderr.write(line);
   });
@@ -606,6 +669,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
           broadcastLive,
           broadcastApprovalLive,
         );
+        void pendingActionStore.deleteForSession(event.sessionId).catch((error) => {
+          console.error("Failed to clear persisted pending actions", error);
+        });
         activeTurns.delete(event.sessionId);
         liveActivities.delete(event.sessionId);
         clearSessionLogCache(logCache, event.sessionId);
@@ -615,18 +681,22 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         // detect gaps after a reconnect.
         return;
       case "action_opened":
-        pendingActions.set(event.action.id, event.action);
-        const publicAction = toPublicPendingAction(event.action);
-        broadcastLive(event.action.sessionId, {
+        const openedAction = normalizeOpenedPendingAction(event.action);
+        pendingActions.set(openedAction.id, openedAction);
+        void pendingActionStore.put(openedAction).catch((error) => {
+          console.error("Failed to persist pending action", error);
+        });
+        const publicAction = toPublicPendingAction(openedAction);
+        broadcastLive(openedAction.sessionId, {
           type: "action_opened",
-          sessionId: event.action.sessionId,
+          sessionId: openedAction.sessionId,
           action: publicAction,
         });
         broadcastApprovalLive({
           type: "action_opened",
           action: publicAction,
         });
-        scheduleRecentSessionUpsert(event.action.sessionId);
+        scheduleRecentSessionUpsert(openedAction.sessionId);
         return;
     }
   });
@@ -1966,24 +2036,20 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         return;
       }
 
-      if (
-        !requireProviderCapability(
-          response,
-          provider,
-          true,
-          "pending action responses",
-          "respondToPendingAction",
-        )
-      ) {
-        return;
+      let handled = false;
+      if (hasProviderMethod(provider, "respondToPendingAction")) {
+        handled = provider.respondToPendingAction!(action, decision);
       }
-      const handled = provider.respondToPendingAction!(action, decision);
+      if (!handled && isRecoveredPendingAction(action)) {
+        handled = await submitRecoveredPendingActionResponse(action, decision);
+      }
       if (!handled) {
         response.status(400).json({ error: "unsupported decision" });
         return;
       }
 
       pendingActions.delete(actionId);
+      await pendingActionStore.delete(actionId);
       broadcastLive(action.sessionId, {
         type: "action_resolved",
         sessionId: action.sessionId,
@@ -2596,6 +2662,20 @@ async function listPendingActions(
   );
 }
 
+function normalizeOpenedPendingAction(
+  action: AgentPendingAction,
+): AgentPendingAction {
+  return {
+    ...action,
+    state: action.state ?? "pending",
+    recoverable: action.recoverable ?? isRecoverablePendingAction(action),
+  };
+}
+
+function isRecoverablePendingAction(action: AgentPendingAction): boolean {
+  return action.kind === "user_input" || action.kind === "elicitation";
+}
+
 async function readSession(
   provider: AgentProvider,
   sessionId: string,
@@ -2934,6 +3014,63 @@ function buildSubmittedUserMessage(
   };
 }
 
+function buildRecoveredPendingActionResponseText(
+  action: AgentPendingAction,
+  decision: PendingActionResponseInput,
+): string | null {
+  if (action.kind === "user_input") {
+    const response =
+      decision && typeof decision === "object" && "answer" in decision
+        ? decision
+        : null;
+    const answer =
+      response && typeof response.answer === "string"
+        ? response.answer.trim()
+        : "";
+    if (!answer) {
+      return null;
+    }
+    const question =
+      action.userInput?.question?.trim() || action.detail || action.title;
+    return [
+      "Answer to the model question after the daemon restarted.",
+      "",
+      `Question: ${question}`,
+      `Answer: ${answer}`,
+    ].join("\n");
+  }
+
+  if (action.kind === "elicitation") {
+    const response =
+      decision && typeof decision === "object" && "action" in decision
+        ? decision
+        : null;
+    const responseAction =
+      response && typeof response.action === "string"
+        ? response.action
+        : null;
+    if (!responseAction) {
+      return null;
+    }
+    const content =
+      response && "content" in response && response.content !== undefined
+        ? JSON.stringify(response.content, null, 2)
+        : "(no content)";
+    const prompt =
+      action.elicitation?.message?.trim() || action.detail || action.title;
+    return [
+      "Response to the model's structured input request after the daemon restarted.",
+      "",
+      `Request: ${prompt}`,
+      `Decision: ${responseAction}`,
+      "Content:",
+      content,
+    ].join("\n");
+  }
+
+  return null;
+}
+
 async function loadCachedSessionRuntime(
   provider: AgentProvider,
   thread: ThreadRecord,
@@ -3267,6 +3404,20 @@ function parseCreateSessionOverrides(value: unknown): AgentSessionOverrides {
     networkAccess: parseOptionalBool(typed.networkAccess),
     webSearch: asString(typed.webSearch),
     profile: asString(typed.profile),
+  };
+}
+
+function emptyAgentSessionOverrides(): AgentSessionOverrides {
+  return {
+    model: null,
+    mode: null,
+    reasoningEffort: null,
+    fastMode: null,
+    approvalPolicy: null,
+    sandboxMode: null,
+    networkAccess: null,
+    webSearch: null,
+    profile: null,
   };
 }
 
