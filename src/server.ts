@@ -294,14 +294,26 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     }
   }
 
-  function activitiesForSessionSnapshot(sessionId: string): SessionActivity[] {
+  function overlayActivitiesForSessionSnapshot(
+    sessionId: string,
+  ): SessionActivity[] {
     syncSessionActivityOverlaysFromStore(
       sessionActivityOverlays,
       sessionActivityOverlayStore.entries(),
     );
+    return [...(sessionActivityOverlays.get(sessionId)?.values() ?? [])];
+  }
+
+  function liveActivitiesForSessionSnapshot(
+    sessionId: string,
+  ): SessionActivity[] {
+    return [...(liveActivities.get(sessionId)?.values() ?? [])];
+  }
+
+  function activitiesForSessionSnapshot(sessionId: string): SessionActivity[] {
     return [
-      ...(sessionActivityOverlays.get(sessionId)?.values() ?? []),
-      ...(liveActivities.get(sessionId)?.values() ?? []),
+      ...overlayActivitiesForSessionSnapshot(sessionId),
+      ...liveActivitiesForSessionSnapshot(sessionId),
     ];
   }
 
@@ -309,9 +321,18 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     sessionId: string,
     historical: SessionActivity[],
   ): SessionActivity[] {
+    const merged = new Map(
+      historical.map((activity) => [activity.id, activity] as const),
+    );
+    for (const activity of overlayActivitiesForSessionSnapshot(sessionId)) {
+      merged.set(
+        activity.id,
+        mergeActivityPreferIncomingOrder(merged.get(activity.id), activity),
+      );
+    }
     return mergeSessionActivities(
-      historical,
-      activitiesForSessionSnapshot(sessionId),
+      [...merged.values()],
+      liveActivitiesForSessionSnapshot(sessionId),
     );
   }
 
@@ -1263,9 +1284,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
           response.json({
             session: mapSession(session, cached.runtime),
             messages: cached.messages,
-            activities: mergeSessionActivities(
+            activities: mergeActivitiesForSessionSnapshot(
+              sessionId,
               cached.activities,
-              activitiesForSessionSnapshot(sessionId),
             ),
             pendingAction: findPendingActionForSession(
               pendingActions,
@@ -1362,9 +1383,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
           ensureSeqCursor(sessionId, entry.nextSeq);
           const delta = replayIndex.getDelta(entry, since);
           newMessages = delta.messages;
-          newActivities = mergeSessionActivities(
+          newActivities = mergeActivitiesForSessionSnapshot(
+            sessionId,
             delta.activities,
-            activitiesForSessionSnapshot(sessionId),
           ).filter((a) => (a.seq ?? 0) > since);
           nextSeq = delta.nextSeq;
           logRuntime = delta.runtime;
@@ -2954,12 +2975,27 @@ function materializeActivityOverlayDraft(
 ): SessionActivity {
   const existing =
     activityOverlays.get(sessionId)?.get(draft.id) ??
-    liveActivities.get(sessionId)?.get(draft.id) ??
-    historicalActivity;
+    liveActivities.get(sessionId)?.get(draft.id);
   return materializeAgentActivityDraft(draft, {
-    createdAt: existing?.createdAt ?? Date.now(),
+    createdAt:
+      existing?.createdAt ?? historicalActivity?.createdAt ?? Date.now(),
     seq: existing?.seq ?? allocSeq(),
   });
+}
+
+function mergeActivityPreferIncomingOrder(
+  existing: SessionActivity | undefined,
+  incoming: SessionActivity,
+): SessionActivity {
+  const merged = mergeActivity(existing, incoming);
+  if (!existing || existing.type !== incoming.type) {
+    return merged;
+  }
+  return {
+    ...merged,
+    createdAt: incoming.createdAt,
+    seq: incoming.seq,
+  };
 }
 
 function syncSessionActivityOverlaysFromStore(
