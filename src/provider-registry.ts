@@ -10,6 +10,10 @@ import {
   FAKE_PROVIDER_CAPABILITIES,
   FakeAgentProvider,
 } from "./fake-provider.js";
+import {
+  PI_PROVIDER_CAPABILITIES,
+  PiAgentProvider,
+} from "./pi-provider.js";
 import type {
   AgentProvider,
   AgentProviderCapabilities,
@@ -22,6 +26,7 @@ import type {
   CopilotProviderConfig,
   FakeCapabilityProfile,
   FakeProviderConfig,
+  PiProviderConfig,
 } from "./types.js";
 
 type ProviderEnvironment = Record<string, string | undefined>;
@@ -56,6 +61,7 @@ export interface AgentProviderDefinitionSummary {
 
 export const DEFAULT_AGENT_PROVIDER_KIND: AgentProviderKind = "codex";
 const CODEX_DEFAULT_COMMAND = "codex";
+const PI_DEFAULT_COMMAND = "sdk";
 const FAKE_DEFAULT_COMMAND = "builtin";
 const COPILOT_DEFAULT_COMMAND = "copilot";
 
@@ -175,6 +181,63 @@ const FAKE_PROVIDER_DEFINITION: AgentProviderDefinition = {
   },
 };
 
+const PI_PROVIDER_DEFINITION: AgentProviderDefinition = {
+  kind: "pi",
+  displayName: "Pi",
+  setupAudience: "public",
+  defaultCommand: PI_DEFAULT_COMMAND,
+  capabilities: PI_PROVIDER_CAPABILITIES,
+  commandEnvironmentVariables: [
+    "SIDEMESH_PI_AGENT_DIR",
+    "SIDEMESH_PI_STATE_DIR",
+    "PI_CODING_AGENT_DIR",
+  ],
+  supportedApprovalPolicies: [],
+
+  create(config) {
+    const pi = expectPiProviderConfig(config);
+    return new PiAgentProvider({
+      agentDir: pi.agentDir,
+      stateDir: pi.stateDir,
+    });
+  },
+
+  loadConfig(env) {
+    return {
+      kind: "pi",
+      agentDir:
+        env.SIDEMESH_PI_AGENT_DIR?.trim() ||
+        env.PI_CODING_AGENT_DIR?.trim() ||
+        null,
+      stateDir: env.SIDEMESH_PI_STATE_DIR?.trim() || null,
+    };
+  },
+
+  resolveConfig(env, base) {
+    const pi = base?.kind === "pi" ? base : null;
+    return {
+      kind: "pi",
+      agentDir:
+        env.SIDEMESH_PI_AGENT_DIR?.trim() ||
+        env.PI_CODING_AGENT_DIR?.trim() ||
+        pi?.agentDir ||
+        null,
+      stateDir:
+        env.SIDEMESH_PI_STATE_DIR === undefined
+          ? pi?.stateDir ?? null
+          : env.SIDEMESH_PI_STATE_DIR?.trim() || null,
+    };
+  },
+
+  summarizeConfig(config) {
+    const pi = expectPiProviderConfig(config);
+    return {
+      kind: pi.kind,
+      command: PI_DEFAULT_COMMAND,
+    };
+  },
+};
+
 const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "copilot",
   displayName: "GitHub Copilot",
@@ -260,6 +323,7 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
 
 const AGENT_PROVIDER_DEFINITIONS = [
   CODEX_PROVIDER_DEFINITION,
+  PI_PROVIDER_DEFINITION,
   FAKE_PROVIDER_DEFINITION,
   COPILOT_PROVIDER_DEFINITION,
 ] as const;
@@ -358,6 +422,15 @@ function expectFakeProviderConfig(
 ): FakeProviderConfig {
   if (config.kind !== "fake") {
     throw new Error(`Expected fake provider config, got "${config.kind}"`);
+  }
+  return config;
+}
+
+function expectPiProviderConfig(
+  config: AgentProviderConfig,
+): PiProviderConfig {
+  if (config.kind !== "pi") {
+    throw new Error(`Expected Pi provider config, got "${config.kind}"`);
   }
   return config;
 }
