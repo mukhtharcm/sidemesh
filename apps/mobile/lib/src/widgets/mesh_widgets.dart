@@ -159,6 +159,8 @@ class MeshCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
+        hoverColor: colors.surfaceElevated.withValues(alpha: 0.5),
+        splashColor: colors.accent.withValues(alpha: 0.08),
         child: content,
       ),
     );
