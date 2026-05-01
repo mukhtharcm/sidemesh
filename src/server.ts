@@ -31,6 +31,7 @@ import type {
   HostCapabilities,
   LiveEvent,
   SessionActivity,
+  SessionLogSnapshot,
   NodeConfig,
   PendingAction,
   RecentSessionsLiveEvent,
@@ -240,12 +241,12 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       limit: SESSION_ACTIVITY_OVERLAY_STORE_LIMIT,
     },
   );
-  for (const entry of sessionActivityOverlayStore.entries()) {
-    upsertSessionActivityOverlay(
-      sessionActivityOverlays,
-      entry.sessionId,
-      entry.activity,
-    );
+  const recoveredActivityOverlays = sessionActivityOverlayStore.entries();
+  syncSessionActivityOverlaysFromStore(
+    sessionActivityOverlays,
+    recoveredActivityOverlays,
+  );
+  for (const entry of recoveredActivityOverlays) {
     sessionSeqCursor.set(
       entry.sessionId,
       Math.max(
@@ -294,6 +295,10 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   }
 
   function activitiesForSessionSnapshot(sessionId: string): SessionActivity[] {
+    syncSessionActivityOverlaysFromStore(
+      sessionActivityOverlays,
+      sessionActivityOverlayStore.entries(),
+    );
     return [
       ...(sessionActivityOverlays.get(sessionId)?.values() ?? []),
       ...(liveActivities.get(sessionId)?.values() ?? []),
@@ -310,19 +315,23 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     );
   }
 
-  async function seedSessionSeqCursorFromLog(sessionId: string): Promise<void> {
+  async function seedSessionSeqCursorFromLog(
+    sessionId: string,
+  ): Promise<SessionLogSnapshot | null> {
     if (
       !hasProviderMethod(provider, "readSessionThread") ||
       !hasProviderMethod(provider, "readSessionLog")
     ) {
-      return;
+      return null;
     }
     try {
       const session = await readSession(provider, sessionId, false);
       const log = await provider.readSessionLog!(session);
       ensureSeqCursor(sessionId, log.nextSeq);
+      return log;
     } catch (error) {
       console.error("Failed to seed session seq cursor", error);
+      return null;
     }
   }
 
@@ -548,7 +557,11 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     const input: AgentSessionInputItem[] = [
       { type: "text", text, text_elements: [] },
     ];
-    await seedSessionSeqCursorFromLog(action.sessionId);
+    const completedActivity = buildRecoveredPendingActionActivityDraft(
+      action,
+      decision,
+    );
+    const seededLog = await seedSessionSeqCursorFromLog(action.sessionId);
     const state = await loadRunState(provider, action.sessionId, activeTurns);
     const submittedMessage = buildSubmittedUserMessage(
       input,
@@ -576,11 +589,11 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       turnId: submitted.turnId || undefined,
       messageItem: submittedMessage,
     });
-    const completedActivity = buildRecoveredPendingActionActivityDraft(
-      action,
-      decision,
-    );
     if (completedActivity) {
+      const historicalActivity = findActivityById(
+        seededLog?.activities ?? [],
+        completedActivity.id,
+      );
       const next = upsertSessionActivityOverlay(
         sessionActivityOverlays,
         action.sessionId,
@@ -590,10 +603,15 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
           action.sessionId,
           completedActivity,
           () => allocSeq(action.sessionId),
+          historicalActivity,
         ),
       );
       try {
         await sessionActivityOverlayStore.put(action.sessionId, next);
+        syncSessionActivityOverlaysFromStore(
+          sessionActivityOverlays,
+          sessionActivityOverlayStore.entries(),
+        );
       } catch (error) {
         console.error("Failed to persist session activity overlay", error);
       }
@@ -2932,14 +2950,37 @@ function materializeActivityOverlayDraft(
   sessionId: string,
   draft: AgentSessionActivityDraft,
   allocSeq: () => number,
+  historicalActivity: SessionActivity | null = null,
 ): SessionActivity {
   const existing =
     activityOverlays.get(sessionId)?.get(draft.id) ??
-    liveActivities.get(sessionId)?.get(draft.id);
+    liveActivities.get(sessionId)?.get(draft.id) ??
+    historicalActivity;
   return materializeAgentActivityDraft(draft, {
     createdAt: existing?.createdAt ?? Date.now(),
     seq: existing?.seq ?? allocSeq(),
   });
+}
+
+function syncSessionActivityOverlaysFromStore(
+  activityOverlays: Map<string, Map<string, SessionActivity>>,
+  entries: Array<{ sessionId: string; activity: SessionActivity }>,
+): void {
+  activityOverlays.clear();
+  for (const entry of entries) {
+    upsertSessionActivityOverlay(
+      activityOverlays,
+      entry.sessionId,
+      entry.activity,
+    );
+  }
+}
+
+function findActivityById(
+  activities: SessionActivity[],
+  activityId: string,
+): SessionActivity | null {
+  return activities.find((activity) => activity.id === activityId) ?? null;
 }
 
 function materializeLiveActivityDraft(
@@ -3299,13 +3340,20 @@ function buildRecoveredPendingActionActivityDraft(
       response && typeof response.action === "string"
         ? response.action
         : "cancel";
+    const status = responseAction === "accept" ? "completed" : "declined";
+    const titleAction =
+      responseAction === "accept"
+        ? "completed"
+        : responseAction === "decline"
+          ? "declined"
+          : "canceled";
     return {
       id: activityId,
       type: "tool",
       turnId: null,
-      status: "completed",
+      status,
       toolName: "elicitation",
-      title: `Structured input completed: ${prompt}`,
+      title: `Structured input ${titleAction}: ${prompt}`,
       args: {
         mode: action.elicitation?.mode ?? "form",
         message: prompt,

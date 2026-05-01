@@ -106,6 +106,29 @@ describe("session activity overlay store", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("enforces the overlay limit while the store stays open", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-overlays-"));
+    try {
+      const filePath = nodePath.join(dir, "overlays.json");
+      const store = await SessionActivityOverlayStore.open(filePath, {
+        ttlMs: 60_000,
+        limit: 2,
+      });
+
+      await store.put("session-1", toolActivity("kept-1", 1));
+      await store.put("session-1", toolActivity("kept-2", 2));
+      await store.put("session-1", toolActivity("kept-3", 3));
+
+      const overlays = store.entries();
+      assert.deepEqual(
+        overlays.map((entry) => entry.activity.id),
+        ["kept-2", "kept-3"],
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 function toolActivity(id: string, seq: number): SessionActivity {
