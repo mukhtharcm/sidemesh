@@ -321,6 +321,10 @@ jobs:
             --apiKey "$ASC_KEY_ID" \
             --apiIssuer "$ASC_ISSUER_ID"
 
+      - name: Install Python dependencies for ASC scripts
+        run: python3 -m pip install pyjwt --quiet --break-system-packages
+
+      - name: Update App Store Connect metadata
       - name: Update App Store Connect metadata
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
