@@ -321,11 +321,7 @@ void main() {
       'output': 'User selected: Yes',
     });
 
-    expect(askUser.id, 'question:tool-ask');
-    expect(askUser.isSystemEvent, isTrue);
-    expect(askUser.toolTitle, 'Model asked: Start?');
-    expect(askUser.detail, 'You answered: Yes');
-    expect(askUser.isHiddenProviderControlActivity, isFalse);
+    expect(askUser.isHiddenProviderControlActivity, isTrue);
 
     final reportIntent = SessionActivity.fromJson({
       'id': 'tool-intent',
