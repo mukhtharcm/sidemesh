@@ -283,6 +283,19 @@ jobs:
           echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
           echo "Building Sidemesh iOS $version ($build_number)"
 
+      - name: Generate release notes
+        run: python3 scripts/generate-release-notes.py
+
+      - name: Resolve build number conflicts
+        id: resolve_build_number
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+        run: python3 scripts/resolve-build-number.py
+
       - name: Build IPA
         working-directory: apps/mobile
         run: |
@@ -290,7 +303,7 @@ jobs:
             --release \
             --flavor prod \
             --build-name="${{ steps.version.outputs.version }}" \
-            --build-number="${{ steps.version.outputs.build_number }}" \
+            --build-number="${{ steps.resolve_build_number.outputs.build_number || steps.version.outputs.build_number }}" \
             --export-options-plist=ios/ExportOptions.plist
 
       - name: Upload to TestFlight
@@ -323,8 +336,8 @@ jobs:
           ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           BUILD_VERSION: ${{ steps.version.outputs.version }}
-          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
-          run: python3 scripts/add-build-to-beta-groups.py
+          BUILD_NUMBER: ${{ steps.resolve_build_number.outputs.build_number || steps.version.outputs.build_number }}
+        run: python3 scripts/add-build-to-beta-groups.py
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
