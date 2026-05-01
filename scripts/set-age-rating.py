@@ -27,19 +27,32 @@ def api(method, path, data=None):
     if data is not None:
         req.add_header("Content-Type", "application/json")
         req.data = json.dumps(data).encode("utf-8")
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 409:
+            print(f"ASC 409 Conflict (already exists): {method} {path}")
+            return {}
+        raise
 
 def main():
     apps = api("GET", f"/apps?filter[bundleId]={BUNDLE_ID}")["data"]
     app_id = apps[0]["id"]
 
-    declarations = api("GET", f"/apps/{app_id}/ageRatingDeclaration")["data"]
-    if declarations:
-        decl_id = declarations[0]["id"]
-    else:
-        decl_resp = api("POST", "/ageRatingDeclarations", {"data": {"type": "ageRatingDeclarations", "attributes": {}, "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})
-        decl_id = decl_resp["data"]["id"]
+    try:
+        declarations = api("GET", f"/apps/{app_id}/ageRatingDeclaration")["data"]
+        if declarations:
+            decl_id = declarations[0]["id"]
+        else:
+            decl_resp = api("POST", "/ageRatingDeclarations", {"data": {"type": "ageRatingDeclarations", "attributes": {}, "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})
+            decl_id = decl_resp["data"]["id"]
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            decl_resp = api("POST", "/ageRatingDeclarations", {"data": {"type": "ageRatingDeclarations", "attributes": {}, "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})
+            decl_id = decl_resp["data"]["id"]
+        else:
+            raise
 
     attrs = {
         "alcoholTobaccoOrDrugUseOrReferences": "NONE",

@@ -27,8 +27,14 @@ def api(method, path, data=None):
     if data is not None:
         req.add_header("Content-Type", "application/json")
         req.data = json.dumps(data).encode("utf-8")
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 409:
+            print(f"ASC 409 Conflict (already exists): {method} {path}")
+            return {}
+        raise
 
 def main():
     contact_first = os.environ.get("SIDEMESH_REVIEW_CONTACT_FIRST", "")
