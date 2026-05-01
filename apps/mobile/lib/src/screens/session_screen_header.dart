@@ -39,7 +39,7 @@ class _CachedTranscriptStrip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: colors.warning.withValues(alpha: 0.11),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.warning.withValues(alpha: 0.26)),
       ),
       child: Row(
@@ -135,7 +135,7 @@ class _SessionActionSheet extends StatelessWidget {
         .toList(growable: false);
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+        padding: const EdgeInsets.only(left: 10, top: 0, right: 10, bottom: 10),
         child: Align(
           alignment: Alignment.bottomCenter,
           child: ConstrainedBox(
@@ -143,7 +143,7 @@ class _SessionActionSheet extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: colors.surfaceElevated,
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: AppShapes.sheet,
                 border: Border.all(color: colors.border),
                 boxShadow: [
                   BoxShadow(
@@ -154,9 +154,9 @@ class _SessionActionSheet extends StatelessWidget {
                 ],
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: AppShapes.sheet,
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+                  padding: const EdgeInsets.only(left: 14, top: 10, right: 14, bottom: 14),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -167,7 +167,7 @@ class _SessionActionSheet extends StatelessWidget {
                           height: 4,
                           decoration: BoxDecoration(
                             color: colors.borderStrong.withValues(alpha: 0.55),
-                            borderRadius: BorderRadius.circular(999),
+                            borderRadius: AppShapes.pill,
                           ),
                         ),
                       ),
@@ -180,7 +180,7 @@ class _SessionActionSheet extends StatelessWidget {
                             height: 38,
                             decoration: BoxDecoration(
                               color: colors.accentMuted,
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: AppShapes.input,
                               border: Border.all(
                                 color: colors.accent.withValues(alpha: 0.24),
                               ),
@@ -274,7 +274,7 @@ class _SessionActionGroupCard extends StatelessWidget {
         DecoratedBox(
           decoration: BoxDecoration(
             color: colors.surface,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: AppShapes.card,
             border: Border.all(color: colors.border),
           ),
           child: Column(
@@ -319,7 +319,7 @@ class _SessionActionRow extends StatelessWidget {
       child: InkWell(
         onTap: () => Navigator.of(context).pop(action.value),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             children: [
               Container(
@@ -327,7 +327,7 @@ class _SessionActionRow extends StatelessWidget {
                 height: 34,
                 decoration: BoxDecoration(
                   color: tone.withValues(alpha: action.active ? 0.14 : 0.08),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: AppShapes.input,
                   border: Border.all(color: tone.withValues(alpha: 0.18)),
                 ),
                 child: Icon(action.icon, size: 18, color: tone),
@@ -406,9 +406,9 @@ class _SessionHeader extends StatelessWidget {
     final contextLabel = _contextUsageLabel(session.runtime);
     final contextTone = _contextUsageTone(session.runtime);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+      padding: const EdgeInsets.only(left: 16, top: 2, right: 16, bottom: 8),
       child: MeshCard(
-        padding: const EdgeInsets.fromLTRB(14, 9, 8, 9),
+        padding: const EdgeInsets.only(left: 14, top: 9, right: 8, bottom: 9),
         accentStrip: running ? colors.success : colors.accent,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -506,8 +506,8 @@ class _SessionHeader extends StatelessWidget {
               icon: Icon(Icons.tune_rounded, size: 18, color: colors.accent),
               tooltip: 'Session details',
               visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.all(6),
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              padding: const EdgeInsets.all(10),
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
             ),
           ],
         ),
@@ -675,7 +675,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
       child: InkWell(
         onTap: onDetails,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 10, 6),
+          padding: const EdgeInsets.only(left: 16, top: 0, right: 10, bottom: 6),
           child: Row(
             children: [
               _HeaderStatusDot(
@@ -867,7 +867,7 @@ class _GitDetailsSheet extends StatelessWidget {
 
     return SafeArea(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+        padding: const EdgeInsets.only(left: 20, top: 8, right: 20, bottom: 28),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1099,7 +1099,7 @@ class _GitDiffSheet extends StatelessWidget {
               ? 'Git diff'
               : _gitDiffTitle(snapshot.data!);
           return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+            padding: const EdgeInsets.only(left: 16, top: 8, right: 16, bottom: 20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1214,12 +1214,12 @@ class _PinnedListSheet extends StatelessWidget {
               height: 4,
               decoration: BoxDecoration(
                 color: colors.border,
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: AppShapes.pill,
               ),
             ),
             const SizedBox(height: 8),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+              padding: const EdgeInsets.only(left: 16, top: 4, right: 8, bottom: 4),
               child: Row(
                 children: [
                   Icon(
@@ -1282,7 +1282,7 @@ class _PinnedMessageSheet extends StatelessWidget {
     return SizedBox(
       height: MediaQuery.of(context).size.height * 0.82,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 8, 18, 20),
+        padding: const EdgeInsets.only(left: 18, top: 8, right: 18, bottom: 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1606,11 +1606,11 @@ class _PendingActionCardState extends State<_PendingActionCard> {
               filled: true,
               fillColor: colors.surfaceMuted,
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: AppShapes.input,
                 borderSide: BorderSide(color: colors.border),
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: AppShapes.input,
                 borderSide: BorderSide(color: colors.border),
               ),
             ),
@@ -1798,11 +1798,11 @@ class _PendingActionCardState extends State<_PendingActionCard> {
       filled: true,
       fillColor: colors.surfaceMuted,
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         borderSide: BorderSide(color: colors.border),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShapes.input,
         borderSide: BorderSide(color: colors.border),
       ),
     );
@@ -2070,7 +2070,7 @@ class _HistoryTruncationCard extends StatelessWidget {
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+      padding: const EdgeInsets.all(4),
       child: Row(
         children: [
           Icon(Icons.history_rounded, size: 14, color: colors.textSecondary),

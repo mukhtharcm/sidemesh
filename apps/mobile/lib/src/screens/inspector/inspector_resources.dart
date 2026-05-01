@@ -11,6 +11,7 @@ import '../../image_blob_cache_store.dart';
 import '../../models.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/app_tokens.dart';
 import '../../widgets/app_snackbar.dart';
 import '../../widgets/mesh_widgets.dart';
 import '../image_viewer_screen.dart';
@@ -240,7 +241,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
                   '${_resources.length} items',
                   style: Theme.of(
                     context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                  ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.emphasis),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -473,7 +474,7 @@ class _ResourceListCard extends StatelessWidget {
                 height: 38,
                 decoration: BoxDecoration(
                   color: colors.surfaceMuted,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: AppShapes.input,
                   border: Border.all(color: colors.border),
                 ),
                 alignment: Alignment.center,
@@ -493,7 +494,7 @@ class _ResourceListCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.emphasis,
                         height: 1.3,
                       ),
                     ),
@@ -607,7 +608,7 @@ class _ResourceMediaCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.emphasis,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -831,7 +832,7 @@ class _MediaFallback extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(
                     context,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.emphasis),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -880,7 +881,7 @@ class _ResourcesEmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ).textTheme.titleMedium?.copyWith(fontWeight: AppWeights.emphasis),
             ),
             const SizedBox(height: 8),
             Text(
