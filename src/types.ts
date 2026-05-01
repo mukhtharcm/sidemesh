@@ -285,7 +285,12 @@ export interface SessionActivityBase {
     | "turn_diff"
     | "web_search"
     | "image_generation"
-    | "context_compaction";
+    | "context_compaction"
+    | "plan"
+    | "task"
+    | "subagent"
+    | "reasoning"
+    | "system_event";
   turnId: string | null;
   createdAt: number;
   seq: number;
@@ -404,6 +409,56 @@ export interface ContextCompactionActivity extends SessionActivityBase {
   type: "context_compaction";
 }
 
+export interface PlanActivity extends SessionActivityBase {
+  type: "plan";
+  action:
+    | "created"
+    | "updated"
+    | "cleared"
+    | "review_requested"
+    | "approved"
+    | "rejected";
+  title: string;
+  summary: string | null;
+  content: string | null;
+}
+
+export interface TaskActivity extends SessionActivityBase {
+  type: "task";
+  action: "started" | "completed" | "failed";
+  title: string;
+  summary: string | null;
+}
+
+export interface SubagentActivity extends SessionActivityBase {
+  type: "subagent";
+  action: "started" | "completed" | "failed" | "selected" | "deselected";
+  agentId: string | null;
+  agentName: string | null;
+  agentDisplayName: string | null;
+  description: string | null;
+  summary: string | null;
+  durationMs: number | null;
+  model: string | null;
+  totalTokens: number | null;
+  totalToolCalls: number | null;
+  error: string | null;
+}
+
+export interface ReasoningActivity extends SessionActivityBase {
+  type: "reasoning";
+  reasoningId: string | null;
+  title: string | null;
+  content: string | null;
+}
+
+export interface SystemEventActivity extends SessionActivityBase {
+  type: "system_event";
+  level: "info" | "warning" | "error";
+  title: string;
+  detail: string | null;
+}
+
 export type SessionActivity =
   | CommandActivity
   | ToolActivity
@@ -411,7 +466,12 @@ export type SessionActivity =
   | TurnDiffActivity
   | WebSearchActivity
   | ImageGenerationActivity
-  | ContextCompactionActivity;
+  | ContextCompactionActivity
+  | PlanActivity
+  | TaskActivity
+  | SubagentActivity
+  | ReasoningActivity
+  | SystemEventActivity;
 
 export type PendingActionApprovalScope = "once" | "session" | "location";
 
