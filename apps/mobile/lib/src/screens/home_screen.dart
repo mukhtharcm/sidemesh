@@ -16,6 +16,7 @@ import '../recent_sessions_live_store.dart';
 import '../recent_session_filter.dart';
 import '../screen_awake_controller.dart';
 import '../session_favorites_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../session_cache_store.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';
@@ -490,6 +491,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   }
 }
 
+enum SessionViewMode { flat, byCwd, byHost }
+
 class _TabDef {
   const _TabDef({
     required this.title,
@@ -792,9 +795,17 @@ String _hostListSignature(HostProfile host) {
   ].join('\u001f');
 }
 
+@immutable
+class _SessionGroup {
+  const _SessionGroup({required this.title, required this.entries});
+  final String title;
+  final List<RemoteSessionEntry> entries;
+}
+
 class _RecentPaneState extends State<RecentPane> {
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
   final RecentSessionsStore _store = RecentSessionsStore();
+  SessionViewMode _viewMode = SessionViewMode.flat;
 
   @override
   void initState() {
@@ -803,6 +814,62 @@ class _RecentPaneState extends State<RecentPane> {
     SessionReadStore.instance.ensureLoaded();
     _store.addListener(_handleStoreChanged);
     _store.configure(hosts: widget.hosts, api: widget.api);
+    _loadViewMode();
+  }
+
+  Future<void> _loadViewMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('sidemesh.recent.viewMode');
+    if (!mounted) return;
+    setState(() {
+      _viewMode = switch (raw) {
+        'byCwd' => SessionViewMode.byCwd,
+        'byHost' => SessionViewMode.byHost,
+        _ => SessionViewMode.flat,
+      };
+    });
+  }
+
+  Future<void> _setViewMode(SessionViewMode mode) async {
+    if (_viewMode == mode) return;
+    setState(() => _viewMode = mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('sidemesh.recent.viewMode', switch (mode) {
+      SessionViewMode.byCwd => 'byCwd',
+      SessionViewMode.byHost => 'byHost',
+      SessionViewMode.flat => 'flat',
+    });
+  }
+
+  String _cwdBasename(String cwd) {
+    if (cwd.isEmpty || cwd == '/') return 'Unknown';
+    final parts = cwd.split('/');
+    return parts.lastWhere((p) => p.isNotEmpty, orElse: () => 'Unknown');
+  }
+
+  List<_SessionGroup> _groupEntries(List<RemoteSessionEntry> entries) {
+    if (_viewMode == SessionViewMode.flat) return const [];
+    final groups = <String, List<RemoteSessionEntry>>{};
+    for (final entry in entries) {
+      final key = switch (_viewMode) {
+        SessionViewMode.byCwd => _cwdBasename(entry.session.cwd),
+        SessionViewMode.byHost => entry.host.label,
+        SessionViewMode.flat => '',
+      };
+      (groups[key] ??= []).add(entry);
+    }
+    for (final list in groups.values) {
+      list.sort((a, b) => b.session.updatedAt.compareTo(a.session.updatedAt));
+    }
+    final sortedKeys = groups.keys.toList()..sort((a, b) {
+      if (a == 'Unknown') return 1;
+      if (b == 'Unknown') return -1;
+      return a.compareTo(b);
+    });
+    return sortedKeys.map((k) => _SessionGroup(
+      title: k,
+      entries: groups[k]!,
+    )).toList();
   }
 
   @override
@@ -882,14 +949,16 @@ class _RecentPaneState extends State<RecentPane> {
       });
     }
     final sorted = visible.toList();
-    sorted.sort((left, right) {
-      final leftFavorite = _favorites.isFavorite(left.host, left.session.id);
-      final rightFavorite = _favorites.isFavorite(right.host, right.session.id);
-      if (leftFavorite != rightFavorite) {
-        return leftFavorite ? -1 : 1;
-      }
-      return right.session.updatedAt.compareTo(left.session.updatedAt);
-    });
+    if (_viewMode == SessionViewMode.flat) {
+      sorted.sort((left, right) {
+        final leftFavorite = _favorites.isFavorite(left.host, left.session.id);
+        final rightFavorite = _favorites.isFavorite(right.host, right.session.id);
+        if (leftFavorite != rightFavorite) {
+          return leftFavorite ? -1 : 1;
+        }
+        return right.session.updatedAt.compareTo(left.session.updatedAt);
+      });
+    }
     return sorted;
   }
 
@@ -926,6 +995,9 @@ class _RecentPaneState extends State<RecentPane> {
       ]),
       builder: (context, _) {
         final sortedEntries = _sortEntries(_store.entries);
+        final groups = _groupEntries(sortedEntries);
+        final isGrouped = groups.isNotEmpty;
+        final showToggle = sortedEntries.isNotEmpty || _viewMode != SessionViewMode.flat;
         final hasCachedEntries =
             _store.entries.isNotEmpty &&
             _store.confirmedHostIds.length < widget.hosts.length;
@@ -976,36 +1048,181 @@ class _RecentPaneState extends State<RecentPane> {
           );
         }
         final leadingStrips = (isRefreshing ? 1 : 0) + (hasFailures ? 1 : 0);
-        return RefreshIndicator(
-          color: context.colors.accent,
-          onRefresh: handleRefresh,
-          child: ListView.separated(
-            padding: basePadding,
-            itemCount: sortedEntries.length + leadingStrips,
-            separatorBuilder: (_, _) => SizedBox(height: widget.dense ? 2 : 10),
-            itemBuilder: (context, index) {
-              var offset = 0;
-              if (isRefreshing) {
-                if (index == offset) {
-                  return _RecentProgressStrip(
-                    remaining: _store.pendingHostIds.length,
-                    total: widget.hosts.length,
-                    showingCached: hasCachedEntries,
-                  );
-                }
-                offset += 1;
-              }
-              if (hasFailures) {
-                if (index == offset) {
-                  return _RecentErrorBanner(
-                    hostLabels: _store.failedHostLabels,
-                    onRetry: handleRefresh,
-                  );
-                }
-                offset += 1;
-              }
-              final entry = sortedEntries[index - offset];
-              return _SessionRowCard(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (showToggle) ...[
+              SizedBox(height: widget.dense ? 4 : 8),
+              _ViewModeToggle(
+                mode: _viewMode,
+                dense: widget.dense,
+                onChanged: _setViewMode,
+              ),
+              SizedBox(height: widget.dense ? 6 : 10),
+            ],
+            Expanded(
+              child: RefreshIndicator(
+                color: context.colors.accent,
+                onRefresh: handleRefresh,
+                child: isGrouped
+                    ? _buildGroupedList(
+                        context,
+                        groups,
+                        isRefreshing: isRefreshing,
+                        hasFailures: hasFailures,
+                        hasCachedEntries: hasCachedEntries,
+                        handleRefresh: handleRefresh,
+                      )
+                    : ListView.separated(
+                        padding: basePadding,
+                        itemCount: sortedEntries.length + leadingStrips,
+                        separatorBuilder: (_, _) => SizedBox(height: widget.dense ? 2 : 10),
+                        itemBuilder: (context, index) {
+                          var offset = 0;
+                          if (isRefreshing) {
+                            if (index == offset) {
+                              return _RecentProgressStrip(
+                                remaining: _store.pendingHostIds.length,
+                                total: widget.hosts.length,
+                                showingCached: hasCachedEntries,
+                              );
+                            }
+                            offset += 1;
+                          }
+                          if (hasFailures) {
+                            if (index == offset) {
+                              return _RecentErrorBanner(
+                                hostLabels: _store.failedHostLabels,
+                                onRetry: handleRefresh,
+                              );
+                            }
+                            offset += 1;
+                          }
+                          final entry = sortedEntries[index - offset];
+                          return _SessionRowCard(
+                            host: entry.host,
+                            session: entry.session,
+                            favorite: _favorites.isFavorite(entry.host, entry.session.id),
+                            selected: widget.selectedSessionId == entry.session.id,
+                            dense: widget.dense,
+                            onTap: () => widget.onOpenSession(entry.host, entry.session),
+                            onToggleFavorite: () {
+                              _favorites.toggleFavorite(entry.host, entry.session.id);
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildGroupedList(
+    BuildContext context,
+    List<_SessionGroup> groups, {
+    required bool isRefreshing,
+    required bool hasFailures,
+    required bool hasCachedEntries,
+    required Future<void> Function() handleRefresh,
+  }) {
+    final colors = context.colors;
+    final padding = widget.padding ??
+        (widget.dense
+            ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
+            : const EdgeInsets.fromLTRB(16, 8, 16, 32));
+    return ListView.builder(
+      padding: padding,
+      itemCount: (isRefreshing ? 1 : 0) + (hasFailures ? 1 : 0) +
+          groups.fold<int>(0, (sum, g) => sum + g.entries.length + 1),
+      itemBuilder: (context, index) {
+        var offset = 0;
+        if (isRefreshing) {
+          if (index == offset) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: widget.dense ? 6 : 10),
+              child: _RecentProgressStrip(
+                remaining: _store.pendingHostIds.length,
+                total: widget.hosts.length,
+                showingCached: hasCachedEntries,
+              ),
+            );
+          }
+          offset += 1;
+        }
+        if (hasFailures) {
+          if (index == offset) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: widget.dense ? 6 : 10),
+              child: _RecentErrorBanner(
+                hostLabels: _store.failedHostLabels,
+                onRetry: handleRefresh,
+              ),
+            );
+          }
+          offset += 1;
+        }
+        var current = offset;
+        for (final group in groups) {
+          final headerIndex = current;
+          final entriesStart = headerIndex + 1;
+          final entriesEnd = entriesStart + group.entries.length;
+          if (index == headerIndex) {
+            return Padding(
+              padding: EdgeInsets.only(
+                top: widget.dense ? 8 : 14,
+                bottom: widget.dense ? 4 : 8,
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _viewMode == SessionViewMode.byCwd
+                        ? Icons.folder_outlined
+                        : Icons.hub_outlined,
+                    size: 14,
+                    color: colors.textSecondary,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      group.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(
+                        color: colors.textSecondary,
+                        fontSize: widget.dense ? 10 : 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: colors.surfaceElevated,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Text(
+                      '${group.entries.length}',
+                      style: monoStyle(
+                        color: colors.textTertiary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          if (index >= entriesStart && index < entriesEnd) {
+            final entry = group.entries[index - entriesStart];
+            return Padding(
+              padding: EdgeInsets.only(bottom: widget.dense ? 2 : 10),
+              child: _SessionRowCard(
                 host: entry.host,
                 session: entry.session,
                 favorite: _favorites.isFavorite(entry.host, entry.session.id),
@@ -1015,11 +1232,84 @@ class _RecentPaneState extends State<RecentPane> {
                 onToggleFavorite: () {
                   _favorites.toggleFavorite(entry.host, entry.session.id);
                 },
-              );
-            },
-          ),
-        );
+              ),
+            );
+          }
+          current = entriesEnd;
+        }
+        return const SizedBox.shrink();
       },
+    );
+  }
+}
+
+class _ViewModeToggle extends StatelessWidget {
+  const _ViewModeToggle({
+    required this.mode,
+    required this.dense,
+    required this.onChanged,
+  });
+
+  final SessionViewMode mode;
+  final bool dense;
+  final ValueChanged<SessionViewMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    Widget chip(SessionViewMode m, IconData icon, String label) {
+      final selected = mode == m;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => onChanged(m),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            curve: Curves.easeOut,
+            padding: EdgeInsets.symmetric(vertical: dense ? 4 : 6),
+            decoration: BoxDecoration(
+              color: selected ? colors.accentMuted : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: selected ? colors.accent.withValues(alpha: 0.35) : Colors.transparent,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: dense ? 12 : 14, color: selected ? colors.accent : colors.textSecondary),
+                SizedBox(width: dense ? 4 : 5),
+                Text(
+                  label,
+                  style: monoStyle(
+                    color: selected ? colors.accent : colors.textSecondary,
+                    fontSize: dense ? 9.5 : 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: dense ? 6 : 16),
+      child: Container(
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: colors.border),
+        ),
+        child: Row(
+          children: [
+            chip(SessionViewMode.flat, Icons.format_list_bulleted_rounded, 'Flat'),
+            chip(SessionViewMode.byCwd, Icons.folder_outlined, 'CWD'),
+            chip(SessionViewMode.byHost, Icons.hub_outlined, 'Host'),
+          ],
+        ),
+      ),
     );
   }
 }
