@@ -174,6 +174,9 @@ export function toPublicPendingAction(action: PendingAction): PendingAction {
     ...(action.recoverable === undefined
       ? {}
       : { recoverable: action.recoverable }),
+    ...(action.relatedActivityId === undefined
+      ? {}
+      : { relatedActivityId: action.relatedActivityId }),
     ...(action.approval === undefined ? {} : { approval: action.approval }),
     ...(action.userInput === undefined ? {} : { userInput: action.userInput }),
     ...(action.elicitation === undefined

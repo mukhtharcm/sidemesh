@@ -160,7 +160,10 @@ export function isRecoveredPendingAction(action: AgentPendingAction): boolean {
 }
 
 function shouldPersistPendingAction(action: PendingAction): boolean {
-  return action.kind === "user_input" || action.kind === "elicitation";
+  return (
+    (action.kind === "user_input" || action.kind === "elicitation") &&
+    action.recoverable !== false
+  );
 }
 
 function toRecoveredAction(action: PendingAction): AgentPendingAction {
@@ -236,6 +239,9 @@ function normalizePendingAction(value: unknown): PendingAction | null {
       ? { sessionTitle: stringValue(typed.sessionTitle)! }
       : {}),
     ...(stringValue(typed.cwd) ? { cwd: stringValue(typed.cwd)! } : {}),
+    ...(stringValue(typed.relatedActivityId)
+      ? { relatedActivityId: stringValue(typed.relatedActivityId)! }
+      : {}),
   };
   if (kind === "user_input") {
     const userInput = normalizeUserInput(typed.userInput);

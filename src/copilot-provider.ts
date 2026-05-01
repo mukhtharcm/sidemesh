@@ -1318,7 +1318,21 @@ export class CopilotAgentProvider
       return { answer: "", wasFreeform: true };
     }
 
-    const action = buildCopilotUserInputAction(session, request);
+    const action = buildCopilotUserInputAction(
+      session,
+      request,
+      findPendingCopilotInteractionActivityId(session, {
+        action: "ask",
+        toolNames: [
+          "ask_user",
+          "askuser",
+          "question",
+          "user_input",
+          "prompt_user",
+        ],
+        prompt: request.question,
+      }),
+    );
     this.emit("liveEvent", {
       type: "action_opened",
       action,
@@ -1958,6 +1972,7 @@ function buildCopilotPendingAction(
 function buildCopilotUserInputAction(
   session: CopilotSessionState,
   request: CopilotSdkUserInputRequest,
+  relatedActivityId?: string,
 ): AgentPendingAction {
   const actionId = `copilot-user-input-${randomUUID()}`;
   const question = request.question?.trim() || "Agent question";
@@ -1985,6 +2000,7 @@ function buildCopilotUserInputAction(
     providerRequestId: actionId,
     providerRequestKind: "copilot/ask_user",
     providerPayload: request,
+    ...(relatedActivityId ? { relatedActivityId } : {}),
   };
 }
 
@@ -2018,6 +2034,58 @@ function buildCopilotElicitationAction(
     providerRequestKind: "copilot/elicitation",
     providerPayload: request,
   };
+}
+
+function findPendingCopilotInteractionActivityId(
+  session: CopilotSessionState,
+  options: {
+    action: ToolActivitySemantic["action"];
+    toolNames: string[];
+    prompt?: string;
+  },
+): string | undefined {
+  const expectedPrompt = options.prompt?.trim();
+  const toolNames = new Set(
+    options.toolNames.map((name) => name.toLowerCase()),
+  );
+  const activities = [...session.activities.values()].sort(
+    (left, right) => right.seq - left.seq,
+  );
+  for (const activity of activities) {
+    if (!isPendingInteractionToolActivity(activity, options.action, toolNames)) {
+      continue;
+    }
+    if (!expectedPrompt) {
+      return activity.id;
+    }
+    const prompt = readFirstString(asRecord(activity.args), [
+      "question",
+      "prompt",
+      "message",
+      "text",
+    ]);
+    if (!prompt || prompt === expectedPrompt) {
+      return activity.id;
+    }
+  }
+  return undefined;
+}
+
+function isPendingInteractionToolActivity(
+  activity: SessionActivity,
+  action: ToolActivitySemantic["action"],
+  toolNames: Set<string>,
+): activity is ToolActivity {
+  if (activity.type !== "tool") {
+    return false;
+  }
+  if (activity.status === "completed" || activity.status === "failed") {
+    return false;
+  }
+  if (activity.semantic?.category === "interaction") {
+    return activity.semantic.action === action;
+  }
+  return toolNames.has(activity.toolName.toLowerCase());
 }
 
 function copilotPendingActionKind(kind: unknown): AgentPendingAction["kind"] {
