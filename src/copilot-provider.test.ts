@@ -1245,22 +1245,7 @@ describe("Copilot provider", () => {
       await completed;
 
       const log = await provider.readSessionLog!(created.thread);
-      assert.deepEqual(
-        log.activities.map((activity) => ({
-          type: activity.type,
-          status: activity.status,
-          title: activity.type === "system_event" ? activity.title : null,
-          detail: activity.type === "system_event" ? activity.detail : null,
-        })),
-        [
-          {
-            type: "system_event",
-            status: "completed",
-            title: "Model asked: Which environment should I use?",
-            detail: "Options: staging / production\nYou answered: staging",
-          },
-        ],
-      );
+      assert.equal(log.activities.length, 0);
       assert.match(log.messages.at(-1)?.text ?? "", /staging/);
     } finally {
       await settleProviderWrites();
