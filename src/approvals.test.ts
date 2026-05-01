@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  buildPendingActionResponseMessage,
   parsePendingActionDecision,
   parsePendingActionResponseBody,
   toPublicPendingAction,
@@ -201,103 +200,5 @@ describe("provider-neutral approvals", () => {
         allowFreeform: false,
       },
     });
-  });
-
-  it("builds visible user messages for question and form responses", () => {
-    assert.deepEqual(
-      buildPendingActionResponseMessage(
-        {
-          kind: "user_input",
-          title: "Agent question",
-          userInput: {
-            question: "Which environment?",
-            choices: ["staging", "production"],
-            allowFreeform: false,
-          },
-        },
-        {
-          answer: "staging",
-          wasFreeform: false,
-        },
-        {
-          id: "msg-1",
-          createdAt: 123,
-          seq: 7,
-        },
-      ),
-      {
-        id: "msg-1",
-        role: "user",
-        text: "staging",
-        attachments: [],
-        createdAt: 123,
-        seq: 7,
-      },
-    );
-
-    assert.deepEqual(
-      buildPendingActionResponseMessage(
-        {
-          kind: "elicitation",
-          title: "Structured input requested",
-          elicitation: {
-            mode: "form",
-            message: "Choose deployment options",
-            fields: [
-              {
-                key: "region",
-                type: "string",
-                title: "Region",
-                required: true,
-              },
-              {
-                key: "dryRun",
-                type: "boolean",
-                title: "Dry run",
-                required: false,
-              },
-            ],
-          },
-        },
-        {
-          action: "accept",
-          content: { region: "us-east", dryRun: true },
-        },
-        {
-          id: "msg-2",
-          createdAt: 456,
-          seq: 8,
-        },
-      ),
-      {
-        id: "msg-2",
-        role: "user",
-        text: "Region: us-east\nDry run: Yes",
-        attachments: [],
-        createdAt: 456,
-        seq: 8,
-      },
-    );
-
-    assert.equal(
-      buildPendingActionResponseMessage(
-        {
-          kind: "elicitation",
-          title: "Structured input requested",
-          elicitation: {
-            mode: "form",
-            message: "Choose deployment options",
-            fields: [],
-          },
-        },
-        { action: "decline" },
-        {
-          id: "msg-3",
-          createdAt: 789,
-          seq: 9,
-        },
-      ),
-      null,
-    );
   });
 });

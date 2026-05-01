@@ -5,7 +5,6 @@ import type {
   PendingActionDecisionKind,
   PendingActionDecisionRequest,
   PendingActionElicitationFieldValue,
-  SessionMessage,
 } from "./types.js";
 
 export interface NormalizedPendingActionDecision {
@@ -179,69 +178,6 @@ export function toPublicPendingAction(action: PendingAction): PendingAction {
   };
 }
 
-export function buildPendingActionResponseMessage(
-  action: Pick<PendingAction, "kind" | "title" | "userInput" | "elicitation">,
-  response: PendingActionResponseInput,
-  options: {
-    id: string;
-    createdAt: number;
-    seq: number;
-  },
-): SessionMessage | null {
-  if (action.kind === "user_input") {
-    if (
-      !response ||
-      typeof response !== "object" ||
-      !("answer" in response) ||
-      typeof response.answer !== "string"
-    ) {
-      return null;
-    }
-    const text = response.answer.trim();
-    if (!text) {
-      return null;
-    }
-    return {
-      id: options.id,
-      role: "user",
-      text,
-      attachments: [],
-      createdAt: options.createdAt,
-      seq: options.seq,
-    };
-  }
-
-  if (action.kind !== "elicitation") {
-    return null;
-  }
-  if (
-    !response ||
-    typeof response !== "object" ||
-    !("action" in response) ||
-    (response.action !== "accept" &&
-      response.action !== "decline" &&
-      response.action !== "cancel")
-  ) {
-    return null;
-  }
-  if (response.action !== "accept") {
-    return null;
-  }
-
-  const text = buildElicitationResponseText(action, response.content);
-  if (!text) {
-    return null;
-  }
-  return {
-    id: options.id,
-    role: "user",
-    text,
-    attachments: [],
-    createdAt: options.createdAt,
-    seq: options.seq,
-  };
-}
-
 function decisionFromLegacy(value: string): NormalizedPendingActionDecision | null {
   if (!isLegacyDecision(value)) {
     return null;
@@ -289,65 +225,6 @@ function normalizeElicitationContent(
     result[key] = fieldValue;
   }
   return result;
-}
-
-function buildElicitationResponseText(
-  action: Pick<PendingAction, "title" | "elicitation">,
-  content: Record<string, PendingActionElicitationFieldValue> | undefined,
-): string | null {
-  if (action.elicitation?.mode === "url") {
-    return "Continued browser sign-in";
-  }
-  if (!content || Object.keys(content).length === 0) {
-    return action.title.trim() || "Submitted form";
-  }
-
-  const labels = new Map(
-    (action.elicitation?.fields ?? []).map((field) => [field.key, field.title]),
-  );
-  const seen = new Set<string>();
-  const lines: string[] = [];
-
-  for (const field of action.elicitation?.fields ?? []) {
-    if (!(field.key in content)) {
-      continue;
-    }
-    seen.add(field.key);
-    lines.push(`${field.title}: ${formatElicitationFieldValue(content[field.key]!)}`);
-  }
-
-  for (const [key, value] of Object.entries(content)) {
-    if (seen.has(key)) {
-      continue;
-    }
-    lines.push(
-      `${labels.get(key) || humanizeFieldKey(key)}: ${formatElicitationFieldValue(value)}`,
-    );
-  }
-
-  const text = lines.join("\n");
-  return text.trim() || null;
-}
-
-function formatElicitationFieldValue(
-  value: PendingActionElicitationFieldValue,
-): string {
-  if (Array.isArray(value)) {
-    return value.join(", ");
-  }
-  if (typeof value === "boolean") {
-    return value ? "Yes" : "No";
-  }
-  return String(value);
-}
-
-function humanizeFieldKey(value: string): string {
-  return value
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/^./, (match) => match.toUpperCase());
 }
 
 function isElicitationFieldValue(

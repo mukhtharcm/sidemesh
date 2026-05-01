@@ -3786,7 +3786,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     try {
-      final submittedMessage = await widget.api.respondToAction(
+      await widget.api.respondToAction(
         widget.host,
         actionId: action.id,
         response: response,
@@ -3796,15 +3796,9 @@ class _SessionScreenState extends State<SessionScreen>
       }
       HapticFeedback.selectionClick();
       setState(() {
-        if (submittedMessage != null) {
-          _upsertOptimisticMessage(submittedMessage);
-        }
         _pendingAction = null;
       });
       _syncSessionLiveActivity();
-      if (submittedMessage != null) {
-        _scrollToBottomFast();
-      }
       final label = switch (action.kind) {
         'user_input' => 'Answer sent',
         'elicitation' => 'Response sent',
@@ -4455,16 +4449,6 @@ class _SessionScreenState extends State<SessionScreen>
       activity.targetUrl ?? '',
       activity.pattern ?? '',
       activity.savedPath ?? '',
-      activity.activityAction ?? '',
-      activity.summary ?? '',
-      activity.content ?? '',
-      activity.detail ?? '',
-      activity.level ?? '',
-      activity.agentName ?? '',
-      activity.agentDisplayName ?? '',
-      activity.description ?? '',
-      activity.model ?? '',
-      activity.errorText ?? '',
       activity.terminalInput ?? '',
       changesText,
       tail,
@@ -4493,20 +4477,6 @@ class _SessionScreenState extends State<SessionScreen>
         return q.isEmpty ? 'Web search' : 'Web: $q';
       case 'image_generation':
         return 'Generated image';
-      case 'plan':
-      case 'task':
-      case 'reasoning':
-      case 'system_event':
-        final title = (activity.toolTitle ?? '').trim();
-        if (title.isNotEmpty) return title;
-        final summary = (activity.summary ?? '').trim();
-        if (summary.isNotEmpty) return summary;
-        return activity.type.replaceAll('_', ' ');
-      case 'subagent':
-        final displayName = (activity.agentDisplayName ?? '').trim();
-        if (displayName.isNotEmpty) return displayName;
-        final name = (activity.agentName ?? '').trim();
-        return name.isEmpty ? 'Subagent' : name;
       default:
         return activity.type;
     }

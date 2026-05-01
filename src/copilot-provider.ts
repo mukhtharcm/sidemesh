@@ -50,7 +50,7 @@ import {
   type CopilotSdkUserInputRequest,
   type CopilotSdkUserInputResponse,
 } from "./copilot-sdk-client.js";
-import { mergeActivity, normalizeStoredSessionActivity } from "./activity.js";
+import { normalizeStoredSessionActivity } from "./activity.js";
 import type {
   ModelSummary,
   PendingActionElicitationField,
@@ -86,9 +86,6 @@ interface CopilotSessionState {
   nextSeq: number;
   copilotSessionId: string | null;
   copilotSessionCreated: boolean;
-  toolRequests: Map<string, CopilotToolRequestMetadata>;
-  hiddenToolCallIds: Set<string>;
-  reasoningBuffers: Map<string, string>;
   sdkSession?: CopilotSdkSession | null;
 }
 
@@ -130,14 +127,6 @@ interface PendingCopilotElicitation {
   resolve(result: CopilotSdkElicitationResult): void;
 }
 
-interface CopilotToolRequestMetadata {
-  toolName: string;
-  toolTitle: string | null;
-  intentionSummary: string | null;
-  mcpServerName: string | null;
-  type: string | null;
-}
-
 type CopilotSessionApproval = Extract<
   CopilotSdkPermissionResult,
   { kind: "approve-for-session" }
@@ -149,25 +138,6 @@ const DEFAULT_COPILOT_STATE_DIR = nodePath.join(
   "copilot-provider",
 );
 const DEFAULT_SIDEMESH_COPILOT_MODEL = "auto";
-const COPILOT_HIDDEN_TOOL_KEYS = new Set([
-  "ask_user",
-  "request_user_input",
-  "user_input",
-  "elicitation",
-  "request_elicitation",
-]);
-const COPILOT_COMMENTARY_TOOL_KEYS = new Set([
-  "report_intent",
-  "assistant_intent",
-  "report_progress",
-]);
-const COPILOT_TASK_TOOL_KEYS = new Set([
-  "update_plan",
-  "todo_write",
-  "todo_update",
-  "write_todo",
-  "write_todos",
-]);
 const COPILOT_SESSION_MODES = [
   "interactive",
   "plan",
@@ -779,9 +749,6 @@ export class CopilotAgentProvider
       nextSeq: 0,
       copilotSessionId: id,
       copilotSessionCreated: false,
-      toolRequests: new Map(),
-      hiddenToolCallIds: new Set(),
-      reasoningBuffers: new Map(),
     };
     this.sessions.set(id, session);
     this.loadedSessionIds.add(id);
@@ -1037,7 +1004,6 @@ export class CopilotAgentProvider
       if (!active) {
         return;
       }
-      rememberCopilotToolRequests(session.toolRequests, event.data.toolRequests);
       const turnId = active.turnId;
       const messageId = event.data.messageId || event.id;
       if (active.completedAssistantMessageIds.has(messageId)) {
@@ -1056,154 +1022,6 @@ export class CopilotAgentProvider
       active.completedAssistantMessageIds.add(messageId);
       active.assistantBuffers.delete(messageId);
       this.persistEventually();
-      return;
-    }
-
-    if (event.type === "assistant.intent") {
-      if (active) {
-        this.appendCopilotCommentaryMessage(
-          session,
-          active.turnId,
-          event.data.intent,
-          `copilot-intent:${event.id}`,
-        );
-      }
-      return;
-    }
-
-    if (event.type === "session.plan_changed") {
-      this.upsertAndEmitActivity(
-        session,
-        active?.turnId ?? null,
-        buildCopilotPlanChangedActivity({
-          activityId: `copilot-plan:${event.id}`,
-          turnId: active?.turnId ?? null,
-          operation: event.data.operation,
-        }),
-      );
-      return;
-    }
-
-    if (event.type === "session.task_complete") {
-      this.upsertAndEmitActivity(
-        session,
-        active?.turnId ?? null,
-        buildCopilotTaskCompleteActivity({
-          activityId: `copilot-task-complete:${event.id}`,
-          turnId: active?.turnId ?? null,
-          success: event.data.success,
-          summary: event.data.summary,
-        }),
-      );
-      return;
-    }
-
-    if (event.type === "assistant.reasoning_delta") {
-      const reasoningId = stringValue(event.data.reasoningId) ?? null;
-      const activityId = copilotReasoningActivityId(event);
-      const delta = event.data.deltaContent;
-      const existing = session.activities.get(activityId);
-      const existingContent =
-        existing?.type === "reasoning" ? existing.content ?? "" : "";
-      const content = `${session.reasoningBuffers.get(activityId) ?? existingContent}${delta}`;
-      session.reasoningBuffers.set(activityId, content);
-      this.upsertAndEmitActivity(
-        session,
-        active?.turnId ?? null,
-        buildCopilotReasoningActivity({
-          activityId,
-          turnId: active?.turnId ?? null,
-          reasoningId,
-          content,
-          status: "in_progress",
-          agentId: stringValue((event as { agentId?: unknown }).agentId) ?? null,
-        }),
-      );
-      return;
-    }
-
-    if (event.type === "assistant.reasoning") {
-      const reasoningId = stringValue(event.data.reasoningId) ?? null;
-      const activityId = copilotReasoningActivityId(event);
-      const content =
-        stringValue(event.data.content) ??
-        session.reasoningBuffers.get(activityId) ??
-        null;
-      if (content) {
-        session.reasoningBuffers.set(activityId, content);
-      }
-      this.upsertAndEmitActivity(
-        session,
-        active?.turnId ?? null,
-        buildCopilotReasoningActivity({
-          activityId,
-          turnId: active?.turnId ?? null,
-          reasoningId,
-          content,
-          status: "completed",
-          agentId: stringValue((event as { agentId?: unknown }).agentId) ?? null,
-        }),
-      );
-      return;
-    }
-
-    const subagentActivity = buildCopilotSubagentActivity(
-      event,
-      active?.turnId ?? null,
-    );
-    if (subagentActivity) {
-      this.upsertAndEmitActivity(session, active?.turnId ?? null, subagentActivity);
-      return;
-    }
-
-    const notificationActivity = buildCopilotSystemNotificationActivity(
-      event,
-      active?.turnId ?? null,
-    );
-    if (notificationActivity) {
-      this.upsertAndEmitActivity(
-        session,
-        active?.turnId ?? null,
-        notificationActivity,
-      );
-      return;
-    }
-
-    const planReviewActivity = buildCopilotPlanReviewActivity(
-      event,
-      active?.turnId ?? null,
-    );
-    if (planReviewActivity) {
-      this.upsertAndEmitActivity(
-        session,
-        active?.turnId ?? null,
-        planReviewActivity,
-      );
-      return;
-    }
-
-    const systemActivity = buildCopilotSystemEventFromEvent(
-      event,
-      active?.turnId ?? null,
-    );
-    if (systemActivity) {
-      this.upsertAndEmitActivity(session, active?.turnId ?? null, systemActivity);
-      return;
-    }
-
-    if (event.type === "user_input.requested") {
-      rememberHiddenCopilotToolCall(
-        session.hiddenToolCallIds,
-        event.data.toolCallId,
-      );
-      return;
-    }
-
-    if (event.type === "elicitation.requested") {
-      rememberHiddenCopilotToolCall(
-        session.hiddenToolCallIds,
-        event.data.toolCallId,
-      );
       return;
     }
 
@@ -1229,36 +1047,25 @@ export class CopilotAgentProvider
     }
 
     if (event.type === "tool.execution_start") {
-      const metadata = session.toolRequests.get(event.data.toolCallId) ?? null;
-      const presentation = describeCopilotToolPresentation({
-        toolCallId: event.data.toolCallId,
-        toolName: event.data.toolName,
-        args: event.data.arguments,
-        metadata,
-        hiddenToolCallIds: session.hiddenToolCallIds,
-      });
-      if (presentation.kind === "hidden" || presentation.kind === "commentary") {
-        return;
-      }
       this.upsertAndEmitActivity(session, active?.turnId ?? null, {
         id: event.data.toolCallId,
         type: "tool",
         turnId: active?.turnId ?? null,
         status: "in_progress",
         toolName: copilotToolName(event.data.toolName),
-        title: presentation.title,
+        title: formatCopilotToolCommand(
+          event.data.toolName,
+          event.data.arguments,
+        ),
         args: event.data.arguments ?? null,
         output: null,
         result: null,
         isError: null,
-        semantic:
-          presentation.kind === "task"
-            ? taskToolSemantic()
-            : inferCopilotToolSemantic(
-                event.data.toolName,
-                event.data.arguments,
-                null,
-              ),
+        semantic: inferCopilotToolSemantic(
+          event.data.toolName,
+          event.data.arguments,
+          null,
+        ),
       });
       return;
     }
@@ -1287,33 +1094,7 @@ export class CopilotAgentProvider
       const completeData = event.data as unknown as Record<string, unknown>;
       const existing = session.activities.get(event.data.toolCallId);
       const existingTool = existing?.type === "tool" ? existing : null;
-      const metadata = session.toolRequests.get(event.data.toolCallId) ?? null;
-      const presentation = describeCopilotToolPresentation({
-        toolCallId: event.data.toolCallId,
-        toolName: completeData.toolName,
-        args: existingTool?.args ?? completeData.arguments,
-        result: event.data.result ?? event.data.error ?? null,
-        metadata,
-        hiddenToolCallIds: session.hiddenToolCallIds,
-      });
-      if (presentation.kind === "hidden") {
-        return;
-      }
-      if (presentation.kind === "commentary") {
-        if (active) {
-          this.appendCopilotCommentaryMessage(
-            session,
-            active.turnId,
-            presentation.commentary,
-            `copilot-commentary:${event.data.toolCallId}`,
-          );
-        }
-        return;
-      }
       const output =
-        (presentation.kind === "task"
-          ? presentation.output
-          : null) ??
         extractCopilotToolOutput(event.data.result ?? event.data.error) ??
         (existing?.type === "tool" || existing?.type === "command"
           ? existing.output
@@ -1324,22 +1105,24 @@ export class CopilotAgentProvider
         turnId: active?.turnId ?? null,
         status: event.data.success ? "completed" : "failed",
         toolName: existingTool?.toolName ?? copilotToolName(completeData.toolName),
-        title: existingTool?.title ?? presentation.title,
+        title:
+          existingTool?.title ??
+          formatCopilotToolCommand(
+            completeData.toolName,
+            completeData.arguments ?? event.data.result ?? event.data.error,
+          ),
         args: existingTool?.args ?? completeData.arguments ?? null,
         output,
         result: event.data.result ?? event.data.error ?? null,
         isError: event.data.success ? false : true,
-        semantic:
-          presentation.kind === "task"
-            ? taskToolSemantic()
-            : mergeCopilotToolSemantic(
-                existingTool,
-                inferCopilotToolSemantic(
-                  completeData.toolName,
-                  existingTool?.args ?? completeData.arguments,
-                  event.data.result ?? event.data.error ?? null,
-                ),
-              ),
+        semantic: mergeCopilotToolSemantic(
+          existingTool,
+          inferCopilotToolSemantic(
+            completeData.toolName,
+            existingTool?.args ?? completeData.arguments,
+            event.data.result ?? event.data.error ?? null,
+          ),
+        ),
       });
     }
   }
@@ -1428,33 +1211,6 @@ export class CopilotAgentProvider
     });
   }
 
-  private appendCopilotCommentaryMessage(
-    session: CopilotSessionState,
-    turnId: string,
-    text: string | null,
-    id: string,
-  ): void {
-    const normalized = normalizeCopilotCommentaryText(text);
-    if (!normalized) {
-      return;
-    }
-    const latest = session.messages.at(-1);
-    if (
-      latest?.role === "assistant" &&
-      latest.phase === "commentary" &&
-      normalizeCopilotCommentaryText(latest.text) === normalized
-    ) {
-      return;
-    }
-    this.appendAndEmitAssistantMessage(
-      session,
-      turnId,
-      normalized,
-      "commentary",
-      id,
-    );
-  }
-
   private upsertAndEmitActivity(
     session: CopilotSessionState,
     turnId: string | null,
@@ -1475,12 +1231,11 @@ export class CopilotAgentProvider
     activity: AgentSessionActivityDraft,
   ): SessionActivity {
     const existing = session.activities.get(activity.id);
-    const incoming = {
+    const next = {
       ...activity,
       createdAt: existing?.createdAt ?? Date.now(),
       seq: existing?.seq ?? session.nextSeq++,
     } as SessionActivity;
-    const next = mergeActivity(existing, incoming);
     session.activities.set(activity.id, next);
     this.touch(session);
     this.persistEventually();
@@ -1763,9 +1518,6 @@ export class CopilotAgentProvider
           copilotSessionId: item.copilotSessionId ?? null,
           copilotSessionCreated:
             item.copilotSessionCreated ?? item.copilotSessionId != null,
-          toolRequests: new Map(),
-          hiddenToolCallIds: new Set(),
-          reasoningBuffers: new Map(),
         };
         this.sessions.set(state.thread.id, state);
       }
@@ -1866,9 +1618,6 @@ export class CopilotAgentProvider
       nextSeq: 0,
       copilotSessionId: sessionId,
       copilotSessionCreated: true,
-      toolRequests: new Map(),
-      hiddenToolCallIds: new Set(),
-      reasoningBuffers: new Map(),
     };
     const sdkSession = await (
       await this.ensureSdkClient()
@@ -2841,24 +2590,9 @@ function parseSdkSessionEvents(
 } {
   const messages: SessionMessage[] = [];
   const activities = new Map<string, import("./types.js").SessionActivity>();
-  const toolRequests = new Map<string, CopilotToolRequestMetadata>();
-  const hiddenToolCallIds = new Set<string>();
-  const reasoningBuffers = new Map<string, string>();
   let seq = 0;
   let runtime: SessionRuntimeSummary | null = null;
   let updatedAt: number | undefined;
-  const upsertParsedActivity = (
-    activity: AgentSessionActivityDraft,
-    timestamp: number,
-  ) => {
-    const existing = activities.get(activity.id);
-    const incoming = {
-      ...activity,
-      createdAt: existing?.createdAt ?? timestamp,
-      seq: existing?.seq ?? seq++,
-    } as SessionActivity;
-    activities.set(activity.id, mergeActivity(existing, incoming));
-  };
 
   for (const event of events) {
     const timestamp = millisFromDateLike(event.timestamp) ?? Date.now();
@@ -2920,37 +2654,10 @@ function parseSdkSessionEvents(
       continue;
     }
 
-    if (event.type === "assistant.intent") {
-      const text = normalizeCopilotCommentaryText(data.intent);
-      if (text) {
-        const latest = messages.at(-1);
-        if (
-          latest?.role !== "assistant" ||
-          latest.phase !== "commentary" ||
-          normalizeCopilotCommentaryText(latest.text) !== text
-        ) {
-          messages.push({
-            id:
-              typeof event.id === "string"
-                ? `copilot-intent:${event.id}`
-                : `copilot-intent-${seq}`,
-            role: "assistant",
-            text,
-            attachments: [],
-            createdAt: timestamp,
-            seq: seq++,
-            phase: "commentary",
-          });
-        }
-      }
-      continue;
-    }
-
     if (
       event.type === "assistant.message" &&
       typeof data.content === "string"
     ) {
-      rememberCopilotToolRequests(toolRequests, data.toolRequests);
       if (typeof data.model === "string") {
         runtime = withRuntimeMetadata(runtime, {
           model: data.model,
@@ -2977,136 +2684,10 @@ function parseSdkSessionEvents(
       continue;
     }
 
-    if (event.type === "session.plan_changed") {
-      const activity = buildCopilotPlanChangedActivity({
-        activityId:
-          typeof event.id === "string"
-            ? `copilot-plan:${event.id}`
-            : `copilot-plan:${timestamp}`,
-        turnId: null,
-        operation: data.operation,
-      });
-      activities.set(activity.id, {
-        ...activity,
-        createdAt: timestamp,
-        seq: seq++,
-      });
-      continue;
-    }
-
-    if (event.type === "session.task_complete") {
-      const activity = buildCopilotTaskCompleteActivity({
-        activityId:
-          typeof event.id === "string"
-            ? `copilot-task-complete:${event.id}`
-            : `copilot-task-complete:${timestamp}`,
-        turnId: null,
-        success: data.success,
-        summary: data.summary,
-      });
-      activities.set(activity.id, {
-        ...activity,
-        createdAt: timestamp,
-        seq: seq++,
-      });
-      continue;
-    }
-
-    if (event.type === "assistant.reasoning_delta") {
-      const activityId = copilotReasoningActivityId(event, seq);
-      const existing = activities.get(activityId);
-      const existingContent =
-        existing?.type === "reasoning" ? existing.content ?? "" : "";
-      const content = `${reasoningBuffers.get(activityId) ?? existingContent}${data.deltaContent ?? ""}`;
-      reasoningBuffers.set(activityId, content);
-      upsertParsedActivity(
-        buildCopilotReasoningActivity({
-          activityId,
-          turnId: null,
-          reasoningId: stringValue(data.reasoningId) ?? null,
-          content,
-          status: "in_progress",
-          agentId: stringValue((event as { agentId?: unknown }).agentId) ?? null,
-        }),
-        timestamp,
-      );
-      continue;
-    }
-
-    if (event.type === "assistant.reasoning") {
-      const activityId = copilotReasoningActivityId(event, seq);
-      const content =
-        stringValue(data.content) ?? reasoningBuffers.get(activityId) ?? null;
-      if (content) {
-        reasoningBuffers.set(activityId, content);
-      }
-      upsertParsedActivity(
-        buildCopilotReasoningActivity({
-          activityId,
-          turnId: null,
-          reasoningId: stringValue(data.reasoningId) ?? null,
-          content,
-          status: "completed",
-          agentId: stringValue((event as { agentId?: unknown }).agentId) ?? null,
-        }),
-        timestamp,
-      );
-      continue;
-    }
-
-    const subagentActivity = buildCopilotSubagentActivity(event, null, seq);
-    if (subagentActivity) {
-      upsertParsedActivity(subagentActivity, timestamp);
-      continue;
-    }
-
-    const notificationActivity = buildCopilotSystemNotificationActivity(
-      event,
-      null,
-      seq,
-    );
-    if (notificationActivity) {
-      upsertParsedActivity(notificationActivity, timestamp);
-      continue;
-    }
-
-    const planReviewActivity = buildCopilotPlanReviewActivity(event, null, seq);
-    if (planReviewActivity) {
-      upsertParsedActivity(planReviewActivity, timestamp);
-      continue;
-    }
-
-    const systemActivity = buildCopilotSystemEventFromEvent(event, null, seq);
-    if (systemActivity) {
-      upsertParsedActivity(systemActivity, timestamp);
-      continue;
-    }
-
-    if (event.type === "user_input.requested") {
-      rememberHiddenCopilotToolCall(hiddenToolCallIds, data.toolCallId);
-      continue;
-    }
-
-    if (event.type === "elicitation.requested") {
-      rememberHiddenCopilotToolCall(hiddenToolCallIds, data.toolCallId);
-      continue;
-    }
-
     if (
       event.type === "tool.execution_start" &&
       typeof data.toolCallId === "string"
     ) {
-      const metadata = toolRequests.get(data.toolCallId) ?? null;
-      const presentation = describeCopilotToolPresentation({
-        toolCallId: data.toolCallId,
-        toolName: data.toolName,
-        args: data.arguments,
-        metadata,
-        hiddenToolCallIds,
-      });
-      if (presentation.kind === "hidden" || presentation.kind === "commentary") {
-        continue;
-      }
       activities.set(data.toolCallId, {
         id: data.toolCallId,
         type: "tool",
@@ -3115,15 +2696,12 @@ function parseSdkSessionEvents(
         seq: seq++,
         status: "in_progress",
         toolName: copilotToolName(data.toolName),
-        title: presentation.title,
+        title: formatCopilotToolCommand(data.toolName, data.arguments),
         args: data.arguments ?? null,
         output: null,
         result: null,
         isError: null,
-        semantic:
-          presentation.kind === "task"
-            ? taskToolSemantic()
-            : inferCopilotToolSemantic(data.toolName, data.arguments, null),
+        semantic: inferCopilotToolSemantic(data.toolName, data.arguments, null),
       });
       continue;
     }
@@ -3138,44 +2716,9 @@ function parseSdkSessionEvents(
           updatedAt: timestamp,
         });
       }
-      const metadata = toolRequests.get(data.toolCallId) ?? null;
-      const presentation = describeCopilotToolPresentation({
-        toolCallId: data.toolCallId,
-        toolName: data.toolName,
-        args: data.arguments,
-        result: data.result ?? data.error ?? null,
-        metadata,
-        hiddenToolCallIds,
-      });
-      if (presentation.kind === "hidden") {
-        continue;
-      }
-      if (presentation.kind === "commentary") {
-        const text = normalizeCopilotCommentaryText(presentation.commentary);
-        if (text) {
-          const latest = messages.at(-1);
-          if (
-            latest?.role !== "assistant" ||
-            latest.phase !== "commentary" ||
-            normalizeCopilotCommentaryText(latest.text) !== text
-          ) {
-            messages.push({
-              id: `copilot-commentary:${data.toolCallId}`,
-              role: "assistant",
-              text,
-              attachments: [],
-              createdAt: timestamp,
-              seq: seq++,
-              phase: "commentary",
-            });
-          }
-        }
-        continue;
-      }
       const existing = activities.get(data.toolCallId);
       const existingTool = existing?.type === "tool" ? existing : null;
       const output =
-        (presentation.kind === "task" ? presentation.output : null) ??
         extractCopilotToolOutput(data.result ?? data.error) ??
         (existing?.type === "tool" || existing?.type === "command"
           ? existing.output
@@ -3188,22 +2731,20 @@ function parseSdkSessionEvents(
         seq: existingTool?.seq ?? seq++,
         status: data.success === false ? "failed" : "completed",
         toolName: existingTool?.toolName ?? copilotToolName(data.toolName),
-        title: existingTool?.title ?? presentation.title,
+        title:
+          existingTool?.title ?? formatCopilotToolCommand(data.toolName, null),
         args: existingTool?.args ?? data.arguments ?? null,
         output,
         result: data.result ?? data.error ?? null,
         isError: data.success === false,
-        semantic:
-          presentation.kind === "task"
-            ? taskToolSemantic()
-            : mergeCopilotToolSemantic(
-                existingTool,
-                inferCopilotToolSemantic(
-                  data.toolName,
-                  existingTool?.args ?? data.arguments,
-                  data.result ?? data.error ?? null,
-                ),
-              ),
+        semantic: mergeCopilotToolSemantic(
+          existingTool,
+          inferCopilotToolSemantic(
+            data.toolName,
+            existingTool?.args ?? data.arguments,
+            data.result ?? data.error ?? null,
+          ),
+        ),
       });
     }
   }
@@ -3231,673 +2772,6 @@ function formatCopilotToolCommand(toolName: unknown, args: unknown): string {
   return `${name} ${JSON.stringify(args)}`;
 }
 
-function rememberCopilotToolRequests(
-  target: Map<string, CopilotToolRequestMetadata>,
-  raw: unknown,
-): void {
-  if (!Array.isArray(raw)) {
-    return;
-  }
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") {
-      continue;
-    }
-    const typed = entry as Record<string, unknown>;
-    const toolCallId = stringValue(typed.toolCallId);
-    if (!toolCallId) {
-      continue;
-    }
-    target.set(toolCallId, {
-      toolName: stringValue(typed.name) ?? "",
-      toolTitle: stringValue(typed.toolTitle) ?? null,
-      intentionSummary: stringValue(typed.intentionSummary) ?? null,
-      mcpServerName: stringValue(typed.mcpServerName) ?? null,
-      type: stringValue(typed.type) ?? null,
-    });
-  }
-}
-
-function rememberHiddenCopilotToolCall(
-  target: Set<string>,
-  toolCallId: unknown,
-): void {
-  if (typeof toolCallId === "string" && toolCallId.trim().length > 0) {
-    target.add(toolCallId.trim());
-  }
-}
-
-function normalizeCopilotToolKey(value: unknown): string {
-  return copilotToolName(value)
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function normalizeCopilotCommentaryText(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim().replace(/\s+/g, " ");
-  return normalized.length > 0 ? normalized : null;
-}
-
-function taskToolSemantic(): ToolActivitySemantic {
-  return {
-    category: "task",
-    action: "invoke",
-    targets: [],
-  };
-}
-
-function buildCopilotPlanChangedActivity(options: {
-  activityId: string;
-  turnId: string | null;
-  operation: unknown;
-}): AgentSessionActivityDraft {
-  const operation =
-    options.operation === "create" ||
-    options.operation === "update" ||
-    options.operation === "delete"
-      ? options.operation
-      : "update";
-  const output = {
-    create: "Copilot created or initialized the working plan for this session.",
-    update: "Copilot updated the working plan or todo list for this session.",
-    delete: "Copilot cleared the working plan for this session.",
-  }[operation];
-  const action = {
-    create: "created",
-    update: "updated",
-    delete: "cleared",
-  }[operation] as "created" | "updated" | "cleared";
-  return {
-    id: options.activityId,
-    type: "plan",
-    turnId: options.turnId,
-    status: "completed",
-    action,
-    title: {
-      create: "Created session plan",
-      update: "Updated session plan",
-      delete: "Cleared session plan",
-    }[operation],
-    summary: output,
-    content: null,
-  };
-}
-
-function buildCopilotTaskCompleteActivity(options: {
-  activityId: string;
-  turnId: string | null;
-  success: unknown;
-  summary: unknown;
-}): AgentSessionActivityDraft {
-  const summary = stringValue(options.summary)?.trim() || null;
-  const success = options.success !== false;
-  return {
-    id: options.activityId,
-    type: "task",
-    turnId: options.turnId,
-    status: success ? "completed" : "failed",
-    action: success ? "completed" : "failed",
-    title: summary || (success ? "Completed task" : "Task failed"),
-    summary:
-      summary ||
-      (success
-        ? "Copilot marked the current task as complete."
-        : "Copilot marked the current task as failed."),
-  };
-}
-
-function buildCopilotReasoningActivity(options: {
-  activityId: string;
-  turnId: string | null;
-  reasoningId: string | null;
-  content: string | null;
-  status: "in_progress" | "completed";
-  agentId?: string | null;
-}): AgentSessionActivityDraft {
-  return {
-    id: options.activityId,
-    type: "reasoning",
-    turnId: options.turnId,
-    status: options.status,
-    reasoningId: options.reasoningId,
-    title: options.agentId ? "Subagent reasoning" : "Reasoning",
-    content: options.content,
-  };
-}
-
-function buildCopilotSubagentActivity(
-  event: CopilotSdkSessionEvent,
-  turnId: string | null,
-  fallbackSeq?: number,
-): AgentSessionActivityDraft | null {
-  if (
-    event.type !== "subagent.started" &&
-    event.type !== "subagent.completed" &&
-    event.type !== "subagent.failed" &&
-    event.type !== "subagent.selected" &&
-    event.type !== "subagent.deselected"
-  ) {
-    return null;
-  }
-
-  const data = asRecord(event.data) ?? {};
-  const agentId =
-    stringValue((event as { agentId?: unknown }).agentId) ??
-    stringValue(data.agentId) ??
-    null;
-  const agentName = stringValue(data.agentName) ?? null;
-  const agentDisplayName = stringValue(data.agentDisplayName) ?? null;
-  const description =
-    stringValue(data.agentDescription) ?? stringValue(data.description) ?? null;
-  const toolCallId = stringValue(data.toolCallId);
-  const lifecycleId =
-    agentId ?? toolCallId ?? stringValue(event.id) ?? String(fallbackSeq ?? Date.now());
-  const eventId = stringValue(event.id) ?? String(fallbackSeq ?? Date.now());
-  const id =
-    event.type === "subagent.selected" || event.type === "subagent.deselected"
-      ? `copilot-subagent-selection:${eventId}`
-      : `copilot-subagent:${lifecycleId}`;
-  const action = {
-    "subagent.started": "started",
-    "subagent.completed": "completed",
-    "subagent.failed": "failed",
-    "subagent.selected": "selected",
-    "subagent.deselected": "deselected",
-  }[event.type] as
-    | "started"
-    | "completed"
-    | "failed"
-    | "selected"
-    | "deselected";
-  const status =
-    action === "started"
-      ? "in_progress"
-      : action === "failed"
-        ? "failed"
-        : "completed";
-  const tools = Array.isArray(data.tools)
-    ? data.tools
-        .map((tool) => (typeof tool === "string" ? tool.trim() : ""))
-        .filter(Boolean)
-    : null;
-  return {
-    id,
-    type: "subagent",
-    turnId,
-    status,
-    action,
-    agentId,
-    agentName,
-    agentDisplayName,
-    description,
-    summary: copilotSubagentSummary(action, data, tools),
-    durationMs: numericValue(data.durationMs) ?? null,
-    model: stringValue(data.model) ?? null,
-    totalTokens: numericValue(data.totalTokens) ?? null,
-    totalToolCalls: numericValue(data.totalToolCalls) ?? null,
-    error: stringValue(data.error) ?? null,
-  };
-}
-
-function buildCopilotSystemNotificationActivity(
-  event: CopilotSdkSessionEvent,
-  turnId: string | null,
-  fallbackSeq?: number,
-): AgentSessionActivityDraft | null {
-  if (event.type !== "system.notification") {
-    return null;
-  }
-  const data = asRecord(event.data) ?? {};
-  const kind = asRecord(data.kind) ?? {};
-  const kindType = stringValue(kind.type);
-  if (kindType === "agent_completed") {
-    const agentId = stringValue(kind.agentId) ?? null;
-    const status = stringValue(kind.status) === "failed" ? "failed" : "completed";
-    return {
-      id: `copilot-background-agent:${agentId ?? stringValue(event.id) ?? fallbackSeq ?? Date.now()}`,
-      type: "subagent",
-      turnId,
-      status,
-      action: status === "failed" ? "failed" : "completed",
-      agentId,
-      agentName: stringValue(kind.agentType) ?? null,
-      agentDisplayName: stringValue(kind.agentType) ?? null,
-      description: stringValue(kind.description) ?? stringValue(kind.prompt) ?? null,
-      summary: stripCopilotSystemTags(stringValue(data.content) ?? "") || null,
-      durationMs: null,
-      model: null,
-      totalTokens: null,
-      totalToolCalls: null,
-      error: status === "failed" ? stripCopilotSystemTags(stringValue(data.content) ?? "") || null : null,
-    };
-  }
-  if (kindType === "agent_idle") {
-    return {
-      id: `copilot-background-agent:${stringValue(kind.agentId) ?? stringValue(event.id) ?? fallbackSeq ?? Date.now()}`,
-      type: "subagent",
-      turnId,
-      status: "in_progress",
-      action: "started",
-      agentId: stringValue(kind.agentId) ?? null,
-      agentName: stringValue(kind.agentType) ?? null,
-      agentDisplayName: stringValue(kind.agentType) ?? null,
-      description: stringValue(kind.description) ?? null,
-      summary: stripCopilotSystemTags(stringValue(data.content) ?? "") || null,
-      durationMs: null,
-      model: null,
-      totalTokens: null,
-      totalToolCalls: null,
-      error: null,
-    };
-  }
-  return buildCopilotSystemEventActivity({
-    activityId: `copilot-system-notification:${stringValue(event.id) ?? fallbackSeq ?? Date.now()}`,
-    turnId,
-    level: "info",
-    title: copilotSystemNotificationTitle(kindType),
-    detail:
-      stripCopilotSystemTags(stringValue(data.content) ?? "") ||
-      copilotCompactJson(kind),
-  });
-}
-
-function buildCopilotPlanReviewActivity(
-  event: CopilotSdkSessionEvent,
-  turnId: string | null,
-  fallbackSeq?: number,
-): AgentSessionActivityDraft | null {
-  if (
-    event.type !== "exit_plan_mode.requested" &&
-    event.type !== "exit_plan_mode.completed"
-  ) {
-    return null;
-  }
-  const data = asRecord(event.data) ?? {};
-  const requestId =
-    stringValue(data.requestId) ?? stringValue(event.id) ?? String(fallbackSeq ?? Date.now());
-  const activityId = `copilot-plan-review:${requestId}`;
-  if (event.type === "exit_plan_mode.requested") {
-    return {
-      id: activityId,
-      type: "plan",
-      turnId,
-      status: "in_progress",
-      action: "review_requested",
-      title: "Plan review requested",
-      summary:
-        stringValue(data.summary) ??
-        copilotPlanReviewActionsSummary(data) ??
-        "The provider requested a plan review.",
-      content: stringValue(data.planContent) ?? null,
-    };
-  }
-  const approved = data.approved !== false;
-  return {
-    id: activityId,
-    type: "plan",
-    turnId,
-    status: "completed",
-    action: approved ? "approved" : "rejected",
-    title: approved ? "Plan approved" : "Plan changes requested",
-    summary:
-      stringValue(data.feedback) ??
-      (stringValue(data.selectedAction)
-        ? `Selected action: ${stringValue(data.selectedAction)}`
-        : approved
-          ? "The plan review was approved."
-          : "The plan review was rejected or sent back for changes."),
-    content: null,
-  };
-}
-
-function buildCopilotSystemEventFromEvent(
-  event: CopilotSdkSessionEvent,
-  turnId: string | null,
-  fallbackSeq?: number,
-): AgentSessionActivityDraft | null {
-  const data = asRecord(event.data) ?? {};
-  const eventId = stringValue(event.id) ?? String(fallbackSeq ?? Date.now());
-  switch (event.type) {
-    case "session.warning":
-      return buildCopilotSystemEventActivity({
-        activityId: `copilot-warning:${eventId}`,
-        turnId,
-        level: "warning",
-        title: copilotTypedMessageTitle("Warning", data.warningType),
-        detail: joinCopilotDetail([stringValue(data.message), stringValue(data.url)]),
-      });
-    case "session.info":
-      return buildCopilotSystemEventActivity({
-        activityId: `copilot-info:${eventId}`,
-        turnId,
-        level: "info",
-        title: copilotTypedMessageTitle("Info", data.infoType),
-        detail: joinCopilotDetail([stringValue(data.message), stringValue(data.url)]),
-      });
-    case "session.handoff":
-      return buildCopilotSystemEventActivity({
-        activityId: `copilot-handoff:${eventId}`,
-        turnId,
-        level: "info",
-        title: "Session handoff",
-        detail: joinCopilotDetail([
-          stringValue(data.summary),
-          stringValue(data.context),
-          stringValue(data.sourceType),
-          stringValue(data.remoteSessionId),
-          stringValue(data.host),
-        ]),
-      });
-    case "session.truncation":
-      return buildCopilotSystemEventActivity({
-        activityId: `copilot-truncation:${eventId}`,
-        turnId,
-        level: "info",
-        title: "Conversation truncated",
-        detail: joinCopilotDetail([
-          copilotNumberDetail("Tokens removed", data.tokensRemovedDuringTruncation),
-          copilotNumberDetail("Messages removed", data.messagesRemovedDuringTruncation),
-          stringValue(data.performedBy)
-            ? `Performed by: ${stringValue(data.performedBy)}`
-            : null,
-        ]),
-      });
-    case "session.workspace_file_changed":
-      return buildCopilotSystemEventActivity({
-        activityId: `copilot-workspace-file:${eventId}`,
-        turnId,
-        level: "info",
-        title: "Workspace file changed",
-        detail: joinCopilotDetail([
-          stringValue(data.operation),
-          stringValue(data.path),
-        ]),
-      });
-    case "system.message":
-      return buildCopilotSystemEventActivity({
-        activityId: `copilot-system-message:${eventId}`,
-        turnId,
-        level: "info",
-        title: "System instruction loaded",
-        detail: joinCopilotDetail([
-          stringValue(data.role) ? `Role: ${stringValue(data.role)}` : null,
-          stringValue(data.name) ? `Name: ${stringValue(data.name)}` : null,
-        ]),
-      });
-    case "mcp.oauth_required":
-      return buildCopilotSystemEventActivity({
-        activityId: `copilot-mcp-oauth:${stringValue(data.requestId) ?? eventId}`,
-        turnId,
-        level: "warning",
-        title: "MCP authentication required",
-        detail: joinCopilotDetail([
-          stringValue(data.serverName),
-          stringValue(data.serverUrl),
-        ]),
-        status: "in_progress",
-      });
-    case "mcp.oauth_completed":
-      return buildCopilotSystemEventActivity({
-        activityId: `copilot-mcp-oauth:${stringValue(data.requestId) ?? eventId}`,
-        turnId,
-        level: "info",
-        title: "MCP authentication completed",
-        detail: stringValue(data.requestId) ?? null,
-      });
-    case "sampling.requested":
-      return buildCopilotSystemEventActivity({
-        activityId: `copilot-sampling:${stringValue(data.requestId) ?? eventId}`,
-        turnId,
-        level: "info",
-        title: "MCP sampling requested",
-        detail: joinCopilotDetail([
-          stringValue(data.serverName),
-          stringValue(data.requestId),
-        ]),
-        status: "in_progress",
-      });
-    case "sampling.completed":
-      return buildCopilotSystemEventActivity({
-        activityId: `copilot-sampling:${stringValue(data.requestId) ?? eventId}`,
-        turnId,
-        level: "info",
-        title: "MCP sampling completed",
-        detail: stringValue(data.requestId) ?? null,
-      });
-    default:
-      return null;
-  }
-}
-
-function buildCopilotSystemEventActivity(options: {
-  activityId: string;
-  turnId: string | null;
-  level: "info" | "warning" | "error";
-  title: string;
-  detail: string | null;
-  status?: "in_progress" | "completed" | "failed" | "declined";
-}): AgentSessionActivityDraft {
-  return {
-    id: options.activityId,
-    type: "system_event",
-    turnId: options.turnId,
-    status: options.status ?? "completed",
-    level: options.level,
-    title: options.title,
-    detail: options.detail,
-  };
-}
-
-function copilotSubagentSummary(
-  action: "started" | "completed" | "failed" | "selected" | "deselected",
-  data: Record<string, unknown>,
-  tools: string[] | null,
-): string | null {
-  if (action === "started") {
-    return "A background or specialized agent started working.";
-  }
-  if (action === "selected") {
-    return tools == null
-      ? "A custom agent was selected with access to all tools."
-      : tools.length > 0
-        ? `A custom agent was selected with ${tools.length} tools.`
-        : "A custom agent was selected.";
-  }
-  if (action === "deselected") {
-    return "The session returned to the default agent.";
-  }
-  const parts = [
-    copilotNumberDetail("Tokens", data.totalTokens),
-    copilotNumberDetail("Tool calls", data.totalToolCalls),
-    copilotNumberDetail("Duration ms", data.durationMs),
-  ].filter((part): part is string => part != null);
-  if (parts.length > 0) {
-    return parts.join("\n");
-  }
-  return action === "failed"
-    ? stringValue(data.error) ?? "The subagent failed."
-    : "The subagent completed.";
-}
-
-function copilotPlanReviewActionsSummary(
-  data: Record<string, unknown>,
-): string | null {
-  const recommended = stringValue(data.recommendedAction);
-  const actions = Array.isArray(data.actions)
-    ? data.actions
-        .map((action) => (typeof action === "string" ? action.trim() : ""))
-        .filter(Boolean)
-    : [];
-  if (!recommended && actions.length === 0) {
-    return null;
-  }
-  return joinCopilotDetail([
-    recommended ? `Recommended action: ${recommended}` : null,
-    actions.length > 0 ? `Available actions: ${actions.join(", ")}` : null,
-  ]);
-}
-
-function copilotTypedMessageTitle(prefix: string, type: unknown): string {
-  const label = stringValue(type);
-  if (!label) {
-    return `Copilot ${prefix.toLowerCase()}`;
-  }
-  return `Copilot ${prefix.toLowerCase()}: ${label.replace(/_/g, " ")}`;
-}
-
-function copilotSystemNotificationTitle(kindType: string | undefined): string {
-  switch (kindType) {
-    case "new_inbox_message":
-      return "New inbox message";
-    case "shell_completed":
-      return "Shell completed";
-    case "shell_detached_completed":
-      return "Detached shell completed";
-    default:
-      return "System notification";
-  }
-}
-
-function stripCopilotSystemTags(value: string): string {
-  return value
-    .replace(/<\/?system_notification>/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function joinCopilotDetail(
-  parts: Array<string | null | undefined>,
-): string | null {
-  const text = parts
-    .map((part) => part?.trim() ?? "")
-    .filter(Boolean)
-    .join("\n");
-  return text.length > 0 ? text : null;
-}
-
-function copilotNumberDetail(label: string, value: unknown): string | null {
-  const number = numericValue(value);
-  return number == null ? null : `${label}: ${number}`;
-}
-
-function copilotCompactJson(value: unknown): string | null {
-  if (value == null) {
-    return null;
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return null;
-  }
-}
-
-function describeCopilotToolPresentation(options: {
-  toolCallId?: unknown;
-  toolName: unknown;
-  args?: unknown;
-  result?: unknown;
-  metadata?: CopilotToolRequestMetadata | null;
-  hiddenToolCallIds?: Set<string>;
-}):
-  | {
-      kind: "hidden";
-    }
-  | {
-      kind: "commentary";
-      commentary: string | null;
-    }
-  | {
-      kind: "task" | "tool";
-      title: string;
-      output: string | null;
-    } {
-  const toolKey = normalizeCopilotToolKey(
-    options.metadata?.toolName || options.toolName,
-  );
-  const toolCallId =
-    typeof options.toolCallId === "string" ? options.toolCallId : null;
-  if (
-    (toolCallId && options.hiddenToolCallIds?.has(toolCallId)) ||
-    COPILOT_HIDDEN_TOOL_KEYS.has(toolKey)
-  ) {
-    return { kind: "hidden" };
-  }
-  if (COPILOT_COMMENTARY_TOOL_KEYS.has(toolKey)) {
-    return {
-      kind: "commentary",
-      commentary: extractCopilotNarrativeText(
-        options.metadata,
-        options.args,
-        options.result,
-      ),
-    };
-  }
-  const title = copilotToolDisplayTitle(
-    options.toolName,
-    options.args,
-    options.metadata,
-  );
-  if (COPILOT_TASK_TOOL_KEYS.has(toolKey)) {
-    return {
-      kind: "task",
-      title,
-      output:
-        extractCopilotNarrativeText(options.metadata, options.args, options.result) ??
-        title,
-    };
-  }
-  return {
-    kind: "tool",
-    title,
-    output: null,
-  };
-}
-
-function copilotToolDisplayTitle(
-  toolName: unknown,
-  args: unknown,
-  metadata?: CopilotToolRequestMetadata | null,
-): string {
-  const intention = metadata?.intentionSummary?.trim();
-  if (intention) {
-    return intention;
-  }
-  const title = metadata?.toolTitle?.trim();
-  if (title) {
-    return title;
-  }
-  return formatCopilotToolCommand(toolName, args);
-}
-
-function extractCopilotNarrativeText(
-  metadata: CopilotToolRequestMetadata | null | undefined,
-  args: unknown,
-  result: unknown,
-): string | null {
-  const fromMetadata = normalizeCopilotCommentaryText(
-    metadata?.intentionSummary ?? metadata?.toolTitle ?? null,
-  );
-  if (fromMetadata) {
-    return fromMetadata;
-  }
-  const typedArgs = asRecord(args);
-  const typedResult = asRecord(result);
-  return (
-    normalizeCopilotCommentaryText(
-      readFirstString(
-        typedResult,
-        ["intent", "summary", "message", "content", "text", "title"],
-        typedArgs,
-      ),
-    ) ??
-    normalizeCopilotCommentaryText(extractCopilotToolOutput(result))
-  );
-}
-
 function copilotToolName(value: unknown): string {
   return typeof value === "string" && value.length > 0 ? value : "tool";
 }
@@ -3921,21 +2795,6 @@ function copilotModeActivityId(
   }
   const stamp = millisFromDateLike(event.timestamp) ?? Date.now();
   return `copilot-mode:${stamp}`;
-}
-
-function copilotReasoningActivityId(
-  event: CopilotSdkSessionEvent,
-  fallbackSeq?: number,
-): string {
-  const data = asRecord(event.data) ?? {};
-  const reasoningId =
-    stringValue(data.reasoningId) ??
-    stringValue(event.id) ??
-    String(fallbackSeq ?? Date.now());
-  const agentId = stringValue((event as { agentId?: unknown }).agentId);
-  return agentId
-    ? `copilot-reasoning:${agentId}:${reasoningId}`
-    : `copilot-reasoning:${reasoningId}`;
 }
 
 function buildCopilotModeChangeActivity(options: {

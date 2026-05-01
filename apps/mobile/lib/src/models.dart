@@ -1712,20 +1712,6 @@ class SessionActivity {
     required this.pattern,
     required this.revisedPrompt,
     required this.savedPath,
-    required this.activityAction,
-    required this.summary,
-    required this.content,
-    required this.detail,
-    required this.level,
-    required this.reasoningId,
-    required this.agentId,
-    required this.agentName,
-    required this.agentDisplayName,
-    required this.description,
-    required this.model,
-    required this.totalTokens,
-    required this.totalToolCalls,
-    required this.errorText,
   });
 
   final String id;
@@ -1758,20 +1744,6 @@ class SessionActivity {
   final String? pattern;
   final String? revisedPrompt;
   final String? savedPath;
-  final String? activityAction;
-  final String? summary;
-  final String? content;
-  final String? detail;
-  final String? level;
-  final String? reasoningId;
-  final String? agentId;
-  final String? agentName;
-  final String? agentDisplayName;
-  final String? description;
-  final String? model;
-  final int? totalTokens;
-  final int? totalToolCalls;
-  final String? errorText;
 
   bool get isCommand => type == 'command';
   bool get isTool => type == 'tool';
@@ -1780,11 +1752,6 @@ class SessionActivity {
   bool get isWebSearch => type == 'web_search';
   bool get isImageGeneration => type == 'image_generation';
   bool get isContextCompaction => type == 'context_compaction';
-  bool get isPlan => type == 'plan';
-  bool get isTask => type == 'task';
-  bool get isSubagent => type == 'subagent';
-  bool get isReasoning => type == 'reasoning';
-  bool get isSystemEvent => type == 'system_event';
   String? get toolCategory => toolSemantic?.category;
   String? get toolAction => toolSemantic?.action;
   List<SessionToolSemanticTarget> get toolSemanticTargets =>
@@ -1859,20 +1826,6 @@ class SessionActivity {
         pattern: _stringOrNull(json['pattern']),
         revisedPrompt: _stringOrNull(json['revisedPrompt']),
         savedPath: _stringOrNull(json['savedPath']),
-        activityAction: _stringOrNull(json['action']),
-        summary: _stringOrNull(json['summary']),
-        content: _stringOrNull(json['content']) ?? _stringOrNull(json['text']),
-        detail: _stringOrNull(json['detail']),
-        level: _stringOrNull(json['level']),
-        reasoningId: _stringOrNull(json['reasoningId']),
-        agentId: _stringOrNull(json['agentId']),
-        agentName: _stringOrNull(json['agentName']),
-        agentDisplayName: _stringOrNull(json['agentDisplayName']),
-        description: _stringOrNull(json['description']),
-        model: _stringOrNull(json['model']),
-        totalTokens: _intOrNull(json['totalTokens']),
-        totalToolCalls: _intOrNull(json['totalToolCalls']),
-        errorText: _stringOrNull(json['error']),
       );
 
   Map<String, dynamic> toJson() => {
@@ -1906,20 +1859,6 @@ class SessionActivity {
     'pattern': pattern,
     'revisedPrompt': revisedPrompt,
     'savedPath': savedPath,
-    'action': activityAction,
-    'summary': summary,
-    'content': content,
-    'detail': detail,
-    'level': level,
-    'reasoningId': reasoningId,
-    'agentId': agentId,
-    'agentName': agentName,
-    'agentDisplayName': agentDisplayName,
-    'description': description,
-    'model': model,
-    'totalTokens': totalTokens,
-    'totalToolCalls': totalToolCalls,
-    'error': errorText,
   };
 }
 
