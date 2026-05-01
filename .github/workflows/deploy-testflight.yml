@@ -283,6 +283,9 @@ jobs:
           echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
           echo "Building Sidemesh iOS $version ($build_number)"
 
+      - name: Install Python dependencies for ASC scripts
+        run: python3 -m pip install pyjwt --quiet --break-system-packages
+
       - name: Generate release notes
         run: python3 scripts/generate-release-notes.py
 
