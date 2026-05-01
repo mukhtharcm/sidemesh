@@ -8,6 +8,8 @@ import {
   type AgentProvider,
   type AgentProviderCapabilities,
 } from "./agent-provider.js";
+import { mergeRecentUnindexedThreads } from "./server.js";
+import type { ThreadRecord } from "./types.js";
 
 const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
   sessions: {
@@ -96,3 +98,47 @@ describe("provider method guards", () => {
     );
   });
 });
+
+describe("recent fallback session merge", () => {
+  it("lets newer unindexed rollout sessions displace full indexed results", async () => {
+    const indexed = [
+      thread("indexed-1", 100),
+      thread("indexed-2", 90),
+    ];
+    const provider = makeProvider({
+      capabilities: {
+        ...EMPTY_CAPABILITIES,
+        sessions: {
+          ...EMPTY_CAPABILITIES.sessions,
+          recentFallback: true,
+        },
+      },
+      listRecentUnindexedSessionThreads: async () => [
+        thread("fallback-new", 120),
+        thread("fallback-old", 80),
+      ],
+    });
+
+    const merged = await mergeRecentUnindexedThreads(provider, indexed, 2);
+
+    assert.deepEqual(
+      merged.map((item) => item.id),
+      ["fallback-new", "indexed-1"],
+    );
+  });
+});
+
+function thread(id: string, updatedAt: number): ThreadRecord {
+  return {
+    id,
+    name: null,
+    preview: id,
+    createdAt: updatedAt,
+    updatedAt,
+    cwd: "/workspace",
+    source: "cli",
+    path: `/tmp/${id}.jsonl`,
+    status: { type: "idle" },
+    gitInfo: null,
+  };
+}

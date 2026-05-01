@@ -2333,7 +2333,7 @@ function normalizedSessionListLimit(limitOverride: number | null): number {
   return Math.max(1, Math.min(limitOverride ?? 100, 100));
 }
 
-async function mergeRecentUnindexedThreads(
+export async function mergeRecentUnindexedThreads(
   provider: AgentProvider,
   indexedThreads: ThreadRecord[],
   limit: number,
@@ -2356,9 +2356,6 @@ async function mergeRecentUnindexedThreads(
       continue;
     }
     threadsById.set(thread.id, thread);
-    if (threadsById.size >= limit) {
-      break;
-    }
   }
 
   return [...threadsById.values()]
