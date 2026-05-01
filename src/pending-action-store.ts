@@ -97,6 +97,10 @@ export class PendingActionStore {
     await write;
   }
 
+  async drain(): Promise<void> {
+    await this.writeQueue;
+  }
+
   private async load(): Promise<void> {
     let raw: string;
     try {
