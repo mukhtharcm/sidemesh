@@ -1745,6 +1745,7 @@ class SessionActivity {
   bool get isTurnDiff => type == 'turn_diff';
   bool get isWebSearch => type == 'web_search';
   bool get isImageGeneration => type == 'image_generation';
+  bool get isContextCompaction => type == 'context_compaction';
   String? get toolCategory => toolSemantic?.category;
   String? get toolAction => toolSemantic?.action;
   List<SessionToolSemanticTarget> get toolSemanticTargets =>

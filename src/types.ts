@@ -283,7 +283,8 @@ export interface SessionActivityBase {
     | "file_change"
     | "turn_diff"
     | "web_search"
-    | "image_generation";
+    | "image_generation"
+    | "context_compaction";
   turnId: string | null;
   createdAt: number;
   seq: number;
@@ -398,13 +399,18 @@ export interface ImageGenerationActivity extends SessionActivityBase {
   savedPath: string | null;
 }
 
+export interface ContextCompactionActivity extends SessionActivityBase {
+  type: "context_compaction";
+}
+
 export type SessionActivity =
   | CommandActivity
   | ToolActivity
   | FileChangeActivity
   | TurnDiffActivity
   | WebSearchActivity
-  | ImageGenerationActivity;
+  | ImageGenerationActivity
+  | ContextCompactionActivity;
 
 export type PendingActionApprovalScope = "once" | "session" | "location";
 

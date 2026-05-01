@@ -3,6 +3,7 @@ import type { EventEmitter } from "node:events";
 import type { PendingActionResponseInput } from "./approvals.js";
 import type {
   CommandActivity,
+  ContextCompactionActivity,
   FileChangeActivity,
   ImageGenerationActivity,
   PendingAction,
@@ -31,7 +32,8 @@ export type AgentSessionActivityDraft =
   | Omit<FileChangeActivity, "createdAt" | "seq">
   | Omit<TurnDiffActivity, "createdAt" | "seq">
   | Omit<WebSearchActivity, "createdAt" | "seq">
-  | Omit<ImageGenerationActivity, "createdAt" | "seq">;
+  | Omit<ImageGenerationActivity, "createdAt" | "seq">
+  | Omit<ContextCompactionActivity, "createdAt" | "seq">;
 
 export interface AgentMessageDraft {
   id: string;

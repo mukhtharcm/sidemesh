@@ -1245,6 +1245,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'turn_diff' => 'Live turn diff',
       'web_search' => _webSearchTitle(activity),
       'image_generation' => 'Generated image',
+      'context_compaction' => 'Context compacted',
       _ => 'Activity',
     };
 
@@ -1258,6 +1259,8 @@ class _ActivityCardState extends State<_ActivityCard> {
         (activity.savedPath ?? '').isNotEmpty
             ? _relativeSessionPath(activity.savedPath!, sessionCwd)
             : 'Image generation output',
+      'context_compaction' =>
+        'Older conversation history was summarized to free context.',
       _ => null,
     };
 
@@ -1268,6 +1271,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'turn_diff' => 'TURN DIFF',
       'web_search' => 'WEB SEARCH',
       'image_generation' => 'IMAGE',
+      'context_compaction' => 'COMPACTION',
       _ => 'ACTIVITY',
     };
 
@@ -1278,6 +1282,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'turn_diff' => Icons.difference_rounded,
       'web_search' => Icons.travel_explore_rounded,
       'image_generation' => Icons.image_rounded,
+      'context_compaction' => Icons.compress_rounded,
       _ => Icons.bolt_rounded,
     };
 
@@ -1492,6 +1497,12 @@ class _ActivityCardState extends State<_ActivityCard> {
                           tone: MeshPillTone.info,
                           mono: true,
                         ),
+                      if (activity.isContextCompaction)
+                        const MeshPill(
+                          label: 'context',
+                          tone: MeshPillTone.info,
+                          mono: true,
+                        ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -1503,6 +1514,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                     _buildWebSearchBody(context, activity),
                   ] else if (activity.isImageGeneration) ...[
                     _buildImageGenerationBody(context, activity),
+                  ] else if (activity.isContextCompaction) ...[
+                    ..._buildContextCompactionBody(context, activity),
                   ] else if (activity.isTurnDiff) ...[
                     if ((activity.diff ?? '').isNotEmpty)
                       _buildLazyDiff(
@@ -1806,6 +1819,22 @@ class _ActivityCardState extends State<_ActivityCard> {
         ],
       ],
     );
+  }
+
+  List<Widget> _buildContextCompactionBody(
+    BuildContext context,
+    SessionActivity activity,
+  ) {
+    final message = switch (activity.status) {
+      'completed' =>
+        'Codex summarized older history so the session can keep working with more free context.',
+      'failed' =>
+        'Codex tried to compact the session context, but the compaction failed.',
+      _ => 'Codex is compacting older history to free context.',
+    };
+    return [
+      _activityInfoBlock(context, 'What happened', message),
+    ];
   }
 
   String _toolActivityTitle(SessionActivity activity, String sessionCwd) {
