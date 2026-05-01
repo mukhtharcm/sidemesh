@@ -21,6 +21,7 @@ interface InitializeResult {
 
 const SHELL_ENV_START_MARKER = "__SIDEMESH_SHELL_ENV_START__";
 const SHELL_ENV_END_MARKER = "__SIDEMESH_SHELL_ENV_END__";
+const CODEX_APP_SERVER_CLOSE_TIMEOUT_MS = 4_000;
 
 function buildSeededCodexSpawnEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -258,6 +259,32 @@ export class CodexBridge extends EventEmitter<{
     this.notify("initialized", {});
   }
 
+  public async close(): Promise<void> {
+    const child = this.process;
+    this.process = null;
+    if (!child) {
+      return;
+    }
+
+    for (const request of this.pending.values()) {
+      request.reject(new Error("codex app-server is closing"));
+    }
+    this.pending.clear();
+
+    if (child.exitCode !== null || child.signalCode !== null) {
+      return;
+    }
+
+    child.stdin.end();
+    child.kill("SIGTERM");
+    const exited = await waitForChildExit(child, CODEX_APP_SERVER_CLOSE_TIMEOUT_MS);
+    if (exited || child.exitCode !== null || child.signalCode !== null) {
+      return;
+    }
+    child.kill("SIGKILL");
+    await waitForChildExit(child, CODEX_APP_SERVER_CLOSE_TIMEOUT_MS);
+  }
+
   public async request<T>(method: string, params: unknown): Promise<T> {
     const id = this.requestId++;
     const payload: JsonRpcMessage = { id, method, params };
@@ -337,4 +364,30 @@ export class CodexBridge extends EventEmitter<{
       });
     }
   }
+}
+
+async function waitForChildExit(
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return true;
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    let timeout: NodeJS.Timeout | null = null;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      child.off("exit", onExit);
+      resolve(value);
+    };
+    const onExit = () => finish(true);
+    child.once("exit", onExit);
+    timeout = setTimeout(() => finish(false), timeoutMs);
+    timeout.unref?.();
+  });
 }

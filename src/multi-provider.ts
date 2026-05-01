@@ -100,6 +100,12 @@ export class MultiAgentProvider
     await Promise.all(this.orderedEntries.map((entry) => entry.provider.start()));
   }
 
+  public async close(): Promise<void> {
+    await Promise.all(
+      this.orderedEntries.map((entry) => entry.provider.close?.() ?? Promise.resolve()),
+    );
+  }
+
   public async getVersion(): Promise<string> {
     return this.defaultEntry().provider.getVersion();
   }
