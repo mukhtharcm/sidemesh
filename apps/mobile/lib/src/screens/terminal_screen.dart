@@ -11,6 +11,9 @@ import '../terminal_input_filter.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
+import '../host_reconnect_scheduler.dart';
+import '../host_status_store.dart';
+import '../relative_time_ticker.dart';
 
 class TerminalScreen extends StatefulWidget {
   const TerminalScreen({
@@ -97,14 +100,12 @@ class _TerminalPaneState extends State<TerminalPane> {
   final FocusNode _focusNode = FocusNode();
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
-  Timer? _reconnectTimer;
   HostTerminalInfo? _terminalInfo;
   bool _starting = true;
   bool _connecting = false;
   bool _stopping = false;
   String? _error;
   int _lastSeq = -1;
-  int _reconnectAttempts = 0;
   int? _cols;
   int? _rows;
 
@@ -117,6 +118,12 @@ class _TerminalPaneState extends State<TerminalPane> {
       onResize: _handleResize,
     );
     _terminal.write('Opening Sidemesh terminal...\r\n');
+    HostReconnectScheduler.instance.registerSlot(
+      widget.host.id,
+      'terminal-live',
+      ReconnectPriority.visibleSupport,
+      _connectLive,
+    );
     unawaited(_startTerminal(reuseExisting: widget.reuseExisting));
   }
 
@@ -132,19 +139,17 @@ class _TerminalPaneState extends State<TerminalPane> {
     }
     _subscription?.cancel();
     _channel?.sink.close();
-    _reconnectTimer?.cancel();
     _subscription = null;
     _channel = null;
     _terminalInfo = null;
     _lastSeq = -1;
-    _reconnectAttempts = 0;
     _terminal.write('\r\nOpening Sidemesh terminal...\r\n');
     unawaited(_startTerminal(reuseExisting: widget.reuseExisting));
   }
 
   @override
   void dispose() {
-    _reconnectTimer?.cancel();
+    HostReconnectScheduler.instance.unregisterSlot(widget.host.id, 'terminal-live');
     _subscription?.cancel();
     _channel?.sink.close();
     _focusNode.dispose();
@@ -176,7 +181,7 @@ class _TerminalPaneState extends State<TerminalPane> {
         _terminalInfo = terminal;
         _starting = false;
       });
-      _connectLive(resetAttempts: true);
+      _connectLive();
     } catch (error) {
       if (!mounted) return;
       final message = friendlyError(error);
@@ -204,13 +209,10 @@ class _TerminalPaneState extends State<TerminalPane> {
     return null;
   }
 
-  void _connectLive({bool resetAttempts = false}) {
+  void _connectLive() {
     final terminal = _terminalInfo;
     if (!mounted || terminal == null || !terminal.isRunning || _connecting) {
       return;
-    }
-    if (resetAttempts) {
-      _reconnectAttempts = 0;
     }
     _subscription?.cancel();
     _channel?.sink.close();
@@ -236,6 +238,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       setState(() {
         _connecting = false;
       });
+      HostReconnectScheduler.instance.markConnected(widget.host.id);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -251,23 +254,11 @@ class _TerminalPaneState extends State<TerminalPane> {
     _subscription?.cancel();
     _subscription = null;
     _channel = null;
-    _reconnectTimer?.cancel();
-    _reconnectAttempts = (_reconnectAttempts + 1).clamp(1, 6);
-    final delayMs = switch (_reconnectAttempts) {
-      1 => 500,
-      2 => 1000,
-      3 => 2000,
-      4 => 4000,
-      5 => 8000,
-      _ => 15000,
-    };
     setState(() {
       _connecting = false;
       _error = 'Terminal disconnected. Reconnecting...';
     });
-    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
-      if (mounted) _connectLive();
-    });
+    HostReconnectScheduler.instance.markDisconnected(widget.host.id);
   }
 
   void _handleRawFrame(dynamic raw) {
@@ -301,6 +292,7 @@ class _TerminalPaneState extends State<TerminalPane> {
         if (data is String && data.isNotEmpty) {
           _terminal.write(data);
         }
+        HostStatusStore.instance.markEvent(widget.host.id);
         return;
       case 'exit':
         final seq = _intOrNull(frame['seq']);
@@ -364,7 +356,6 @@ class _TerminalPaneState extends State<TerminalPane> {
 
   void _adoptReplacementTerminal(HostTerminalInfo replacement) {
     if (!mounted || replacement.id == _terminalInfo?.id) return;
-    _reconnectTimer?.cancel();
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     _subscription = null;
@@ -375,11 +366,10 @@ class _TerminalPaneState extends State<TerminalPane> {
       _stopping = false;
       _connecting = false;
       _lastSeq = -1;
-      _reconnectAttempts = 0;
       _error = null;
     });
     _terminal.write('\r\n[terminal restarted from another device]\r\n');
-    _connectLive(resetAttempts: true);
+    _connectLive();
   }
 
   void _handleResize(int cols, int rows, int pixelWidth, int pixelHeight) {
@@ -414,7 +404,6 @@ class _TerminalPaneState extends State<TerminalPane> {
 
   Future<void> _restartTerminal() async {
     if (_starting) return;
-    _reconnectTimer?.cancel();
     await _subscription?.cancel();
     await _channel?.sink.close();
     if (!mounted) return;
@@ -425,7 +414,6 @@ class _TerminalPaneState extends State<TerminalPane> {
       _stopping = false;
       _connecting = false;
       _lastSeq = -1;
-      _reconnectAttempts = 0;
       _error = null;
     });
     _terminal.write('\r\nStarting a new Sidemesh terminal...\r\n');
@@ -439,6 +427,7 @@ class _TerminalPaneState extends State<TerminalPane> {
     return Column(
       children: [
         _TerminalStatusStrip(
+          hostId: widget.host.id,
           starting: _starting,
           connecting: _connecting,
           stopping: _stopping,
@@ -541,6 +530,7 @@ Color _brightTerminalColor(Color color) =>
 
 class _TerminalStatusStrip extends StatelessWidget {
   const _TerminalStatusStrip({
+    required this.hostId,
     required this.starting,
     required this.connecting,
     required this.stopping,
@@ -550,6 +540,7 @@ class _TerminalStatusStrip extends StatelessWidget {
     required this.onRestart,
   });
 
+  final String hostId;
   final bool starting;
   final bool connecting;
   final bool stopping;
@@ -568,7 +559,7 @@ class _TerminalStatusStrip extends StatelessWidget {
         !connecting &&
         (terminal != null || error != null);
     final limitedBackend = terminal?.backend == 'pipe';
-    final label =
+    final baseLabel =
         error ??
         (starting
             ? 'Starting terminal'
@@ -606,14 +597,27 @@ class _TerminalStatusStrip extends StatelessWidget {
             ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: error == null ? colors.textSecondary : colors.danger,
-                fontWeight: FontWeight.w700,
-              ),
+            child: ListenableBuilder(
+              listenable: Listenable.merge([
+                HostStatusStore.instance,
+                RelativeTimeTicker.instance,
+              ]),
+              builder: (context, _) {
+                final status = HostStatusStore.instance.statusFor(hostId);
+                final freshness = _terminalFreshness(status);
+                final label = freshness != null
+                    ? '$baseLabel · $freshness'
+                    : baseLabel;
+                return Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: error == null ? colors.textSecondary : colors.danger,
+                    fontWeight: FontWeight.w700,
+                  ),
+                );
+              },
             ),
           ),
           if (terminal != null)
@@ -651,6 +655,16 @@ class _TerminalStatusStrip extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String? _terminalFreshness(HostStatus status) {
+    final last = status.lastEventAt ?? status.lastOnlineAt;
+    if (last == null) return null;
+    final elapsed = DateTime.now().difference(last);
+    if (elapsed.inSeconds < 5) return null;
+    if (elapsed.inMinutes < 1) return 'last output ${elapsed.inSeconds}s ago';
+    if (elapsed.inHours < 1) return 'last output ${elapsed.inMinutes}m ago';
+    return 'last output ${elapsed.inHours}h ago';
   }
 }
 

@@ -180,18 +180,7 @@ export class CodexAgentProvider
   }
 
   public async listRecentUnindexedSessionThreads(limit: number): Promise<ThreadRecord[]> {
-    const summaries = await listRecentRolloutThreads(this.runtimeHome, limit);
-    const threads: ThreadRecord[] = [];
-
-    for (const summary of summaries) {
-      try {
-        threads.push(await this.readSessionThread(summary.id, false));
-      } catch {
-        threads.push(summary);
-      }
-    }
-
-    return threads;
+    return listRecentRolloutThreads(this.runtimeHome, limit);
   }
 
   public readSessionLog(

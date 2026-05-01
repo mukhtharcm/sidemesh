@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../api_client.dart';
 import '../approval_inbox_store.dart';
 import '../host_status_store.dart';
+import '../relative_time_ticker.dart';
 import '../host_store.dart';
 import '../live_activity_service.dart';
 import '../local_notification_service.dart';
@@ -2991,13 +2992,18 @@ class _HostRowCard extends StatelessWidget {
                     if (!host.enabled ||
                         status.reachability != HostReachability.unknown) ...[
                       const SizedBox(height: 4),
-                      Text(
-                        _statusLine(status),
-                        style: monoStyle(
-                          color: _statusColor(colors, status),
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      ListenableBuilder(
+                        listenable: RelativeTimeTicker.instance,
+                        builder: (context, _) {
+                          return Text(
+                            _statusLine(status),
+                            style: monoStyle(
+                              color: _statusColor(colors, status),
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ],
@@ -3043,10 +3049,40 @@ class _HostRowCard extends StatelessWidget {
     if (!host.enabled) return 'Disabled';
     switch (status.reachability) {
       case HostReachability.online:
+        final last = status.lastEventAt ?? status.lastOnlineAt;
+        if (last != null) {
+          final elapsed = DateTime.now().difference(last);
+          if (elapsed.inSeconds >= 5) {
+            if (elapsed.inMinutes < 1) {
+              return 'Online · last event ${elapsed.inSeconds}s ago';
+            } else if (elapsed.inHours < 1) {
+              return 'Online · last event ${elapsed.inMinutes}m ago';
+            } else {
+              return 'Online · last event ${elapsed.inHours}h ago';
+            }
+          }
+        }
         return 'Online';
       case HostReachability.offline:
+        final last = status.lastOnlineAt;
+        String suffix;
+        if (last != null) {
+          final elapsed = DateTime.now().difference(last);
+          if (elapsed.inMinutes < 1) {
+            suffix = 'last seen ${elapsed.inSeconds}s ago';
+          } else if (elapsed.inHours < 1) {
+            suffix = 'last seen ${elapsed.inMinutes}m ago';
+          } else {
+            suffix = 'last seen ${elapsed.inHours}h ago';
+          }
+        } else {
+          suffix = 'never seen';
+        }
         final err = status.lastError;
-        return err == null || err.isEmpty ? 'Offline' : 'Offline · $err';
+        if (err != null && err.isNotEmpty) {
+          return 'Offline · $err · $suffix';
+        }
+        return 'Offline · $suffix';
       case HostReachability.probing:
         return 'Probing…';
       case HostReachability.unknown:
