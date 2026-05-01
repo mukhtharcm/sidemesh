@@ -2164,10 +2164,21 @@ class _SessionScreenState extends State<SessionScreen>
       unawaited(_loadSkills(forceReload: true));
       final nextSeq = event.nextSeq;
       final last = _lastEventSeq;
-      if (nextSeq != null && last != null && nextSeq > last + 1) {
-        // We missed events while disconnected; try the cheap delta first,
-        // fall back to a full snapshot if that fails.
+      if (nextSeq != null &&
+          last != null &&
+          (nextSeq > last + 1 || nextSeq <= last)) {
+        // We either missed events while disconnected, or the daemon restarted
+        // and reset its live-event sequence. A reset cannot be reconciled by
+        // asking for events after our old seq, so fetch a full snapshot.
         unawaited(() async {
+          if (nextSeq <= last) {
+            await _loadSnapshot(
+              messageLimit: _messageLimit,
+              activityLimit: _activityLimit,
+              scrollToBottom: false,
+            );
+            return;
+          }
           final applied = await _resyncDelta();
           if (!applied && mounted) {
             await _loadSnapshot(
