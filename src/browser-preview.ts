@@ -16,6 +16,7 @@ const DEFAULT_HEIGHT = 844;
 const DEFAULT_QUALITY = 55;
 const CHROME_START_TIMEOUT_MS = 10_000;
 const CDP_COMMAND_TIMEOUT_MS = 15_000;
+const CHROME_SHUTDOWN_TIMEOUT_MS = 2_000;
 const MAX_TEXT_INPUT_CHARS = 20_000;
 const MAX_CLIENT_BUFFERED_AMOUNT = 8 * 1024 * 1024;
 const SIDEMESH_BROWSER_PROFILE_DIR = "sidemesh";
@@ -414,7 +415,10 @@ export class BrowserPreviewRegistry {
     const userDataDir = await mkdtemp(
       path.join(tmpdir(), "sidemesh-browser-preview-"),
     );
-    const { process: child, browserWsUrl } = await launchChrome(chromePath, userDataDir);
+    const { process: child, browserWsUrl } = await launchChrome(
+      chromePath,
+      userDataDir,
+    );
     try {
       return {
         cdp: await CdpConnection.connect(browserWsUrl),
@@ -423,7 +427,7 @@ export class BrowserPreviewRegistry {
         ownsBrowser: true,
       };
     } catch (error) {
-      if (!child.killed) child.kill("SIGTERM");
+      await terminateBrowserProcess(child);
       await rm(userDataDir, { recursive: true, force: true }).catch(() => {});
       throw error;
     }
@@ -461,13 +465,16 @@ export class BrowserPreviewRegistry {
       this.persistentProfileRoot,
       SIDEMESH_BROWSER_PROFILE_DIR,
     );
-    const { process: child, browserWsUrl } = await launchChrome(chromePath, userDataDir);
+    const { process: child, browserWsUrl } = await launchChrome(
+      chromePath,
+      userDataDir,
+    );
     let cdp: CdpConnection;
     try {
       cdp = await CdpConnection.connect(browserWsUrl);
       await cdp.send("Target.setDiscoverTargets", { discover: true });
     } catch (error) {
-      if (!child.killed) child.kill("SIGTERM");
+      await terminateBrowserProcess(child);
       throw error;
     }
     const host = { userDataDir, process: child, cdp };
@@ -848,8 +855,8 @@ export class BrowserPreviewRegistry {
     preview.cdp = null;
     preview.sessionIdCdp = null;
     preview.targetId = null;
-    if (preview.ownsBrowser && preview.process && !preview.process.killed) {
-      preview.process.kill("SIGTERM");
+    if (preview.ownsBrowser && preview.process) {
+      await terminateBrowserProcess(preview.process);
     }
     preview.process = null;
     const userDataDir = preview.userDataDir;
@@ -875,9 +882,7 @@ export class BrowserPreviewRegistry {
     this.persistentHost = null;
     if (!host) return;
     host.cdp.close();
-    if (!host.process.killed) {
-      host.process.kill("SIGTERM");
-    }
+    await terminateBrowserProcess(host.process);
   }
 
   private requirePreview(id: string): BrowserPreviewRecord {
@@ -1250,8 +1255,45 @@ async function launchChrome(
     stdio: ["ignore", "pipe", "pipe"],
     env,
   });
-  const browserWsUrl = await waitForDevToolsUrl(child);
-  return { process: child, browserWsUrl };
+  try {
+    const browserWsUrl = await waitForDevToolsUrl(child);
+    return { process: child, browserWsUrl };
+  } catch (error) {
+    await terminateBrowserProcess(child);
+    throw error;
+  }
+}
+
+async function terminateBrowserProcess(child: BrowserProcess): Promise<void> {
+  if (isBrowserProcessExited(child)) return;
+  child.kill("SIGTERM");
+  const exited = await waitForProcessExit(child, CHROME_SHUTDOWN_TIMEOUT_MS);
+  if (exited || isBrowserProcessExited(child)) return;
+  child.kill("SIGKILL");
+  await waitForProcessExit(child, CHROME_SHUTDOWN_TIMEOUT_MS);
+}
+
+function isBrowserProcessExited(child: BrowserProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+async function waitForProcessExit(
+  child: BrowserProcess,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (isBrowserProcessExited(child)) return true;
+  let timeout: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      once(child, "exit").then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(false), timeoutMs);
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 async function waitForDevToolsUrl(
