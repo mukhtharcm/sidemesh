@@ -1823,19 +1823,25 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
       child: Row(
         children: [
           widget.viewMode != null && widget.onViewModeChanged != null
-              ? PopupMenuButton<SessionViewMode>(
-                  icon: Icon(
-                    switch (widget.viewMode!) {
-                      SessionViewMode.flat => Icons.view_list_rounded,
-                      SessionViewMode.byCwd => Icons.folder_outlined,
-                      SessionViewMode.byHost => Icons.hub_outlined,
-                    },
-                    size: 15,
-                    color: _focused ? colors.accent : colors.textTertiary,
+              ? ConstrainedBox(
+                  constraints: const BoxConstraints.tightFor(
+                    width: 26,
+                    height: 26,
                   ),
-                  tooltip: 'View mode',
-                  onSelected: widget.onViewModeChanged,
-                  itemBuilder: (context) => [
+                  child: PopupMenuButton<SessionViewMode>(
+                    padding: EdgeInsets.zero,
+                    icon: Icon(
+                      switch (widget.viewMode!) {
+                        SessionViewMode.flat => Icons.view_list_rounded,
+                        SessionViewMode.byCwd => Icons.folder_outlined,
+                        SessionViewMode.byHost => Icons.hub_outlined,
+                      },
+                      size: 15,
+                      color: _focused ? colors.accent : colors.textTertiary,
+                    ),
+                    tooltip: 'View mode',
+                    onSelected: widget.onViewModeChanged,
+                    itemBuilder: (context) => [
                     PopupMenuItem(
                       value: SessionViewMode.flat,
                       child: Row(
@@ -1879,7 +1885,8 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
                       ),
                     ),
                   ],
-                )
+                ),
+              )
               : Icon(
                   Icons.search_rounded,
                   size: 15,
