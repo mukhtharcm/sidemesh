@@ -1,7 +1,7 @@
 # Sidemesh
 
 Sidemesh is a fleet-first mobile control plane for agent sessions. The daemon
-ships with provider adapters for Codex, GitHub Copilot CLI, and a deterministic
+ships with provider adapters for Codex, GitHub Copilot CLI, Pi (via the Pi SDK), and a deterministic
 fake test provider, while the server/client boundaries are structured around
 provider capabilities so more coding agents can be added behind the same API.
 
@@ -459,7 +459,7 @@ Current limits:
 - host tokens are stored in platform secure storage, but token revocation is
   not implemented yet
 - the iOS and Android builds allow plain `http://` traffic so Tailscale and private LAN nodes work immediately
-- Codex remains the fullest production provider; the Copilot adapter is
+- Codex and Pi are the production-ready providers; the Copilot adapter is
   experimental and disabled by default, and the fake provider is the
   deterministic contract test adapter
 - provider registration is centralized in `src/provider-registry.ts`; future
