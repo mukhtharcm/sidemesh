@@ -77,6 +77,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   int _activeCount = 0;
   int _inboxCount = 0;
   String _query = '';
+  SessionViewMode _recentViewMode = SessionViewMode.flat;
   bool _handlingNotificationIntent = false;
 
   List<HostProfile> get _enabledHosts =>
@@ -104,6 +105,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       });
     });
     _startHeartbeat();
+    _loadRecentViewMode();
   }
 
   @override
@@ -168,6 +170,30 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     } finally {
       _heartbeatInFlight = false;
     }
+  }
+
+  Future<void> _loadRecentViewMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('sidemesh.recent.viewMode');
+    if (!mounted) return;
+    setState(() {
+      _recentViewMode = switch (raw) {
+        'byCwd' => SessionViewMode.byCwd,
+        'byHost' => SessionViewMode.byHost,
+        _ => SessionViewMode.flat,
+      };
+    });
+  }
+
+  Future<void> _setRecentViewMode(SessionViewMode mode) async {
+    if (_recentViewMode == mode) return;
+    setState(() => _recentViewMode = mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('sidemesh.recent.viewMode', switch (mode) {
+      SessionViewMode.byCwd => 'byCwd',
+      SessionViewMode.byHost => 'byHost',
+      SessionViewMode.flat => 'flat',
+    });
   }
 
   Future<void> _refreshHosts() async {
@@ -412,6 +438,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               onRefresh: _refreshHosts,
               onStartSession: _startSessionFromHome,
               onOpenSettings: _openSettings,
+              recentViewMode: _tabIndex == 0 ? _recentViewMode : null,
+              onRecentViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
             ),
             _HomeSearchBar(
               controller: _searchController,
@@ -435,6 +463,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                             if (!mounted) return;
                             setState(() => _activeCount = count);
                           },
+                          viewMode: _recentViewMode,
+                          onViewModeChanged: _setRecentViewMode,
                         ),
                         InboxPane(
                           hosts: enabledHosts,
@@ -513,12 +543,16 @@ class _TopBar extends StatelessWidget {
     required this.onRefresh,
     required this.onStartSession,
     required this.onOpenSettings,
+    this.recentViewMode,
+    this.onRecentViewModeChanged,
   });
 
   final _TabDef tab;
   final VoidCallback onRefresh;
   final VoidCallback onStartSession;
   final VoidCallback onOpenSettings;
+  final SessionViewMode? recentViewMode;
+  final ValueChanged<SessionViewMode>? onRecentViewModeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -593,6 +627,66 @@ class _TopBar extends StatelessWidget {
             onTap: onStartSession,
           ),
           const SizedBox(width: 8),
+          if (recentViewMode != null && onRecentViewModeChanged != null) ...[
+            PopupMenuButton<SessionViewMode>(
+              icon: Icon(
+                switch (recentViewMode!) {
+                  SessionViewMode.flat => Icons.view_list_rounded,
+                  SessionViewMode.byCwd => Icons.folder_outlined,
+                  SessionViewMode.byHost => Icons.hub_outlined,
+                },
+                size: 20,
+                color: Theme.of(context).iconTheme.color,
+              ),
+              tooltip: 'View mode',
+              onSelected: onRecentViewModeChanged,
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: SessionViewMode.flat,
+                  child: Row(
+                    children: [
+                      Icon(Icons.view_list_rounded, size: 18),
+                      const SizedBox(width: 10),
+                      Text('Flat list'),
+                      if (recentViewMode == SessionViewMode.flat) ...[
+                        const SizedBox(width: 8),
+                        Icon(Icons.check_rounded, size: 16),
+                      ],
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: SessionViewMode.byCwd,
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder_outlined, size: 18),
+                      const SizedBox(width: 10),
+                      Text('By working dir'),
+                      if (recentViewMode == SessionViewMode.byCwd) ...[
+                        const SizedBox(width: 8),
+                        Icon(Icons.check_rounded, size: 16),
+                      ],
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: SessionViewMode.byHost,
+                  child: Row(
+                    children: [
+                      Icon(Icons.hub_outlined, size: 18),
+                      const SizedBox(width: 10),
+                      Text('By host'),
+                      if (recentViewMode == SessionViewMode.byHost) ...[
+                        const SizedBox(width: 8),
+                        Icon(Icons.check_rounded, size: 16),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 8),
+          ],
           MeshIconButton(
             icon: Icons.tune_rounded,
             tooltip: 'Settings',
@@ -758,6 +852,8 @@ class RecentPane extends StatefulWidget {
     this.hasSavedHosts = false,
     this.screenAwakeSourceKey,
     this.screenAwakeController,
+    this.viewMode = SessionViewMode.flat,
+    this.onViewModeChanged,
   });
 
   final List<HostProfile> hosts;
@@ -771,6 +867,8 @@ class RecentPane extends StatefulWidget {
   final bool hasSavedHosts;
   final String? screenAwakeSourceKey;
   final ScreenAwakeController? screenAwakeController;
+  final SessionViewMode viewMode;
+  final ValueChanged<SessionViewMode>? onViewModeChanged;
 
   @override
   State<RecentPane> createState() => _RecentPaneState();
@@ -805,7 +903,6 @@ class _SessionGroup {
 class _RecentPaneState extends State<RecentPane> {
   final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
   final RecentSessionsStore _store = RecentSessionsStore();
-  SessionViewMode _viewMode = SessionViewMode.flat;
 
   @override
   void initState() {
@@ -814,31 +911,6 @@ class _RecentPaneState extends State<RecentPane> {
     SessionReadStore.instance.ensureLoaded();
     _store.addListener(_handleStoreChanged);
     _store.configure(hosts: widget.hosts, api: widget.api);
-    _loadViewMode();
-  }
-
-  Future<void> _loadViewMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('sidemesh.recent.viewMode');
-    if (!mounted) return;
-    setState(() {
-      _viewMode = switch (raw) {
-        'byCwd' => SessionViewMode.byCwd,
-        'byHost' => SessionViewMode.byHost,
-        _ => SessionViewMode.flat,
-      };
-    });
-  }
-
-  Future<void> _setViewMode(SessionViewMode mode) async {
-    if (_viewMode == mode) return;
-    setState(() => _viewMode = mode);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('sidemesh.recent.viewMode', switch (mode) {
-      SessionViewMode.byCwd => 'byCwd',
-      SessionViewMode.byHost => 'byHost',
-      SessionViewMode.flat => 'flat',
-    });
   }
 
   String _cwdBasename(String cwd) {
@@ -848,10 +920,10 @@ class _RecentPaneState extends State<RecentPane> {
   }
 
   List<_SessionGroup> _groupEntries(List<RemoteSessionEntry> entries) {
-    if (_viewMode == SessionViewMode.flat) return const [];
+    if (widget.viewMode == SessionViewMode.flat) return const [];
     final groups = <String, List<RemoteSessionEntry>>{};
     for (final entry in entries) {
-      final key = switch (_viewMode) {
+      final key = switch (widget.viewMode) {
         SessionViewMode.byCwd => _cwdBasename(entry.session.cwd),
         SessionViewMode.byHost => entry.host.label,
         SessionViewMode.flat => '',
@@ -949,7 +1021,7 @@ class _RecentPaneState extends State<RecentPane> {
       });
     }
     final sorted = visible.toList();
-    if (_viewMode == SessionViewMode.flat) {
+    if (widget.viewMode == SessionViewMode.flat) {
       sorted.sort((left, right) {
         final leftFavorite = _favorites.isFavorite(left.host, left.session.id);
         final rightFavorite = _favorites.isFavorite(right.host, right.session.id);
@@ -997,7 +1069,6 @@ class _RecentPaneState extends State<RecentPane> {
         final sortedEntries = _sortEntries(_store.entries);
         final groups = _groupEntries(sortedEntries);
         final isGrouped = groups.isNotEmpty;
-        final showToggle = sortedEntries.isNotEmpty || _viewMode != SessionViewMode.flat;
         final hasCachedEntries =
             _store.entries.isNotEmpty &&
             _store.confirmedHostIds.length < widget.hosts.length;
@@ -1051,15 +1122,7 @@ class _RecentPaneState extends State<RecentPane> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (showToggle) ...[
-              SizedBox(height: widget.dense ? 4 : 8),
-              _ViewModeToggle(
-                mode: _viewMode,
-                dense: widget.dense,
-                onChanged: _setViewMode,
-              ),
-              SizedBox(height: widget.dense ? 6 : 10),
-            ],
+            SizedBox(height: widget.dense ? 4 : 8),
             Expanded(
               child: RefreshIndicator(
                 color: context.colors.accent,
@@ -1178,7 +1241,7 @@ class _RecentPaneState extends State<RecentPane> {
               child: Row(
                 children: [
                   Icon(
-                    _viewMode == SessionViewMode.byCwd
+                    widget.viewMode == SessionViewMode.byCwd
                         ? Icons.folder_outlined
                         : Icons.hub_outlined,
                     size: 14,
@@ -1239,77 +1302,6 @@ class _RecentPaneState extends State<RecentPane> {
         }
         return const SizedBox.shrink();
       },
-    );
-  }
-}
-
-class _ViewModeToggle extends StatelessWidget {
-  const _ViewModeToggle({
-    required this.mode,
-    required this.dense,
-    required this.onChanged,
-  });
-
-  final SessionViewMode mode;
-  final bool dense;
-  final ValueChanged<SessionViewMode> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    Widget chip(SessionViewMode m, IconData icon, String label) {
-      final selected = mode == m;
-      return Expanded(
-        child: GestureDetector(
-          onTap: () => onChanged(m),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            curve: Curves.easeOut,
-            padding: EdgeInsets.symmetric(vertical: dense ? 4 : 6),
-            decoration: BoxDecoration(
-              color: selected ? colors.accentMuted : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: selected ? colors.accent.withValues(alpha: 0.35) : Colors.transparent,
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, size: dense ? 12 : 14, color: selected ? colors.accent : colors.textSecondary),
-                SizedBox(width: dense ? 4 : 5),
-                Text(
-                  label,
-                  style: monoStyle(
-                    color: selected ? colors.accent : colors.textSecondary,
-                    fontSize: dense ? 9.5 : 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: dense ? 6 : 16),
-      child: Container(
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          color: colors.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: colors.border),
-        ),
-        child: Row(
-          children: [
-            chip(SessionViewMode.flat, Icons.format_list_bulleted_rounded, 'Flat'),
-            chip(SessionViewMode.byCwd, Icons.folder_outlined, 'CWD'),
-            chip(SessionViewMode.byHost, Icons.hub_outlined, 'Host'),
-          ],
-        ),
-      ),
     );
   }
 }
