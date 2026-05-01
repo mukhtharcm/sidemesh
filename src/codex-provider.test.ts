@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { CodexAgentProvider } from "./codex-provider.js";
 import type {
@@ -97,6 +100,59 @@ describe("codex provider resume runtime restore", () => {
         turnId: "turn-1",
       },
     });
+  });
+
+  it("lists recent rollout fallback sessions without app-server hydration", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "sidemesh-codex-provider-"));
+    try {
+      const rolloutDir = path.join(tempDir, "sessions", "2026", "05", "01");
+      const rolloutPath = path.join(
+        rolloutDir,
+        "rollout-2026-05-01T01-00-00-thread-1.jsonl",
+      );
+      await mkdir(rolloutDir, { recursive: true });
+      await writeFile(
+        rolloutPath,
+        [
+          JSON.stringify({
+            timestamp: "2026-05-01T01:00:00.000Z",
+            type: "session_meta",
+            payload: {
+              id: "thread-1",
+              cwd: "/tmp/project",
+              timestamp: "2026-05-01T01:00:00.000Z",
+              source: "cli",
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-05-01T01:00:01.000Z",
+            type: "event_msg",
+            payload: { type: "user_message", message: "hello" },
+          }),
+          "",
+        ].join("\n"),
+      );
+
+      const provider = new CodexAgentProvider("codex") as any;
+      let bridgeReads = 0;
+      provider.bridge = {
+        codexHome: tempDir,
+        request: async () => {
+          bridgeReads += 1;
+          throw new Error("thread/read should not be called for rollout fallback");
+        },
+      };
+
+      const threads = await provider.listRecentUnindexedSessionThreads(10);
+
+      assert.equal(bridgeReads, 0);
+      assert.equal(threads.length, 1);
+      assert.equal(threads[0]?.id, "thread-1");
+      assert.equal(threads[0]?.cwd, "/tmp/project");
+      assert.equal(threads[0]?.preview, "hello");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("restores persisted runtime when resuming an unloaded session", async () => {
