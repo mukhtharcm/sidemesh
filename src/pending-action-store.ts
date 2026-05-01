@@ -164,7 +164,13 @@ export function isRecoveredPendingAction(action: AgentPendingAction): boolean {
 }
 
 function shouldPersistPendingAction(action: PendingAction): boolean {
-  return action.kind === "user_input" && action.recoverable !== false;
+  if (action.kind === "user_input") {
+    return action.recoverable !== false;
+  }
+  if (action.kind === "elicitation") {
+    return action.recoverable === true;
+  }
+  return false;
 }
 
 function toRecoveredAction(action: PendingAction): AgentPendingAction {
@@ -236,6 +242,9 @@ function normalizePendingAction(value: unknown): PendingAction | null {
     canApprove: typed.canApprove === true,
     canApproveForSession: typed.canApproveForSession === true,
     canDecline: typed.canDecline === true,
+    ...(typeof typed.recoverable === "boolean"
+      ? { recoverable: typed.recoverable }
+      : {}),
     ...(stringValue(typed.sessionTitle)
       ? { sessionTitle: stringValue(typed.sessionTitle)! }
       : {}),
@@ -250,6 +259,12 @@ function normalizePendingAction(value: unknown): PendingAction | null {
       return null;
     }
     action.userInput = userInput;
+  } else if (kind === "elicitation") {
+    const elicitation = normalizeElicitation(typed.elicitation);
+    if (!elicitation) {
+      return null;
+    }
+    action.elicitation = elicitation;
   }
   return action;
 }
@@ -431,8 +446,8 @@ function normalizeElicitationFormat(
 
 function isPersistedPendingActionKind(
   value: string | null,
-): value is "user_input" {
-  return value === "user_input";
+): value is "user_input" | "elicitation" {
+  return value === "user_input" || value === "elicitation";
 }
 
 function fallbackTitle(kind: "user_input" | "elicitation"): string {

@@ -111,11 +111,12 @@ The daemon represents interactive requests as `PendingAction` records:
 - `state: "pending"` for a live provider callback.
 - `state: "recovered"` for a request restored after daemon restart.
 - `recoverable: true` when Sidemesh can safely send the answer as a follow-up if
-  the original provider callback is gone. Today this is limited to plain
-  `user_input` questions.
+  the original provider callback is gone. Plain `user_input` questions default
+  to recoverable.
 - `recoverable: false` when an adapter knows the request must not be replayed
-  after restart. Structured `elicitation` requests should use this unless the
-  adapter can prove their values are safe to serialize into a chat follow-up.
+  after restart. Structured `elicitation` requests default to non-recoverable;
+  adapters must opt in only when the request and submitted values are safe to
+  serialize into a chat follow-up.
 - `relatedActivityId` when the pending action corresponds to a timeline tool
   activity that should be marked completed when a recovered response is sent.
 

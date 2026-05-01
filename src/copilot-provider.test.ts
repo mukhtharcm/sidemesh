@@ -87,6 +87,19 @@ describe("Copilot provider", () => {
                 success: true,
                 result: { answer: "staging" },
               }),
+              event("tool.execution_start", {
+                toolCallId: "tool-intent-1",
+                toolName: "report_intent",
+                arguments: {
+                  intent: "Implement the requested UI cleanup",
+                },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "tool-intent-1",
+                toolName: "report_intent",
+                success: true,
+                result: { ok: true },
+              }),
               event("assistant.usage", {
                 model: "gpt-5.2",
                 inputTokens: 333,
@@ -145,7 +158,7 @@ describe("Copilot provider", () => {
       assert.equal(log.messages.length, 2);
       assert.equal(log.messages[0]?.text, "hello sdk");
       assert.equal(log.messages[1]?.text, "hello back");
-      assert.equal(log.activities.length, 3);
+      assert.equal(log.activities.length, 4);
       assert.equal(log.activities[0]?.type, "tool");
       assert.equal(log.activities[0]?.semantic?.action, "mode_change");
       assert.deepEqual(log.activities[0]?.semantic?.targets, [
@@ -164,6 +177,19 @@ describe("Copilot provider", () => {
       );
       assert.equal(log.activities[2]?.semantic?.category, "interaction");
       assert.equal(log.activities[2]?.semantic?.action, "ask");
+      assert.deepEqual(log.activities[2]?.semantic?.targets, [
+        { type: "query", value: "Which environment should I use?" },
+      ]);
+      assert.equal(log.activities[3]?.type, "tool");
+      assert.equal(
+        log.activities[3]?.title,
+        "Model reported intent: Implement the requested UI cleanup",
+      );
+      assert.equal(log.activities[3]?.semantic?.category, "interaction");
+      assert.equal(log.activities[3]?.semantic?.action, "report");
+      assert.deepEqual(log.activities[3]?.semantic?.targets, [
+        { type: "query", value: "Implement the requested UI cleanup" },
+      ]);
       assert.equal(log.runtime?.model, "gpt-5.2");
       assert.equal(log.runtime?.mode, "autopilot");
       assert.equal(log.runtime?.telemetry?.contextWindow?.currentTokens, 3200);

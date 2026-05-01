@@ -292,6 +292,26 @@ void main() {
     expect(nested.toolTarget, 'README.md');
     expect(nested.toolTargets, ['README.md']);
 
+    final interaction = SessionActivity.fromJson({
+      'id': 'tool-ask-1',
+      'type': 'tool',
+      'createdAt': DateTime(2026, 4, 28).millisecondsSinceEpoch,
+      'seq': 2,
+      'status': 'completed',
+      'toolName': 'ask_user',
+      'semantic': {
+        'category': 'interaction',
+        'action': 'ask',
+        'targets': [
+          {'type': 'query', 'value': 'Which environment should I use?'},
+        ],
+      },
+    });
+
+    expect(interaction.toolSemantic?.category, 'interaction');
+    expect(interaction.toolSemantic?.action, 'ask');
+    expect(interaction.toolQuery, 'Which environment should I use?');
+
     final legacy = SessionActivity.fromJson({
       'id': 'tool-2',
       'type': 'tool',
