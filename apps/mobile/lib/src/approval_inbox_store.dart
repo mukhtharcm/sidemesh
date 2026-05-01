@@ -7,6 +7,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'api_client.dart';
 import 'approval_action_seen_store.dart';
 import 'host_status_store.dart';
+import 'host_reconnect_scheduler.dart';
 import 'live_activity_service.dart';
 import 'local_notification_service.dart';
 import 'models.dart';
@@ -380,9 +381,7 @@ class _ApprovalHostLiveConnection {
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
-  Timer? _reconnectTimer;
   bool _disposed = false;
-  int _attempt = 0;
 
   bool matches(HostProfile next) =>
       host.id == next.id &&
@@ -398,7 +397,7 @@ class _ApprovalHostLiveConnection {
         onError: (Object error) => _scheduleReconnect(error),
         onDone: () => _scheduleReconnect(null),
       );
-      _attempt = 0;
+      HostReconnectScheduler.instance.markConnected(host.id);
     } catch (error) {
       if (!host.enabled) return;
       _scheduleReconnect(error);
@@ -450,26 +449,13 @@ class _ApprovalHostLiveConnection {
     _subscription = null;
     _channel = null;
     onOffline(host, error);
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(_backoffDelay(), connect);
+    HostReconnectScheduler.instance.markDisconnected(host.id);
   }
 
-  Duration _backoffDelay() {
-    const delays = <Duration>[
-      Duration(seconds: 1),
-      Duration(seconds: 2),
-      Duration(seconds: 5),
-      Duration(seconds: 10),
-      Duration(seconds: 30),
-    ];
-    final delay = delays[_attempt.clamp(0, delays.length - 1).toInt()];
-    _attempt++;
-    return delay;
-  }
 
   void dispose() {
     _disposed = true;
-    _reconnectTimer?.cancel();
+    HostReconnectScheduler.instance.unregisterSlot(host.id, 'approval-inbox-live');
     unawaited(_subscription?.cancel() ?? Future<void>.value());
     final sink = _channel?.sink;
     if (sink != null) {
