@@ -438,12 +438,12 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               onRefresh: _refreshHosts,
               onStartSession: _startSessionFromHome,
               onOpenSettings: _openSettings,
-              recentViewMode: _tabIndex == 0 ? _recentViewMode : null,
-              onRecentViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
             ),
             _HomeSearchBar(
               controller: _searchController,
               hintText: 'Search ${tab.title.toLowerCase()}',
+              viewMode: _tabIndex == 0 ? _recentViewMode : null,
+              onViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
             ),
             const NotificationPermissionBanner(),
             Expanded(
@@ -543,16 +543,12 @@ class _TopBar extends StatelessWidget {
     required this.onRefresh,
     required this.onStartSession,
     required this.onOpenSettings,
-    this.recentViewMode,
-    this.onRecentViewModeChanged,
   });
 
   final _TabDef tab;
   final VoidCallback onRefresh;
   final VoidCallback onStartSession;
   final VoidCallback onOpenSettings;
-  final SessionViewMode? recentViewMode;
-  final ValueChanged<SessionViewMode>? onRecentViewModeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -627,66 +623,6 @@ class _TopBar extends StatelessWidget {
             onTap: onStartSession,
           ),
           const SizedBox(width: 8),
-          if (recentViewMode != null && onRecentViewModeChanged != null) ...[
-            PopupMenuButton<SessionViewMode>(
-              icon: Icon(
-                switch (recentViewMode!) {
-                  SessionViewMode.flat => Icons.view_list_rounded,
-                  SessionViewMode.byCwd => Icons.folder_outlined,
-                  SessionViewMode.byHost => Icons.hub_outlined,
-                },
-                size: 20,
-                color: Theme.of(context).iconTheme.color,
-              ),
-              tooltip: 'View mode',
-              onSelected: onRecentViewModeChanged,
-              itemBuilder: (context) => [
-                PopupMenuItem(
-                  value: SessionViewMode.flat,
-                  child: Row(
-                    children: [
-                      Icon(Icons.view_list_rounded, size: 18),
-                      const SizedBox(width: 10),
-                      Text('Flat list'),
-                      if (recentViewMode == SessionViewMode.flat) ...[
-                        const SizedBox(width: 8),
-                        Icon(Icons.check_rounded, size: 16),
-                      ],
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: SessionViewMode.byCwd,
-                  child: Row(
-                    children: [
-                      Icon(Icons.folder_outlined, size: 18),
-                      const SizedBox(width: 10),
-                      Text('By working dir'),
-                      if (recentViewMode == SessionViewMode.byCwd) ...[
-                        const SizedBox(width: 8),
-                        Icon(Icons.check_rounded, size: 16),
-                      ],
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: SessionViewMode.byHost,
-                  child: Row(
-                    children: [
-                      Icon(Icons.hub_outlined, size: 18),
-                      const SizedBox(width: 10),
-                      Text('By host'),
-                      if (recentViewMode == SessionViewMode.byHost) ...[
-                        const SizedBox(width: 8),
-                        Icon(Icons.check_rounded, size: 16),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 8),
-          ],
           MeshIconButton(
             icon: Icons.tune_rounded,
             tooltip: 'Settings',
@@ -4126,10 +4062,17 @@ class _RecentErrorBanner extends StatelessWidget {
 }
 
 class _HomeSearchBar extends StatelessWidget {
-  const _HomeSearchBar({required this.controller, required this.hintText});
+  const _HomeSearchBar({
+    required this.controller,
+    required this.hintText,
+    this.viewMode,
+    this.onViewModeChanged,
+  });
 
   final TextEditingController controller;
   final String hintText;
+  final SessionViewMode? viewMode;
+  final ValueChanged<SessionViewMode>? onViewModeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -4150,14 +4093,72 @@ class _HomeSearchBar extends StatelessWidget {
               fillColor: colors.surface,
               hintText: hintText,
               hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
-              prefixIcon: Icon(
-                Icons.search_rounded,
-                size: 18,
-                color: colors.textSecondary,
-              ),
+              prefixIcon: viewMode != null && onViewModeChanged != null
+                  ? PopupMenuButton<SessionViewMode>(
+                      icon: Icon(
+                        switch (viewMode!) {
+                          SessionViewMode.flat => Icons.view_list_rounded,
+                          SessionViewMode.byCwd => Icons.folder_outlined,
+                          SessionViewMode.byHost => Icons.hub_outlined,
+                        },
+                        size: 18,
+                        color: colors.textSecondary,
+                      ),
+                      tooltip: 'View mode',
+                      onSelected: onViewModeChanged,
+                      itemBuilder: (context) => [
+                        PopupMenuItem(
+                          value: SessionViewMode.flat,
+                          child: Row(
+                            children: [
+                              Icon(Icons.view_list_rounded, size: 18),
+                              const SizedBox(width: 10),
+                              Text('Flat list'),
+                              if (viewMode == SessionViewMode.flat) ...[
+                                const SizedBox(width: 8),
+                                Icon(Icons.check_rounded, size: 16),
+                              ],
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: SessionViewMode.byCwd,
+                          child: Row(
+                            children: [
+                              Icon(Icons.folder_outlined, size: 18),
+                              const SizedBox(width: 10),
+                              Text('By working dir'),
+                              if (viewMode == SessionViewMode.byCwd) ...[
+                                const SizedBox(width: 8),
+                                Icon(Icons.check_rounded, size: 16),
+                              ],
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: SessionViewMode.byHost,
+                          child: Row(
+                            children: [
+                              Icon(Icons.hub_outlined, size: 18),
+                              const SizedBox(width: 10),
+                              Text('By host'),
+                              if (viewMode == SessionViewMode.byHost) ...[
+                                const SizedBox(width: 8),
+                                Icon(Icons.check_rounded, size: 16),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    )
+                  : Icon(
+                      Icons.search_rounded,
+                      size: 18,
+                      color: colors.textSecondary,
+                    ),
               prefixIconConstraints: const BoxConstraints(
-                minWidth: 36,
-                minHeight: 36,
+                minWidth: 40,
+                minHeight: 40,
               ),
               suffixIcon: hasQuery
                   ? IconButton(
