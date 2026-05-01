@@ -1640,8 +1640,12 @@ class _ActivityCardState extends State<_ActivityCard> {
     SessionActivity activity,
   ) {
     final widgets = <Widget>[];
-    final question = _interactionQuestion(activity);
-    final intent = _interactionIntent(activity);
+    final question = activity.toolAction == 'report'
+        ? null
+        : _interactionQuestion(activity);
+    final intent = activity.toolAction == 'ask'
+        ? null
+        : _interactionIntent(activity);
     final choices = _interactionChoices(activity);
     final answer = _interactionAnswer(activity);
 
@@ -2125,20 +2129,28 @@ class _ActivityCardState extends State<_ActivityCard> {
     return _relativeSessionPath(raw, sessionCwd);
   }
 
-  String? _interactionQuestion(SessionActivity activity) =>
-      _firstStringFromPayload(activity.toolArgs, const [
-        'question',
-        'prompt',
-        'message',
-        'text',
-      ]);
+  String? _interactionQuestion(SessionActivity activity) {
+    final rawQuestion = _firstStringFromPayload(activity.toolArgs, const [
+      'question',
+      'prompt',
+      'message',
+      'text',
+    ]);
+    if (rawQuestion != null) return rawQuestion;
+    final semanticQuestion = (activity.toolQuery ?? '').trim();
+    return semanticQuestion.isEmpty ? null : semanticQuestion;
+  }
 
-  String? _interactionIntent(SessionActivity activity) =>
-      _firstStringFromPayload(activity.toolArgs, const [
-        'intent',
-        'intention',
-        'message',
-      ]);
+  String? _interactionIntent(SessionActivity activity) {
+    final rawIntent = _firstStringFromPayload(activity.toolArgs, const [
+      'intent',
+      'intention',
+      'message',
+    ]);
+    if (rawIntent != null) return rawIntent;
+    final semanticIntent = (activity.toolQuery ?? '').trim();
+    return semanticIntent.isEmpty ? null : semanticIntent;
+  }
 
   String? _interactionAnswer(SessionActivity activity) {
     final text = _firstStringFromPayload(activity.toolResult, const [

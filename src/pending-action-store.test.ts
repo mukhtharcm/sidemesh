@@ -66,7 +66,7 @@ describe("pending action store", () => {
     }
   });
 
-  it("only persists recoverable user-input requests", async () => {
+  it("only persists recoverable interaction requests", async () => {
     const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-actions-"));
     try {
       const store = await PendingActionStore.open(
@@ -121,7 +121,7 @@ describe("pending action store", () => {
         canApprove: false,
         canApproveForSession: false,
         canDecline: true,
-        recoverable: true,
+        recoverable: false,
         elicitation: {
           mode: "form",
           message: "Enter token",
@@ -139,6 +139,75 @@ describe("pending action store", () => {
       });
 
       assert.deepEqual(store.recoveredActions(), []);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers explicitly recoverable structured input requests", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-actions-"));
+    try {
+      const filePath = nodePath.join(dir, "actions.json");
+      const store = await PendingActionStore.open(filePath, {
+        ttlMs: 60_000,
+        limit: 10,
+      });
+
+      await store.put({
+        id: "form-1",
+        sessionId: "session-1",
+        kind: "elicitation",
+        title: "Structured input",
+        detail: "Choose deployment options",
+        requestedAt: 125,
+        canApprove: false,
+        canApproveForSession: false,
+        canDecline: true,
+        recoverable: true,
+        relatedActivityId: "tool-form-1",
+        elicitation: {
+          mode: "form",
+          message: "Choose deployment options",
+          source: "deploy",
+          fields: [
+            {
+              key: "region",
+              type: "string",
+              title: "Region",
+              required: true,
+              options: [{ value: "us-east", label: "US East" }],
+            },
+            {
+              key: "dryRun",
+              type: "boolean",
+              title: "Dry run",
+              required: false,
+              defaultValue: true,
+            },
+          ],
+        },
+        providerRequestId: "secret-request",
+        providerRequestKind: "provider/elicitation",
+        providerPayload: { secret: true },
+      });
+
+      const reopened = await PendingActionStore.open(filePath, {
+        ttlMs: 60_000,
+        limit: 10,
+      });
+      const recovered = reopened.recoveredActions();
+
+      assert.equal(recovered.length, 1);
+      assert.equal(recovered[0]?.id, "form-1");
+      assert.equal(recovered[0]?.state, "recovered");
+      assert.equal(recovered[0]?.recoverable, true);
+      assert.equal(recovered[0]?.relatedActivityId, "tool-form-1");
+      assert.equal(recovered[0]?.elicitation?.message, "Choose deployment options");
+      assert.equal(recovered[0]?.elicitation?.fields.length, 2);
+      assert.deepEqual(recovered[0]?.providerPayload, {
+        recovered: true,
+        originalRequestedAt: 125,
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

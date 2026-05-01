@@ -2932,10 +2932,15 @@ function inferCopilotToolSemantic(
     normalizedName === "user_input" ||
     normalizedName === "prompt_user"
   ) {
+    const question = readFirstString(
+      typedArgs,
+      ["question", "prompt", "message", "text", "query"],
+      typedResult,
+    );
     return {
       category: "interaction",
       action: "ask",
-      targets: query ? [{ type: "query", value: query }] : [],
+      targets: question ? [{ type: "query", value: question }] : [],
     };
   }
 
@@ -2944,10 +2949,15 @@ function inferCopilotToolSemantic(
     normalizedName === "reportintent" ||
     normalizedName === "intent"
   ) {
+    const intent = readFirstString(
+      typedArgs,
+      ["intent", "intention", "message", "text", "query"],
+      typedResult,
+    );
     return {
       category: "interaction",
       action: "report",
-      targets: query ? [{ type: "query", value: query }] : [],
+      targets: intent ? [{ type: "query", value: intent }] : [],
     };
   }
 
