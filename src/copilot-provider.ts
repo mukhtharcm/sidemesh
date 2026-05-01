@@ -1751,10 +1751,9 @@ export class CopilotAgentProvider
           thread: item.thread,
           messages: item.messages ?? [],
           activities: new Map(
-            (item.activities ?? []).map((activity) => [
-              activity.id,
-              normalizeStoredSessionActivity(activity),
-            ]),
+            normalizeStoredCopilotActivities(item.activities ?? []).map(
+              (activity) => [activity.id, activity],
+            ),
           ),
           turns: item.turns ?? [],
           runtime: normalizeStoredRuntime(item.runtime ?? null),
@@ -3264,6 +3263,51 @@ function rememberHiddenCopilotToolCall(
   if (typeof toolCallId === "string" && toolCallId.trim().length > 0) {
     target.add(toolCallId.trim());
   }
+}
+
+function normalizeStoredCopilotActivities(
+  activities: SessionActivity[],
+): SessionActivity[] {
+  const normalized: SessionActivity[] = [];
+  for (const activity of activities) {
+    const stored = normalizeStoredSessionActivity(activity);
+    if (stored.type !== "tool") {
+      normalized.push(stored);
+      continue;
+    }
+
+    const presentation = describeCopilotToolPresentation({
+      toolCallId: stored.id,
+      toolName: stored.toolName,
+      args: stored.args,
+      result: stored.result,
+      metadata: null,
+    });
+    if (
+      presentation.kind === "hidden" ||
+      presentation.kind === "commentary"
+    ) {
+      continue;
+    }
+    if (presentation.kind === "task") {
+      const plan = buildCopilotPlanChangedActivity({
+        activityId: stored.id,
+        turnId: stored.turnId,
+        operation: "update",
+      });
+      if (plan.type === "plan") {
+        normalized.push({
+          ...plan,
+          createdAt: stored.createdAt,
+          seq: stored.seq,
+          summary: presentation.output ?? plan.summary,
+        });
+      }
+      continue;
+    }
+    normalized.push(stored);
+  }
+  return normalized;
 }
 
 function normalizeCopilotToolKey(value: unknown): string {
