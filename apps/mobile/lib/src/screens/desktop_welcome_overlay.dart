@@ -348,17 +348,17 @@ class _WelcomeTab extends StatelessWidget {
               colors: colors,
             ),
             _FeatureChip(
-              icon: Icons.folder_open_outlined,
+              icon: Icons.folder_open_rounded,
               label: 'Browse files',
               colors: colors,
             ),
             _FeatureChip(
-              icon: Icons.terminal_outlined,
+              icon: Icons.terminal_rounded,
               label: 'Live terminal',
               colors: colors,
             ),
             _FeatureChip(
-              icon: Icons.notifications_active_outlined,
+              icon: Icons.notifications_active_rounded,
               label: 'Approval alerts',
               colors: colors,
             ),

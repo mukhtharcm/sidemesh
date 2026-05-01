@@ -224,7 +224,7 @@ class _ComposerAttachButton extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: Icon(
-              Icons.add_photo_alternate_outlined,
+              Icons.add_photo_alternate_rounded,
               color: enabled ? colors.accent : colors.textTertiary,
               size: 22,
             ),
@@ -470,7 +470,7 @@ class _ComposerSkillSuggestionTrayState
         child: Row(
           children: [
             Icon(
-              Icons.auto_awesome_outlined,
+              Icons.auto_awesome_rounded,
               size: 16,
               color: colors.textTertiary,
             ),

@@ -1115,7 +1115,7 @@ class _ImageViewerErrorState extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: Icon(
-              Icons.broken_image_outlined,
+              Icons.broken_image_rounded,
               size: 28,
               color: colors.danger,
             ),

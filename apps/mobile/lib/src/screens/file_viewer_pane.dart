@@ -267,7 +267,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: MeshEmptyState(
-          icon: Icons.description_outlined,
+          icon: Icons.description_rounded,
           title: 'Binary file',
           body:
               '${formatBytes(file.size)} • ${file.mimeHint.isEmpty ? 'unknown type' : file.mimeHint}',
@@ -408,7 +408,7 @@ class FileViewerActions extends StatelessWidget {
                 ? () => s?.toggleMarkdownPreview()
                 : null,
             icon: Icon(
-              markdownPreview ? Icons.code_rounded : Icons.article_outlined,
+              markdownPreview ? Icons.code_rounded : Icons.article_rounded,
               size: 18,
             ),
           ),

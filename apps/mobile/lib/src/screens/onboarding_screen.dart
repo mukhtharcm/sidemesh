@@ -653,12 +653,12 @@ class _ActionsPage extends StatelessWidget {
                 colors: colors,
               ),
               _FeatureChip(
-                icon: Icons.folder_open_outlined,
+                icon: Icons.folder_open_rounded,
                 label: 'Files',
                 colors: colors,
               ),
               _FeatureChip(
-                icon: Icons.terminal_outlined,
+                icon: Icons.terminal_rounded,
                 label: 'Terminal',
                 colors: colors,
               ),

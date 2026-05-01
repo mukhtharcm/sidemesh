@@ -1245,7 +1245,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               Text(
                 'New $_providerName session',
                 style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w800,
                   letterSpacing: -0.4,
                 ),
               ),
@@ -1488,7 +1488,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (_supportsProfiles) {
       extras.add(_ModelSelectionCard(
         title: 'Profile',
-        icon: Icons.badge_outlined,
+        icon: Icons.badge_rounded,
         value: _profileLabel,
         subtitle: _profileDescription,
         loading: _loadingProfiles,
@@ -1680,7 +1680,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (_supportsProfiles)
         MeshPill(
           label: _profileLabel,
-          icon: Icons.badge_outlined,
+          icon: Icons.badge_rounded,
           tone: _profileToSubmit == null
               ? MeshPillTone.neutral
               : MeshPillTone.accent,
@@ -2234,7 +2234,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                                   style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(
                                         color: colors.textPrimary,
-                                        fontWeight: FontWeight.w900,
+                                        fontWeight: FontWeight.w800,
                                         letterSpacing: -0.2,
                                       ),
                                 ),
@@ -2388,7 +2388,7 @@ class _ProviderPickerTile extends StatelessWidget {
                             style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(
                                   color: colors.textPrimary,
-                                  fontWeight: FontWeight.w900,
+                                  fontWeight: FontWeight.w800,
                                 ),
                           ),
                         ),
