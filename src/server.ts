@@ -51,7 +51,6 @@ import {
   mergeSessionActivities,
 } from "./activity.js";
 import {
-  buildPendingActionQuestionMessage,
   buildPendingActionResponseMessage,
   parsePendingActionResponseBody,
   toPublicPendingAction,
@@ -490,49 +489,6 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     );
   }
 
-  function persistInteractionMessage(
-    sessionId: string,
-    message: SessionMessage,
-  ): void {
-    appendInteractionMessage(interactionMessagesBySession, sessionId, message);
-    clearSessionLogCache(logCache, sessionId);
-    void timelineOverlayStore.upsertMessage(sessionId, message).catch(
-      (error: unknown) => {
-        const text = error instanceof Error ? error.message : String(error);
-        process.stderr.write(
-          `Failed to persist timeline message for ${sessionId}: ${text}\n`,
-        );
-      },
-    );
-  }
-
-  function persistQuestionMessageForAction(action: AgentPendingAction): void {
-    if (action.kind !== "user_input" && action.kind !== "elicitation") {
-      return;
-    }
-    const id = `action-question:${action.id}`;
-    const existing = interactionMessagesBySession
-      .get(action.sessionId)
-      ?.find((message) => message.id === id);
-    const message = buildPendingActionQuestionMessage(action, {
-      id,
-      createdAt: existing?.createdAt ?? Date.now(),
-      seq: existing?.seq ?? allocSeq(action.sessionId),
-    });
-    if (!message) {
-      return;
-    }
-    persistInteractionMessage(action.sessionId, message);
-    if (!existing) {
-      broadcastLive(action.sessionId, {
-        type: "assistant_message_completed",
-        sessionId: action.sessionId,
-        seq: message.seq,
-        messageItem: message,
-      });
-    }
-  }
-
   provider.on("stderr", (line) => {
     process.stderr.write(line);
   });
@@ -701,7 +657,6 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         return;
       case "action_opened":
         pendingActions.set(event.action.id, event.action);
-        persistQuestionMessageForAction(event.action);
         const publicAction = toPublicPendingAction(event.action);
         broadcastLive(event.action.sessionId, {
           type: "action_opened",
@@ -1138,23 +1093,13 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
             threadUpdatedAt: session.updatedAt,
             runtime: cached.runtime,
           });
-          const cachedActivities = mergeSessionActivities(
-            cached.activities,
-            liveActivities.get(sessionId)?.values() || [],
-          );
-          const cachedQuestionMessages = questionMessagesFromActivities(
-            cachedActivities,
-            cached.messages,
-          );
-          const cachedMessages = mergeSessionMessagesWithLimit(
-            cached.messages,
-            cachedQuestionMessages,
-            messageLimit,
-          );
           response.json({
             session: mapSession(session, cached.runtime),
-            messages: cachedMessages,
-            activities: filterQuestionActivities(cachedActivities),
+            messages: cached.messages,
+            activities: mergeSessionActivities(
+              cached.activities,
+              liveActivities.get(sessionId)?.values() || [],
+            ),
             pendingAction: findPendingActionForSession(
               pendingActions,
               sessionId,
@@ -1171,32 +1116,19 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         activityLimit,
       });
       ensureSeqCursor(sessionId, log.nextSeq);
-      const baseMessages = mergeSessionMessagesWithLimit(
+      const mergedMessages = mergeSessionMessagesWithLimit(
         log.messages,
         interactionMessagesBySession.get(sessionId) ?? [],
         messageLimit,
       );
-      const historicalActivitiesWithQuestions = mergeSessionActivities(
+      const historicalActivities = mergeSessionActivities(
         log.activities,
         overlayActivitiesBySession.get(sessionId) ?? [],
       );
-      const activitiesWithQuestions = mergeSessionActivities(
-        historicalActivitiesWithQuestions,
+      const activities = mergeSessionActivities(
+        historicalActivities,
         liveActivities.get(sessionId)?.values() || [],
       );
-      const questionMessages = questionMessagesFromActivities(
-        activitiesWithQuestions,
-        baseMessages,
-      );
-      const mergedMessages = mergeSessionMessagesWithLimit(
-        baseMessages,
-        questionMessages,
-        messageLimit,
-      );
-      const historicalActivities = filterQuestionActivities(
-        historicalActivitiesWithQuestions,
-      );
-      const activities = filterQuestionActivities(activitiesWithQuestions);
       const nextSeq = Math.max(log.nextSeq, sessionSeqCursor.get(sessionId) ?? 0);
       const history = buildSessionHistorySummary(
         log.totalMessages +
@@ -1347,14 +1279,6 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         nextSeq = highestSeq;
         logRuntime = log.runtime;
       }
-
-      const questionDelta = normalizeQuestionEventDelta(
-        newMessages,
-        newActivities,
-        since,
-      );
-      newMessages = questionDelta.messages;
-      newActivities = questionDelta.activities;
 
       const eventDeltaSize = measureSessionEventDelta(
         newMessages,
@@ -3263,118 +3187,6 @@ function mergeSessionMessagesWithLimit(
     return merged;
   }
   return merged.slice(-limit);
-}
-
-function questionMessagesFromActivities(
-  activities: SessionActivity[],
-  existingMessages: SessionMessage[],
-): SessionMessage[] {
-  const existingIds = new Set(existingMessages.map((message) => message.id));
-  const messages: SessionMessage[] = [];
-  for (const activity of activities) {
-    const message = questionMessageFromActivity(activity);
-    if (!message || existingIds.has(message.id)) {
-      continue;
-    }
-    existingIds.add(message.id);
-    messages.push(message);
-  }
-  return messages;
-}
-
-function questionMessageFromActivity(
-  activity: SessionActivity,
-): SessionMessage | null {
-  if (!isQuestionActivity(activity)) {
-    return null;
-  }
-  return {
-    id: questionMessageIdForActivity(activity),
-    role: "assistant",
-    text: formatQuestionActivityMessageText(activity.title, activity.detail),
-    attachments: [],
-    createdAt: activity.createdAt,
-    seq: activity.seq,
-    phase: "question",
-  };
-}
-
-function filterQuestionActivities(
-  activities: SessionActivity[],
-): SessionActivity[] {
-  return activities.filter((activity) => !isQuestionActivity(activity));
-}
-
-function normalizeQuestionEventDelta(
-  messages: SessionMessage[],
-  activities: SessionActivity[],
-  since: number,
-): { messages: SessionMessage[]; activities: SessionActivity[] } {
-  const questionMessages = questionMessagesFromActivities(activities, messages);
-  return {
-    messages: mergeSessionMessages(messages, questionMessages).filter(
-      (message) => (message.seq ?? 0) > since,
-    ),
-    activities: filterQuestionActivities(activities).filter(
-      (activity) => (activity.seq ?? 0) > since,
-    ),
-  };
-}
-
-function isQuestionActivity(activity: SessionActivity): activity is SessionActivity & {
-  type: "system_event";
-  title: string;
-  detail: string | null;
-} {
-  return (
-    activity.type === "system_event" &&
-    /^Model (asked|requested input):/i.test(activity.title.trim())
-  );
-}
-
-function questionMessageIdForActivity(activity: SessionActivity): string {
-  if (activity.id.startsWith("copilot-question-")) {
-    return `action-question:${activity.id.slice("copilot-question-".length)}`;
-  }
-  return `activity-question-message:${activity.id}`;
-}
-
-function formatQuestionActivityMessageText(
-  title: string,
-  detail: string | null,
-): string {
-  const titleMatch = title.match(/^Model (asked|requested input):\s*(.*)$/i);
-  const verb = titleMatch?.[1]?.toLowerCase() ?? "asked";
-  const body = titleMatch?.[2]?.trim() || "Agent question";
-  const lines = [
-    verb === "requested input"
-      ? `**Model requested input:** ${body}`
-      : `**Model asked:** ${body}`,
-  ];
-  for (const rawLine of (detail ?? "").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) {
-      continue;
-    }
-    const options = line.match(/^Options:\s*(.*)$/i);
-    if (options) {
-      const choices = options[1]!
-        .split(/\s+\/\s+/)
-        .map((choice) => choice.trim())
-        .filter((choice) => choice.length > 0);
-      if (choices.length > 0) {
-        lines.push("", "**Options:**", ...choices.map((choice) => `- ${choice}`));
-      }
-      continue;
-    }
-    const answer = line.match(/^You answered:\s*(.*)$/i);
-    if (answer) {
-      lines.push("", `**You answered:** ${answer[1]?.trim() ?? ""}`);
-      continue;
-    }
-    lines.push("", line);
-  }
-  return lines.join("\n");
 }
 
 function appendInteractionMessage(

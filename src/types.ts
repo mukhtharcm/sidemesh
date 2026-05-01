@@ -236,7 +236,7 @@ export interface SessionMessage {
   attachments: SessionMessageAttachment[];
   createdAt: number;
   seq: number;
-  phase?: "commentary" | "final_answer" | "question";
+  phase?: "commentary" | "final_answer";
 }
 
 export interface SessionMessageAttachment {

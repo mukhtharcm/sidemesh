@@ -404,11 +404,9 @@ class _MessageBubble extends StatelessWidget {
                             const SizedBox(width: 6),
                           ],
                           Text(
-                            switch (message.phase) {
-                              'commentary' => 'COMMENTARY',
-                              'question' => 'QUESTION',
-                              _ => 'ANSWER',
-                            },
+                            message.phase == 'commentary'
+                                ? 'COMMENTARY'
+                                : 'ANSWER',
                             style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
                                   color: colors.textTertiary,
@@ -811,9 +809,9 @@ class _LocalImageFallback extends StatelessWidget {
                   loading ? 'Loading image...' : _basename(path),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: AppWeights.emphasis,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.emphasis),
                 ),
                 const SizedBox(height: 2),
                 Text(
