@@ -126,6 +126,25 @@ class ApiClient {
     return _decodeList(response).map(SessionSummary.fromJson).toList();
   }
 
+  Future<List<SessionSummary>> searchSessions(
+    HostProfile host, {
+    required String query,
+    int? limit,
+  }) async {
+    final queryParameters = <String, String>{
+      'q': query,
+      if (limit != null) 'limit': '$limit',
+    };
+    final response = await _get(
+      host,
+      '/api/sessions/search',
+      queryParameters: queryParameters,
+      timeout: _standardReadTimeout,
+      operation: 'search sessions',
+    );
+    return _decodeList(response).map(SessionSummary.fromJson).toList();
+  }
+
   Future<List<PendingAction>> fetchPendingActions(HostProfile host) async {
     final response = await _get(
       host,

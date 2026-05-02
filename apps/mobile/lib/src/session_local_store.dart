@@ -136,7 +136,66 @@ class SessionLocalStore extends ChangeNotifier {
     return rows.map(_rowToSession).toList(growable: false);
   }
 
+  /// Returns ghost metadata for favorited sessions that are not in the recent list.
+  Future<List<SessionSummary>> ghostsForHost(HostProfile host) async {
+    await _ensureFavoritesLoaded();
+    final db = await SidemeshDb.instance;
+    final rows = await db.rawQuery(
+      """
+        SELECT * FROM sessions
+        WHERE host_id = ? AND is_favorite = 1 AND source = 'favorite'
+        ORDER BY updated_at DESC
+      """,
+      [host.id],
+    );
+    return rows.map(_rowToSession).toList(growable: false);
+  }
+
+  /// Updates ghost metadata for a session when we receive fresh server data.
+  Future<void> updateGhost(HostProfile host, SessionSummary session) async {
+    await _ensureFavoritesLoaded();
+    if (!isFavorite(host, session.id)) return;
+    final db = await SidemeshDb.instance;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await db.rawInsert(
+      '''
+      INSERT INTO sessions (
+        host_id, session_id, title, preview, cwd, provider, status,
+        created_at, updated_at, runtime_json, git_info_json,
+        is_favorite, source, cached_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'favorite', ?)
+      ON CONFLICT(host_id, session_id) DO UPDATE SET
+        title = excluded.title,
+        preview = excluded.preview,
+        cwd = excluded.cwd,
+        provider = excluded.provider,
+        status = excluded.status,
+        created_at = excluded.created_at,
+        updated_at = excluded.updated_at,
+        runtime_json = excluded.runtime_json,
+        git_info_json = excluded.git_info_json,
+        source = excluded.source,
+        cached_at = excluded.cached_at
+    ''',
+      [
+        host.id,
+        session.id,
+        session.title,
+        session.preview,
+        session.cwd,
+        session.provider,
+        session.status,
+        session.createdAt.millisecondsSinceEpoch,
+        session.updatedAt.millisecondsSinceEpoch,
+        session.runtime != null ? jsonEncode(session.runtime!.toJson()) : null,
+        session.gitInfo != null ? jsonEncode(session.gitInfo!.toJson()) : null,
+        now,
+      ],
+    );
+  }
+
   // ─── Session cache (SQLite) ───
+
 
   Future<void> upsertSessions(
     HostProfile host,
