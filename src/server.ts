@@ -2342,6 +2342,11 @@ function unsupportedInputCapability(
           return `${provider.displayName} does not support skill input`;
         }
         break;
+      case "file":
+        if (!provider.capabilities.input.fileMentions) {
+          return `${provider.displayName} does not support file mentions`;
+        }
+        break;
     }
   }
   return null;
@@ -3237,6 +3242,9 @@ function buildSubmittedUserMessageAttachments(
     }
     if (item.type === "localImage") {
       attachments.push({ type: "localImage", path: item.path });
+    }
+    if (item.type === "file") {
+      attachments.push({ type: "file", path: item.path });
     }
   }
   return attachments;
