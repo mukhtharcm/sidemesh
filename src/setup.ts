@@ -27,7 +27,11 @@ import { listSetupAgentProviderDefinitionSummaries } from "./provider-registry.j
 export interface SetupOptions {
   configPath?: string | null;
   includeDevProviders?: boolean;
+  /** Show advanced prompts for daemon port and state directory. */
+  advanced?: boolean;
 }
+
+type HostFeature = "terminal" | "portForwarding" | "browserPreview";
 
 export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> {
   const persisted = await readResolvedPersistedConfig({
@@ -57,29 +61,32 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
       value.trim() ? undefined : "Label cannot be empty.",
   });
 
-  const portValue = await promptText({
-    message: "Daemon port",
-    defaultValue: String(existing?.port ?? 8787),
-    validate: (value) => {
-      const parsed = Number.parseInt(value, 10);
-      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) {
-        return "Enter a port between 1 and 65535.";
-      }
-      return undefined;
-    },
-  });
-  const port = Number.parseInt(portValue, 10);
+  // Port and state dir are advanced — accept defaults silently unless --advanced is passed.
+  let port = existing?.port ?? 8787;
+  let stateDir = existing?.stateDir || nodePath.join(homedir(), ".sidemesh");
+  if (options.advanced) {
+    const portValue = await promptText({
+      message: "Daemon port",
+      defaultValue: String(port),
+      validate: (value) => {
+        const parsed = Number.parseInt(value, 10);
+        if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) {
+          return "Enter a port between 1 and 65535.";
+        }
+        return undefined;
+      },
+    });
+    port = Number.parseInt(portValue, 10);
 
-  const stateDir = await promptText({
-    message: "State directory",
-    defaultValue: existing?.stateDir || nodePath.join(homedir(), ".sidemesh"),
-    validate: (value) =>
-      value.trim() ? undefined : "State directory cannot be empty.",
-  });
-  const terminal = await promptTerminalConfig(existing);
-  const portForwarding = await promptPortForwardingConfig(existing);
-  const browserPreview = await promptBrowserPreviewConfig(existing);
+    stateDir = await promptText({
+      message: "State directory",
+      defaultValue: stateDir,
+      validate: (value) =>
+        value.trim() ? undefined : "State directory cannot be empty.",
+    });
+  }
 
+  // Providers
   const initialProviders =
     existing?.providers.map((provider) => provider.kind) ?? ["codex"];
   const providers = await multiselect<AgentProviderKind>({
@@ -97,32 +104,31 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
   }
 
   const selectedProviders = providers as AgentProviderKind[];
-  const defaultProvider = await select<AgentProviderKind>({
-    message: "Default provider",
-    initialValue:
-      selectedProviders.includes(
+
+  // Only ask for a default when there is a real choice.
+  let defaultProvider: AgentProviderKind = selectedProviders[0]!;
+  if (selectedProviders.length > 1) {
+    const picked = await select<AgentProviderKind>({
+      message: "Default provider",
+      initialValue: selectedProviders.includes(
         (existing?.defaultProviderKind as AgentProviderKind | undefined) ??
           "codex",
       )
         ? ((existing?.defaultProviderKind as AgentProviderKind | undefined) ??
           selectedProviders[0]!)
         : selectedProviders[0]!,
-    options: selectedProviders.map((kind) => {
-      const definition = definitions.find((entry) => entry.kind === kind)!;
-      return { value: kind, label: definition.displayName };
-    }),
-  });
-  if (isCancel(defaultProvider)) {
-    throw new Error("Setup cancelled.");
+      options: selectedProviders.map((kind) => {
+        const definition = definitions.find((entry) => entry.kind === kind)!;
+        return { value: kind, label: definition.displayName };
+      }),
+    });
+    if (isCancel(picked)) {
+      throw new Error("Setup cancelled.");
+    }
+    defaultProvider = picked as AgentProviderKind;
   }
 
-  const token = await promptText({
-    message: "Shared token",
-    defaultValue: existing?.token || randomBytes(24).toString("hex"),
-    validate: (value) =>
-      value.trim() ? undefined : "Token cannot be empty.",
-  });
-
+  // Per-provider configuration
   const resolvedProviders: AgentProviderConfig[] = [];
   for (const kind of selectedProviders) {
     switch (kind) {
@@ -141,18 +147,60 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     }
   }
 
-  const shouldSave = await confirm({
-    message: "Save this configuration?",
-    initialValue: true,
+  // Optional host features — single multiselect with inline descriptions so
+  // users understand what each feature does before opting in.
+  const currentlyEnabled: HostFeature[] = [];
+  if (existing?.terminal?.enabled) currentlyEnabled.push("terminal");
+  if (existing?.portForwarding?.enabled) currentlyEnabled.push("portForwarding");
+  if (existing?.browserPreview?.enabled) currentlyEnabled.push("browserPreview");
+
+  const selectedFeatures = await multiselect<HostFeature>({
+    message: "Optional host features  (space to toggle, enter to confirm)",
+    required: false,
+    initialValues: currentlyEnabled,
+    options: [
+      {
+        value: "terminal",
+        label: "Integrated terminal",
+        hint: "Expose an interactive shell to authenticated clients",
+      },
+      {
+        value: "portForwarding",
+        label: "Port forwarding",
+        hint: "Let clients preview local services running on this host's ports",
+      },
+      {
+        value: "browserPreview",
+        label: "Remote browser preview",
+        hint: "Stream screenshots of localhost web apps to clients (requires Chromium)",
+      },
+    ],
   });
-  if (isCancel(shouldSave) || !shouldSave) {
+  if (isCancel(selectedFeatures)) {
     throw new Error("Setup cancelled.");
   }
+  const features = selectedFeatures as HostFeature[];
+
+  const terminal = features.includes("terminal")
+    ? await promptTerminalDetails(existing)
+    : defaultTerminalConfig(existing);
+
+  const portForwarding = features.includes("portForwarding")
+    ? await promptPortForwardingDetails(existing)
+    : defaultPortForwardingConfig(existing);
+
+  const browserPreview = features.includes("browserPreview")
+    ? await promptBrowserPreviewDetails(existing)
+    : defaultBrowserPreviewConfig(existing);
+
+  // Token is auto-generated on first setup and preserved on re-runs.
+  // Use `sidemesh pair` to display it for pairing.
+  const token = existing?.token || randomBytes(24).toString("hex");
 
   const config: NodeConfig = {
     label: label.trim(),
     port,
-    token: token.trim(),
+    token,
     tokenSource: "file",
     provider:
       resolvedProviders.find((provider) => provider.kind === defaultProvider) ??
@@ -170,14 +218,26 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
   outro(
     [
       `Saved ${persisted.path}`,
-      `Run: sidemesh daemon`,
-      `Then pair with token ${config.token}`,
+      `Run: sidemesh start`,
+      `Run: sidemesh pair   (to display your pairing URL and token)`,
     ].join("\n"),
   );
   return config;
 }
 
-async function promptTerminalConfig(
+// ── Terminal ─────────────────────────────────────────────────────────────────
+
+function defaultTerminalConfig(
+  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
+): HostTerminalConfig {
+  return {
+    enabled: false,
+    shell: existing?.terminal?.shell ?? null,
+    requirePty: existing?.terminal?.requirePty ?? false,
+  };
+}
+
+async function promptTerminalDetails(
   existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
 ): Promise<HostTerminalConfig> {
   note(
@@ -185,20 +245,6 @@ async function promptTerminalConfig(
     "Integrated terminal",
   );
   const current = existing?.terminal;
-  const enabled = await confirm({
-    message: "Enable integrated terminal on this host?",
-    initialValue: current?.enabled ?? false,
-  });
-  if (isCancel(enabled)) {
-    throw new Error("Setup cancelled.");
-  }
-  if (!enabled) {
-    return {
-      enabled: false,
-      shell: current?.shell ?? null,
-      requirePty: current?.requirePty ?? false,
-    };
-  }
   const shell = await promptText({
     message: "Terminal shell (leave blank for login shell)",
     defaultValue: current?.shell ?? process.env.SHELL ?? "",
@@ -218,7 +264,19 @@ async function promptTerminalConfig(
   };
 }
 
-async function promptPortForwardingConfig(
+// ── Port forwarding ───────────────────────────────────────────────────────────
+
+function defaultPortForwardingConfig(
+  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
+): HostPortForwardingConfig {
+  return {
+    enabled: false,
+    allowNonLoopbackTargets:
+      existing?.portForwarding?.allowNonLoopbackTargets ?? false,
+  };
+}
+
+async function promptPortForwardingDetails(
   existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
 ): Promise<HostPortForwardingConfig> {
   note(
@@ -226,19 +284,6 @@ async function promptPortForwardingConfig(
     "Port forwarding",
   );
   const current = existing?.portForwarding;
-  const enabled = await confirm({
-    message: "Enable port forwarding on this host?",
-    initialValue: current?.enabled ?? false,
-  });
-  if (isCancel(enabled)) {
-    throw new Error("Setup cancelled.");
-  }
-  if (!enabled) {
-    return {
-      enabled: false,
-      allowNonLoopbackTargets: current?.allowNonLoopbackTargets ?? false,
-    };
-  }
   const allowNonLoopbackTargets = await confirm({
     message: "Allow forwarding to non-localhost targets from this host?",
     initialValue: current?.allowNonLoopbackTargets ?? false,
@@ -252,7 +297,23 @@ async function promptPortForwardingConfig(
   };
 }
 
-async function promptBrowserPreviewConfig(
+// ── Browser preview ───────────────────────────────────────────────────────────
+
+function defaultBrowserPreviewConfig(
+  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
+): HostBrowserPreviewConfig {
+  const current = existing?.browserPreview;
+  return {
+    enabled: false,
+    chromePath: current?.chromePath ?? null,
+    maxPreviews: current?.maxPreviews ?? 8,
+    idleTtlMs: current?.idleTtlMs ?? 60 * 60 * 1000,
+    frameIntervalMs: current?.frameIntervalMs ?? 900,
+    quality: current?.quality ?? 55,
+  };
+}
+
+async function promptBrowserPreviewDetails(
   existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
 ): Promise<HostBrowserPreviewConfig> {
   note(
@@ -260,25 +321,8 @@ async function promptBrowserPreviewConfig(
     "Remote browser preview",
   );
   const current = existing?.browserPreview;
-  const enabled = await confirm({
-    message: "Enable remote browser preview on this host?",
-    initialValue: current?.enabled ?? false,
-  });
-  if (isCancel(enabled)) {
-    throw new Error("Setup cancelled.");
-  }
-  if (!enabled) {
-    return {
-      enabled: false,
-      chromePath: current?.chromePath ?? null,
-      maxPreviews: current?.maxPreviews ?? 8,
-      idleTtlMs: current?.idleTtlMs ?? 60 * 60 * 1000,
-      frameIntervalMs: current?.frameIntervalMs ?? 900,
-      quality: current?.quality ?? 55,
-    };
-  }
   const chromePath = await promptText({
-    message: "Chrome/Chromium path",
+    message: "Chrome/Chromium path (leave blank to auto-detect)",
     defaultValue: current?.chromePath ?? "",
   });
   const defaults = {
@@ -308,7 +352,7 @@ async function promptBrowserPreviewConfig(
     : defaults.maxPreviews;
   const idleTtlMs = tuneResources
     ? await promptInteger({
-        message: "Idle cleanup after milliseconds",
+        message: "Idle cleanup after (milliseconds)",
         defaultValue: defaults.idleTtlMs,
         min: 30_000,
         max: 24 * 60 * 60 * 1000,
@@ -316,7 +360,7 @@ async function promptBrowserPreviewConfig(
     : defaults.idleTtlMs;
   const frameIntervalMs = tuneResources
     ? await promptInteger({
-        message: "Screenshot interval milliseconds",
+        message: "Screenshot interval (milliseconds)",
         defaultValue: defaults.frameIntervalMs,
         min: 250,
         max: 10_000,
@@ -324,7 +368,7 @@ async function promptBrowserPreviewConfig(
     : defaults.frameIntervalMs;
   const quality = tuneResources
     ? await promptInteger({
-        message: "JPEG quality",
+        message: "JPEG quality (20–95)",
         defaultValue: defaults.quality,
         min: 20,
         max: 95,
