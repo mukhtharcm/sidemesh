@@ -167,7 +167,6 @@ describe("loadSessionRuntime", () => {
     assert.deepEqual(runtime?.telemetry?.contextWindow, {
       currentTokens: 64800,
       tokenLimit: 128000,
-      messagesLength: 0,
       updatedAt: Date.parse("2026-04-29T00:00:02.000Z"),
     });
     assert.deepEqual(runtime?.telemetry?.lastUsage, {

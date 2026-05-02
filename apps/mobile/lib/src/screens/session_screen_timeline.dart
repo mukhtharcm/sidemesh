@@ -2481,10 +2481,11 @@ class _SessionRuntimeDetails extends StatelessWidget {
               label: 'Window',
               value: _formatTokenWindow(telemetry!.contextWindow!),
             ),
-            (
-              label: 'Messages',
-              value: '${telemetry.contextWindow!.messagesLength}',
-            ),
+            if (telemetry.contextWindow!.messagesLength != null)
+              (
+                label: 'Messages',
+                value: '${telemetry.contextWindow!.messagesLength!}',
+              ),
             if (telemetry.contextWindow!.conversationTokens != null)
               (
                 label: 'Conversation',

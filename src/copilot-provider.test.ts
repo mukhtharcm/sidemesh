@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { describe, it } from "node:test";
 
-import type { AgentPendingAction, AgentProviderLiveEvent } from "./agent-provider.js";
+import {
+  UnsupportedProviderFeatureError,
+  type AgentPendingAction,
+  type AgentProviderLiveEvent,
+} from "./agent-provider.js";
 import {
   type CopilotSdkClient,
   type CopilotSdkClientFactory,
@@ -293,6 +297,38 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("surfaces missing SDK compaction support as unsupported", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-compact-unsupported-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "hello", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      (sdk.created[0]!.session.rpc as any).compaction = undefined;
+
+      await assert.rejects(
+        () => provider.compactSession!(created.thread.id),
+        UnsupportedProviderFeatureError,
+      );
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("lists and toggles Copilot skills through SDK discovery", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-skills-test-"),
@@ -365,6 +401,35 @@ describe("Copilot provider", () => {
         enabled: false,
       });
       assert.deepEqual([...sdk.disabledSkills], ["frontend-design"]);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces missing SDK skill management support as unsupported", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-skills-unsupported-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      (sdk as any).rpc.skills = undefined;
+
+      await assert.rejects(
+        () =>
+          provider.writeSkillConfig!({
+            name: "frontend-design",
+            path: null,
+            enabled: true,
+          }),
+        UnsupportedProviderFeatureError,
+      );
     } finally {
       await settleProviderWrites();
       await rm(dir, { recursive: true, force: true });

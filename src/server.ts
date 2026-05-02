@@ -17,6 +17,7 @@ import {
   hasProviderMethod,
   materializeAgentActivityDraft,
   requireProviderMethod,
+  UnsupportedProviderFeatureError,
   type AgentPendingAction,
   type AgentProvider,
   type AgentProviderMethodName,
@@ -696,12 +697,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   });
 
   app.get("/api/node", (_request, response) => {
-    const supportedProviders = providerRuntime.providers.map((entry) => ({
-      ...entry.definitionSummary,
-      config: entry.configSummary,
-      version: providerVersions.get(entry.kind) ?? "unknown",
-      isDefault: entry.kind === config.defaultProviderKind,
-    }));
+    const supportedProviders = buildProviderMetadata(providerRuntime, providerVersions, config.defaultProviderKind);
     response.json({
       label: config.label,
       hostname: hostname(),
@@ -713,7 +709,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         provider.displayName,
       providerVersion,
       providerConfig: summarizeProviderConfig(config.provider),
-      providerCapabilities: provider.capabilities,
+      providerCapabilities:
+        supportedProviders.find((item) => item.isDefault)?.capabilities ??
+        provider.capabilities,
       hostCapabilities,
       searchSessions: provider.capabilities.sessions.searchSessions,
       searchIndexStats: searchIndex.getStats(),
@@ -726,12 +724,11 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   app.get("/api/providers", (_request, response) => {
     response.json({
       currentProvider: config.defaultProviderKind,
-      providers: providerRuntime.providers.map((entry) => ({
-        ...entry.definitionSummary,
-        config: entry.configSummary,
-        version: providerVersions.get(entry.kind) ?? "unknown",
-        isDefault: entry.kind === config.defaultProviderKind,
-      })),
+      providers: buildProviderMetadata(
+        providerRuntime,
+        providerVersions,
+        config.defaultProviderKind,
+      ),
     });
   });
 
@@ -846,8 +843,14 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   app.get(
     "/api/sessions/search",
     asyncRoute(async (request, response) => {
-      if (!provider.capabilities.sessions.searchSessions) {
-        response.status(503).json({ error: "Session search is not available" });
+      if (
+        !requireProviderCapability(
+          response,
+          provider,
+          provider.capabilities.sessions.searchSessions,
+          "session search",
+        )
+      ) {
         return;
       }
       const query = asString((request.query as Record<string, unknown>)?.q);
@@ -1392,6 +1395,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       const state = await loadFastRunState(provider, sessionId, activeTurns);
       response.json({
         sessionId,
+        status: state.status,
+        threadStatus: state.threadStatus,
+        loaded: state.loaded,
         isRunning: state.isRunning,
         activeTurnId: state.turnId,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
@@ -2257,7 +2263,8 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         error instanceof TerminalError ||
         error instanceof WorkspaceAccessError ||
         error instanceof PortForwardError ||
-        error instanceof BrowserPreviewError
+        error instanceof BrowserPreviewError ||
+        error instanceof UnsupportedProviderFeatureError
           ? error.status
           : 500;
       response.status(status).json({ error: message });
@@ -2394,6 +2401,21 @@ function getCodexHomePath(provider: AgentProvider): string | null {
   const runtimeHome = (provider as { runtimeHome?: string }).runtimeHome;
   return typeof runtimeHome === "string" ? runtimeHome : null;
 }
+
+function buildProviderMetadata(
+  providerRuntime: ReturnType<typeof createAgentProviderRuntime>,
+  providerVersions: ReadonlyMap<string, string>,
+  defaultProviderKind: string,
+) {
+  return providerRuntime.providers.map((entry) => ({
+    ...entry.definitionSummary,
+    capabilities: entry.provider.capabilities,
+    config: entry.configSummary,
+    version: providerVersions.get(entry.kind) ?? "unknown",
+    isDefault: entry.kind === defaultProviderKind,
+  }));
+}
+
 function asyncRoute(
   handler: (
     request: Request,
@@ -2809,25 +2831,62 @@ async function loadFastRunState(
   provider: AgentProvider,
   sessionId: string,
   activeTurns: Map<string, ActiveTurnState>,
-): Promise<{ isRunning: boolean; turnId: string | null }> {
+): Promise<{
+  status: string;
+  threadStatus: string | null;
+  loaded: boolean;
+  isRunning: boolean;
+  turnId: string | null;
+}> {
   const known = activeTurns.get(sessionId);
   if (known) {
-    return { isRunning: true, turnId: known.turnId };
+    return {
+      status: "running",
+      threadStatus: "running",
+      loaded: true,
+      isRunning: true,
+      turnId: known.turnId,
+    };
   }
   if (!hasProviderMethod(provider, "readSessionThread")) {
-    return { isRunning: false, turnId: null };
+    return {
+      status: "idle",
+      threadStatus: null,
+      loaded: true,
+      isRunning: false,
+      turnId: null,
+    };
   }
   const session = await readSession(provider, sessionId, false);
+  const loaded = session.status?.type === "archived"
+    ? false
+    : await isThreadLoaded(provider, sessionId);
   if (isActiveThread(session)) {
-    return { isRunning: true, turnId: null };
+    return {
+      status: "running",
+      threadStatus: session.status?.type || null,
+      loaded,
+      isRunning: true,
+      turnId: null,
+    };
   }
+  let latestTurnStatus: string | null = null;
   try {
     const sessionWithTurns = await readSession(provider, sessionId, true);
     const turns = Array.isArray(sessionWithTurns.turns) ? sessionWithTurns.turns : [];
     for (let index = turns.length - 1; index >= 0; index -= 1) {
       const turn = turns[index] as TurnRecord;
       if (isActiveTurnStatus(turn.status)) {
-        return { isRunning: true, turnId: turn.id };
+        return {
+          status: "running",
+          threadStatus: sessionWithTurns.status?.type || session.status?.type || null,
+          loaded,
+          isRunning: true,
+          turnId: turn.id,
+        };
+      }
+      if (!latestTurnStatus && turn.status) {
+        latestTurnStatus = turn.status;
       }
     }
   } catch (error) {
@@ -2835,11 +2894,23 @@ async function loadFastRunState(
     if (
       message.includes("includeTurns is unavailable before first user message")
     ) {
-      return { isRunning: false, turnId: null };
+      return {
+        status: loaded ? "idle" : "unloaded",
+        threadStatus: session.status?.type || null,
+        loaded,
+        isRunning: false,
+        turnId: null,
+      };
     }
     throw error;
   }
-  return { isRunning: false, turnId: null };
+  return {
+    status: normalizedSessionStatus(session.status?.type, latestTurnStatus, loaded),
+    threadStatus: session.status?.type || null,
+    loaded,
+    isRunning: false,
+    turnId: null,
+  };
 }
 
 async function isThreadLoaded(
@@ -3154,6 +3225,34 @@ function isActiveTurnStatus(status: string | null | undefined): boolean {
 function isActiveThread(thread: ThreadRecord): boolean {
   const type = thread.status?.type;
   return type === "active" || type === "running";
+}
+
+function normalizedSessionStatus(
+  threadStatus: string | null | undefined,
+  latestTurnStatus: string | null | undefined,
+  loaded: boolean,
+): string {
+  if (!loaded || threadStatus === "archived") {
+    return "unloaded";
+  }
+  if (threadStatus === "running" || threadStatus === "active") {
+    return "running";
+  }
+  if (
+    threadStatus === "completed" ||
+    threadStatus === "failed" ||
+    threadStatus === "interrupted"
+  ) {
+    return threadStatus;
+  }
+  if (
+    latestTurnStatus === "completed" ||
+    latestTurnStatus === "failed" ||
+    latestTurnStatus === "interrupted"
+  ) {
+    return latestTurnStatus;
+  }
+  return "idle";
 }
 
 async function mapWithConcurrency<T, R>(

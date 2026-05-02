@@ -6,18 +6,31 @@ import nodePath from "node:path";
 import http from "node:http";
 
 import { startServer, type RunningServer } from "./server.js";
-import type { NodeConfig } from "./types.js";
+import type { FakeCapabilityProfile, NodeConfig } from "./types.js";
 import { FakeAgentProvider } from "./fake-provider.js";
 
-function makeConfig(stateDir: string): NodeConfig {
+function makeConfig(
+  stateDir: string,
+  options: {
+    latencyMs?: number;
+    capabilityProfile?: FakeCapabilityProfile;
+  } = {},
+): NodeConfig {
   const token = "test-token-" + Math.random().toString(36).slice(2);
+  const provider = {
+    kind: "fake" as const,
+    latencyMs: options.latencyMs ?? 0,
+    seedSessions: false,
+    workspaceRoot: null,
+    capabilityProfile: options.capabilityProfile ?? "full",
+  };
   return {
     label: "test",
     port: 0,
     token,
     tokenSource: "generated",
-    provider: { kind: "fake", latencyMs: 0, seedSessions: false, workspaceRoot: null, capabilityProfile: "full" },
-    providers: [{ kind: "fake", latencyMs: 0, seedSessions: false, workspaceRoot: null, capabilityProfile: "full" }],
+    provider,
+    providers: [provider],
     defaultProviderKind: "fake",
     stateDir,
     terminal: { enabled: false, shell: null, requirePty: false },
@@ -55,6 +68,21 @@ async function withServer(config: NodeConfig, fn: (server: RunningServer, config
     await server.close();
     await rm(config.stateDir, { recursive: true, force: true });
   }
+}
+
+async function poll(
+  fn: () => Promise<boolean>,
+  timeoutMs = 1_500,
+  intervalMs = 25,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await fn()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("timed out waiting for condition");
 }
 
 describe("/healthz", () => {
@@ -114,6 +142,47 @@ describe("POST /api/admin/provider/:kind/restart", () => {
       });
       assert.equal(res.statusCode, 501);
       assert.equal((res.body as any).error, "provider does not support restart");
+    });
+  });
+});
+
+describe("provider metadata and capability gating", () => {
+  it("reports the actual configured provider capabilities", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-node-test-"));
+    await withServer(
+      makeConfig(stateDir, { capabilityProfile: "no-files" }),
+      async (server, config) => {
+        const res = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/node",
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(res.statusCode, 200);
+        const supported = ((res.body as any).supportedProviders ?? [])[0];
+        assert.equal(supported?.kind, "fake");
+        assert.equal(supported?.capabilities?.workspace?.filesystem, false);
+        assert.equal(supported?.capabilities?.sessions?.searchSessions, false);
+      },
+    );
+  });
+
+  it("returns 501 when session search is unsupported", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/search?q=hello",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(res.statusCode, 501);
+      assert.equal(
+        (res.body as any).error,
+        "Fake Test Provider does not support session search",
+      );
     });
   });
 });
@@ -194,5 +263,112 @@ describe("GET /api/sessions/:sessionId/status", () => {
         (FakeAgentProvider.prototype as any).readSessionThread = original;
       }
     });
+  });
+
+  it("normalizes completed, interrupted, and unloaded session states", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-normalized-"));
+    await withServer(
+      makeConfig(stateDir, { latencyMs: 120 }),
+      async (server, config) => {
+        const createRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/sessions/create",
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            cwd: "/tmp",
+            input: [{ type: "text", text: "hello" }],
+          }),
+        });
+        assert.equal(createRes.statusCode, 201);
+        const sessionId = (createRes.body as any).session.id as string;
+
+        await poll(async () => {
+          const statusRes = await request({
+            hostname: "127.0.0.1",
+            port: server.port,
+            path: `/api/sessions/${sessionId}/status`,
+            method: "GET",
+            headers: { Authorization: "Bearer " + config.token },
+          });
+          return (statusRes.body as any).status === "completed";
+        });
+
+        const completedStatus = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${sessionId}/status`,
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(completedStatus.statusCode, 200);
+        assert.equal((completedStatus.body as any).status, "completed");
+        assert.equal((completedStatus.body as any).loaded, true);
+        assert.equal((completedStatus.body as any).isRunning, false);
+
+        const slowCreateRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/sessions/create",
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            cwd: "/tmp",
+            input: [{ type: "text", text: "slow" }],
+          }),
+        });
+        assert.equal(slowCreateRes.statusCode, 201);
+        const slowSessionId = (slowCreateRes.body as any).session.id as string;
+
+        const stopRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${slowSessionId}/stop`,
+          method: "POST",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(stopRes.statusCode, 200);
+
+        const interruptedStatus = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${slowSessionId}/status`,
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(interruptedStatus.statusCode, 200);
+        assert.equal((interruptedStatus.body as any).status, "interrupted");
+        assert.equal((interruptedStatus.body as any).loaded, true);
+        assert.equal((interruptedStatus.body as any).isRunning, false);
+
+        const archiveRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${sessionId}/archive`,
+          method: "POST",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(archiveRes.statusCode, 200);
+
+        const unloadedStatus = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${sessionId}/status`,
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(unloadedStatus.statusCode, 200);
+        assert.equal((unloadedStatus.body as any).status, "unloaded");
+        assert.equal((unloadedStatus.body as any).loaded, false);
+        assert.equal((unloadedStatus.body as any).threadStatus, "loaded");
+      },
+    );
   });
 });

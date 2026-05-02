@@ -711,27 +711,40 @@ function buildRuntimeFromCodexTokenUsage(
   const total = usage.total && typeof usage.total === "object"
     ? (usage.total as Record<string, unknown>)
     : null;
-  const tokenLimit = asNumber(usage.modelContextWindow) ?? 0;
-  const currentTokens = asNumber(last?.totalTokens) ?? asNumber(total?.totalTokens) ?? 0;
+  const tokenLimit = asNumber(usage.modelContextWindow);
+  const currentTokens =
+    asNumber(last?.totalTokens) ?? asNumber(total?.totalTokens);
   const updatedAt = Date.now();
+  const contextWindow =
+    currentTokens != null && tokenLimit != null
+      ? {
+          currentTokens,
+          tokenLimit,
+          updatedAt,
+        }
+      : null;
+  const lastUsage = {
+    inputTokens: asNumber(last?.inputTokens) ?? undefined,
+    outputTokens: asNumber(last?.outputTokens) ?? undefined,
+    reasoningTokens: asNumber(last?.reasoningOutputTokens) ?? undefined,
+    cacheReadTokens: asNumber(last?.cachedInputTokens) ?? undefined,
+    updatedAt,
+  };
+  const hasLastUsage =
+    lastUsage.inputTokens != null ||
+    lastUsage.outputTokens != null ||
+    lastUsage.reasoningTokens != null ||
+    lastUsage.cacheReadTokens != null;
+  if (!contextWindow && !hasLastUsage) {
+    return null;
+  }
 
   return {
     sessionId,
     runtime: {
       telemetry: {
-        contextWindow: {
-          currentTokens,
-          tokenLimit,
-          messagesLength: 0,
-          updatedAt,
-        },
-        lastUsage: {
-          inputTokens: asNumber(last?.inputTokens) ?? undefined,
-          outputTokens: asNumber(last?.outputTokens) ?? undefined,
-          reasoningTokens: asNumber(last?.reasoningOutputTokens) ?? undefined,
-          cacheReadTokens: asNumber(last?.cachedInputTokens) ?? undefined,
-          updatedAt,
-        },
+        ...(contextWindow ? { contextWindow } : {}),
+        ...(hasLastUsage ? { lastUsage } : {}),
       },
       updatedAt,
       turnId: asString(typed.turnId) ?? undefined,

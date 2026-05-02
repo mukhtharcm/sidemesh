@@ -409,6 +409,15 @@ export function requireProviderMethod<K extends AgentProviderMethodName>(
   return candidate as AgentProviderMethod<K>;
 }
 
+export class UnsupportedProviderFeatureError extends Error {
+  public readonly status = 501;
+
+  public constructor(message: string) {
+    super(message);
+    this.name = "UnsupportedProviderFeatureError";
+  }
+}
+
 export function materializeAgentActivityDraft(
   draft: AgentSessionActivityDraft,
   context: { createdAt: number; seq: number },
