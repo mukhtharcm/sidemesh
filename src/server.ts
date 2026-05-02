@@ -162,6 +162,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   const providerRuntime = createAgentProviderRuntime(config);
   const provider = providerRuntime.provider;
   await provider.start();
+  let runningServerRef: RunningServer | null = null;
   const hostCapabilities: HostCapabilities = {
     workspace: {
       ...HOST_CAPABILITIES.workspace,
@@ -781,6 +782,40 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   app.get("/api/debug/codex-rpc-audit", (_request, response) => {
     response.json(getCodexRpcAuditSnapshot());
   });
+
+  app.post(
+    "/api/admin/provider/:kind/restart",
+    asyncRoute(async (request, response) => {
+      const kind = Array.isArray(request.params.kind) ? request.params.kind[0] : request.params.kind;
+      if (!isAgentProviderKind(kind)) {
+        response.status(400).json({ error: "unknown provider kind" });
+        return;
+      }
+      if (provider instanceof MultiAgentProvider) {
+        await provider.restartProvider(kind);
+      } else if (provider.kind === kind && provider.capabilities.lifecycle?.restart) {
+        await provider.restart!();
+      } else {
+        response.status(501).json({ error: "provider does not support restart" });
+        return;
+      }
+      response.json({ ok: true, kind });
+    }),
+  );
+
+  app.post(
+    "/api/admin/restart",
+    asyncRoute(async (_request, response) => {
+      response.json({ ok: true, message: "daemon is restarting" });
+      setTimeout(async () => {
+        try {
+          await runningServerRef!.close();
+        } finally {
+          process.exit(0);
+        }
+      }, 100);
+    }),
+  );
 
   app.get(
     "/api/sessions",
@@ -2253,7 +2288,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     console.log(line);
   }
 
-  return {
+  runningServerRef = {
     close: async () => {
       terminalRegistry.dispose();
       portForwardRegistry.dispose();
@@ -2268,6 +2303,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       await provider.close?.();
     },
   };
+  return runningServerRef;
 }
 
 async function listen(server: Server, port: number): Promise<void> {
