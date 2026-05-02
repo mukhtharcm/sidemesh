@@ -5,10 +5,9 @@ ships with provider adapters for Codex, GitHub Copilot CLI, Pi (via the Pi SDK),
 fake test provider, while the server/client boundaries are structured around
 provider capabilities so more coding agents can be added behind the same API.
 
-Sidemesh is currently a private developer-preview project. It does not have an
-open-source license yet, the npm package is intentionally marked private, and
-daemon access should stay on trusted networks such as Tailscale or a private
-LAN.
+Sidemesh is open source under Apache-2.0. The npm package is not published
+yet, and daemon access should stay on trusted networks such as Tailscale or a
+private LAN.
 
 This repo contains:
 
@@ -76,10 +75,11 @@ sidemesh start
 sidemesh pair
 ```
 
-For a trusted machine that should consume the private GitHub repo directly:
+For a trusted machine that should consume the repo directly before npm
+publishing is set up:
 
 ```bash
-npm install -g github:your-org/sidemesh
+npm install -g github:mukhtharcm/sidemesh
 sidemesh setup
 sidemesh start
 sidemesh pair
