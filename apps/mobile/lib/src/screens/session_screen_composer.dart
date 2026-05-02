@@ -850,7 +850,7 @@ class _ClipboardImageData {
   final Uint8List bytes;
 }
 
-class _ComposerFileSuggestionTray extends StatelessWidget {
+class _ComposerFileSuggestionTray extends StatefulWidget {
   const _ComposerFileSuggestionTray({
     required this.query,
     required this.suggestions,
@@ -866,70 +866,143 @@ class _ComposerFileSuggestionTray extends StatelessWidget {
   final ValueChanged<FsSearchResult> onSelectFile;
 
   @override
+  State<_ComposerFileSuggestionTray> createState() => _ComposerFileSuggestionTrayState();
+}
+
+class _ComposerFileSuggestionTrayState
+    extends State<_ComposerFileSuggestionTray> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    if (error != null) {
-      return Text(
-        error!,
-        style: TextStyle(color: colors.danger, fontSize: 12),
+    Widget child;
+    if (widget.loading && widget.suggestions.isEmpty) {
+      child = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 10),
+        child: Center(
+          child: SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 1.8),
+          ),
+        ),
       );
-    }
-    if (loading && suggestions.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+    } else if (widget.error != null && widget.error!.trim().isNotEmpty) {
+      child = Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
-            SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
+            Icon(
+              Icons.error_outline_rounded,
+              size: 16,
+              color: colors.danger,
             ),
             const SizedBox(width: 8),
-            Text(
-              'Searching files...',
-              style: TextStyle(color: colors.textTertiary, fontSize: 12),
+            Expanded(
+              child: Text(
+                widget.error!,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.danger,
+                ),
+              ),
             ),
           ],
         ),
       );
-    }
-    if (suggestions.isEmpty) {
-      return Text(
-        'No files found',
-        style: TextStyle(color: colors.textTertiary, fontSize: 12),
+    } else if (widget.suggestions.isEmpty) {
+      child = Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              size: 16,
+              color: colors.textTertiary,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'No files match "@${widget.query}".',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      final maxHeight = math.min(
+        340.0,
+        MediaQuery.sizeOf(context).height * 0.32,
+      );
+      child = ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: widget.suggestions.length > 6,
+          child: ListView.builder(
+            controller: _scrollController,
+            primary: false,
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            itemCount: widget.suggestions.length,
+            itemBuilder: (context, index) =>
+                _buildFileRow(context, widget.suggestions[index]),
+          ),
+        ),
       );
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: suggestions.map((file) {
-        return InkWell(
-          onTap: () => onSelectFile(file),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Row(
-              children: [
-                Icon(
-                  file.isDirectory ? Icons.folder_rounded : Icons.insert_drive_file_rounded,
-                  size: 16,
-                  color: colors.textTertiary,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    file.path,
-                    style: TextStyle(
-                      color: colors.textPrimary,
-                      fontSize: 13,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: AppShapes.input,
+        border: Border.all(color: colors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: child,
+    );
+  }
+
+  Widget _buildFileRow(BuildContext context, FsSearchResult file) {
+    final colors = context.colors;
+    return InkWell(
+      onTap: () => widget.onSelectFile(file),
+      borderRadius: AppShapes.input,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(
+              file.isDirectory
+                  ? Icons.folder_rounded
+                  : Icons.insert_drive_file_rounded,
+              size: 16,
+              color: colors.textTertiary,
             ),
-          ),
-        );
-      }).toList(growable: false),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                file.path,
+                style: TextStyle(
+                  color: colors.textPrimary,
+                  fontSize: 13,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
