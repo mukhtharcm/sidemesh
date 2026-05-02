@@ -155,6 +155,7 @@ interface SessionInputDedupeEntry {
 }
 
 export interface RunningServer {
+  port: number;
   close(): Promise<void>;
 }
 
@@ -2317,7 +2318,11 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     }
   }, HEALTH_MONITOR_INTERVAL_MS);
 
+  const boundAddress = server.address();
+  const boundPort = typeof boundAddress === "string" ? 0 : (boundAddress?.port ?? 0);
+
   runningServerRef = {
+    port: boundPort,
     close: async () => {
       clearInterval(healthMonitor);
       terminalRegistry.dispose();
@@ -2788,7 +2793,7 @@ async function loadRunState(
   const turns = Array.isArray(session.turns) ? session.turns : [];
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index] as TurnRecord;
-    if (turn.status === "inProgress") {
+    if (isActiveTurnStatus(turn.status)) {
       activeTurns.set(sessionId, {
         turnId: turn.id,
         startedAt: Date.now(),
@@ -2813,7 +2818,28 @@ async function loadFastRunState(
     return { isRunning: false, turnId: null };
   }
   const session = await readSession(provider, sessionId, false);
-  return { isRunning: isActiveThread(session), turnId: null };
+  if (isActiveThread(session)) {
+    return { isRunning: true, turnId: null };
+  }
+  try {
+    const sessionWithTurns = await readSession(provider, sessionId, true);
+    const turns = Array.isArray(sessionWithTurns.turns) ? sessionWithTurns.turns : [];
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const turn = turns[index] as TurnRecord;
+      if (isActiveTurnStatus(turn.status)) {
+        return { isRunning: true, turnId: turn.id };
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (
+      message.includes("includeTurns is unavailable before first user message")
+    ) {
+      return { isRunning: false, turnId: null };
+    }
+    throw error;
+  }
+  return { isRunning: false, turnId: null };
 }
 
 async function isThreadLoaded(
@@ -3119,6 +3145,10 @@ async function loadCachedSessionRuntime(
     runtime,
   });
   return runtime;
+}
+
+function isActiveTurnStatus(status: string | null | undefined): boolean {
+  return status === "inProgress" || status === "in_progress";
 }
 
 function isActiveThread(thread: ThreadRecord): boolean {
