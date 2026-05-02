@@ -1503,6 +1503,7 @@ class SessionInputItem {
     this.url,
     this.name,
     this.path,
+    this.isDirectory,
   });
 
   const SessionInputItem.text(String text) : this._(type: 'text', text: text);
@@ -1515,11 +1516,15 @@ class SessionInputItem {
   const SessionInputItem.skill(String name, String path)
     : this._(type: 'skill', name: name, path: path);
 
+  const SessionInputItem.file(String path, {bool isDirectory = false})
+    : this._(type: 'file', path: path, isDirectory: isDirectory);
+
   final String type;
   final String? text;
   final String? url;
   final String? name;
   final String? path;
+  final bool? isDirectory;
 
   factory SessionInputItem.fromJson(Map<String, dynamic> json) {
     final type = _stringValue(json['type']);
@@ -1534,6 +1539,11 @@ class SessionInputItem {
         return SessionInputItem.skill(
           _stringValue(json['name']),
           _stringValue(json['path']),
+        );
+      case 'file':
+        return SessionInputItem.file(
+          _stringValue(json['path']),
+          isDirectory: json['isDirectory'] == true,
         );
       default:
         return SessionInputItem._(type: type);
@@ -1554,6 +1564,12 @@ class SessionInputItem {
         return {'type': 'localImage', 'path': path ?? ''};
       case 'skill':
         return {'type': 'skill', 'name': name ?? '', 'path': path ?? ''};
+      case 'file':
+        return {
+          'type': 'file',
+          'path': path ?? '',
+          'isDirectory': isDirectory ?? false,
+        };
       default:
         return {'type': type};
     }

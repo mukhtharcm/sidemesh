@@ -56,6 +56,7 @@ import type {
   SkillSummary,
   ThreadRecord,
 } from "./types.js";
+import type { AgentSessionInputItem } from "./agent-provider.js";
 
 const PROVIDER_MODEL_LIST_TIMEOUT_MS = 2500;
 const CODEX_THREAD_SOURCES = ["cli", "vscode", "exec", "appServer"];
@@ -218,7 +219,7 @@ export class CodexAgentProvider
     if (request.input.length > 0) {
       const turn = (await this.bridge.request("turn/start", {
         threadId: thread.id,
-        input: request.input,
+        input: normalizeCodexInput(request.input),
       })) as Record<string, unknown>;
       activeTurnId = asString(
         (turn.turn as Record<string, unknown> | undefined)?.id,
@@ -238,7 +239,7 @@ export class CodexAgentProvider
     if (request.activeTurnId) {
       const steer = (await this.bridge.request("turn/steer", {
         threadId: request.sessionId,
-        input: request.input,
+        input: normalizeCodexInput(request.input),
         expectedTurnId: request.activeTurnId,
       })) as Record<string, unknown>;
       return {
@@ -1437,6 +1438,22 @@ function asOptionalNumber(value: unknown): number | null {
   return value;
 }
 
+function normalizeCodexInput(input: AgentSessionInputItem[]): AgentSessionInputItem[] {
+  const result: AgentSessionInputItem[] = [];
+  for (const item of input) {
+    if (item.type === "file") {
+      result.push({
+        type: "text",
+        text: item.isDirectory ? `@${item.path}/` : `@${item.path}`,
+        text_elements: [],
+      });
+    } else {
+      result.push(item);
+    }
+  }
+  return result;
+}
+
 function buildCodexThreadStartParams(
   request: AgentCreateSessionRequest,
 ): Record<string, unknown> {
@@ -1473,7 +1490,7 @@ function buildCodexTurnStartParams(
   const overrides = request.overrides;
   const params: Record<string, unknown> = {
     threadId: request.sessionId,
-    input: request.input,
+    input: normalizeCodexInput(request.input),
   };
   const approvalPolicy = parseCodexApprovalPolicy(overrides.approvalPolicy);
   if (approvalPolicy) {
@@ -1859,6 +1876,7 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     imageUrl: true,
     localImage: true,
     skills: true,
+    fileMentions: true,
   },
   interaction: {
     userInput: false,
