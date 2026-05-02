@@ -1,7 +1,7 @@
 {
   "name": "sidemesh",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Fleet-first coding-agent session node and Flutter client.",
   "license": "Apache-2.0",
   "type": "module",
@@ -13,6 +13,9 @@
     "url": "https://github.com/mukhtharcm/sidemesh/issues"
   },
   "homepage": "https://github.com/mukhtharcm/sidemesh#readme",
+  "publishConfig": {
+    "provenance": true
+  },
   "keywords": [
     "agents",
     "codex",

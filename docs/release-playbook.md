@@ -8,7 +8,7 @@ and distribution because the product exposes powerful host-control surfaces.
 
 - Repository: public.
 - License: Apache-2.0.
-- npm: not published; `package.json` remains `"private": true`.
+- npm: not published yet, but the package metadata is publish-ready.
 - Daemon distribution: private GitHub install or local clone.
 - App distribution: local Flutter builds and manual GitHub Actions artifacts.
 - Recommended network: Tailscale or trusted private LAN.
@@ -109,7 +109,32 @@ Current workflows:
   spend macOS CI minutes.
 - `Deploy Website`: deploys the static `web/` marketing site and Pages
   Functions to Cloudflare Pages when `web/**` changes on `main`.
+- `Publish npm Package`: publishes the daemon package to npm on manual dispatch
+  or when a GitHub Release is published. It uses npm trusted publishing via
+  GitHub Actions OIDC instead of a long-lived `NPM_TOKEN`.
 - `Secret Scan`: manual gitleaks scan over full git history.
+
+## npm Publish Setup
+
+The npm workflow assumes:
+
+- package name: `sidemesh`
+- npm trusted publishing is configured for this repository and workflow
+- GitHub environment name: `npm`
+
+Before the first publish:
+
+1. Create or log into the npm user account that will own `sidemesh`.
+2. On npm, configure a trusted publisher for:
+   - repository: `mukhtharcm/sidemesh`
+   - workflow file: `.github/workflows/publish-npm.yml`
+   - environment: `npm`
+3. Create the `npm` GitHub environment in this repository.
+4. Confirm the package version in `package.json` is the version you want to
+   publish.
+
+No `NPM_TOKEN` secret is required when trusted publishing is configured
+correctly.
 
 Store deployment is intentionally opt-in. Run TestFlight only when you actually
 need a mobile build; use server tags/releases for daemon-only changes.
