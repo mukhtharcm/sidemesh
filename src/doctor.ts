@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, mkdir } from "node:fs/promises";
+import { access, mkdir, readFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { homedir } from "node:os";
 import nodePath from "node:path";
@@ -110,7 +110,7 @@ async function inspectProvider(
 ): Promise<DoctorProviderReport> {
   switch (provider.kind) {
     case "codex":
-      return inspectCommandProvider("codex", "Codex", provider.bin, ["--version"]);
+      return inspectCodexProvider(provider);
     case "pi":
       return inspectPiProvider(provider);
     case "fake":
@@ -167,6 +167,80 @@ async function inspectCommandProvider(
     version,
     auth: null,
     checks,
+  };
+}
+
+async function inspectCodexProvider(
+  provider: { bin: string },
+): Promise<DoctorProviderReport> {
+  const base = await inspectCommandProvider("codex", "Codex", provider.bin, ["--version"]);
+  const checks = [...base.checks];
+  let auth: DoctorProviderReport["auth"] = null;
+
+  if (base.resolvedCommandPath) {
+    const authPath = nodePath.join(homedir(), ".codex", "auth.json");
+    try {
+      const raw = await readFile(authPath, "utf8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const tokens = parsed.tokens as Record<string, unknown> | undefined;
+      const hasAccessToken = typeof tokens?.access_token === "string";
+      const hasRefreshToken = typeof tokens?.refresh_token === "string";
+      if (hasAccessToken && hasRefreshToken) {
+        auth = {
+          status: "authenticated",
+          source: (parsed.auth_mode as string) || null,
+          login: (tokens?.email as string) || null,
+          host: null,
+          message: "Auth file present with tokens",
+        };
+        checks.push({
+          severity: "ok",
+          label: "auth",
+          detail: "Auth file present with tokens",
+        });
+      } else {
+        auth = {
+          status: "unauthenticated",
+          source: null,
+          login: null,
+          host: null,
+          message: "Auth file missing tokens",
+        };
+        checks.push({
+          severity: "error",
+          label: "auth",
+          detail: "Auth file missing tokens",
+          remedy: "Run `codex auth login` to authenticate.",
+        });
+      }
+    } catch (error) {
+      const isMissing =
+        error instanceof Error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT";
+      auth = {
+        status: "unauthenticated",
+        source: null,
+        login: null,
+        host: null,
+        message: isMissing ? "No auth file found" : "Auth file unreadable",
+      };
+      checks.push({
+        severity: "error",
+        label: "auth",
+        detail: isMissing
+          ? "No auth file found"
+          : `Auth file unreadable: ${formatError(error)}`,
+        remedy: isMissing
+          ? "Run `codex auth login` to authenticate."
+          : "Check permissions on ~/.codex/auth.json.",
+      });
+    }
+  }
+
+  return {
+    ...base,
+    checks,
+    auth,
   };
 }
 
