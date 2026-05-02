@@ -138,6 +138,7 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     history: true,
     eventReplay: true,
     recentFallback: true,
+    searchSessions: false,
   },
   input: {
     text: true,
