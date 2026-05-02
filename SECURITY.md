@@ -1,7 +1,7 @@
 # Security
 
-Sidemesh is currently a private developer-preview project. It does not have an
-open-source license and should be shared only with trusted testers.
+Sidemesh is open source under Apache-2.0, but it should still be deployed only
+on networks you trust.
 
 ## Supported Use
 
