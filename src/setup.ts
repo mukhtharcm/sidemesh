@@ -215,13 +215,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     configExists: true,
   };
   await saveConfig(config, { configPath: persisted.path });
-  outro(
-    [
-      `Saved ${persisted.path}`,
-      `Run: sidemesh start`,
-      `Run: sidemesh pair   (to display your pairing URL and token)`,
-    ].join("\n"),
-  );
+  outro(`Saved ${persisted.path}\n\n  ❯ sidemesh start && sidemesh pair`);
   return config;
 }
 
