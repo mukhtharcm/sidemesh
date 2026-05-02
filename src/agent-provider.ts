@@ -14,6 +14,7 @@ import type {
   ToolActivity,
   ModelSummary,
   ProviderProfileCatalog,
+  PromptCatalogEntry,
   SkillCatalogEntry,
   ThreadRecord,
   TurnDiffActivity,
@@ -175,6 +176,11 @@ export interface AgentSkillListOptions {
   forceReload: boolean;
 }
 
+export interface AgentPromptListOptions {
+  cwd: string;
+  forceReload: boolean;
+}
+
 export interface AgentSkillConfigWriteRequest {
   path: string | null;
   name: string | null;
@@ -216,6 +222,7 @@ export interface AgentProviderCapabilities {
     models: boolean;
     profiles: boolean;
     skills: boolean;
+    prompts: boolean;
     skillManagement: boolean;
   };
   runtimeControls: {
@@ -351,6 +358,7 @@ export interface AgentWorkspaceProvider {
 
 export interface AgentConfigurationProvider {
   listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry>;
+  listPrompts(options: AgentPromptListOptions): Promise<PromptCatalogEntry>;
   writeSkillConfig(request: AgentSkillConfigWriteRequest): Promise<unknown>;
   listModels(options: AgentModelListOptions): Promise<ModelSummary[]>;
   listProfiles(options: AgentProfileListOptions): Promise<ProviderProfileCatalog>;

@@ -118,6 +118,25 @@ describe("POST /api/admin/provider/:kind/restart", () => {
   });
 });
 
+describe("GET /api/prompts", () => {
+  it("returns provider prompt catalogs when supported", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-prompts-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/prompts?cwd=${encodeURIComponent("/tmp/workspace")}`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal((res.body as any).cwd, "/tmp/workspace");
+      assert.equal(Array.isArray((res.body as any).prompts), true);
+      assert.equal((res.body as any).prompts.some((prompt: any) => prompt.name === "fake-review"), true);
+    });
+  });
+});
+
 
 
 describe("GET /api/sessions/:sessionId/status", () => {

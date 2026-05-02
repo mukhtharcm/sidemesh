@@ -1914,6 +1914,7 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     models: true,
     profiles: true,
     skills: true,
+    prompts: false,
     skillManagement: true,
   },
   runtimeControls: {
