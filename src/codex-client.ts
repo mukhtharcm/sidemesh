@@ -22,6 +22,7 @@ interface InitializeResult {
 const SHELL_ENV_START_MARKER = "__SIDEMESH_SHELL_ENV_START__";
 const SHELL_ENV_END_MARKER = "__SIDEMESH_SHELL_ENV_END__";
 const CODEX_APP_SERVER_CLOSE_TIMEOUT_MS = 4_000;
+const CODEX_RPC_REQUEST_TIMEOUT_MS = 30_000;
 
 function buildSeededCodexSpawnEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -297,9 +298,15 @@ export class CodexBridge extends EventEmitter<{
         reject,
       });
     });
+    const timeout = setTimeout(() => {
+      const pending = this.pending.get(id);
+      if (!pending) return;
+      this.pending.delete(id);
+      pending.reject(new Error(`Codex request timed out: ${method}`));
+    }, CODEX_RPC_REQUEST_TIMEOUT_MS);
     codexRpcAudit.recordRequest(method);
     this.send(payload);
-    return promise;
+    return promise.finally(() => clearTimeout(timeout));
   }
 
   public respond(id: number | string, result: unknown): void {
