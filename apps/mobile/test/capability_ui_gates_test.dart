@@ -521,8 +521,8 @@ void main() {
       RecentPane(
         hosts: [_host('recent-search-minimal')],
         api: api,
-        onOpenSession: (_, __) {},
-        onActiveCountChanged: (_) {},
+        onOpenSession: (host, session) {},
+        onActiveCountChanged: (count) {},
       ),
       size: const Size(1200, 900),
     );
@@ -536,8 +536,8 @@ void main() {
           body: RecentPane(
             hosts: [_host('recent-search-minimal')],
             api: api,
-            onOpenSession: (_, __) {},
-            onActiveCountChanged: (_) {},
+            onOpenSession: (host, session) {},
+            onActiveCountChanged: (count) {},
             query: 'hello',
           ),
         ),
