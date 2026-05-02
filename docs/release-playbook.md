@@ -1,12 +1,13 @@
 # Release Playbook
 
-Sidemesh is private developer-preview software right now. This playbook is for
-trusted testers and your own hosts; it is not a public OSS release process.
+Sidemesh is Apache-2.0 licensed open-source software, but its daemon still
+belongs on trusted networks. This playbook stays conservative about release
+and distribution because the product exposes powerful host-control surfaces.
 
 ## Release Position
 
-- Repository: private.
-- License: intentionally not chosen yet.
+- Repository: public.
+- License: Apache-2.0.
 - npm: not published; `package.json` remains `"private": true`.
 - Daemon distribution: private GitHub install or local clone.
 - App distribution: local Flutter builds and manual GitHub Actions artifacts.
@@ -39,12 +40,12 @@ scripts/secret-scan.sh --history
 The manual GitHub Actions workflow `Secret Scan` runs gitleaks against full git
 history and should also pass before public release.
 
-## Daemon Install From Private GitHub
+## Daemon Install From GitHub
 
-On a trusted host with access to the private repo:
+On a trusted host that should consume the repo directly before npm publishing:
 
 ```bash
-npm install -g github:your-org/sidemesh
+npm install -g github:mukhtharcm/sidemesh
 sidemesh setup
 sidemesh doctor
 sidemesh service install
@@ -78,10 +79,10 @@ npm run build
 sidemesh service restart --yes
 ```
 
-For a global private GitHub install:
+For a global GitHub install:
 
 ```bash
-npm install -g github:your-org/sidemesh
+npm install -g github:mukhtharcm/sidemesh
 sidemesh service restart --yes
 ```
 
