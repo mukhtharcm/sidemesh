@@ -1,112 +1,107 @@
-
-/* Sidemesh custom Starlight theme */
-
 /* ── Font imports ── */
 @import url("https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Manrope:wght@500;600;700;800&display=swap");
 
-/* ── Color tokens ── */
+/* ═══════════════════════════════════════════════════════════════
+   Starlight custom theme — Sidemesh
+   ═══════════════════════════════════════════════════════════════
+   Starlight’s base :root is DARK mode.  Light mode is activated
+   via [data-theme="light"] on <html>.  The raw colour tokens
+   (white → black) are INVERTED between modes; semantic tokens
+   (--sl-color-bg, --sl-color-text, …) are NOT re-declared in
+   the light block — they inherit and pick up the new raw values.
+   So we ONLY override raw tokens + a handful of semantic ones.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Base (dark mode) ── */
 :root,
 ::backdrop {
-  --sidemesh-paper: #e9edf0;
-  --sidemesh-paper-2: #dce4e7;
-  --sidemesh-paper-3: #c9d4d7;
-  --sidemesh-ink: #101616;
-  --sidemesh-ink-soft: #323d3c;
-  --sidemesh-muted: #65706f;
-  --sidemesh-line: rgba(16, 22, 22, 0.14);
-  --sidemesh-line-strong: rgba(16, 22, 22, 0.3);
-  --sidemesh-surface: rgba(250, 252, 247, 0.72);
-  --sidemesh-surface-solid: #fafcf7;
-  --sidemesh-sage: #2e7666;
-  --sidemesh-sage-2: #195c51;
-  --sidemesh-clay: #9d6b35;
-  --sidemesh-clay-soft: rgba(157, 107, 53, 0.13);
-  --sidemesh-blueprint: #172b34;
-  --sidemesh-ease: cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* ── Light mode overrides ── */
-:root[data-theme="light"],
-[data-theme="light"] ::backdrop {
-  --sl-color-white: var(--sidemesh-paper);
-  --sl-color-gray-1: var(--sidemesh-paper-2);
-  --sl-color-gray-2: var(--sidemesh-paper-3);
-  --sl-color-gray-3: var(--sidemesh-muted);
-  --sl-color-gray-4: var(--sidemesh-ink-soft);
-  --sl-color-gray-5: var(--sidemesh-ink);
-  --sl-color-gray-6: var(--sidemesh-ink);
-  --sl-color-gray-7: var(--sidemesh-ink);
-  --sl-color-black: var(--sidemesh-ink);
-
-  --sl-color-accent-low: var(--sidemesh-clay-soft);
-  --sl-color-accent: var(--sidemesh-sage);
-  --sl-color-accent-high: var(--sidemesh-sage-2);
-
-  --sl-color-text: var(--sidemesh-ink-soft);
-  --sl-color-text-accent: var(--sidemesh-sage);
-  --sl-color-text-invert: var(--sidemesh-paper);
-
-  --sl-color-bg: var(--sidemesh-paper);
-  --sl-color-bg-nav: var(--sidemesh-surface);
-  --sl-color-bg-sidebar: var(--sidemesh-surface);
-  --sl-color-bg-inline-code: var(--sidemesh-paper-2);
-  --sl-color-bg-table: var(--sidemesh-surface);
-
-  --sl-color-hairline: var(--sidemesh-line);
-  --sl-color-hairline-shade: var(--sidemesh-line-strong);
-  --sl-color-hairline-light: var(--sidemesh-line);
-
-  --sl-color-backdrop-overlay: rgba(16, 22, 22, 0.22);
-}
-
-/* ── Dark mode overrides ── */
-:root[data-theme="dark"],
-[data-theme="dark"] ::backdrop {
-  --sl-color-white: #0f1414;
-  --sl-color-gray-1: #171e1e;
-  --sl-color-gray-2: #232c2c;
-  --sl-color-gray-3: #4a5655;
-  --sl-color-gray-4: #8a9695;
-  --sl-color-gray-5: #b8c4c3;
-  --sl-color-gray-6: #d8e2e1;
-  --sl-color-gray-7: #e9edf0;
-  --sl-color-black: #e9edf0;
-
-  --sl-color-accent-low: rgba(46, 118, 102, 0.18);
-  --sl-color-accent: #3a9b87;
-  --sl-color-accent-high: #5cc4ae;
-
-  --sl-color-text: #b8c4c3;
-  --sl-color-text-accent: #5cc4ae;
-  --sl-color-text-invert: #0f1414;
-
-  --sl-color-bg: #0f1414;
-  --sl-color-bg-nav: #171e1e;
-  --sl-color-bg-sidebar: #171e1e;
-  --sl-color-bg-inline-code: #232c2c;
-  --sl-color-bg-table: #171e1e;
-
-  --sl-color-hairline: rgba(233, 237, 240, 0.1);
-  --sl-color-hairline-shade: rgba(233, 237, 240, 0.2);
-  --sl-color-hairline-light: rgba(233, 237, 240, 0.06);
-
-  --sl-color-backdrop-overlay: rgba(0, 0, 0, 0.5);
-}
-
-/* ── Typography ── */
-:root {
   --sl-font: "Manrope", system-ui, sans-serif;
   --sl-font-body: "Manrope", system-ui, sans-serif;
   --sl-font-mono: "Geist Mono", ui-monospace, monospace;
-  --sl-font-system: "Manrope", system-ui, sans-serif;
+
+  /* raw palette — light → dark */
+  --sl-color-white:   #e9edf0;   /* brightest highlights on dark bg */
+  --sl-color-gray-1:  #c9d4d7;   /* light surfaces */
+  --sl-color-gray-2:  #8a9695;   /* secondary text (default --sl-color-text) */
+  --sl-color-gray-3:  #65706f;   /* muted / disabled */
+  --sl-color-gray-4:  #4a5655;   /* borders on dark */
+  --sl-color-gray-5:  #323d3c;   /* code inline bg */
+  --sl-color-gray-6:  #232c2c;   /* nav / sidebar bg */
+  --sl-color-black:   #171e1e;   /* page background (default --sl-color-bg) */
+
+  /* accent */
+  --sl-color-accent-low:  rgba(46, 118, 102, 0.18);
+  --sl-color-accent:      #3a9b87;
+  --sl-color-accent-high: #5cc4ae;
+
+  /* semantic overrides (dark) */
+  --sl-color-text-accent: var(--sl-color-accent-high);
+  --sl-color-text-invert: var(--sl-color-accent-low);
+  --sl-color-bg-nav:      var(--sl-color-gray-6);
+  --sl-color-bg-sidebar:  var(--sl-color-gray-6);
+  --sl-color-bg-inline-code: var(--sl-color-gray-5);
+  --sl-color-bg-accent:   var(--sl-color-accent-high);
+  --sl-color-hairline-light: var(--sl-color-gray-5);
+  --sl-color-hairline:    var(--sl-color-gray-6);
+  --sl-color-hairline-shade: var(--sl-color-black);
+  --sl-color-backdrop-overlay: rgba(0, 0, 0, 0.5);
 }
 
-/* ── Page background texture ── */
+/* ── Light mode ── */
+:root[data-theme="light"],
+[data-theme="light"] ::backdrop {
+  /* raw palette — dark → light  (INVERTED relative to dark) */
+  --sl-color-white:   #101616;   /* darkest (was brightest) */
+  --sl-color-gray-1:  #1a2423;
+  --sl-color-gray-2:  #323d3c;   /* body text (default --sl-color-text) */
+  --sl-color-gray-3:  #65706f;   /* muted */
+  --sl-color-gray-4:  #8a9695;
+  --sl-color-gray-5:  #c9d4d7;   /* borders */
+  --sl-color-gray-6:  #dce4e7;   /* code inline bg */
+  --sl-color-gray-7:  #e9edf0;   /* nav bg */
+  --sl-color-black:   #fafcf7;   /* page background (default --sl-color-bg) */
+
+  /* accent */
+  --sl-color-accent-low:  rgba(46, 118, 102, 0.12);
+  --sl-color-accent:      #2e7666;
+  --sl-color-accent-high: #195c51;
+
+  /* semantic overrides (light) */
+  --sl-color-text-accent: var(--sl-color-accent);
+  --sl-color-text-invert: var(--sl-color-black);
+  --sl-color-bg-nav:      var(--sl-color-gray-7);
+  --sl-color-bg-sidebar:  var(--sl-color-bg);        /* inherits white page bg */
+  --sl-color-bg-inline-code: var(--sl-color-gray-6);
+  --sl-color-bg-accent:   var(--sl-color-accent);
+  --sl-color-hairline-light: var(--sl-color-gray-6);
+  --sl-color-hairline:    var(--sl-color-gray-6);
+  --sl-color-hairline-shade: var(--sl-color-gray-6);
+  --sl-color-backdrop-overlay: rgba(16, 22, 22, 0.22);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Page-level styling
+   ═══════════════════════════════════════════════════════════════ */
+
+html { scroll-behavior: smooth; }
+
 body {
+  font-family: var(--sl-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-theme="light"] body {
   background:
     radial-gradient(circle at 12% -12%, rgba(46, 118, 102, 0.08), transparent 34rem),
-    radial-gradient(circle at 95% 8%, rgba(157, 107, 53, 0.05), transparent 32rem),
-    linear-gradient(180deg, var(--sidemesh-paper) 0%, #f5f7f2 42%, var(--sidemesh-paper) 100%);
+    radial-gradient(circle at 95% 8%,  rgba(157, 107, 53, 0.05), transparent 32rem),
+    linear-gradient(180deg, #e9edf0 0%, #f5f7f2 42%, #e9edf0 100%);
+}
+
+[data-theme="dark"] body {
+  background:
+    radial-gradient(circle at 12% -12%, rgba(46, 118, 102, 0.06), transparent 34rem),
+    radial-gradient(circle at 95% 8%,  rgba(157, 107, 53, 0.03), transparent 32rem),
+    linear-gradient(180deg, #171e1e 0%, #1a2423 42%, #171e1e 100%);
 }
 
 body::before {
@@ -115,7 +110,7 @@ body::before {
   z-index: -1;
   pointer-events: none;
   content: "";
-  opacity: 0.18;
+  opacity: 0.12;
   background-image:
     linear-gradient(rgba(16, 22, 22, 0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(16, 22, 22, 0.03) 1px, transparent 1px);
@@ -123,145 +118,110 @@ body::before {
   mask-image: linear-gradient(to bottom, black, transparent 72%);
 }
 
-/* ── Headings ── */
-sl-content h1,
-sl-content h2,
-sl-content h3,
-sl-content h4,
-sl-content h5,
-sl-content h6,
-.starlight-aside__title,
-.sidebar-content h2,
-.sidebar-content h3,
-.right-sidebar-panel h2 {
+[data-theme="dark"] body::before {
+  opacity: 0.06;
+  background-image:
+    linear-gradient(rgba(233, 237, 240, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(233, 237, 240, 0.02) 1px, transparent 1px);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Typography
+   ═══════════════════════════════════════════════════════════════ */
+
+:is(h1, h2, h3, h4, h5, h6) {
   font-family: "Instrument Serif", Georgia, serif;
   font-weight: 400;
   letter-spacing: -0.02em;
   line-height: 1.15;
-  color: var(--sidemesh-ink);
+  color: var(--sl-color-white);   /* Starlight uses white for headings */
 }
 
-[data-theme="dark"] sl-content h1,
-[data-theme="dark"] sl-content h2,
-[data-theme="dark"] sl-content h3,
-[data-theme="dark"] sl-content h4,
-[data-theme="dark"] sl-content h5,
-[data-theme="dark"] sl-content h6,
-[data-theme="dark"] .starlight-aside__title,
-[data-theme="dark"] .sidebar-content h2,
-[data-theme="dark"] .sidebar-content h3,
-[data-theme="dark"] .right-sidebar-panel h2 {
-  color: var(--sl-color-gray-7);
-}
-
-/* ── Code ── */
-code,
-kbd {
+:is(code, kbd) {
   font-family: var(--sl-font-mono);
   font-size: 0.85em;
   font-weight: 500;
   letter-spacing: -0.02em;
 }
 
-/* ── Links ── */
-a {
-  transition: color 180ms var(--sidemesh-ease);
-}
+/* ═══════════════════════════════════════════════════════════════
+   Tables
+   ═══════════════════════════════════════════════════════════════ */
 
-/* ── Tables ── */
 table {
   border-collapse: separate;
   border-spacing: 0;
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid var(--sidemesh-line);
+  border: 1px solid var(--sl-color-hairline);
 }
 
 table th {
   font-family: "Instrument Serif", Georgia, serif;
   font-weight: 400;
   font-size: 1.05em;
-  background: var(--sidemesh-surface-solid);
-  border-bottom: 1px solid var(--sidemesh-line);
+  background: var(--sl-color-bg-table);
+  border-bottom: 1px solid var(--sl-color-hairline);
   padding: 12px 16px;
   text-align: left;
 }
 
 table td {
   padding: 10px 16px;
-  border-bottom: 1px solid var(--sidemesh-line);
+  border-bottom: 1px solid var(--sl-color-hairline);
 }
+table tr:last-child td { border-bottom: none; }
+table tr:hover td { background: var(--sl-color-accent-low); }
 
-table tr:last-child td {
-  border-bottom: none;
-}
+/* ═══════════════════════════════════════════════════════════════
+   Asides / Cards
+   ═══════════════════════════════════════════════════════════════ */
 
-table tr:hover td {
-  background: var(--sidemesh-surface);
-}
-
-/* ── Cards / Asides ── */
 .starlight-aside {
   border-radius: 14px;
-  border: 1px solid var(--sidemesh-line);
-  background: var(--sidemesh-surface-solid);
+  border: 1px solid var(--sl-color-hairline);
+  background: var(--sl-color-bg-table);
   padding: 16px 20px;
 }
 
-/* ── Sidebar ── */
-.sidebar-content {
-  font-weight: 500;
-  font-size: 0.92rem;
-}
+/* ═══════════════════════════════════════════════════════════════
+   Sidebar active link
+   ═══════════════════════════════════════════════════════════════ */
 
 .sidebar-content a[aria-current="page"] {
   font-weight: 700;
-  color: var(--sidemesh-sage);
-  background: var(--sidemesh-clay-soft);
+  color: var(--sl-color-accent);
+  background: var(--sl-color-accent-low);
   border-radius: 8px;
 }
 
-/* ── Search ── */
-#starlight__search {
-  --sl-search-color-bg: var(--sidemesh-surface-solid);
-  --sl-search-color-border: var(--sidemesh-line);
-}
+/* ═══════════════════════════════════════════════════════════════
+   Nav header frosted glass
+   ═══════════════════════════════════════════════════════════════ */
 
-/* ── Expressive Code (syntax highlighting) ── */
-.expressive-code {
-  border-radius: 14px;
-  overflow: hidden;
-  border: 1px solid var(--sidemesh-line);
-}
-
-.expressive-code .frame {
-  border-radius: 14px;
-}
-
-/* ── Nav header ── */
 header.header {
   backdrop-filter: blur(18px);
-  background: rgba(233, 237, 240, 0.78);
-  border-bottom: 1px solid rgba(16, 22, 22, 0.08);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+[data-theme="light"] header.header {
+  background: rgba(250, 252, 247, 0.78);
+  border-bottom: 1px solid rgba(16, 22, 22, 0.06);
 }
 
 [data-theme="dark"] header.header {
-  background: rgba(15, 20, 20, 0.78);
-  border-bottom: 1px solid rgba(233, 237, 240, 0.06);
+  background: rgba(35, 44, 44, 0.78);
+  border-bottom: 1px solid rgba(233, 237, 240, 0.04);
 }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+/* ═══════════════════════════════════════════════════════════════
+   Scrollbar
+   ═══════════════════════════════════════════════════════════════ */
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--sidemesh-paper-3);
+  background: var(--sl-color-gray-4);
   border-radius: 999px;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--sidemesh-muted);
-}
+::-webkit-scrollbar-thumb:hover { background: var(--sl-color-gray-3); }
