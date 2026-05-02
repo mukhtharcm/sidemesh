@@ -1,0 +1,122 @@
+---
+title: Getting Started
+description: Install Sidemesh, configure providers, and connect the mobile app.
+---
+
+## What You Need
+
+- **Host machine** (where you code): macOS, Linux, or Windows with WSL
+  - Node.js 20+
+  - For Pi provider: Pi must be installed separately
+- **Client device**: iOS, Android, macOS, or Linux
+  - Flutter runtime for the mobile app
+- **Network**: Tailscale, private LAN, or localhost
+
+## Install the Daemon
+
+### From source (recommended for development)
+
+```bash
+git clone https://github.com/mukhtharcm/sidemesh.git
+cd sidemesh
+npm install
+npm run build
+npm link              # makes sidemesh available globally
+```
+
+### From private GitHub repo
+
+```bash
+npm install -g github:mukhtharcm/sidemesh
+```
+
+## Configure Providers
+
+Run the interactive setup wizard:
+
+```bash
+sidemesh setup
+```
+
+This writes `~/.sidemesh/config.json` with:
+- Shared bearer token for client authentication
+- Selected agent provider(s)
+- Daemon port and label
+
+| Provider | Extra setup |
+|----------|-------------|
+| **Codex** (default) | Install `codex` CLI: `npm install -g @openai/codex` |
+| **Pi** | Install Pi: `npm install -g @mariozechner/pi-coding-agent`, then `pi /login` |
+| **Copilot** | Install GitHub Copilot CLI and authenticate |
+| **Fake** | No extra setup; for testing only (`--dev` flag) |
+
+## Start the Daemon
+
+### Background mode
+
+```bash
+sidemesh start       # detached background daemon
+sidemesh pair        # print QR code + connection details
+```
+
+### Foreground mode
+
+```bash
+sidemesh daemon      # runs in terminal, shows live logs
+```
+
+### As a system service
+
+**Linux (systemd):**
+```bash
+sudo sidemesh service install
+sudo sidemesh service restart --yes
+```
+
+**macOS (LaunchAgent):**
+```bash
+sidemesh service install
+sidemesh service restart --yes
+```
+
+## Connect the Mobile App
+
+### Option 1: QR code
+
+1. Run `sidemesh pair` on the host
+2. Open the Sidemesh app
+3. Tap the host editor -> "Scan QR"
+4. Point camera at the terminal QR code
+
+### Option 2: Manual entry
+
+1. Run `sidemesh pair` to see the base URL and token
+2. In the app, tap "Add host manually"
+3. Enter:
+   - **Label**: any friendly name
+   - **Base URL**: `http://HOST:PORT`
+   - **Token**: the bearer token
+
+Example URLs:
+- Tailscale: `http://100.94.10.20:8787`
+- LAN: `http://192.168.1.50:8787`
+- Localhost: `http://localhost:8787`
+
+## Daily Workflow
+
+1. **Start daemon** on host: `sidemesh start`
+2. **Open app** on phone/desktop
+3. **Select host** from the host list
+4. **Create or resume** a session
+5. **Chat** with the agent
+
+## Useful Commands
+
+| Command | Purpose |
+|---------|---------|
+| `sidemesh setup` | Re-run config wizard |
+| `sidemesh doctor` | Check provider health |
+| `sidemesh status` | Show config, PID, health |
+| `sidemesh pair` | Re-print connection QR |
+| `sidemesh stop` | Stop background daemon |
+| `sidemesh restart --yes` | Restart non-interactively |

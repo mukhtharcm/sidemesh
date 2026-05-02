@@ -1,0 +1,35 @@
+---
+title: Git
+description: Git status, diffs, and working tree inspection.
+---
+
+Git integration is a **host-owned** feature. The daemon inspects the local git repository and exposes status and diffs through the API.
+
+## Git status
+
+`GET /api/sessions/:sessionId/git` returns:
+- Current branch
+- Ahead/behind counts
+- Dirty state
+- Commit hash
+
+## Diffs
+
+`GET /api/sessions/:sessionId/git/diff?kind=...` supports four diff kinds:
+
+| Kind | What you see |
+|------|-------------|
+| `working` | Unstaged changes in the working tree |
+| `staged` | Changes in the index (staged for commit) |
+| `unstaged` | Working tree changes excluding staged changes |
+| `remote` | Diff against the remote tracking branch |
+
+## Provider-owned remote diffs
+
+Providers can optionally implement `readRemoteGitDiff` to return agent-specific remote diffs. This is used when the provider has context about the remote that the host git command does not.
+
+## Limitations
+
+- The daemon does not write git commits or run `git push`
+- Branch switching, merging, and rebasing must be done through the terminal or the agent's native tools
+- Git operations require a valid git repository inside the workspace

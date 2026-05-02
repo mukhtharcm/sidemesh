@@ -1,0 +1,46 @@
+---
+title: Sidemesh Docs
+description: Documentation for the Sidemesh mobile control plane for agent sessions.
+tableOfContents: false
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+Welcome to the Sidemesh documentation. Sidemesh is a fleet-first mobile control plane for coding agent sessions. Run the daemon on your own machines and control everything from your phone or desktop.
+
+## Getting started
+
+<CardGrid stagger>
+	<Card title="Install" icon="rocket">
+		Get the daemon running on macOS, Linux, or Windows with WSL. [Install →](/getting-started/install/)
+	</Card>
+	<Card title="Connect" icon="iphone">
+		Pair the mobile app with your host using a QR code or manual entry. [Connect →](/getting-started/connect/)
+	</Card>
+	<Card title="Daily workflow" icon="list-format">
+		Start sessions, chat with agents, review approvals, and manage files. [Workflow →](/getting-started/workflow/)
+	</Card>
+	<Card title="Troubleshooting" icon="warning">
+		Fix common connection, provider, and sync issues. [Troubleshooting →](/getting-started/troubleshooting/)
+	</Card>
+</CardGrid>
+
+## Explore
+
+<CardGrid>
+	<Card title="Providers" icon="setting">
+		Codex, Pi, GitHub Copilot, and Fake test adapter. [Providers →](/providers/)
+	</Card>
+	<Card title="Features" icon="approve-check">
+		Sessions, approvals, filesystem, terminal, port forwarding, browser preview. [Features →](/features/)
+	</Card>
+	<Card title="Comparisons" icon="bars">
+		Terminal vs port forwarding, browser preview vs port forwarding, when to use what. [Comparisons →](/comparisons/)
+	</Card>
+	<Card title="Security" icon="seti:lock">
+		Trusted-network model, token management, and local-only data. [Security →](/security/network-model/)
+	</Card>
+	<Card title="Reference" icon="open-book">
+		Provider adapter contract and HTTP API endpoints. [Reference →](/reference/provider-adapter-contract/)
+	</Card>
+</CardGrid>

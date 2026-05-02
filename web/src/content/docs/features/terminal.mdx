@@ -1,0 +1,27 @@
+---
+title: Terminal
+description: Attach to a host shell through the Sidemesh daemon.
+---
+
+The integrated terminal lets you open a shell on the host directly from the app. This is a **host-owned** feature available regardless of provider.
+
+## How it works
+
+The daemon spawns a shell (defaulting to the user's login shell) and exposes it over a WebSocket. Terminal output streams to the app in real time, and input from the app is forwarded to the shell.
+
+## Security
+
+- `SIDEMESH_TOKEN` is deleted from the environment before spawning the shell so child processes cannot extract the bearer token
+- `SIDEMESH_TERMINAL_SESSION=1` is injected so your shell config can detect a Sidemesh terminal session
+- Terminal access is gated by the `hostCapabilities.terminal` flag
+
+## Use cases
+
+- Run one-off commands when the agent is not active
+- Check system state (`top`, `df`, `netstat`) without starting a session
+- Interact with tools the agent does not natively support
+- Fix agent mistakes manually
+
+## Comparison with port forwarding
+
+The terminal gives you a raw shell. Port forwarding gives you access to HTTP services. They solve different problems. See [Terminal vs Port Forwarding](/comparisons/terminal-vs-port-forwarding/) for a detailed comparison.
