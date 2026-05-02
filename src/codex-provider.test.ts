@@ -322,3 +322,34 @@ describe("codex provider resume runtime restore", () => {
     assert.deepEqual(result, { started: true });
   });
 });
+
+describe("codex provider restart", () => {
+  it("calls bridge.close() then bridge.start() on restart", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const calls: string[] = [];
+    provider.bridge = {
+      close: async () => { calls.push("close"); },
+      start: async () => { calls.push("start"); },
+    };
+
+    await provider.restart();
+
+    assert.deepEqual(calls, ["close", "start"]);
+  });
+
+  it("emits stderr when restarting", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const stderrLines: string[] = [];
+    provider.on("stderr", (line: string) => stderrLines.push(line));
+
+    provider.bridge = {
+      close: async () => {},
+      start: async () => {},
+    };
+
+    await provider.restart();
+
+    assert.equal(stderrLines.length, 1);
+    assert.ok(stderrLines[0].includes("Restarting app-server"));
+  });
+});
