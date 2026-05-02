@@ -236,4 +236,29 @@ describe("SessionSearchIndex", () => {
 
     await index.close();
   });
+
+  it("returns a non-null snippet with the matched keyword", async () => {
+    const index = new SessionSearchIndex(dbPath);
+    await index.open();
+
+    const path = rolloutPath("thread-snippet");
+    await writeFile(
+      path,
+      JSON.stringify({
+        timestamp: "2026-05-02T00:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "how do I configure nginx reverse proxy" },
+      }) + "\n",
+      "utf8",
+    );
+
+    await index.indexRollout(path);
+    const results = await index.search("nginx", 10);
+    assert.equal(results.length, 1);
+    assert.ok(results[0].snippet != null);
+    assert.ok(results[0].snippet!.toLowerCase().includes("nginx"));
+
+    await index.close();
+  });
 });
+
