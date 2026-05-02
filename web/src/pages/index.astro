@@ -1,5 +1,6 @@
 ---
 // Landing page - custom layout, not Starlight
+const turnstileSiteKey = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY ?? "";
 ---
 <!doctype html>
 <html lang="en">
@@ -854,6 +855,57 @@
     margin-top: 22px;
   }
 
+  .waitlist-block {
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .waitlist-block h4 {
+    margin: 0 0 10px;
+    font-size: 16px;
+    letter-spacing: -0.03em;
+  }
+
+  .waitlist-block p {
+    margin: 0 0 14px;
+    font-size: 14px;
+  }
+
+  .waitlist-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .waitlist-form input {
+    min-width: 0;
+    min-height: 48px;
+    padding: 13px 15px;
+    border: 1px solid var(--line-strong);
+    border-radius: 16px;
+    background: rgba(233, 237, 240, 0.45);
+    color: var(--ink);
+    font-family: "Geist Mono", monospace;
+    font-size: 13px;
+  }
+
+  .waitlist-form button {
+    min-width: 144px;
+  }
+
+  .waitlist-message {
+    display: none;
+    margin-top: 12px;
+    color: var(--muted);
+    font-family: "Geist Mono", monospace;
+    font-size: 12px;
+  }
+
+  .waitlist-turnstile {
+    min-height: 1px;
+  }
+
   .note {
     padding: 14px;
     border: 1px solid var(--line);
@@ -1029,6 +1081,14 @@
 
     .hero-actions,
     .hero-actions .button {
+      width: 100%;
+    }
+
+    .waitlist-form {
+      grid-template-columns: 1fr;
+    }
+
+    .waitlist-form button {
       width: 100%;
     }
 
@@ -1320,6 +1380,16 @@
             <span class="kicker">App</span>
             <h3>Open, pair, continue.</h3>
             <p>The app gives you the daily surface: recent sessions, inbox, chat, files, git details, terminals, port forwarding, and previews.</p>
+            <div class="waitlist-block" aria-labelledby="waitlist-title">
+              <h4 id="waitlist-title">Join the waitlist.</h4>
+              <p>Preview access is still limited. Leave your email and we will send one note when the next batch opens.</p>
+              <form class="waitlist-form" id="waitlist-form">
+                <input type="email" name="email" required placeholder="you@wherever.dev" autocomplete="email" />
+                <button class="button" type="submit">Join waitlist</button>
+                <div class="waitlist-turnstile" id="waitlist-turnstile" data-sitekey={turnstileSiteKey}></div>
+              </form>
+              <p class="waitlist-message" id="waitlist-message" aria-live="polite"></p>
+            </div>
             <div class="note-list">
               <div class="note">Mobile first, with desktop support for larger inspection work.</div>
               <div class="note">Best on private networks where your devices can reach each host directly.</div>
@@ -1384,5 +1454,134 @@
       <a href="/getting-started/">Docs</a>
     </nav>
   </footer>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <script is:inline define:vars={{ turnstileSiteKey }}>
+    const form = document.getElementById("waitlist-form");
+    const message = document.getElementById("waitlist-message");
+    const turnstileContainer = document.getElementById("waitlist-turnstile");
+    const emailInput = form?.querySelector('input[name="email"]');
+    const submitButton = form?.querySelector('button[type="submit"]');
+
+    let widgetId = null;
+    let resolver = null;
+
+    function setMessage(text) {
+      if (!message) return;
+      message.textContent = text;
+      message.style.display = text ? "block" : "none";
+    }
+
+    function ensureTurnstile() {
+      if (!turnstileSiteKey || !turnstileContainer || !window.turnstile) return null;
+      if (widgetId === null) {
+        widgetId = window.turnstile.render("#waitlist-turnstile", {
+          sitekey: turnstileSiteKey,
+          size: "invisible",
+          callback: (token) => {
+            if (!resolver) return;
+            resolver.resolve(token);
+            resolver = null;
+          },
+          "error-callback": () => {
+            if (!resolver) return;
+            resolver.reject(new Error("captcha_error"));
+            resolver = null;
+          },
+          "timeout-callback": () => {
+            if (!resolver) return;
+            resolver.reject(new Error("captcha_timeout"));
+            resolver = null;
+          },
+        });
+      }
+      return widgetId;
+    }
+
+    async function getTurnstileToken() {
+      const activeWidgetId = ensureTurnstile();
+      if (activeWidgetId === null) return null;
+
+      const token = await new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          resolver = null;
+          reject(new Error("captcha_slow"));
+        }, 15000);
+
+        resolver = {
+          resolve: (value) => {
+            clearTimeout(timeoutId);
+            resolve(value);
+          },
+          reject: (error) => {
+            clearTimeout(timeoutId);
+            reject(error);
+          },
+        };
+
+        window.turnstile.execute(activeWidgetId);
+      });
+
+      window.turnstile.reset(activeWidgetId);
+      return token;
+    }
+
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!emailInput || !submitButton) return;
+
+      setMessage("");
+      submitButton.disabled = true;
+      emailInput.disabled = true;
+      submitButton.textContent = "Joining...";
+
+      let tsToken = null;
+      try {
+        tsToken = await getTurnstileToken();
+      } catch {
+        submitButton.disabled = false;
+        emailInput.disabled = false;
+        submitButton.textContent = "Join waitlist";
+        setMessage("Captcha did not load cleanly. Try once more.");
+        return;
+      }
+
+      const params = new URLSearchParams(window.location.search);
+      const payload = {
+        email: emailInput.value.trim(),
+        ts_token: tsToken,
+        screen: `${window.screen.width}x${window.screen.height}`,
+        dpr: window.devicePixelRatio || 1,
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+        utm_source: params.get("utm_source"),
+        utm_medium: params.get("utm_medium"),
+        utm_campaign: params.get("utm_campaign"),
+      };
+
+      try {
+        const response = await fetch("/api/waitlist", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json().catch(() => ({}));
+
+        if (response.ok && result.ok) {
+          submitButton.textContent = "Joined";
+          setMessage("You are on the list. We will email you when the next batch opens.");
+          return;
+        }
+
+        submitButton.disabled = false;
+        emailInput.disabled = false;
+        submitButton.textContent = "Join waitlist";
+        setMessage(result.error === "invalid_email" ? "That email looks off. Check it and try again." : "Something broke on our end. Try again.");
+      } catch {
+        submitButton.disabled = false;
+        emailInput.disabled = false;
+        submitButton.textContent = "Join waitlist";
+        setMessage("Network error. Try again.");
+      }
+    });
+  </script>
 </body>
 </html>
