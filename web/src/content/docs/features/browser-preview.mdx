@@ -27,11 +27,10 @@ The browser preview supports remote interaction through CDP:
 
 ## Use cases
 
-- See what the agent sees when it uses a browser tool
-- Review visual changes without port-forwarding a dev server
-- Verify rendering on the host's browser engine
-- Catch UI bugs the agent might miss
-- Preview heavy dev servers over slow links — browser preview sends only compressed screenshots, while port-forwarding pulls the full page payload (HTML, CSS, JS, images)
+- Low-bandwidth environments where downloading full page payloads is slow
+- Heavy pages with lots of JS, images, and fonts where you only need a visual
+- Quick checks without setting up a full tunnel
+- Verifying what a headless browser renders on the host
 
 ## Limitations
 
