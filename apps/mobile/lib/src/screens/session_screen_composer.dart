@@ -6,10 +6,15 @@ class _Composer extends StatelessWidget {
     required this.focusNode,
     required this.attachments,
     required this.skills,
+    required this.files,
     required this.activeSkillQuery,
     required this.skillSuggestions,
     required this.loadingSkills,
     required this.skillError,
+    required this.activeFileQuery,
+    required this.fileSuggestions,
+    required this.loadingFileSearch,
+    required this.fileError,
     required this.sending,
     required this.supportsImageInput,
     required this.supportsSkillInput,
@@ -19,6 +24,8 @@ class _Composer extends StatelessWidget {
     required this.onRemoveAttachment,
     required this.onSelectSkill,
     required this.onRemoveSkill,
+    required this.onSelectFile,
+    required this.onRemoveFile,
     required this.onSend,
     required this.onDismiss,
     this.submitOnEnter = false,
@@ -28,10 +35,15 @@ class _Composer extends StatelessWidget {
   final FocusNode focusNode;
   final List<_ComposerImageAttachment> attachments;
   final List<_ComposerSkillMention> skills;
+  final List<_ComposerFileMention> files;
   final String? activeSkillQuery;
   final List<SkillSummary> skillSuggestions;
   final bool loadingSkills;
   final String? skillError;
+  final String? activeFileQuery;
+  final List<FsSearchResult> fileSuggestions;
+  final bool loadingFileSearch;
+  final String? fileError;
   final bool sending;
   final bool supportsImageInput;
   final bool supportsSkillInput;
@@ -41,6 +53,8 @@ class _Composer extends StatelessWidget {
   final ValueChanged<String> onRemoveAttachment;
   final ValueChanged<SkillSummary> onSelectSkill;
   final ValueChanged<String> onRemoveSkill;
+  final ValueChanged<FsSearchResult> onSelectFile;
+  final ValueChanged<String> onRemoveFile;
   final VoidCallback onSend;
   final VoidCallback onDismiss;
   final bool submitOnEnter;
@@ -142,6 +156,16 @@ class _Composer extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                     ],
+                    if (activeFileQuery != null) ...[
+                      _ComposerFileSuggestionTray(
+                        query: activeFileQuery!,
+                        suggestions: fileSuggestions,
+                        loading: loadingFileSearch,
+                        error: fileError,
+                        onSelectFile: onSelectFile,
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     if (supportsSkillInput && skills.isNotEmpty) ...[
                       Align(
                         alignment: Alignment.centerLeft,
@@ -153,6 +177,24 @@ class _Composer extends StatelessWidget {
                                 (skill) => _ComposerSkillChip(
                                   mention: skill,
                                   onRemove: onRemoveSkill,
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    if (files.isNotEmpty) ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: files
+                              .map(
+                                (file) => _ComposerFileChip(
+                                  mention: file,
+                                  onRemove: onRemoveFile,
                                 ),
                               )
                               .toList(growable: false),
@@ -188,7 +230,7 @@ class _Composer extends StatelessWidget {
               sending: sending,
               controller: controller,
               hasAttachments: attachments.isNotEmpty,
-              hasSkills: skills.isNotEmpty,
+              hasSkills: skills.isNotEmpty || files.isNotEmpty,
               onSend: onSend,
             ),
           ],
@@ -722,8 +764,37 @@ class _ComposerSkillMention {
   int get hashCode => Object.hash(skill.path, tokenText);
 }
 
+class _ComposerFileMention {
+  const _ComposerFileMention({required this.file, required this.tokenText});
+
+  final FsSearchResult file;
+  final String tokenText;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _ComposerFileMention &&
+        other.file.path == file.path &&
+        other.tokenText == tokenText;
+  }
+
+  @override
+  int get hashCode => Object.hash(file.path, tokenText);
+}
+
 class _ActiveComposerSkillQuery {
   const _ActiveComposerSkillQuery({
+    required this.start,
+    required this.end,
+    required this.query,
+  });
+
+  final int start;
+  final int end;
+  final String query;
+}
+
+class _ActiveComposerFileQuery {
+  const _ActiveComposerFileQuery({
     required this.start,
     required this.end,
     required this.query,
@@ -777,4 +848,120 @@ class _ClipboardImageData {
   final String name;
   final String mimeType;
   final Uint8List bytes;
+}
+
+class _ComposerFileSuggestionTray extends StatelessWidget {
+  const _ComposerFileSuggestionTray({
+    required this.query,
+    required this.suggestions,
+    required this.loading,
+    required this.error,
+    required this.onSelectFile,
+  });
+
+  final String query;
+  final List<FsSearchResult> suggestions;
+  final bool loading;
+  final String? error;
+  final ValueChanged<FsSearchResult> onSelectFile;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (error != null) {
+      return Text(
+        error!,
+        style: TextStyle(color: colors.danger, fontSize: 12),
+      );
+    }
+    if (loading && suggestions.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Searching files...',
+              style: TextStyle(color: colors.textTertiary, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+    if (suggestions.isEmpty) {
+      return Text(
+        'No files found',
+        style: TextStyle(color: colors.textTertiary, fontSize: 12),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: suggestions.map((file) {
+        return InkWell(
+          onTap: () => onSelectFile(file),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                Icon(
+                  file.isDirectory ? Icons.folder_rounded : Icons.insert_drive_file_rounded,
+                  size: 16,
+                  color: colors.textTertiary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    file.path,
+                    style: TextStyle(
+                      color: colors.textPrimary,
+                      fontSize: 13,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(growable: false),
+    );
+  }
+}
+
+class _ComposerFileChip extends StatelessWidget {
+  const _ComposerFileChip({
+    required this.mention,
+    required this.onRemove,
+  });
+
+  final _ComposerFileMention mention;
+  final ValueChanged<String> onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Chip(
+      avatar: Icon(
+        mention.file.isDirectory ? Icons.folder_rounded : Icons.insert_drive_file_rounded,
+        size: 14,
+        color: colors.textTertiary,
+      ),
+      label: Text(
+        mention.file.name,
+        style: TextStyle(color: colors.textPrimary, fontSize: 12),
+      ),
+      backgroundColor: colors.surface,
+      side: BorderSide(color: colors.border),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      visualDensity: VisualDensity.compact,
+      onDeleted: () => onRemove(mention.file.path),
+      deleteIconColor: colors.textTertiary,
+    );
+  }
 }

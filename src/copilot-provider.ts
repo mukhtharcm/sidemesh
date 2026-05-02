@@ -162,6 +162,7 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     imageUrl: true,
     localImage: true,
     skills: true,
+    fileMentions: true,
   },
   interaction: {
     userInput: true,
@@ -1808,6 +1809,13 @@ async function sdkAttachments(
     }
     if (item.type === "image") {
       attachments.push(await sdkAttachmentForImage(item.url));
+    }
+    if (item.type === "file") {
+      attachments.push({
+        type: "file",
+        path: item.path,
+        displayName: nodePath.basename(item.path),
+      });
     }
   }
   return attachments.length > 0 ? attachments : undefined;
@@ -3545,6 +3553,8 @@ function inputAttachments(
         return [{ type: "image", url: item.url }];
       case "localImage":
         return [{ type: "localImage", path: item.path }];
+      case "file":
+        return [{ type: "file", path: item.path }];
       default:
         return [];
     }

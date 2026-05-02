@@ -597,6 +597,7 @@ function mergeCapabilities(
       imageUrl: any((caps) => caps.input.imageUrl),
       localImage: any((caps) => caps.input.localImage),
       skills: any((caps) => caps.input.skills),
+      fileMentions: any((caps) => caps.input.fileMentions),
     },
     interaction: {
       userInput: any((caps) => caps.interaction.userInput),

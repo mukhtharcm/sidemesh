@@ -748,6 +748,29 @@ class ApiClient {
         .toList();
   }
 
+  Future<List<FsSearchResult>> searchFiles(
+    HostProfile host, {
+    required String query,
+    String? sessionId,
+    int? limit,
+  }) async {
+    final response = await _post(
+      host,
+      '/api/fs/search',
+      body: {
+        'query': query,
+        'sessionId?': sessionId,
+        'limit?': limit,
+      },
+      operation: 'search files',
+    );
+    final decoded = _decodeObject(response);
+    return ((decoded['files'] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(FsSearchResult.fromJson)
+        .toList();
+  }
+
   Future<FsListing> listDirectory(
     HostProfile host,
     String path, {

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import nodePath from "node:path";
 
@@ -144,6 +144,7 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     imageUrl: false,
     localImage: true,
     skills: true,
+    fileMentions: true,
   },
   interaction: {
     userInput: false,
@@ -2100,6 +2101,13 @@ async function preparePiInput(
       case "image":
         ignoredImageUrlCount += 1;
         break;
+      case "file": {
+        const fileContent = await inlinePiFile(item.path, item.isDirectory ?? false);
+        if (fileContent) {
+          promptParts.push(fileContent);
+        }
+        break;
+      }
     }
   }
 
@@ -2138,6 +2146,67 @@ async function inlinePiSkill(name: string, filePath: string): Promise<string> {
   const body = stripFrontmatter(content).trim();
   const baseDir = nodePath.dirname(filePath);
   return `<skill name="${name}" location="${filePath}">\nReferences are relative to ${baseDir}.\n\n${body}\n</skill>`;
+}
+
+const FILE_CONTENT_CAP_BYTES = 100_000;
+const DIRECTORY_LISTING_MAX_ENTRIES = 100;
+
+async function inlinePiFile(filePath: string, isDirectory: boolean): Promise<string | null> {
+  try {
+    if (isDirectory) {
+      const entries = await readdir(filePath, { withFileTypes: true });
+      const lines = entries
+        .slice(0, DIRECTORY_LISTING_MAX_ENTRIES)
+        .map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
+      const truncated = entries.length > DIRECTORY_LISTING_MAX_ENTRIES;
+      const suffix = truncated ? String.raw`
+... (${entries.length - DIRECTORY_LISTING_MAX_ENTRIES} more entries)` : "";
+      return `--- Directory: ${filePath} ---
+${lines.join("\n")}${suffix}`;
+    }
+
+    const stats = await stat(filePath);
+    const isBinaryFile = await checkBinaryFile(filePath);
+    if (isBinaryFile) {
+      return `--- File: ${filePath} ---
+[binary file]`;
+    }
+
+    const handle = await open(filePath, "r");
+    try {
+      const buffer = Buffer.allocUnsafe(Math.min(stats.size, FILE_CONTENT_CAP_BYTES + 1));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const text = buffer.subarray(0, bytesRead).toString("utf8");
+      const truncated = stats.size > FILE_CONTENT_CAP_BYTES;
+      const suffix = truncated ? String.raw`
+... (truncated, ${stats.size} bytes total)` : "";
+      return `--- File: ${filePath} ---
+\`\`\`
+${text}${suffix}
+\`\`\``;
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return `--- File: ${filePath} ---
+[unable to read file]`;
+  }
+}
+
+async function checkBinaryFile(filePath: string): Promise<boolean> {
+  const handle = await open(filePath, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(8192);
+    const { bytesRead } = await handle.read(buffer, 0, 8192, 0);
+    const sample = buffer.subarray(0, bytesRead);
+    if (sample.length === 0) return false;
+    for (let i = 0; i < sample.length; i++) {
+      if (sample[i] === 0) return true;
+    }
+    return false;
+  } finally {
+    await handle.close();
+  }
 }
 
 async function readLocalImage(path: string): Promise<PiImageInput> {
