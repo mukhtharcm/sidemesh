@@ -28,6 +28,7 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
     imageUrl: false,
     localImage: false,
     skills: false,
+    fileMentions: false,
   },
   interaction: {
     userInput: false,

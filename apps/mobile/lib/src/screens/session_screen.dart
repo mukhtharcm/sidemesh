@@ -18,6 +18,7 @@ import '../host_status_store.dart';
 import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
 import '../models.dart';
+import '../fs_models.dart';
 import '../pending_send_recovery.dart';
 import 'browser_preview_screen.dart';
 import 'create_session_sheet.dart';
@@ -571,10 +572,14 @@ class _SessionScreenState extends State<SessionScreen>
       const <_ComposerImageAttachment>[];
   List<_ComposerSkillMention> _draftSkillMentions =
       const <_ComposerSkillMention>[];
+  List<_ComposerFileMention> _draftFileMentions =
+      const <_ComposerFileMention>[];
   List<PendingSessionSend> _pendingSends = const <PendingSessionSend>[];
   List<SkillSummary> _skills = const <SkillSummary>[];
+  List<FsSearchResult> _fileSuggestions = const <FsSearchResult>[];
   NodeInfo? _nodeInfo;
   _ActiveComposerSkillQuery? _activeSkillQuery;
+  _ActiveComposerFileQuery? _activeFileQuery;
   SessionLogHistorySummary? _history;
   PendingAction? _pendingAction;
   _DockedBrowserPreview? _dockedBrowserPreview;
@@ -586,6 +591,7 @@ class _SessionScreenState extends State<SessionScreen>
   bool _sending = false;
   bool _awaitingAssistantReply = false;
   bool _loadingSkills = false;
+  bool _loadingFileSearch = false;
   bool _loadingNodeInfo = false;
   bool _showingCachedSnapshot = false;
   bool _snapshotRefreshing = false;
@@ -594,6 +600,7 @@ class _SessionScreenState extends State<SessionScreen>
   bool _resumeSyncFailed = false;
   String _searchQuery = '';
   String? _skillsError;
+  String? _fileSearchError;
   String? _failedSendRetryClientMessageId;
   String? _failedSendRetrySignature;
   DateTime? _failedSendRetryExpiresAt;
@@ -617,6 +624,7 @@ class _SessionScreenState extends State<SessionScreen>
   final List<LiveEvent> _pendingLiveEvents = <LiveEvent>[];
   int? _snapshotInFlightRequestId;
   int _skillsRequestId = 0;
+  int _fileSearchRequestId = 0;
   int _nodeInfoRequestId = 0;
 
   // Memoized timeline entries so rebuilds that don't change list inputs skip
@@ -697,6 +705,9 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsSkillInput =>
       _supportsProviderCapability('input', 'skills') &&
       _supportsProviderCapability('configuration', 'skills');
+
+  bool get _supportsFileMentions =>
+      _supportsProviderCapability('input', 'fileMentions');
 
   bool get _supportsSessionResources =>
       _supportsProviderCapability('sessions', 'history');
@@ -913,7 +924,8 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _applyComposerSeed(SessionComposerSeed seed) {
     final draftAttachments = <_ComposerImageAttachment>[];
-    final draftMentions = <_ComposerSkillMention>[];
+    final draftSkillMentions = <_ComposerSkillMention>[];
+    final draftFileMentions = <_ComposerFileMention>[];
     var attachmentIndex = 0;
     for (final item in seed.inputItems) {
       switch (item.type) {
@@ -953,8 +965,25 @@ class _SessionScreenState extends State<SessionScreen>
             scope: 'repo',
             enabled: true,
           );
-          draftMentions.add(
+          draftSkillMentions.add(
             _ComposerSkillMention(skill: skill, tokenText: skill.mentionToken),
+          );
+        case 'file':
+          final path = item.path?.trim() ?? '';
+          if (path.isEmpty) {
+            continue;
+          }
+          final file = FsSearchResult(
+            path: path,
+            name: path.split('/').last,
+            isDirectory: item.isDirectory == true,
+            score: 0,
+          );
+          draftFileMentions.add(
+            _ComposerFileMention(
+              file: file,
+              tokenText: file.isDirectory ? '@${file.path}/' : '@${file.path}',
+            ),
           );
         default:
           continue;
@@ -962,7 +991,10 @@ class _SessionScreenState extends State<SessionScreen>
     }
 
     _draftAttachments = draftAttachments;
-    _draftSkillMentions = draftMentions
+    _draftSkillMentions = draftSkillMentions
+        .where((item) => seed.text.contains(item.tokenText))
+        .toList(growable: false);
+    _draftFileMentions = draftFileMentions
         .where((item) => seed.text.contains(item.tokenText))
         .toList(growable: false);
     _composerController.value = TextEditingValue(
@@ -1458,6 +1490,42 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
+  Future<void> _loadFileSuggestions() async {
+    final requestId = ++_fileSearchRequestId;
+    if (mounted) {
+      setState(() {
+        _loadingFileSearch = true;
+        _fileSearchError = null;
+      });
+    } else {
+      _loadingFileSearch = true;
+      _fileSearchError = null;
+    }
+
+    try {
+      final results = await widget.api.searchFiles(
+        widget.host,
+        query: _activeFileQuery?.query ?? '',
+        sessionId: widget.session.id,
+      );
+      if (!mounted || requestId != _fileSearchRequestId) {
+        return;
+      }
+      setState(() {
+        _fileSuggestions = results;
+        _loadingFileSearch = false;
+      });
+    } catch (error) {
+      if (!mounted || requestId != _fileSearchRequestId) {
+        return;
+      }
+      setState(() {
+        _loadingFileSearch = false;
+        _fileSearchError = friendlyError(error);
+      });
+    }
+  }
+
   Future<void> _loadGitStatus({bool silent = false}) async {
     if (!_supportsGitStatus) {
       if (mounted) {
@@ -1506,7 +1574,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _handleComposerChanged() {
-    final nextQuery = _supportsSkillInput
+    final nextSkillQuery = _supportsSkillInput
         ? _extractActiveSkillQuery(_composerController.value)
         : null;
     final nextDraftSkillMentions = _supportsSkillInput
@@ -1516,27 +1584,60 @@ class _SessionScreenState extends State<SessionScreen>
               )
               .toList(growable: false)
         : const <_ComposerSkillMention>[];
-    final queryChanged =
-        nextQuery?.start != _activeSkillQuery?.start ||
-        nextQuery?.end != _activeSkillQuery?.end ||
-        nextQuery?.query != _activeSkillQuery?.query;
-    final mentionsChanged = !listEquals(
+    final skillQueryChanged =
+        nextSkillQuery?.start != _activeSkillQuery?.start ||
+        nextSkillQuery?.end != _activeSkillQuery?.end ||
+        nextSkillQuery?.query != _activeSkillQuery?.query;
+    final skillMentionsChanged = !listEquals(
       nextDraftSkillMentions,
       _draftSkillMentions,
     );
-    if (queryChanged || mentionsChanged) {
+    if (skillQueryChanged || skillMentionsChanged) {
       if (!mounted) {
-        _activeSkillQuery = nextQuery;
+        _activeSkillQuery = nextSkillQuery;
         _draftSkillMentions = nextDraftSkillMentions;
       } else {
         setState(() {
-          _activeSkillQuery = nextQuery;
+          _activeSkillQuery = nextSkillQuery;
           _draftSkillMentions = nextDraftSkillMentions;
         });
       }
     }
-    if (nextQuery != null && _skills.isEmpty && !_loadingSkills) {
+    if (nextSkillQuery != null && _skills.isEmpty && !_loadingSkills) {
       unawaited(_loadSkills());
+    }
+
+    final nextFileQuery = _supportsFileMentions
+        ? _extractActiveFileQuery(_composerController.value)
+        : null;
+    final nextDraftFileMentions = _supportsFileMentions
+        ? _draftFileMentions
+            .where(
+              (item) => _composerController.text.contains(item.tokenText),
+            )
+            .toList(growable: false)
+        : const <_ComposerFileMention>[];
+    final fileQueryChanged =
+        nextFileQuery?.start != _activeFileQuery?.start ||
+        nextFileQuery?.end != _activeFileQuery?.end ||
+        nextFileQuery?.query != _activeFileQuery?.query;
+    final fileMentionsChanged = !listEquals(
+      nextDraftFileMentions,
+      _draftFileMentions,
+    );
+    if (fileQueryChanged || fileMentionsChanged) {
+      if (!mounted) {
+        _activeFileQuery = nextFileQuery;
+        _draftFileMentions = nextDraftFileMentions;
+      } else {
+        setState(() {
+          _activeFileQuery = nextFileQuery;
+          _draftFileMentions = nextDraftFileMentions;
+        });
+      }
+    }
+    if (nextFileQuery != null && !_loadingFileSearch) {
+      unawaited(_loadFileSuggestions());
     }
   }
 
@@ -1584,6 +1685,38 @@ class _SessionScreenState extends State<SessionScreen>
       default:
         return false;
     }
+  }
+
+  _ActiveComposerFileQuery? _extractActiveFileQuery(TextEditingValue value) {
+    final selection = value.selection;
+    if (!selection.isValid || !selection.isCollapsed) {
+      return null;
+    }
+
+    final text = value.text;
+    final cursor = math.min(math.max(selection.extentOffset, 0), text.length);
+    var start = cursor;
+    while (start > 0 && !_isComposerWhitespace(text.codeUnitAt(start - 1))) {
+      start -= 1;
+    }
+    var end = cursor;
+    while (end < text.length && !_isComposerWhitespace(text.codeUnitAt(end))) {
+      end += 1;
+    }
+    if (start >= end) {
+      return null;
+    }
+
+    final token = text.substring(start, end);
+    if (!token.startsWith('@')) {
+      return null;
+    }
+
+    return _ActiveComposerFileQuery(
+      start: start,
+      end: end,
+      query: token.substring(1),
+    );
   }
 
   List<SkillSummary> get _skillSuggestions {
@@ -2831,6 +2964,7 @@ class _SessionScreenState extends State<SessionScreen>
     String text,
     List<_ComposerImageAttachment> attachments,
     List<_ComposerSkillMention> skills,
+    List<_ComposerFileMention> files,
   ) {
     return <SessionInputItem>[
       if (_supportsImageInput)
@@ -2839,6 +2973,12 @@ class _SessionScreenState extends State<SessionScreen>
         ...skills.map(
           (item) => SessionInputItem.skill(item.skill.name, item.skill.path),
         ),
+      ...files.map(
+        (item) => SessionInputItem.file(
+          item.file.path,
+          isDirectory: item.file.isDirectory,
+        ),
+      ),
       if (text.isNotEmpty) SessionInputItem.text(text),
     ];
   }
@@ -2909,7 +3049,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
 
-    final nextText = _removeSkillTokenFromText(
+    final nextText = _removeTokenFromText(
       _composerController.text,
       mention.tokenText,
     );
@@ -2924,7 +3064,7 @@ class _SessionScreenState extends State<SessionScreen>
     });
   }
 
-  String _removeSkillTokenFromText(String text, String tokenText) {
+  String _removeTokenFromText(String text, String tokenText) {
     final escaped = RegExp.escape(tokenText);
     var next = text.replaceAllMapped(
       RegExp('(^|\\s)$escaped(?=\\s|\$)'),
@@ -2933,6 +3073,71 @@ class _SessionScreenState extends State<SessionScreen>
     next = next.replaceAll(RegExp(r'[ \t]{2,}'), ' ');
     next = next.replaceAll(RegExp(r'\n{3,}'), '\n\n');
     return next.trim();
+  }
+
+  void _insertFileMention(FsSearchResult file) {
+    final active =
+        _activeFileQuery ??
+        _extractActiveFileQuery(_composerController.value);
+    if (active == null) {
+      return;
+    }
+
+    final tokenText = file.isDirectory ? '@${file.path}/' : '@${file.path}';
+    final value = _composerController.value;
+    final text = value.text;
+    final replaced = text.replaceRange(active.start, active.end, '$tokenText ');
+    final cursorOffset = active.start + tokenText.length + 1;
+    _composerController.value = value.copyWith(
+      text: replaced,
+      selection: TextSelection.collapsed(offset: cursorOffset),
+      composing: TextRange.empty,
+    );
+
+    final nextMentions = List<_ComposerFileMention>.from(_draftFileMentions);
+    if (!nextMentions.any((item) => item.file.path == file.path)) {
+      nextMentions.add(
+        _ComposerFileMention(file: file, tokenText: tokenText),
+      );
+    }
+
+    HapticFeedback.selectionClick();
+    if (!mounted) {
+      _draftFileMentions = nextMentions;
+      _activeFileQuery = null;
+      return;
+    }
+    setState(() {
+      _draftFileMentions = nextMentions;
+      _activeFileQuery = null;
+    });
+  }
+
+  void _removeDraftFileMention(String filePath) {
+    _ComposerFileMention? mention;
+    for (final item in _draftFileMentions) {
+      if (item.file.path == filePath) {
+        mention = item;
+        break;
+      }
+    }
+    if (mention == null) {
+      return;
+    }
+
+    final nextText = _removeTokenFromText(
+      _composerController.text,
+      mention.tokenText,
+    );
+    _composerController.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: nextText.length),
+    );
+    setState(() {
+      _draftFileMentions = _draftFileMentions
+          .where((item) => item.file.path != filePath)
+          .toList(growable: false);
+    });
   }
 
   Future<void> _loadPendingSends() async {
@@ -3282,7 +3487,10 @@ class _SessionScreenState extends State<SessionScreen>
     final draftSkillMentions = List<_ComposerSkillMention>.from(
       _draftSkillMentions.where((item) => text.contains(item.tokenText)),
     );
-    if ((text.isEmpty && draftAttachments.isEmpty) || _sending) {
+    final draftFileMentions = List<_ComposerFileMention>.from(
+      _draftFileMentions.where((item) => text.contains(item.tokenText)),
+    );
+    if ((text.isEmpty && draftAttachments.isEmpty && draftFileMentions.isEmpty) || _sending) {
       return;
     }
 
@@ -3291,6 +3499,7 @@ class _SessionScreenState extends State<SessionScreen>
       text,
       draftAttachments,
       draftSkillMentions,
+      draftFileMentions,
     );
     if (inputItems.isEmpty) {
       return;
@@ -3425,6 +3634,9 @@ class _SessionScreenState extends State<SessionScreen>
       final restoredSkillMentions = List<_ComposerSkillMention>.from(
         draftSkillMentions,
       );
+      final restoredFileMentions = List<_ComposerFileMention>.from(
+        draftFileMentions,
+      );
       showAppSnackBar(context, "Failed to send: ${friendlyError(error)}");
       setState(() {
         _optimisticMessages = _optimisticMessages
@@ -3432,6 +3644,7 @@ class _SessionScreenState extends State<SessionScreen>
             .toList();
         _draftAttachments = restoredAttachments;
         _draftSkillMentions = restoredSkillMentions;
+        _draftFileMentions = restoredFileMentions;
         _running = wasRunning;
         _awaitingAssistantReply =
             wasRunning && _liveAssistantText.isEmpty && !stillHasPending;
@@ -5068,10 +5281,15 @@ class _SessionScreenState extends State<SessionScreen>
           focusNode: _composerFocusNode,
           attachments: _draftAttachments,
           skills: _draftSkillMentions,
+          files: _draftFileMentions,
           activeSkillQuery: _activeSkillQuery?.query,
           skillSuggestions: _skillSuggestions,
           loadingSkills: _loadingSkills,
           skillError: _skillsError,
+          activeFileQuery: _activeFileQuery?.query,
+          fileSuggestions: _fileSuggestions,
+          loadingFileSearch: _loadingFileSearch,
+          fileError: _fileSearchError,
           sending: _sending,
           supportsImageInput: _supportsImageInput,
           supportsSkillInput: _supportsSkillInput,
@@ -5081,6 +5299,8 @@ class _SessionScreenState extends State<SessionScreen>
           onRemoveAttachment: _removeDraftAttachment,
           onSelectSkill: _insertSkillMention,
           onRemoveSkill: _removeDraftSkillMention,
+          onSelectFile: _insertFileMention,
+          onRemoveFile: _removeDraftFileMention,
           onSend: _sendInput,
           onDismiss: _dismissKeyboard,
           submitOnEnter: widget.desktopMode,

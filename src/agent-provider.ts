@@ -70,6 +70,11 @@ export type AgentSessionInputItem =
       type: "skill";
       name: string;
       path: string;
+    }
+  | {
+      type: "file";
+      path: string;
+      isDirectory?: boolean;
     };
 
 export interface AgentSessionOverrides {
@@ -193,6 +198,7 @@ export interface AgentProviderCapabilities {
     imageUrl: boolean;
     localImage: boolean;
     skills: boolean;
+    fileMentions: boolean;
   };
   interaction: {
     userInput: boolean;
