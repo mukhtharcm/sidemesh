@@ -232,6 +232,9 @@ export interface AgentProviderCapabilities {
     filesystem: boolean;
     remoteGitDiff: boolean;
   };
+  lifecycle: {
+    restart: boolean;
+  };
 }
 
 export type AgentProviderLiveEvent =
@@ -304,6 +307,7 @@ export interface AgentProviderCore extends EventEmitter<AgentProviderEvents> {
 
   start(): Promise<void>;
   close?(): Promise<void>;
+  restart?(): Promise<void>;
   getVersion(): Promise<string>;
 }
 
