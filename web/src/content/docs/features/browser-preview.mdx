@@ -3,11 +3,27 @@ title: Browser Preview
 description: Stream browser screenshots to the client.
 ---
 
-Browser preview captures screenshots of a headless browser running on the host and streams them to the client as a live image feed.
+Browser preview launches a headless Chromium instance on the host, captures screenshots, and streams them to the client as a live image feed.
 
 ## How it works
 
-The daemon launches a headless browser (Chromium via Playwright or similar), navigates to a URL, and periodically captures screenshots. Images are pushed to the client over the live event WebSocket.
+1. The daemon launches headless Chromium via the Chrome DevTools Protocol (CDP)
+2. It navigates to the target URL and captures screenshots at a configurable interval (default 900ms)
+3. Screenshots are pushed to the client over the live event WebSocket
+4. The client can send interaction commands back to the headless browser
+
+## Supported interactions
+
+The browser preview supports remote interaction through CDP:
+
+| Action | How it works |
+|--------|-------------|
+| **Tap / click** | Dispatches `mousePressed` + `mouseReleased` events at the tapped coordinates |
+| **Scroll** | Sends `mouseWheel` events with deltaX / deltaY |
+| **Text input** | Inserts text via `Input.insertText` |
+| **Special keys** | Sends key events (Enter, Backspace, Arrow keys, etc.) |
+| **Navigation** | Back, forward, and reload via `Page.getNavigationHistory` and `Page.reload` |
+| **Resize** | Updates the viewport dimensions dynamically |
 
 ## Use cases
 
@@ -15,14 +31,16 @@ The daemon launches a headless browser (Chromium via Playwright or similar), nav
 - Review visual changes without port-forwarding a dev server
 - Verify rendering on the host's browser engine
 - Catch UI bugs the agent might miss
-- Preview heavy dev servers over slow links — browser preview sends only screenshots, while port-forwarding pulls the full page payload (HTML, CSS, JS, images)
+- Preview heavy dev servers over slow links — browser preview sends only compressed screenshots, while port-forwarding pulls the full page payload (HTML, CSS, JS, images)
 
 ## Limitations
 
-- Screenshots are lower fidelity than a real browser
-- Interaction is limited; for full control, use port forwarding
-- The browser runs on the host, not the client, so it sees the host's network
+- Lower fidelity than a real browser (compressed JPEG screenshots, not native rendering)
+- Frame updates are periodic, not real-time (default every 900ms)
+- The browser runs on the host, so it sees the host's network and user-agent
+- No native browser developer tools or extensions
+- Only supports HTTP/HTTPS targets (not raw TCP)
 
 ## Comparison with port forwarding
 
-Browser preview is for quick visual checks. Port forwarding is for full interaction. See [Browser vs Port Forwarding](/comparisons/browser-vs-port-forwarding/) for a detailed comparison.
+Browser preview is for visual verification and light interaction when bandwidth or setup is constrained. Port forwarding is for full-fidelity browsing in your native mobile browser. See [Browser vs Port Forwarding](/comparisons/browser-vs-port-forwarding/) for a detailed comparison.
