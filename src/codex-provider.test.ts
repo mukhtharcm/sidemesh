@@ -85,7 +85,6 @@ describe("codex provider resume runtime restore", () => {
           contextWindow: {
             currentTokens: 64800,
             tokenLimit: 128000,
-            messagesLength: 0,
             updatedAt: (events[0] as any).runtime.telemetry.contextWindow.updatedAt,
           },
           lastUsage: {

@@ -22,6 +22,7 @@ import {
   type AgentSubmitInputRequest,
   type AgentSubmitInputResult,
 } from "./agent-provider.js";
+import { UnsupportedProviderFeatureError } from "./agent-provider.js";
 import {
   type NormalizedPendingActionDecision,
   type PendingActionDecisionInput,
@@ -420,7 +421,9 @@ export class CopilotAgentProvider
     const session = await this.getWritableSession(threadId);
     const sdkSession = await this.ensureSdkSession(session);
     if (!sdkSession.rpc?.compaction?.compact) {
-      throw new Error("Copilot SDK does not expose manual compaction.");
+      throw new UnsupportedProviderFeatureError(
+        "Copilot SDK does not expose manual compaction.",
+      );
     }
     const startedAt = Date.now();
     this.replaceRuntime(
@@ -666,7 +669,9 @@ export class CopilotAgentProvider
     const sdkClient = await this.ensureSdkClient();
     const rpc = sdkClient.rpc?.skills;
     if (!rpc) {
-      throw new Error("GitHub Copilot SDK skill configuration is unavailable.");
+      throw new UnsupportedProviderFeatureError(
+        "GitHub Copilot SDK skill configuration is unavailable.",
+      );
     }
     const discovered = await rpc.discover({});
     const skillName = resolveCopilotSkillName(discovered.skills, request);
@@ -3197,15 +3202,27 @@ function applyCopilotRuntimeEvent(
   const telemetry = { ...(next.telemetry ?? {}) };
 
   if (event.type === "session.usage_info") {
-    telemetry.contextWindow = {
-      currentTokens: numericValue(data.currentTokens) ?? 0,
-      tokenLimit: numericValue(data.tokenLimit) ?? 0,
-      messagesLength: numericValue(data.messagesLength) ?? 0,
-      conversationTokens: numericValue(data.conversationTokens),
-      systemTokens: numericValue(data.systemTokens),
-      toolDefinitionsTokens: numericValue(data.toolDefinitionsTokens),
-      updatedAt,
-    };
+    const currentTokens = numericValue(data.currentTokens);
+    const tokenLimit = numericValue(data.tokenLimit);
+    if (currentTokens != null && tokenLimit != null) {
+      telemetry.contextWindow = {
+        currentTokens,
+        tokenLimit,
+        ...(numericValue(data.messagesLength) != null
+          ? { messagesLength: numericValue(data.messagesLength) }
+          : {}),
+        ...(numericValue(data.conversationTokens) != null
+          ? { conversationTokens: numericValue(data.conversationTokens) }
+          : {}),
+        ...(numericValue(data.systemTokens) != null
+          ? { systemTokens: numericValue(data.systemTokens) }
+          : {}),
+        ...(numericValue(data.toolDefinitionsTokens) != null
+          ? { toolDefinitionsTokens: numericValue(data.toolDefinitionsTokens) }
+          : {}),
+        updatedAt,
+      };
+    }
     return {
       ...next,
       telemetry,

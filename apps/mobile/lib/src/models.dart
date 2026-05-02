@@ -723,8 +723,8 @@ class SessionContextWindowSummary {
   const SessionContextWindowSummary({
     required this.currentTokens,
     required this.tokenLimit,
-    required this.messagesLength,
     required this.updatedAt,
+    this.messagesLength,
     this.conversationTokens,
     this.systemTokens,
     this.toolDefinitionsTokens,
@@ -732,7 +732,7 @@ class SessionContextWindowSummary {
 
   final int currentTokens;
   final int tokenLimit;
-  final int messagesLength;
+  final int? messagesLength;
   final DateTime updatedAt;
   final int? conversationTokens;
   final int? systemTokens;
@@ -745,7 +745,7 @@ class SessionContextWindowSummary {
       SessionContextWindowSummary(
         currentTokens: _intValue(json['currentTokens']),
         tokenLimit: _intValue(json['tokenLimit']),
-        messagesLength: _intValue(json['messagesLength']),
+        messagesLength: _intOrNull(json['messagesLength']),
         updatedAt: _dateValue(json['updatedAt']),
         conversationTokens: _intOrNull(json['conversationTokens']),
         systemTokens: _intOrNull(json['systemTokens']),
@@ -2443,18 +2443,27 @@ class SessionLogHistorySummary {
 class SessionStatus {
   const SessionStatus({
     required this.sessionId,
+    required this.status,
+    required this.loaded,
+    required this.threadStatus,
     required this.isRunning,
     required this.activeTurnId,
     required this.pendingAction,
   });
 
   final String sessionId;
+  final String status;
+  final bool loaded;
+  final String? threadStatus;
   final bool isRunning;
   final String? activeTurnId;
   final PendingAction? pendingAction;
 
   factory SessionStatus.fromJson(Map<String, dynamic> json) => SessionStatus(
     sessionId: _stringValue(json['sessionId']),
+    status: _stringValue(json['status']),
+    loaded: json['loaded'] != false,
+    threadStatus: _stringOrNull(json['threadStatus']),
     isRunning: _boolValue(json['isRunning']),
     activeTurnId: json['activeTurnId'] as String?,
     pendingAction: json['pendingAction'] == null
