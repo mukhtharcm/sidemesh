@@ -123,9 +123,17 @@ Required GitHub Actions secrets:
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-The site is currently static-only. The old waitlist form and admin endpoint
-were removed when preview downloads became available, so the deploy should not
-require Pages Functions, D1 bindings, Turnstile, or admin runtime secrets.
+The site now includes a Cloudflare Pages waitlist flow again. Production setup
+needs:
+
+- a `DB` D1 binding wired to a `waitlist` table
+- `TURNSTILE_SECRET` Pages secret if Turnstile should be enforced
+- `ADMIN_PASS` Pages secret for `/admin`
+- `PUBLIC_TURNSTILE_SITE_KEY` available at build time for the landing page form
+
+The deploy action publishes the built Astro site. Pages Functions are picked up
+from `web/functions/`, but the D1 binding and runtime secrets still need to be
+configured in the Cloudflare Pages project.
 
 Manual deploy:
 

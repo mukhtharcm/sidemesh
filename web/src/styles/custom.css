@@ -231,6 +231,6 @@ header.header {
    ═══════════════════════════════════════════════════════════════ */
 
 header.header img[alt="Sidemesh"] {
-  border-radius: 10px;
+  border-radius: 14px;
   overflow: hidden;
 }
