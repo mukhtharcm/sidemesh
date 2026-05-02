@@ -81,9 +81,10 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
     final sessions = results[1] as List<SessionSummary>;
 
     // Merge favorites in the background so the screen paints immediately.
-    _localStore.getFavoriteSessions(widget.host).then((favorites) {
+    _localStore.getFavoriteSessions(widget.host).then((favorites) async {
       if (!mounted) return;
-      final merged = _mergeSessions(sessions, favorites);
+      final ghosts = await _localStore.ghostsForHost(widget.host);
+      final merged = _mergeSessions(sessions, [...favorites, ...ghosts]);
       setState(() {
         _future = Future.value(_HostOverview(
           node: node,

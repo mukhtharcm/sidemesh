@@ -22,6 +22,7 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
     history: false,
     eventReplay: false,
     recentFallback: false,
+    searchSessions: false,
   },
   input: {
     text: false,
@@ -112,6 +113,7 @@ describe("recent fallback session merge", () => {
         sessions: {
           ...EMPTY_CAPABILITIES.sessions,
           recentFallback: true,
+    searchSessions: true,
         },
       },
       listRecentUnindexedSessionThreads: async () => [

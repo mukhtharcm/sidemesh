@@ -278,6 +278,7 @@ class RecentSessionsStore extends ChangeNotifier {
     _publishEntries();
     notifyListeners();
     _persistHostCache(host);
+    unawaited(SessionLocalStore.instance.updateGhost(host, session));
   }
 
   void _handleLiveRemove(HostProfile host, String sessionId) {

@@ -192,6 +192,7 @@ export interface AgentProviderCapabilities {
     history: boolean;
     eventReplay: boolean;
     recentFallback: boolean;
+    searchSessions: boolean;
   };
   input: {
     text: boolean;
