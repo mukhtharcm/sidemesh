@@ -220,6 +220,12 @@ export class CodexBridge extends EventEmitter<{
     return this.codexHomePath;
   }
 
+  public get isAlive(): boolean {
+    const child = this.process;
+    if (!child) return false;
+    return child.exitCode === null && child.signalCode === null;
+  }
+
   public async start(): Promise<void> {
     this.requestId = 1;
     const spawnEnv = await buildCodexSpawnEnv();

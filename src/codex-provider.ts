@@ -117,6 +117,10 @@ export class CodexAgentProvider
     await this.bridge.start();
   }
 
+public async health(): Promise<boolean> {
+    return this.bridge.isAlive;
+  }
+
   public async getVersion(): Promise<string> {
     try {
       return execFileSync(this.codexBin, ["--version"], { encoding: "utf8" }).trim();
