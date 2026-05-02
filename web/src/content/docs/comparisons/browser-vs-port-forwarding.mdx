@@ -1,0 +1,52 @@
+---
+title: Browser Preview vs Port Forwarding
+description: Screenshot stream vs full browser access.
+---
+
+Browser preview and port forwarding both let you see web content from the host, but with very different fidelity and interaction models.
+
+## Browser Preview
+
+The daemon launches a headless browser, captures screenshots, and streams them to the app.
+
+**Best for:**
+- Seeing what the agent sees when it uses a browser tool
+- Quick visual checks without starting a dev server
+- Verifying rendering on the host's browser engine
+- Catching visual bugs the agent might miss
+
+**Limitations:**
+- Lower fidelity than a real browser
+- No interaction (click, scroll, type)
+- Fixed viewport size
+- Updates are periodic, not real-time
+
+## Port Forwarding
+
+Port forwarding tunnels an HTTP service from the host to the client.
+
+**Best for:**
+- Full interaction with a website
+- Testing responsive breakpoints
+- Using developer tools
+- Real-time updates from hot-reload
+
+**Limitations:**
+- Requires a running HTTP server
+- Only works for TCP services
+- Does not show the agent's browser tool view
+
+## Decision matrix
+
+| Task | Browser Preview | Port Forwarding |
+|------|-----------------|-----------------|
+| Verify agent browser tool output | ✅ | ❌ |
+| Click around a web app | ❌ | ✅ |
+| Check responsive layout | ❌ | ✅ |
+| See what the agent sees | ✅ | ❌ |
+| Hot-reload dev server | ❌ | ✅ |
+| Catch visual regressions | ✅ | ❌ |
+
+## Recommendation
+
+Use **browser preview** for quick visual verification and **port forwarding** for full interaction. They complement each other: preview for the agent's view, forwarding for your own testing.

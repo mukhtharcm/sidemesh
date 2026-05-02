@@ -1,0 +1,41 @@
+---
+title: Token Management
+description: How Sidemesh handles authentication tokens.
+---
+
+Sidemesh uses a single shared bearer token for daemon-client authentication. This page explains how it works, how to rotate it, and the current limitations.
+
+## Token lifecycle
+
+1. `sidemesh setup` generates a random token and writes it to `~/.sidemesh/config.json`
+2. The daemon validates the `Authorization: Bearer <token>` header on every request
+3. The mobile app stores the token in platform secure storage (iOS Keychain, Android Keystore, macOS Keychain)
+4. The QR code printed by `sidemesh pair` contains the base URL and token
+
+## Rotating a token
+
+If a device is lost or you want to revoke access:
+
+1. Edit `~/.sidemesh/config.json` and change the `token` field
+2. Restart the daemon: `sidemesh restart --yes`
+3. Re-pair all trusted devices with the new token
+
+There is no per-device revocation yet. Rotating the token invalidates all existing clients.
+
+## Secure storage
+
+| Platform | Storage |
+|----------|---------|
+| iOS | Keychain |
+| Android | Keystore |
+| macOS | Keychain |
+
+## Token environment
+
+The daemon deletes `SIDEMESH_TOKEN` from the environment before spawning shells or child processes. This prevents subprocesses from extracting the bearer token.
+
+## Future improvements
+
+- Per-device tokens with granular revocation
+- Token expiry and refresh
+- OAuth or SSO integration for enterprise deployments

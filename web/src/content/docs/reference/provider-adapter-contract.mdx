@@ -1,0 +1,82 @@
+---
+title: Provider Adapter Contract
+description: The interface every Sidemesh provider must implement.
+---
+
+## Required core
+
+Every provider must implement:
+
+- `kind`: stable provider id (e.g., `codex`)
+- `displayName`: human-readable name
+- `capabilities`: feature flags for UI gating
+- `start()`: boot or connect to the agent service
+- `getVersion()`: return provider version string
+
+## Capability groups
+
+### Session history
+
+- `listSessionThreads`
+- `readSessionThread`
+- `readSessionLog`
+- `readSessionRuntime`
+- `listRecentUnindexedSessionThreads`
+
+### Session lifecycle
+
+- `createSession`
+- `submitInput`
+- `listLoadedSessionIds`
+- `resumeSessionThread`
+- `setSessionName`
+- `archiveSession`
+- `unarchiveSession`
+- `interruptTurn`
+
+### Approvals
+
+- `respondToPendingAction`
+
+### Configuration
+
+- `listModels`
+- `listProfiles`
+- `listSkills`
+- `writeSkillConfig`
+
+### Workspace
+
+- `readRemoteGitDiff`
+- Filesystem methods under `fs*`
+
+## Runtime events
+
+Providers must emit `liveEvent` events for streaming UI updates:
+
+- `turn_started`
+- `assistant_delta`
+- `assistant_message_completed`
+- `activity_updated`
+- `activity_output_delta`
+- `activity_terminal_input`
+- `turn_completed`
+- `action_opened`
+- `fs_changed`
+- `skills_changed`
+
+## HTTP behavior
+
+- Unsupported provider-owned routes return `501`
+- Daemon-owned features (git status, terminals, port forwarding) are exposed through `hostCapabilities`
+- `/api/node` returns active provider, version, capabilities, and host capabilities
+- `/api/providers` returns supported provider definitions
+
+## Adding a provider
+
+1. Add config types to `src/types.ts`
+2. Add definition to `src/provider-registry.ts`
+3. Implement adapter in `src/<name>-provider.ts`
+4. Register construction in `src/provider-factory.ts`
+5. Set unsupported capabilities to `false` first, then enable one by one
+6. Add client UI only after the capability map is accurate
