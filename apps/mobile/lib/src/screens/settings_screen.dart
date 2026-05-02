@@ -1302,7 +1302,6 @@ class _HostDiagnosticsCardState extends State<_HostDiagnosticsCard> {
   bool _busy = false;
   String? _message;
   ProviderMetadata? _metadata;
-  bool _metadataLoading = true;
 
   @override
   void initState() {
@@ -1314,17 +1313,13 @@ class _HostDiagnosticsCardState extends State<_HostDiagnosticsCard> {
     try {
       final host = await _getHost();
       if (host == null) {
-        setState(() => _metadataLoading = false);
         return;
       }
       final metadata = await _api.fetchProviders(host);
       if (!mounted) return;
-      setState(() {
-        _metadata = metadata;
-        _metadataLoading = false;
-      });
+      setState(() => _metadata = metadata);
     } catch (_) {
-      if (mounted) setState(() => _metadataLoading = false);
+      // ignore
     }
   }
 
