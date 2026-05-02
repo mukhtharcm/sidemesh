@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../api_client.dart';
 import '../models.dart';
-import '../session_favorites_store.dart';
+import '../session_local_store.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';
 import '../session_runtime.dart';
@@ -40,7 +40,7 @@ class HostDetailScreen extends StatefulWidget {
 }
 
 class _HostDetailScreenState extends State<HostDetailScreen> {
-  final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
+  final SessionLocalStore _localStore = SessionLocalStore.instance;
   late Future<_HostOverview> _future;
   Timer? _refreshTimer;
   static const Duration _refreshInterval = Duration(seconds: 20);
@@ -48,7 +48,8 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _favorites.ensureLoaded();
+    
+    _localStore.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
     _future = _load();
     _refreshTimer = Timer.periodic(_refreshInterval, (_) => _silentRefresh());
@@ -78,12 +79,40 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
     ]);
     final node = results[0] as NodeInfo;
     final sessions = results[1] as List<SessionSummary>;
+
+    // Merge favorites in the background so the screen paints immediately.
+    _localStore.getFavoriteSessions(widget.host).then((favorites) {
+      if (!mounted) return;
+      final merged = _mergeSessions(sessions, favorites);
+      setState(() {
+        _future = Future.value(_HostOverview(
+          node: node,
+          workspaces: _buildWorkspaces(merged),
+          sessions: merged,
+        ));
+      });
+    });
+
     final workspaces = _buildWorkspaces(sessions);
     return _HostOverview(
       node: node,
       workspaces: workspaces,
       sessions: sessions,
     );
+  }
+
+  List<SessionSummary> _mergeSessions(
+    List<SessionSummary> recents,
+    List<SessionSummary> favorites,
+  ) {
+    final byId = <String, SessionSummary>{
+      for (final s in recents) s.id: s,
+    };
+    for (final fav in favorites) {
+      byId.putIfAbsent(fav.id, () => fav);
+    }
+    return byId.values.toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
   }
 
   Future<void> _refresh() async {
@@ -97,8 +126,8 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
         .map((s) => overrides.overlay(widget.host.id, s))
         .toList();
     sorted.sort((left, right) {
-      final leftFavorite = _favorites.isFavorite(widget.host, left.id);
-      final rightFavorite = _favorites.isFavorite(widget.host, right.id);
+      final leftFavorite = _localStore.isFavorite(widget.host, left.id);
+      final rightFavorite = _localStore.isFavorite(widget.host, right.id);
       if (leftFavorite != rightFavorite) {
         return leftFavorite ? -1 : 1;
       }
@@ -211,7 +240,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
         final data = snapshot.data!;
         return ListenableBuilder(
           listenable: Listenable.merge([
-            _favorites,
+            SessionLocalStore.instance,
             SessionOverridesStore.instance,
           ]),
           builder: (context, _) {
@@ -276,13 +305,13 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                         child: _SessionRow(
                           host: widget.host,
                           session: session,
-                          favorite: _favorites.isFavorite(
+                          favorite: _localStore.isFavorite(
                             widget.host,
                             session.id,
                           ),
                           onTap: () => widget.onOpenSession(session),
                           onToggleFavorite: () {
-                            _favorites.toggleFavorite(widget.host, session.id);
+                            _localStore.toggleFavorite(widget.host, session.id);
                           },
                         ),
                       ),

@@ -15,9 +15,8 @@ import '../pending_send_recovery.dart';
 import '../recent_sessions_live_store.dart';
 import '../recent_session_filter.dart';
 import '../screen_awake_controller.dart';
-import '../session_favorites_store.dart';
+import '../session_local_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../session_cache_store.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';
 import '../session_runtime.dart';
@@ -236,7 +235,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     if (previousHost != null &&
         (previousHost.baseUrl != result.baseUrl ||
             previousHost.token != result.token)) {
-      await SessionCacheStore.instance.clearHost(previousHost);
+      await SessionLocalStore.instance.clearHost(previousHost);
     }
     await _store.saveHosts(updated);
     await _refreshHosts();
@@ -244,7 +243,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
 
   Future<void> _removeHost(HostProfile host) async {
     final updated = _hosts.where((item) => item.id != host.id).toList();
-    await SessionCacheStore.instance.clearHost(host);
+    await SessionLocalStore.instance.clearHost(host);
     await _store.saveHosts(updated);
     await _refreshHosts();
   }
@@ -986,13 +985,14 @@ class _SessionGroup {
 }
 
 class _RecentPaneState extends State<RecentPane> {
-  final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
+  final SessionLocalStore _localStore = SessionLocalStore.instance;
   final RecentSessionsStore _store = RecentSessionsStore();
 
   @override
   void initState() {
     super.initState();
-    _favorites.ensureLoaded();
+    
+    _localStore.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
     _store.addListener(_handleStoreChanged);
     _store.configure(hosts: widget.hosts, api: widget.api);
@@ -1108,8 +1108,8 @@ class _RecentPaneState extends State<RecentPane> {
     final sorted = visible.toList();
     if (widget.viewMode == SessionViewMode.flat) {
       sorted.sort((left, right) {
-        final leftFavorite = _favorites.isFavorite(left.host, left.session.id);
-        final rightFavorite = _favorites.isFavorite(right.host, right.session.id);
+        final leftFavorite = _localStore.isFavorite(left.host, left.session.id);
+        final rightFavorite = _localStore.isFavorite(right.host, right.session.id);
         if (leftFavorite != rightFavorite) {
           return leftFavorite ? -1 : 1;
         }
@@ -1146,7 +1146,7 @@ class _RecentPaneState extends State<RecentPane> {
     return ListenableBuilder(
       listenable: Listenable.merge([
         _store,
-        _favorites,
+        SessionLocalStore.instance,
         HostStatusStore.instance,
         SessionOverridesStore.instance,
       ]),
@@ -1250,12 +1250,12 @@ class _RecentPaneState extends State<RecentPane> {
                           return _SessionRowCard(
                             host: entry.host,
                             session: entry.session,
-                            favorite: _favorites.isFavorite(entry.host, entry.session.id),
+                            favorite: _localStore.isFavorite(entry.host, entry.session.id),
                             selected: widget.selectedSessionId == entry.session.id,
                             dense: widget.dense,
                             onTap: () => widget.onOpenSession(entry.host, entry.session),
                             onToggleFavorite: () {
-                              _favorites.toggleFavorite(entry.host, entry.session.id);
+                              _localStore.toggleFavorite(entry.host, entry.session.id);
                             },
                           );
                         },
@@ -1373,12 +1373,12 @@ class _RecentPaneState extends State<RecentPane> {
               child: _SessionRowCard(
                 host: entry.host,
                 session: entry.session,
-                favorite: _favorites.isFavorite(entry.host, entry.session.id),
+                favorite: _localStore.isFavorite(entry.host, entry.session.id),
                 selected: widget.selectedSessionId == entry.session.id,
                 dense: widget.dense,
                 onTap: () => widget.onOpenSession(entry.host, entry.session),
                 onToggleFavorite: () {
-                  _favorites.toggleFavorite(entry.host, entry.session.id);
+                  _localStore.toggleFavorite(entry.host, entry.session.id);
                 },
               ),
             );
@@ -1814,7 +1814,7 @@ class _InboxPaneState extends State<InboxPane> {
     HostProfile host,
     PendingSessionSend send,
   ) async {
-    final cached = await SessionCacheStore.instance.loadRecentSessions(host);
+    final cached = await SessionLocalStore.instance.getRecentSessions(host);
     for (final session in cached) {
       if (session.id == send.sessionId) {
         return session;

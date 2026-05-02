@@ -8,7 +8,7 @@ import 'api_client.dart';
 import 'host_status_store.dart';
 import 'host_reconnect_scheduler.dart';
 import 'models.dart';
-import 'session_cache_store.dart';
+import 'session_local_store.dart';
 
 @immutable
 class RemoteSessionEntry {
@@ -131,7 +131,7 @@ class RecentSessionsStore extends ChangeNotifier {
           _hasLoadedOnce = true;
           _publishEntries();
           unawaited(
-            SessionCacheStore.instance.saveRecentSessions(host, sessions),
+            SessionLocalStore.instance.upsertSessions(host, sessions),
           );
         } catch (error) {
           if (_disposed || gen != _loadGen) return;
@@ -183,7 +183,7 @@ class RecentSessionsStore extends ChangeNotifier {
     await Future.wait(
       hosts.map((host) async {
         try {
-          final cached = await SessionCacheStore.instance.loadRecentSessions(
+          final cached = await SessionLocalStore.instance.getRecentSessions(
             host,
           );
           final current = _hostsById[host.id];
@@ -263,7 +263,7 @@ class RecentSessionsStore extends ChangeNotifier {
     _replaceHostSessions(host, sessions);
     _publishEntries();
     notifyListeners();
-    unawaited(SessionCacheStore.instance.saveRecentSessions(host, sessions));
+    unawaited(SessionLocalStore.instance.upsertSessions(host, sessions));
   }
 
   void _handleLiveUpsert(HostProfile host, SessionSummary session) {
@@ -333,12 +333,12 @@ class RecentSessionsStore extends ChangeNotifier {
   void _persistHostCache(HostProfile host) {
     final sessions = _sessionsByHostId[host.id];
     if (sessions == null) {
-      unawaited(SessionCacheStore.instance.saveRecentSessions(host, const []));
+      unawaited(SessionLocalStore.instance.upsertSessions(host, const []));
       return;
     }
     final sorted = sessions.values.toList(growable: false)
       ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
-    unawaited(SessionCacheStore.instance.saveRecentSessions(host, sorted));
+    unawaited(SessionLocalStore.instance.upsertSessions(host, sorted));
   }
 
   void _removeEntriesForMissingHosts() {
