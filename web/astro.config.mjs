@@ -11,6 +11,9 @@ export default defineConfig({
         src: './public/assets/app-icon.png',
         replacesTitle: false,
       },
+      customCss: [
+        "./src/styles/custom.css",
+      ],
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/mukhtharcm/sidemesh' },
       ],
@@ -33,7 +36,6 @@ export default defineConfig({
             { label: 'Codex', slug: 'providers/codex' },
             { label: 'Pi', slug: 'providers/pi' },
             { label: 'GitHub Copilot', slug: 'providers/copilot' },
-            { label: 'Fake (Testing)', slug: 'providers/fake' },
           ],
         },
         {

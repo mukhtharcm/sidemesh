@@ -1,0 +1,267 @@
+
+/* Sidemesh custom Starlight theme */
+
+/* ── Font imports ── */
+@import url("https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Manrope:wght@500;600;700;800&display=swap");
+
+/* ── Color tokens ── */
+:root,
+::backdrop {
+  --sidemesh-paper: #e9edf0;
+  --sidemesh-paper-2: #dce4e7;
+  --sidemesh-paper-3: #c9d4d7;
+  --sidemesh-ink: #101616;
+  --sidemesh-ink-soft: #323d3c;
+  --sidemesh-muted: #65706f;
+  --sidemesh-line: rgba(16, 22, 22, 0.14);
+  --sidemesh-line-strong: rgba(16, 22, 22, 0.3);
+  --sidemesh-surface: rgba(250, 252, 247, 0.72);
+  --sidemesh-surface-solid: #fafcf7;
+  --sidemesh-sage: #2e7666;
+  --sidemesh-sage-2: #195c51;
+  --sidemesh-clay: #9d6b35;
+  --sidemesh-clay-soft: rgba(157, 107, 53, 0.13);
+  --sidemesh-blueprint: #172b34;
+  --sidemesh-ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Light mode overrides ── */
+:root[data-theme="light"],
+[data-theme="light"] ::backdrop {
+  --sl-color-white: var(--sidemesh-paper);
+  --sl-color-gray-1: var(--sidemesh-paper-2);
+  --sl-color-gray-2: var(--sidemesh-paper-3);
+  --sl-color-gray-3: var(--sidemesh-muted);
+  --sl-color-gray-4: var(--sidemesh-ink-soft);
+  --sl-color-gray-5: var(--sidemesh-ink);
+  --sl-color-gray-6: var(--sidemesh-ink);
+  --sl-color-gray-7: var(--sidemesh-ink);
+  --sl-color-black: var(--sidemesh-ink);
+
+  --sl-color-accent-low: var(--sidemesh-clay-soft);
+  --sl-color-accent: var(--sidemesh-sage);
+  --sl-color-accent-high: var(--sidemesh-sage-2);
+
+  --sl-color-text: var(--sidemesh-ink-soft);
+  --sl-color-text-accent: var(--sidemesh-sage);
+  --sl-color-text-invert: var(--sidemesh-paper);
+
+  --sl-color-bg: var(--sidemesh-paper);
+  --sl-color-bg-nav: var(--sidemesh-surface);
+  --sl-color-bg-sidebar: var(--sidemesh-surface);
+  --sl-color-bg-inline-code: var(--sidemesh-paper-2);
+  --sl-color-bg-table: var(--sidemesh-surface);
+
+  --sl-color-hairline: var(--sidemesh-line);
+  --sl-color-hairline-shade: var(--sidemesh-line-strong);
+  --sl-color-hairline-light: var(--sidemesh-line);
+
+  --sl-color-backdrop-overlay: rgba(16, 22, 22, 0.22);
+}
+
+/* ── Dark mode overrides ── */
+:root[data-theme="dark"],
+[data-theme="dark"] ::backdrop {
+  --sl-color-white: #0f1414;
+  --sl-color-gray-1: #171e1e;
+  --sl-color-gray-2: #232c2c;
+  --sl-color-gray-3: #4a5655;
+  --sl-color-gray-4: #8a9695;
+  --sl-color-gray-5: #b8c4c3;
+  --sl-color-gray-6: #d8e2e1;
+  --sl-color-gray-7: #e9edf0;
+  --sl-color-black: #e9edf0;
+
+  --sl-color-accent-low: rgba(46, 118, 102, 0.18);
+  --sl-color-accent: #3a9b87;
+  --sl-color-accent-high: #5cc4ae;
+
+  --sl-color-text: #b8c4c3;
+  --sl-color-text-accent: #5cc4ae;
+  --sl-color-text-invert: #0f1414;
+
+  --sl-color-bg: #0f1414;
+  --sl-color-bg-nav: #171e1e;
+  --sl-color-bg-sidebar: #171e1e;
+  --sl-color-bg-inline-code: #232c2c;
+  --sl-color-bg-table: #171e1e;
+
+  --sl-color-hairline: rgba(233, 237, 240, 0.1);
+  --sl-color-hairline-shade: rgba(233, 237, 240, 0.2);
+  --sl-color-hairline-light: rgba(233, 237, 240, 0.06);
+
+  --sl-color-backdrop-overlay: rgba(0, 0, 0, 0.5);
+}
+
+/* ── Typography ── */
+:root {
+  --sl-font: "Manrope", system-ui, sans-serif;
+  --sl-font-body: "Manrope", system-ui, sans-serif;
+  --sl-font-mono: "Geist Mono", ui-monospace, monospace;
+  --sl-font-system: "Manrope", system-ui, sans-serif;
+}
+
+/* ── Page background texture ── */
+body {
+  background:
+    radial-gradient(circle at 12% -12%, rgba(46, 118, 102, 0.08), transparent 34rem),
+    radial-gradient(circle at 95% 8%, rgba(157, 107, 53, 0.05), transparent 32rem),
+    linear-gradient(180deg, var(--sidemesh-paper) 0%, #f5f7f2 42%, var(--sidemesh-paper) 100%);
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  opacity: 0.18;
+  background-image:
+    linear-gradient(rgba(16, 22, 22, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 22, 22, 0.03) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(to bottom, black, transparent 72%);
+}
+
+/* ── Headings ── */
+sl-content h1,
+sl-content h2,
+sl-content h3,
+sl-content h4,
+sl-content h5,
+sl-content h6,
+.starlight-aside__title,
+.sidebar-content h2,
+.sidebar-content h3,
+.right-sidebar-panel h2 {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--sidemesh-ink);
+}
+
+[data-theme="dark"] sl-content h1,
+[data-theme="dark"] sl-content h2,
+[data-theme="dark"] sl-content h3,
+[data-theme="dark"] sl-content h4,
+[data-theme="dark"] sl-content h5,
+[data-theme="dark"] sl-content h6,
+[data-theme="dark"] .starlight-aside__title,
+[data-theme="dark"] .sidebar-content h2,
+[data-theme="dark"] .sidebar-content h3,
+[data-theme="dark"] .right-sidebar-panel h2 {
+  color: var(--sl-color-gray-7);
+}
+
+/* ── Code ── */
+code,
+kbd {
+  font-family: var(--sl-font-mono);
+  font-size: 0.85em;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+/* ── Links ── */
+a {
+  transition: color 180ms var(--sidemesh-ease);
+}
+
+/* ── Tables ── */
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--sidemesh-line);
+}
+
+table th {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-weight: 400;
+  font-size: 1.05em;
+  background: var(--sidemesh-surface-solid);
+  border-bottom: 1px solid var(--sidemesh-line);
+  padding: 12px 16px;
+  text-align: left;
+}
+
+table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--sidemesh-line);
+}
+
+table tr:last-child td {
+  border-bottom: none;
+}
+
+table tr:hover td {
+  background: var(--sidemesh-surface);
+}
+
+/* ── Cards / Asides ── */
+.starlight-aside {
+  border-radius: 14px;
+  border: 1px solid var(--sidemesh-line);
+  background: var(--sidemesh-surface-solid);
+  padding: 16px 20px;
+}
+
+/* ── Sidebar ── */
+.sidebar-content {
+  font-weight: 500;
+  font-size: 0.92rem;
+}
+
+.sidebar-content a[aria-current="page"] {
+  font-weight: 700;
+  color: var(--sidemesh-sage);
+  background: var(--sidemesh-clay-soft);
+  border-radius: 8px;
+}
+
+/* ── Search ── */
+#starlight__search {
+  --sl-search-color-bg: var(--sidemesh-surface-solid);
+  --sl-search-color-border: var(--sidemesh-line);
+}
+
+/* ── Expressive Code (syntax highlighting) ── */
+.expressive-code {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--sidemesh-line);
+}
+
+.expressive-code .frame {
+  border-radius: 14px;
+}
+
+/* ── Nav header ── */
+header.header {
+  backdrop-filter: blur(18px);
+  background: rgba(233, 237, 240, 0.78);
+  border-bottom: 1px solid rgba(16, 22, 22, 0.08);
+}
+
+[data-theme="dark"] header.header {
+  background: rgba(15, 20, 20, 0.78);
+  border-bottom: 1px solid rgba(233, 237, 240, 0.06);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--sidemesh-paper-3);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--sidemesh-muted);
+}
