@@ -7,6 +7,7 @@
 
 - **MANDATORY**: Run `npm run typecheck` after any TypeScript change and fix all
   errors before running tests or declaring work complete.
+- **MANDATORY**: Run `flutter analyze` in `apps/mobile/` after any Dart/Flutter change and fix all errors before declaring work complete.
 - **NEVER** run tests if `npm run typecheck` fails.
 - **NEVER** commit tokens, private hostnames, generated env files, signing
   profiles, certificates, or app-store keys.
