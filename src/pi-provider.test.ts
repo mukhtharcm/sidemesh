@@ -293,6 +293,9 @@ describe("PiAgentProvider", () => {
       thinkingLevel: "medium",
       isStreaming: false,
       messages: [],
+      getContextUsage() {
+        return { tokens: 42, contextWindow: 200_000, percent: 0.021 };
+      },
       subscribe(listener: (event: unknown) => void) {
         listeners.add(listener);
         return () => listeners.delete(listener);
@@ -466,6 +469,9 @@ describe("PiAgentProvider", () => {
 
     const log = await provider.readSessionLog(created.thread);
     assert.equal(log.messages.at(-1)?.text, "Done.");
+    assert.equal(log.runtime?.telemetry?.contextWindow?.currentTokens, 42);
+    assert.equal(log.runtime?.telemetry?.contextWindow?.tokenLimit, 200_000);
+    assert.equal(log.runtime?.telemetry?.contextWindow?.messagesLength, 0);
     const activity = log.activities.find((candidate) => candidate.type === "tool");
     assert.equal(activity?.type, "tool");
   });

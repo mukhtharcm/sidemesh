@@ -1460,6 +1460,20 @@ function runtimeFromLoadedSession(
         }
       : {}),
   };
+
+  const contextUsage = session.getContextUsage?.();
+  if (contextUsage && contextUsage.contextWindow != null && contextUsage.tokens != null) {
+    runtime.telemetry = {
+      ...(existing?.telemetry ?? {}),
+      contextWindow: {
+        currentTokens: contextUsage.tokens,
+        tokenLimit: contextUsage.contextWindow,
+        messagesLength: session.messages?.length ?? 0,
+        updatedAt: Date.now(),
+      },
+    };
+  }
+
   return runtimeWithTurnId(runtime, turnId);
 }
 
