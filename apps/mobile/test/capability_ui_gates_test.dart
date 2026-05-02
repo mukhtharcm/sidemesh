@@ -917,6 +917,9 @@ class _CapabilityFakeApi extends ApiClient {
   @override
   WebSocketChannel openLive(HostProfile host, String sessionId) => _channel;
 
+  @override
+  WebSocketChannel openSessionsLive(HostProfile host) => _channel;
+
   void dispose() => _channel.dispose();
 }
 
