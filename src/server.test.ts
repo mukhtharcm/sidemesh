@@ -162,6 +162,7 @@ describe("provider metadata and capability gating", () => {
         assert.equal(res.statusCode, 200);
         const supported = ((res.body as any).supportedProviders ?? [])[0];
         assert.equal(supported?.kind, "fake");
+        assert.equal((res.body as any).searchSessions, false);
         assert.equal(supported?.capabilities?.workspace?.filesystem, false);
         assert.equal(supported?.capabilities?.sessions?.searchSessions, false);
       },

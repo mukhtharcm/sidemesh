@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { hostname, platform } from "node:os";
+import { Buffer } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 import nodePath from "node:path";
 
@@ -713,7 +714,10 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         supportedProviders.find((item) => item.isDefault)?.capabilities ??
         provider.capabilities,
       hostCapabilities,
-      searchSessions: provider.capabilities.sessions.searchSessions,
+      searchSessions:
+        supportedProviders.find((item) => item.isDefault)?.capabilities
+          .sessions.searchSessions ??
+        provider.capabilities.sessions.searchSessions,
       searchIndexStats: searchIndex.getStats(),
       supportedProviders,
       startedAt: process.uptime(),
@@ -863,9 +867,18 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         100,
       );
       const searchResults = await searchIndex.search(query, limit);
+      const searchProvider = searchableProviderEntry(providerRuntime);
+      if (!searchProvider) {
+        response.status(501).json({ error: "Session search is not available" });
+        return;
+      }
       const sessions: SessionSummary[] = [];
       for (const result of searchResults) {
-        const thread = await readSession(provider, result.sessionId, false).catch(() => null);
+        const thread = await readSession(
+          provider,
+          scopedSearchSessionId(provider, searchProvider.kind, result.sessionId),
+          false,
+        ).catch(() => null);
         if (!thread) continue;
         const runtime = await loadCachedSessionRuntime(provider, thread, runtimeCache, "active");
         const session = mapSession(thread, runtime);
@@ -1244,7 +1257,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       if (session.path && session.path.endsWith(".jsonl")) {
         try {
           const entry = await replayIndex.load(sessionId, session.path);
-          if (provider.capabilities.sessions.searchSessions) {
+          if (sessionProvider.provider.capabilities.sessions.searchSessions) {
             void searchIndex.indexRollout(session.path).catch(() => {
               // Ignore indexing errors for live sessions
             });
@@ -2275,7 +2288,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
 
   // Open search index and catch up in the background
   searchIndex.open().then(() => {
-    const codexHomePath = getCodexHomePath(provider);
+    const codexHomePath = getCodexHomePath(
+      searchableProviderEntry(providerRuntime)?.provider ?? null,
+    );
     return searchIndex.catchUp(codexHomePath);
   }).then((result) => {
     if (result.indexed > 0 || result.removed > 0) {
@@ -2397,7 +2412,20 @@ async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
 }
 
 
-function getCodexHomePath(provider: AgentProvider): string | null {
+function searchableProviderEntry(
+  providerRuntime: ReturnType<typeof createAgentProviderRuntime>,
+) {
+  return (
+    providerRuntime.providers.find(
+      (entry) => entry.provider.capabilities.sessions.searchSessions,
+    ) ?? null
+  );
+}
+
+function getCodexHomePath(provider: AgentProvider | null): string | null {
+  if (!provider) {
+    return null;
+  }
   const runtimeHome = (provider as { runtimeHome?: string }).runtimeHome;
   return typeof runtimeHome === "string" ? runtimeHome : null;
 }
@@ -2414,6 +2442,23 @@ function buildProviderMetadata(
     version: providerVersions.get(entry.kind) ?? "unknown",
     isDefault: entry.kind === defaultProviderKind,
   }));
+}
+
+function scopedSearchSessionId(
+  provider: AgentProvider,
+  providerKind: string,
+  sessionId: string,
+): string {
+  if (!(provider instanceof MultiAgentProvider)) {
+    return sessionId;
+  }
+  if (sessionId.includes(":")) {
+    return sessionId;
+  }
+  if (provider.kind === providerKind) {
+    return sessionId;
+  }
+  return `${providerKind}:${Buffer.from(sessionId, "utf8").toString("base64url")}`;
 }
 
 function asyncRoute(
