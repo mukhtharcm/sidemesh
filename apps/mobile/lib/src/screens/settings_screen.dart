@@ -1299,14 +1299,60 @@ class _HostDiagnosticsCardState extends State<_HostDiagnosticsCard> {
   final ApiClient _api = ApiClient();
   bool _busy = false;
   String? _message;
+  ProviderMetadata? _metadata;
+  bool _metadataLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadMetadata());
+  }
+
+  Future<void> _loadMetadata() async {
+    try {
+      final host = await _getHost();
+      if (host == null) {
+        setState(() => _metadataLoading = false);
+        return;
+      }
+      final metadata = await _api.fetchProviders(host);
+      if (!mounted) return;
+      setState(() {
+        _metadata = metadata;
+        _metadataLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _metadataLoading = false);
+    }
+  }
 
   Future<HostProfile?> _getHost() async {
     final hosts = await _store.loadHosts();
     return hosts.where((h) => h.enabled).firstOrNull;
   }
 
+  String get _providerDisplayName {
+    final kind = _metadata?.currentProvider ?? 'codex';
+    final provider = _metadata?.providers
+        .firstWhere((p) => p.kind == kind, orElse: () => ProviderDefinitionSummary.empty);
+    return (provider?.displayName.isNotEmpty == true)
+        ? provider!.displayName
+        : 'Provider';
+  }
+
+  String get _providerKind {
+    return _metadata?.currentProvider ?? 'codex';
+  }
+
+  bool get _providerSupportsRestart {
+    final kind = _providerKind;
+    final provider = _metadata?.providers
+        .firstWhere((p) => p.kind == kind, orElse: () => ProviderDefinitionSummary.empty);
+    return provider?.capabilities.supports('lifecycle', 'restart') ?? false;
+  }
+
   Future<void> _restartProvider() async {
-    await _doRestart((host) => _api.restartProvider(host, 'codex'));
+    await _doRestart((host) => _api.restartProvider(host, _providerKind));
   }
 
   Future<void> _restartDaemon() async {
@@ -1336,6 +1382,8 @@ class _HostDiagnosticsCardState extends State<_HostDiagnosticsCard> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final displayName = _providerDisplayName;
+    final supportsRestart = _providerSupportsRestart;
     return _SettingsCard(
       icon: Icons.medical_services_rounded,
       title: 'Remote recovery',
@@ -1343,14 +1391,15 @@ class _HostDiagnosticsCardState extends State<_HostDiagnosticsCard> {
       footer: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _ActionRow(
-            icon: Icons.refresh_rounded,
-            title: 'Restart Codex provider',
-            subtitle: 'Preserves terminals and port forwards.',
-            busy: _busy,
-            onTap: () => unawaited(_restartProvider()),
-          ),
-          Divider(color: colors.border),
+          if (supportsRestart)
+            _ActionRow(
+              icon: Icons.refresh_rounded,
+              title: 'Restart $displayName provider',
+              subtitle: 'Preserves terminals and port forwards.',
+              busy: _busy,
+              onTap: () => unawaited(_restartProvider()),
+            ),
+          if (supportsRestart) Divider(color: colors.border),
           _ActionRow(
             icon: Icons.restart_alt_rounded,
             title: 'Restart Sidemesh daemon',
