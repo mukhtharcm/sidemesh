@@ -107,6 +107,7 @@ export interface SessionSummary {
   runtime: SessionRuntimeSummary | null;
   gitInfo: GitInfoSummary | null;
   isSubAgent?: boolean;
+  matchSnippet?: string | null;
 }
 
 export interface GitInfoSummary {

@@ -810,7 +810,8 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         const thread = await readSession(provider, result.sessionId, false).catch(() => null);
         if (!thread) continue;
         const runtime = await loadCachedSessionRuntime(provider, thread, runtimeCache, "active");
-        sessions.push(mapSession(thread, runtime));
+        const session = mapSession(thread, runtime);
+        sessions.push({ ...session, matchSnippet: result.snippet ?? undefined });
       }
       response.json(sessions);
     }),
