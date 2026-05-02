@@ -24,6 +24,7 @@ import {
   resolveWorkspacePath,
   WorkspaceAccessError,
 } from "./workspace-scope.js";
+import { searchFiles } from "./fs-search.js";
 import type { SessionSummary } from "./types.js";
 
 const READ_SOFT_CAP_BYTES = 2 * 1024 * 1024; // 2 MiB — UX preview cap.
@@ -255,6 +256,24 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
         await copyFile(source, destination);
       }
       response.json({ sourcePath: source, destinationPath: destination });
+    }),
+  );
+
+  app.post(
+    "/api/fs/search",
+    asyncRoute(async (request, response) => {
+      const resolveRoots = createRequestRootsResolver(
+        request,
+        opts,
+        fallbackResolveRoots,
+      );
+      const roots = await resolveRoots();
+      const query = asString(request.body?.query) ?? "";
+      const limit = typeof request.body?.limit === "number"
+        ? Math.max(1, Math.min(200, request.body.limit))
+        : undefined;
+      const results = await searchFiles(query, roots, { limit });
+      response.json({ files: results });
     }),
   );
 

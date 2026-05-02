@@ -175,6 +175,7 @@ class StubProvider
       recentFallback: true,
     },
     input: {
+      fileMentions: true,
       text: true,
       imageUrl: false,
       localImage: false,

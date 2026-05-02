@@ -247,7 +247,7 @@ export interface SessionMessage {
 }
 
 export interface SessionMessageAttachment {
-  type: "image" | "localImage";
+  type: "image" | "localImage" | "file";
   url?: string;
   path?: string;
 }
