@@ -1343,6 +1343,7 @@ class _RecentPaneState extends State<RecentPane> {
                             favorite: _localStore.isFavorite(entry.host, entry.session.id),
                             selected: widget.selectedSessionId == entry.session.id,
                             dense: widget.dense,
+                            query: widget.query,
                             onTap: () {
                               _localStore.updateGhost(entry.host, entry.session);
                               widget.onOpenSession(entry.host, entry.session);
@@ -1469,6 +1470,7 @@ class _RecentPaneState extends State<RecentPane> {
                 favorite: _localStore.isFavorite(entry.host, entry.session.id),
                 selected: widget.selectedSessionId == entry.session.id,
                 dense: widget.dense,
+                query: widget.query,
                 onTap: () => widget.onOpenSession(entry.host, entry.session),
                 onToggleFavorite: () {
                   _localStore.toggleFavorite(entry.host, entry.session.id);
@@ -1484,6 +1486,57 @@ class _RecentPaneState extends State<RecentPane> {
   }
 }
 
+class _HighlightedSnippet extends StatelessWidget {
+  const _HighlightedSnippet({
+    required this.text,
+    required this.query,
+    required this.style,
+  });
+
+  final String text;
+  final String query;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (query.trim().isEmpty) {
+      return Text(text, style: style, maxLines: 2, overflow: TextOverflow.ellipsis);
+    }
+
+    final spans = <TextSpan>[];
+    final lowerText = text.toLowerCase();
+    final lowerQuery = query.toLowerCase().trim();
+    var start = 0;
+
+    while (true) {
+      final idx = lowerText.indexOf(lowerQuery, start);
+      if (idx == -1) break;
+      if (idx > start) {
+        spans.add(TextSpan(text: text.substring(start, idx), style: style));
+      }
+      spans.add(TextSpan(
+        text: text.substring(idx, idx + lowerQuery.length),
+        style: style.copyWith(
+          color: colors.accent,
+          fontWeight: FontWeight.w600,
+        ),
+      ));
+      start = idx + lowerQuery.length;
+    }
+
+    if (start < text.length) {
+      spans.add(TextSpan(text: text.substring(start), style: style));
+    }
+
+    return RichText(
+      text: TextSpan(children: spans),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
 class _SessionRowCard extends StatelessWidget {
   const _SessionRowCard({
     required this.host,
@@ -1493,6 +1546,7 @@ class _SessionRowCard extends StatelessWidget {
     required this.onToggleFavorite,
     this.selected = false,
     this.dense = false,
+    this.query = '',
   });
 
   final HostProfile host;
@@ -1500,6 +1554,7 @@ class _SessionRowCard extends StatelessWidget {
   final bool favorite;
   final bool selected;
   final bool dense;
+  final String query;
   final VoidCallback onTap;
   final VoidCallback onToggleFavorite;
 
@@ -1620,6 +1675,18 @@ class _SessionRowCard extends StatelessWidget {
                                 height: 1.3,
                                 fontSize: 11.5,
                               ),
+                        ),
+                      ],
+                      if (session.matchSnippet != null && session.matchSnippet!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        _HighlightedSnippet(
+                          text: session.matchSnippet!,
+                          query: query,
+                          style: Theme.of(context).textTheme.bodySmall!.copyWith(
+                            color: colors.textSecondary,
+                            height: 1.3,
+                            fontSize: 11.5,
+                          ),
                         ),
                       ],
                     ],
@@ -1749,6 +1816,17 @@ class _SessionRowCard extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                height: 1.35,
+              ),
+            ),
+          ],
+          if (session.matchSnippet != null && session.matchSnippet!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _HighlightedSnippet(
+              text: session.matchSnippet!,
+              query: query,
+              style: Theme.of(context).textTheme.bodySmall!.copyWith(
                 color: colors.textSecondary,
                 height: 1.35,
               ),
