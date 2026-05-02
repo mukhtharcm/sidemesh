@@ -1,6 +1,6 @@
 {
   "name": "sidemesh",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "description": "Fleet-first coding-agent session node and Flutter client.",
   "license": "Apache-2.0",
@@ -24,9 +24,7 @@
     "tailscale",
     "terminal"
   ],
-  "bin": {
-    "sidemesh": "./dist/cli.js"
-  },
+  "bin": "dist/cli.js",
   "main": "./dist/index.js",
   "files": [
     "dist",
