@@ -1,8 +1,7 @@
 # Contributing
 
-Sidemesh is currently a private developer-preview project. Contributions are
-limited to trusted collaborators until the license and public distribution model
-are decided.
+Sidemesh is open source under Apache-2.0. Contributions are still reviewed
+conservatively because the daemon exposes high-trust host-control surfaces.
 
 ## Development Setup
 
