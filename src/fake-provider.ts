@@ -140,6 +140,9 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     filesystem: true,
     remoteGitDiff: true,
   },
+  lifecycle: {
+    restart: false,
+  },
 };
 
 function capabilitiesForFakeProfile(
@@ -200,6 +203,7 @@ function cloneCapabilities(
     configuration: { ...capabilities.configuration },
     runtimeControls: { ...capabilities.runtimeControls },
     workspace: { ...capabilities.workspace },
+    lifecycle: { ...capabilities.lifecycle },
   };
 }
 

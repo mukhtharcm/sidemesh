@@ -111,6 +111,12 @@ export class CodexAgentProvider
     await this.bridge.close();
   }
 
+  public async restart(): Promise<void> {
+    this.emit("stderr", "[codex-provider] Restarting app-server...\n");
+    await this.bridge.close();
+    await this.bridge.start();
+  }
+
   public async getVersion(): Promise<string> {
     try {
       return execFileSync(this.codexBin, ["--version"], { encoding: "utf8" }).trim();
@@ -1908,6 +1914,9 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   workspace: {
     filesystem: true,
     remoteGitDiff: true,
+  },
+  lifecycle: {
+    restart: true,
   },
 };
 

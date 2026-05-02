@@ -177,6 +177,9 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     filesystem: false,
     remoteGitDiff: false,
   },
+  lifecycle: {
+    restart: false,
+  },
 };
 
 export class PiAgentProvider

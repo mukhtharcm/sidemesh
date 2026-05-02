@@ -106,6 +106,17 @@ export class MultiAgentProvider
     );
   }
 
+  public async restartProvider(kind: AgentProviderKind): Promise<void> {
+    const entry = this.entriesByKind.get(kind);
+    if (!entry) {
+      throw new Error(`Unknown provider "${kind}".`);
+    }
+    if (!entry.provider.restart) {
+      throw new Error(`${entry.provider.displayName} does not support restart.`);
+    }
+    await entry.provider.restart();
+  }
+
   public async getVersion(): Promise<string> {
     return this.defaultEntry().provider.getVersion();
   }
@@ -629,6 +640,9 @@ function mergeCapabilities(
     workspace: {
       filesystem: any((caps) => caps.workspace.filesystem),
       remoteGitDiff: any((caps) => caps.workspace.remoteGitDiff),
+    },
+    lifecycle: {
+      restart: any((caps) => caps.lifecycle.restart),
     },
   };
 }
