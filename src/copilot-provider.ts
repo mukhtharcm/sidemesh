@@ -180,6 +180,7 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     models: true,
     profiles: false,
     skills: true,
+    prompts: false,
     skillManagement: true,
   },
   runtimeControls: {

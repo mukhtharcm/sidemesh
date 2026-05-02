@@ -18,6 +18,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "configuration.models": true,
       "configuration.profiles": true,
       "configuration.skills": true,
+      "configuration.prompts": true,
       "runtimeControls.model": true,
       "runtimeControls.mode": false,
       "runtimeControls.approvalPolicy": true,
@@ -31,6 +32,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       models: 200,
       profiles: 200,
       skills: 200,
+      prompts: 200,
       fsList: 200,
       createWithModel: 201,
       createWithImage: 201,
@@ -44,6 +46,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "configuration.models": false,
       "configuration.profiles": false,
       "configuration.skills": false,
+      "configuration.prompts": false,
       "runtimeControls.model": false,
       "runtimeControls.mode": false,
       "runtimeControls.approvalPolicy": false,
@@ -57,6 +60,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       models: 501,
       profiles: 501,
       skills: 501,
+      prompts: 501,
       fsList: 200,
       createWithModel: 501,
       createWithImage: 501,
@@ -70,6 +74,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "configuration.models": true,
       "configuration.profiles": true,
       "configuration.skills": true,
+      "configuration.prompts": true,
       "runtimeControls.model": true,
       "runtimeControls.mode": false,
       "runtimeControls.approvalPolicy": true,
@@ -83,6 +88,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       models: 200,
       profiles: 200,
       skills: 200,
+      prompts: 200,
       fsList: 200,
       createWithModel: 201,
       createWithImage: 201,
@@ -96,6 +102,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "configuration.models": false,
       "configuration.profiles": false,
       "configuration.skills": true,
+      "configuration.prompts": true,
       "runtimeControls.model": false,
       "runtimeControls.mode": false,
       "runtimeControls.approvalPolicy": true,
@@ -109,6 +116,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       models: 501,
       profiles: 501,
       skills: 200,
+      prompts: 200,
       fsList: 200,
       createWithModel: 501,
       createWithImage: 201,
@@ -122,6 +130,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "configuration.models": true,
       "configuration.profiles": true,
       "configuration.skills": true,
+      "configuration.prompts": true,
       "runtimeControls.model": true,
       "runtimeControls.mode": false,
       "runtimeControls.approvalPolicy": false,
@@ -135,6 +144,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       models: 200,
       profiles: 200,
       skills: 200,
+      prompts: 200,
       fsList: 200,
       createWithModel: 201,
       createWithImage: 201,
@@ -148,6 +158,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       "configuration.models": false,
       "configuration.profiles": false,
       "configuration.skills": false,
+      "configuration.prompts": false,
       "runtimeControls.model": false,
       "runtimeControls.mode": false,
       "runtimeControls.approvalPolicy": false,
@@ -161,6 +172,7 @@ const PROFILE_EXPECTATIONS: ProfileExpectation[] = [
       models: 501,
       profiles: 501,
       skills: 501,
+      prompts: 501,
       fsList: 200,
       createWithModel: 501,
       createWithImage: 501,
@@ -175,6 +187,7 @@ interface ProfileExpectation {
     models: number;
     profiles: number;
     skills: number;
+    prompts: number;
     fsList: number;
     createWithModel: number;
     createWithImage: number;
@@ -246,6 +259,13 @@ describe("fake provider capability profile API smoke", () => {
             `/api/skills?cwd=${encodeURIComponent(workspaceRoot)}`,
           ),
           expectation.routes.skills,
+        );
+        assert.equal(
+          await status(
+            daemon.baseUrl,
+            `/api/prompts?cwd=${encodeURIComponent(workspaceRoot)}`,
+          ),
+          expectation.routes.prompts,
         );
         assert.equal(
           await status(

@@ -1581,6 +1581,40 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   );
 
   app.get(
+    "/api/prompts",
+    asyncRoute(async (request, response) => {
+      const query = request.query as Record<string, unknown>;
+      const agentProvider = asString(query.agentProvider) || null;
+      const selectedProvider = providerEntryForKind(agentProvider);
+      if (!selectedProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
+      if (
+        !requireProviderCapability(
+          response,
+          selectedProvider.provider,
+          selectedProvider.provider.capabilities.configuration.prompts,
+          "prompt listing",
+          "listPrompts",
+        )
+      ) {
+        return;
+      }
+      const cwd = asString(query.cwd);
+      if (!cwd) {
+        response.status(400).json({ error: "cwd is required" });
+        return;
+      }
+
+      const forceReload = parseQueryBool(query.forceReload);
+      response.json(
+        await selectedProvider.provider.listPrompts!({ cwd, forceReload }),
+      );
+    }),
+  );
+
+  app.get(
     "/api/models",
     asyncRoute(async (request, response) => {
       const query = request.query as Record<string, unknown>;

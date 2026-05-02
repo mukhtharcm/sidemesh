@@ -197,6 +197,7 @@ class StubProvider
       models: true,
       profiles: false,
       skills: false,
+      prompts: false,
       skillManagement: false,
     },
     runtimeControls: {

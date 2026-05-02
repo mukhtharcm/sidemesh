@@ -58,6 +58,7 @@ Configuration:
 - `listModels`
 - `listProfiles`
 - `listSkills`
+- `listPrompts`
 - `writeSkillConfig`
 
 Model summaries should describe UI behavior without requiring the Flutter app
@@ -156,3 +157,10 @@ adapter can report honest capabilities and translate SDK events into Sidemesh
 event types. The Copilot adapter uses `auto` as the Sidemesh default for
 app-started turns, so a costly persistent Copilot setting is not consumed by
 accident.
+
+Prompt catalogs are the first generalized catalog surface beyond models,
+profiles, and skills. Providers that already expose prompt-template resources
+should prefer `listPrompts()` over baking those templates into provider-specific
+commands or skills-only flows. Prompt catalogs are intended as the first slice
+of a broader provider-runtime catalog model that will eventually cover tools,
+resources, and provider-registered extension surfaces.

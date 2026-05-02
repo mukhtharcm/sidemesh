@@ -188,6 +188,26 @@ export interface SkillCatalogEntry {
   errors: SkillErrorInfo[];
 }
 
+export interface PromptSummary {
+  name: string;
+  description: string;
+  argumentHint?: string | null;
+  path: string;
+  scope: "user" | "repo" | "system" | "admin" | string;
+  source?: string | null;
+}
+
+export interface PromptErrorInfo {
+  path: string | null;
+  message: string;
+}
+
+export interface PromptCatalogEntry {
+  cwd: string;
+  prompts: PromptSummary[];
+  errors: PromptErrorInfo[];
+}
+
 export interface ModelReasoningEffortSummary {
   reasoningEffort: string;
   description: string;

@@ -27,6 +27,7 @@ import {
   type AgentFsWatchResult,
   type AgentModelListOptions,
   type AgentPendingAction,
+  type AgentPromptListOptions,
   type AgentProfileListOptions,
   type AgentProvider,
   type AgentProviderCapabilities,
@@ -45,6 +46,7 @@ import {
 import type {
   FakeCapabilityProfile,
   ModelSummary,
+  PromptCatalogEntry,
   ProviderProfileCatalog,
   ProviderProfileSummary,
   SessionActivity,
@@ -125,6 +127,7 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     models: true,
     profiles: true,
     skills: true,
+    prompts: true,
     skillManagement: true,
   },
   runtimeControls: {
@@ -226,6 +229,7 @@ function disableConfiguration(capabilities: AgentProviderCapabilities): void {
   capabilities.configuration.models = false;
   capabilities.configuration.profiles = false;
   capabilities.configuration.skills = false;
+  capabilities.configuration.prompts = false;
   capabilities.configuration.skillManagement = false;
 }
 
@@ -523,6 +527,47 @@ export class FakeAgentProvider
     return {
       cwd: options.cwd,
       skills,
+      errors: [],
+    };
+  }
+
+  public async listPrompts(
+    options: AgentPromptListOptions,
+  ): Promise<PromptCatalogEntry> {
+    const workspacePath = nodePath.join(
+      options.cwd,
+      ".pi",
+      "prompts",
+      "fake-workspace.md",
+    );
+    return {
+      cwd: options.cwd,
+      prompts: [
+        {
+          name: "fake-review",
+          description: "Exercises prompt catalog listing for provider runtime work.",
+          argumentHint: "<area>",
+          path: "fake://prompts/review.md",
+          scope: "system",
+          source: "builtin",
+        },
+        {
+          name: "fake-debug",
+          description: "Deterministic debugging prompt for fake provider scenarios.",
+          argumentHint: "<symptom>",
+          path: "fake://prompts/debug.md",
+          scope: "admin",
+          source: "builtin",
+        },
+        {
+          name: "fake-workspace",
+          description: "Represents a workspace-local prompt template for the current cwd.",
+          argumentHint: null,
+          path: workspacePath,
+          scope: "repo",
+          source: "local",
+        },
+      ],
       errors: [],
     };
   }

@@ -166,7 +166,7 @@ describe("fake test provider", () => {
     assert.deepEqual(await provider.listLoadedSessionIds(), [created.thread.id]);
   });
 
-  it("supports configuration APIs and skill change events", async () => {
+  it("supports configuration APIs, prompt catalogs, and skill change events", async () => {
     const cwd = await tempRoot(tempRoots);
     const provider = new FakeAgentProvider({
       latencyMs: 0,
@@ -193,6 +193,13 @@ describe("fake test provider", () => {
     const profiles = await provider.listProfiles({ cwd });
     assert.equal(profiles.defaultProfile, "balanced");
     assert.equal(profiles.profiles.some((profile) => profile.name === "locked-down"), true);
+
+    const prompts = await provider.listPrompts({ cwd, forceReload: false });
+    assert.equal(prompts.prompts.some((prompt) => prompt.scope === "repo"), true);
+    assert.equal(
+      prompts.prompts.some((prompt) => prompt.argumentHint === "<area>"),
+      true,
+    );
 
     let skills = await provider.listSkills({ cwd, forceReload: false });
     assert.equal(skills.skills.some((skill) => skill.scope === "repo"), true);
@@ -286,6 +293,7 @@ describe("fake test provider", () => {
     assert.equal(provider.capabilities.input.localImage, false);
     assert.equal(provider.capabilities.input.skills, false);
     assert.equal(provider.capabilities.configuration.models, false);
+    assert.equal(provider.capabilities.configuration.prompts, false);
     assert.equal(provider.capabilities.runtimeControls.model, false);
     assert.equal(provider.capabilities.approvals.command, false);
     assert.equal(provider.capabilities.workspace.filesystem, false);
@@ -342,6 +350,7 @@ describe("fake test provider", () => {
     assert.equal(noFiles.capabilities.workspace.filesystem, false);
     assert.equal(noFiles.capabilities.workspace.remoteGitDiff, false);
     assert.equal(noFiles.capabilities.configuration.models, true);
+    assert.equal(noFiles.capabilities.configuration.prompts, true);
 
     const noFilesSession = await noFiles.createSession({
       cwd,
@@ -373,6 +382,7 @@ describe("fake test provider", () => {
     });
     assert.equal(noModelControls.capabilities.configuration.models, false);
     assert.equal(noModelControls.capabilities.configuration.profiles, false);
+    assert.equal(noModelControls.capabilities.configuration.prompts, true);
     assert.equal(noModelControls.capabilities.runtimeControls.model, false);
     assert.equal(noModelControls.capabilities.runtimeControls.fastMode, false);
     assert.equal(noModelControls.capabilities.approvals.command, true);
@@ -391,6 +401,7 @@ describe("fake test provider", () => {
     assert.equal(noApprovals.capabilities.approvals.permissions, false);
     assert.equal(noApprovals.capabilities.runtimeControls.approvalPolicy, false);
     assert.equal(noApprovals.capabilities.configuration.models, true);
+    assert.equal(noApprovals.capabilities.configuration.prompts, true);
     assert.equal(noApprovals.capabilities.workspace.filesystem, true);
 
     const minimal = new FakeAgentProvider({
@@ -409,6 +420,7 @@ describe("fake test provider", () => {
     assert.equal(minimal.capabilities.input.text, true);
     assert.equal(minimal.capabilities.input.imageUrl, false);
     assert.equal(minimal.capabilities.configuration.models, false);
+    assert.equal(minimal.capabilities.configuration.prompts, false);
     assert.equal(minimal.capabilities.workspace.filesystem, false);
   });
 

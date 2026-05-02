@@ -23,6 +23,7 @@ import {
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
   type AgentModelListOptions,
+  type AgentPromptListOptions,
   type AgentProvider,
   type AgentProviderCapabilities,
   type AgentProviderEvents,
@@ -37,6 +38,7 @@ import {
 } from "./agent-provider.js";
 import type {
   ModelSummary,
+  PromptCatalogEntry,
   SessionActivity,
   SessionActivityChange,
   SessionLogSnapshot,
@@ -162,6 +164,7 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     models: true,
     profiles: false,
     skills: true,
+    prompts: true,
     skillManagement: false,
   },
   runtimeControls: {
@@ -508,6 +511,28 @@ export class PiAgentProvider
       cwd: options.cwd,
       skills: skills.map((skill) => piSkillToSummary(skill, options.cwd, this.agentDir)),
       errors: diagnostics.map(resourceDiagnosticToSkillError),
+    };
+  }
+
+  public async listPrompts(
+    options: AgentPromptListOptions,
+  ): Promise<PromptCatalogEntry> {
+    const services = await this.createServices(options.cwd);
+    const { prompts, diagnostics } = services.resourceLoader.getPrompts();
+    return {
+      cwd: options.cwd,
+      prompts: prompts.map((prompt) => ({
+        name: prompt.name,
+        description: prompt.description,
+        argumentHint: prompt.argumentHint ?? null,
+        path: prompt.filePath,
+        scope: piPromptScope(prompt.sourceInfo.scope),
+        source: prompt.sourceInfo.source,
+      })),
+      errors: diagnostics.map((diagnostic) => ({
+        path: diagnostic.path ?? null,
+        message: diagnostic.message,
+      })),
     };
   }
 
@@ -2481,6 +2506,17 @@ function piSkillToSummary(
     scope,
     enabled: true,
   };
+}
+
+function piPromptScope(scope: "user" | "project" | "temporary"): PromptCatalogEntry["prompts"][number]["scope"] {
+  switch (scope) {
+    case "user":
+      return "user";
+    case "project":
+      return "repo";
+    case "temporary":
+      return "system";
+  }
 }
 
 function resourceDiagnosticToSkillError(
