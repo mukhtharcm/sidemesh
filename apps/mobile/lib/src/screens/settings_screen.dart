@@ -9,7 +9,7 @@ import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
 import '../local_notification_service.dart';
 import '../screen_awake_settings_store.dart';
-import '../session_cache_store.dart';
+import '../session_local_store.dart';
 import '../session_policy_store.dart';
 import '../session_send_outbox_store.dart';
 import '../theme/app_colors.dart';
@@ -743,7 +743,7 @@ class _SettingsContent extends StatelessWidget {
                         title: 'Clear saved transcript cache?',
                         body:
                             'This removes saved recent sessions and saved transcripts from this device. Open panes keep their current contents until refreshed.',
-                        action: SessionCacheStore.instance.clearAll,
+                        action: SessionLocalStore.instance.clearAll,
                         successMessage: 'Saved transcript cache cleared.',
                       ),
                     ),
