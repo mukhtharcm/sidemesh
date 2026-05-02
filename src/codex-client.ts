@@ -220,6 +220,7 @@ export class CodexBridge extends EventEmitter<{
   }
 
   public async start(): Promise<void> {
+    this.requestId = 1;
     const spawnEnv = await buildCodexSpawnEnv();
     this.process = spawn(this.codexBin, ["app-server"], {
       env: spawnEnv,
