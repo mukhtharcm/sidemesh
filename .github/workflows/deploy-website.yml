@@ -21,10 +21,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install and build
+        run: |
+          cd web
+          npm ci
+          npm run build
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: web
-          command: pages deploy . --project-name sidemesh --branch main --commit-dirty=true
+          command: pages deploy dist --project-name sidemesh --branch main --commit-dirty=true

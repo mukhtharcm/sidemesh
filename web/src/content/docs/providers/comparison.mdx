@@ -1,0 +1,41 @@
+---
+title: Provider Comparison
+description: Feature matrix across Codex, Pi, Copilot, and Fake providers.
+---
+
+## Capability matrix
+
+| Feature | Codex | Pi | Copilot | Fake |
+|---------|-------|----|---------|------|
+| Text input | ✅ | ✅ | ✅ | ✅ |
+| Local images | ✅ | ✅ | ❌ | ✅ |
+| Image URLs | ✅ | ❌ | ❌ | ✅ |
+| Skills | ✅ | ✅ | ❌ | ✅ |
+| Model switching | ✅ | ✅ | ✅ | ✅ |
+| Reasoning levels | ✅ | ✅ | ❌ | ✅ |
+| Compaction | ✅ | ✅ | ❌ | ✅ |
+| Session archive | ✅ | ✅ | ✅ | ✅ |
+| Interrupt | ✅ | ✅ | ✅ | ✅ |
+| Approvals (command) | ✅ | ❌ | ✅ | ✅ |
+| Approvals (file) | ✅ | ❌ | ❌ | ✅ |
+| Approvals (permissions) | ✅ | ❌ | ❌ | ✅ |
+| Filesystem | Host | Host | Host | Host |
+| Terminal | Host | Host | Host | Host |
+| Port forwarding | Host | Host | Host | Host |
+| Browser preview | Host | Host | Host | Host |
+
+## Architecture differences
+
+| | Codex | Pi | Copilot | Fake |
+|---|---|---|---|---|
+| **Runtime** | Shells out to `codex` CLI | In-process TypeScript SDK | Shells out to Copilot CLI | In-process harness |
+| **Session storage** | Codex `.codex` directory | `~/.pi/agent/sessions/` | Copilot SDK managed | In-memory / ephemeral |
+| **Auth** | Codex CLI auth | `pi /login` | GitHub CLI auth | None |
+| **Config** | `~/.sidemesh/config.json` | `~/.sidemesh/config.json` + `~/.pi/agent/` | GitHub CLI config | Env vars only |
+
+## When to use which
+
+- Use **Codex** when you want the richest tool ecosystem and full approval gating
+- Use **Pi** when you want in-process execution, native compaction, and thinking-level control
+- Use **Copilot** when you are already committed to GitHub Copilot and want mobile access
+- Use **Fake** for automated testing, screenshots, and reproducing specific UI states

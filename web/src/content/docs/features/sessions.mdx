@@ -1,0 +1,35 @@
+---
+title: Sessions
+description: Creating, resuming, archiving, and managing agent sessions.
+---
+
+Sessions are the primary unit of work in Sidemesh. Each session is a conversation thread with a coding agent that persists on the host.
+
+## Creating a session
+
+Tap **New Session** in the app or use the provider's native CLI. Sidemesh sessions map directly to provider session threads where supported (Codex, Pi, Copilot).
+
+## Resuming sessions
+
+The **Recent** list shows sessions from the current host. Tap any session to resume where you left off. The live event stream replays the latest activity so you see the current state immediately.
+
+## Session lifecycle
+
+| Action | How it works |
+|--------|--------------|
+| **Rename** | `POST /api/sessions/:id/name` — sets a friendly display name |
+| **Archive** | `POST /api/sessions/:id/archive` — hides from recent list |
+| **Unarchive** | `POST /api/sessions/:id/unarchive` — restores to recent list |
+| **Interrupt** | `POST /api/sessions/:id/stop` — aborts the current turn |
+| **Compact** | Provider-specific (Codex/Pi) — reduces context window usage |
+
+## Multi-provider sessions
+
+When multiple providers are configured, each session is bound to the provider that created it. The session list is filtered by the active provider context. Switching providers does not destroy sessions; it only changes which sessions are visible.
+
+## Session states
+
+- **Active** — a turn is in progress
+- **Idle** — waiting for input
+- **Approval pending** — needs your response before continuing
+- **Error** — the last turn failed

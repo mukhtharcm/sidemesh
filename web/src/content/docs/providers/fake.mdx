@@ -1,0 +1,54 @@
+---
+title: Fake Provider
+description: Deterministic test harness for the Sidemesh provider contract.
+---
+
+The Fake provider is a deterministic, in-process test harness that implements the full Sidemesh provider contract. It is used for contract testing, CI, and reproducing specific UI states without a real agent.
+
+## Usage
+
+Run with the environment variable:
+
+```bash
+SIDEMESH_PROVIDER=fake npm run daemon
+```
+
+Or select it during setup with the `--dev` flag:
+
+```bash
+npm run setup -- --dev
+```
+
+## Prompt keywords
+
+Type these keywords into the chat to trigger specific behaviors:
+
+| Keyword | Behavior |
+|---------|----------|
+| `tools` | Command output, terminal input, file change, turn diff, and web search |
+| `approval:command` | Pending command approval |
+| `approval:file` | Pending file-change approval |
+| `approval:permissions` | Pending permissions approval |
+| `image` | Image generation activity |
+| `slow` | Delayed streaming |
+| `fail` | Failed turn completion |
+
+## Capability profiles
+
+Set `SIDEMESH_FAKE_CAPABILITY_PROFILE` to narrow advertised capabilities:
+
+| Profile | Capabilities |
+|---------|-------------|
+| `full` | Everything |
+| `chat-only` | No tools, no files |
+| `no-files` | No filesystem |
+| `no-model-controls` | No model/profile/skill lists |
+| `no-approvals` | No approval gating |
+| `minimal` | Bare minimum |
+
+## Use cases
+
+- Automated UI tests in CI
+- Screenshot generation for marketing
+- Reproducing bug reports with exact steps
+- Dogfooding non-Codex behavior before a real adapter exists

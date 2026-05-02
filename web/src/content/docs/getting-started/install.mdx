@@ -1,0 +1,65 @@
+---
+title: Install
+description: Install Sidemesh from source or npm, then build the CLI.
+---
+
+## Prerequisites
+
+- Node.js 20+ (`node --version` to check)
+- Git (for source install)
+- Optional: Flutter SDK (for mobile app development)
+
+## From Source
+
+```bash
+git clone https://github.com/mukhtharcm/sidemesh.git
+cd sidemesh
+npm install
+npm run build
+npm link
+```
+
+`npm link` makes `sidemesh` available as a global CLI command.
+
+## From Private GitHub Repo
+
+If you have access to the private repo:
+
+```bash
+npm install -g github:mukhtharcm/sidemesh
+```
+
+## Verify Installation
+
+```bash
+sidemesh --help
+sidemesh doctor
+```
+
+## Provider Prerequisites
+
+### Codex
+
+```bash
+npm install -g @openai/codex
+```
+
+### Pi
+
+```bash
+npm install -g @mariozechner/pi-coding-agent
+pi /login          # authenticate
+pi /model          # select default model
+```
+
+### Copilot
+
+Install GitHub Copilot CLI and authenticate via `gh auth login`.
+
+## Build the Mobile App
+
+```bash
+cd apps/mobile
+flutter pub get
+flutter run --flavor dev
+```

@@ -1,0 +1,30 @@
+---
+title: Providers
+description: Supported agent providers and how they work with Sidemesh.
+---
+
+Sidemesh connects to coding agents through provider adapters. Each adapter translates the agent's native protocol into the Sidemesh provider contract so the same mobile app works with multiple backends.
+
+## Supported providers
+
+| Provider | Status | Type |
+|----------|--------|------|
+| [Codex](/providers/codex/) | Production | External CLI |
+| [Pi](/providers/pi/) | Production | In-process SDK |
+| [GitHub Copilot](/providers/copilot/) | Experimental | External CLI |
+| [Fake](/providers/fake/) | Testing only | In-process harness |
+
+## Multi-provider mode
+
+When `config.providers.length > 1`, the daemon automatically wraps them in `MultiAgentProvider`. Each session is namespaced by provider kind, so `codex:abc123` and `pi:abc123` do not collide.
+
+Capabilities merge with **OR** semantics: if any provider supports a feature, the multi-provider facade advertises it. However, if the resolved provider for a specific session lacks a capability, the call throws even if another provider has it.
+
+## Choosing a provider
+
+- **Codex** — best for OpenAI models, full tool support, approvals, and reasoning controls
+- **Pi** — best for in-process SDK integration, compaction, and thinking-level overrides
+- **Copilot** — best if you already use GitHub Copilot CLI and want a mobile view
+- **Fake** — for contract testing, CI, and deterministic UI reproduction
+
+See [Provider Comparison](/providers/comparison/) for a detailed feature matrix.

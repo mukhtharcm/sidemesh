@@ -1,0 +1,51 @@
+---
+title: Connect
+description: Pair the mobile app with your Sidemesh daemon.
+---
+
+## Start the Daemon
+
+```bash
+sidemesh start       # background mode
+sidemesh pair        # show connection details
+```
+
+The `pair` command prints:
+- A QR code
+- Base URLs (Tailscale, LAN, localhost)
+- The shared bearer token
+
+## Add a Host in the App
+
+### QR Code (fastest)
+
+1. Run `sidemesh pair` on the host
+2. In the app, tap the host editor -> "Scan QR"
+3. Point camera at the QR code
+
+### Manual Entry
+
+1. Run `sidemesh pair` to see the base URL and token
+2. In the app, tap "Add host manually"
+3. Enter:
+   - **Label**: friendly name (e.g., "MacBook", "lab-vps")
+   - **Base URL**: `http://HOST:PORT`
+   - **Token**: bearer token from `sidemesh pair`
+
+## Network Requirements
+
+- Host and client must be on the same network
+- Recommended: Tailscale or private LAN
+- Do not expose the daemon directly to the public internet
+
+## Multiple Hosts
+
+The app can store multiple hosts. Each host runs its own daemon with its own token.
+
+## Troubleshooting
+
+**"Connection failed"**
+- Verify host and client are on the same network
+- Check `sidemesh status` shows healthy
+- Verify token matches exactly
+- Try `http://HOST:PORT/healthz` in a browser

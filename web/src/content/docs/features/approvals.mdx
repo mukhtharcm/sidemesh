@@ -1,0 +1,33 @@
+---
+title: Approvals
+description: Pending action inbox for commands, file changes, and permissions.
+---
+
+Sidemesh collects pending actions from providers into a single **Approvals** inbox. This lets you review and approve or reject agent actions without watching the chat scroll.
+
+## Approval types
+
+| Type | What the agent wants | Your options |
+|------|---------------------|--------------|
+| **Command** | Run a shell command | Approve once, approve always, or reject |
+| **File change** | Edit, create, or delete a file | View diff, approve, or reject |
+| **Permissions** | Access a tool or scope | Approve or reject |
+
+## How approvals work
+
+1. The agent proposes an action during a turn
+2. The provider emits an `action_opened` event
+3. The app surfaces the action in the chat and the approvals tab
+4. You respond via `POST /api/actions/:id/respond`
+5. The provider continues or aborts based on your response
+
+## Provider differences
+
+- **Codex**: Full approval support with granular always/once/reject options
+- **Pi**: Does not expose gating; approvals are not available
+- **Copilot**: Supports permission requests via the Copilot SDK
+- **Fake**: Deterministic approval triggers for testing (`approval:command`, `approval:file`, `approval:permissions`)
+
+## Skipping approvals
+
+You can configure auto-approval for specific action types in the provider's native config. Sidemesh still shows the action in the chat stream, but it does not block the turn.

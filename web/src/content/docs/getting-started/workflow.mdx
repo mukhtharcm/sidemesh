@@ -1,0 +1,38 @@
+---
+title: Daily Workflow
+description: How to use Sidemesh day-to-day.
+---
+
+## Morning
+
+1. Start daemon on host: `sidemesh start`
+2. Open app, select host
+3. Check recent sessions and pending approvals
+
+## During the Day
+
+- **New task**: Create a session, describe the goal, let the agent work
+- **Check in**: Review session progress, approve pending actions
+- **Deep dive**: Browse files, check git status, attach terminal
+- **Away from desk**: Use mobile to approve, steer, or inspect
+
+## Key Surfaces
+
+| Surface | When to use |
+|---------|-------------|
+| Chat | Direct conversation with the agent |
+| Approvals | Review and approve/reject tool calls |
+| Files | Browse, read, and edit workspace files |
+| Git | Check status, diffs, and history |
+| Terminal | Direct shell access when chat is too slow |
+| Port Forwarding | Access dev servers from mobile |
+| Browser Preview | See visual state of the application |
+
+## Session Lifecycle
+
+1. **Create**: Start a session with a goal
+2. **Run**: Agent works, may request approvals
+3. **Steer**: Send additional input while turn is active
+4. **Interrupt**: Stop the current turn if it goes wrong
+5. **Archive**: Clean up finished sessions
+6. **Resume**: Pick up where you left off

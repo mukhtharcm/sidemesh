@@ -1,0 +1,34 @@
+---
+title: Filesystem
+description: Browse, read, write, and manage files on the host.
+---
+
+The filesystem feature is a **host-owned** capability. It works with any provider because the daemon manages file access directly.
+
+## Browse files
+
+- `GET /api/fs/roots` — list workspace roots
+- `GET /api/fs/list?path=...` — list a directory
+- `GET /api/fs/metadata?path=...` — file metadata (size, mtime)
+
+## Read and write
+
+- `GET /api/fs/read?path=...` — read file contents
+- `POST /api/fs/write` — write or overwrite a file
+- `POST /api/fs/createDir` — create a directory
+- `POST /api/fs/remove` — delete a file or directory
+- `POST /api/fs/copy` — copy a file
+
+## Live updates
+
+Connect to `WS /api/fs/live` to receive real-time file change notifications. When the agent edits a file, the app refreshes the file view automatically.
+
+## Workspace sandboxing
+
+The daemon resolves paths against configured workspace roots. `resolveWorkspacePath` uses `realpath` and a prefix match to prevent escaping the workspace. Attempts to access files outside the workspace raise a `WorkspaceAccessError` with HTTP 403.
+
+## Security notes
+
+- Filesystem access requires the shared bearer token
+- There is no per-file permission model; token holders can read/write anything inside the workspace roots
+- Keep the daemon on trusted networks only

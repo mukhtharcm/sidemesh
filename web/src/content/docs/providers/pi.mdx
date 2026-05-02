@@ -1,0 +1,88 @@
+---
+title: Pi Provider
+description: Pi coding agent SDK adapter for Sidemesh.
+---
+
+The Pi provider runs Pi in-process through its TypeScript SDK. Unlike Codex and Copilot, which shell out to external CLIs, the Pi adapter calls the SDK directly.
+
+## Prerequisites
+
+1. Install Pi independently:
+
+```bash
+npm install -g @mariozechner/pi-coding-agent
+pi /login          # authenticate with your provider
+pi /model          # pick a default model
+```
+
+2. Node.js 20+ (same as the Sidemesh daemon).
+
+## Setup
+
+### Guided setup
+
+```bash
+npm install
+npm run setup          # select Pi from the provider list
+npm run daemon
+```
+
+### Manual config
+
+Add to `~/.sidemesh/config.json`:
+
+```json
+{
+  "providers": [
+    {
+      "kind": "pi",
+      "agentDir": "~/.pi/agent",
+      "stateDir": null
+    }
+  ],
+  "defaultProviderKind": "pi"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `agentDir` | Pi config directory. Default: `~/.pi/agent` |
+| `stateDir` | Sidemesh Pi sidecar state. Default: `~/.sidemesh/pi-provider` |
+
+## Capabilities
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Text input | ✅ | Full support |
+| Local images | ✅ | Base64-encoded |
+| Image URLs | ❌ | Ignored with warning |
+| Skills | ✅ | Inlined from Pi skill dirs |
+| Model switching | ✅ | Auth-filtered model list |
+| Thinking level | ✅ | Override when supported |
+| Compaction | ✅ | Native Pi compaction |
+| Session archive | ✅ | Sidecar tracked |
+| Interrupt | ✅ | Calls Pi `abort()` |
+| Filesystem | Host | Daemon-owned |
+| Approvals | ❌ | Pi does not expose gating |
+| Terminal | Host | Daemon-owned |
+
+## Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `SIDEMESH_PI_AGENT_DIR` | Override Pi agent directory |
+| `SIDEMESH_PI_STATE_DIR` | Override Sidemesh sidecar directory |
+
+## Troubleshooting
+
+**Unknown Pi session after restart**
+The sidecar index is stale. Restarting triggers a fresh scan of `~/.pi/agent/sessions/`.
+
+**No API key for anthropic/claude-**
+The model is visible but unauthenticated. Run `pi /login` for that provider.
+
+**Image URLs silently ignored**
+Pi only accepts local files. Sidemesh emits a stderr warning and substitutes an explanatory prompt.
+
+**Slow session list**
+First scan walks all `.jsonl` files. Subsequent calls use a stat-based fingerprint cache.

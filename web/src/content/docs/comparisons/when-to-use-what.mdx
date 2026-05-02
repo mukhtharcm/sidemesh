@@ -1,0 +1,36 @@
+---
+title: When to Use What
+description: Quick decision guide for Sidemesh tools.
+---
+
+## I need to...
+
+### ...chat with the agent
+Use the **session chat**. Create or resume a session, then type your message. The provider handles the rest.
+
+### ...approve a command the agent wants to run
+Open the **Approvals** tab or tap the pending action card in the chat. Choose approve once, approve always, or reject.
+
+### ...see what files the agent changed
+Use the **Filesystem** browser or the **Git** diff view. Filesystem shows the current tree; Git shows working, staged, and remote diffs.
+
+### ...run a command myself
+Use the **Terminal**. It spawns a shell on the host with `SIDEMESH_TOKEN` removed from the environment.
+
+### ...preview my local website on my phone
+Use **Port Forwarding**. Forward the dev server port (e.g., 5173) and open `http://127.0.0.1:5173` in the in-app browser.
+
+### ...see what the agent's browser tool sees
+Use **Browser Preview**. The daemon captures screenshots from a headless browser and streams them to the app.
+
+### ...edit a file the agent missed
+Use the **Filesystem** editor. Navigate to the file, tap edit, and write your changes.
+
+### ...check if the agent broke my repo
+Use the **Git** status and diff endpoints. Check working diff for unstaged changes and staged diff for pending commits.
+
+### ...switch models or reasoning levels
+Use the **session controls** if the provider advertises model switching. Codex and Pi support this; Copilot is limited.
+
+### ...connect from outside my home network
+Use **Tailscale**. Install Tailscale on both the host and client, then use the Tailscale IP in the host URL.

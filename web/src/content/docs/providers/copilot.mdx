@@ -1,0 +1,51 @@
+---
+title: GitHub Copilot Provider
+description: GitHub Copilot CLI adapter for Sidemesh.
+---
+
+The Copilot provider uses the GitHub Copilot SDK for session discovery, transcript replay, turns, model controls, and permission requests. It is experimental and disabled by default.
+
+## Prerequisites
+
+- GitHub Copilot CLI installed and authenticated
+- Valid GitHub Copilot subscription
+
+## Setup
+
+Select Copilot during `sidemesh setup` (may require `--dev` flag depending on build) or add manually:
+
+```json
+{
+  "providers": [
+    {
+      "kind": "copilot",
+      "model": null
+    }
+  ],
+  "defaultProviderKind": "copilot"
+}
+```
+
+## Capabilities
+
+| Feature | Status |
+|---------|--------|
+| Text input | ✅ |
+| Model switching | ✅ |
+| Session archive | ✅ |
+| Interrupt | ✅ |
+| Approvals (command/permissions) | ✅ |
+| Local images | ❌ |
+| Image URLs | ❌ |
+| Skills | ❌ |
+| Reasoning levels | ❌ |
+| Compaction | ❌ |
+| Filesystem | Host |
+| Terminal | Host |
+
+## Design notes
+
+- The adapter uses `auto` as the Sidemesh default for app-started turns so a costly persistent Copilot setting is not consumed by accident
+- Model controls are advertised from SDK `listModels()` metadata with explicit host defaults layered on top
+- The adapter intentionally does not read Copilot's on-disk session files directly
+- Images, skills, and richer native tool translation will be enabled only when the adapter can report honest capabilities

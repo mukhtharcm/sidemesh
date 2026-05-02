@@ -1,0 +1,26 @@
+---
+title: Features
+description: Sidemesh features overview.
+---
+
+Sidemesh exposes host capabilities and provider capabilities through a unified API. The Flutter app gates UI based on these capability flags.
+
+## Host Features
+
+These are daemon-owned and available regardless of provider:
+
+- **Filesystem**: Browse, read, write, create, remove files and directories
+- **Git**: Status, working diff, staged diff, remote diff
+- **Terminal**: Attach to a host shell (opt-in, behind private network)
+- **Port Forwarding**: Forward local ports to the client
+- **Browser Preview**: Stream browser screenshots to the client
+
+## Provider Features
+
+These depend on the active provider:
+
+- **Sessions**: Create, resume, archive, compact
+- **Input**: Text, images, skills
+- **Approvals**: Command, file, permissions
+- **Models**: List, switch, reasoning levels
+- **Skills**: List, inline in prompts
