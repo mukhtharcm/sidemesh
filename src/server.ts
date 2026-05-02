@@ -2288,8 +2288,38 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     console.log(line);
   }
 
+  // Health monitor: exit if provider is unhealthy so systemd can restart.
+  const HEALTH_MONITOR_INTERVAL_MS = 30_000;
+  const HEALTH_MONITOR_MAX_FAILURES = 3;
+  let healthFailures = 0;
+  const healthMonitor = setInterval(async () => {
+    const probe = provider.health
+      ? provider.health()
+      : provider.getVersion().then(() => true).catch(() => false);
+    const healthy = await Promise.race([
+      probe,
+      new Promise<boolean>((resolve) =>
+        setTimeout(() => resolve(false), 5_000),
+      ),
+    ]);
+    if (healthy) {
+      healthFailures = 0;
+      return;
+    }
+    healthFailures++;
+    console.error(
+      `Health monitor: provider unhealthy (${healthFailures}/${HEALTH_MONITOR_MAX_FAILURES})`,
+    );
+    if (healthFailures >= HEALTH_MONITOR_MAX_FAILURES) {
+      console.error("Health monitor: exiting due to persistent provider failure");
+      await runningServerRef!.close();
+      process.exit(1);
+    }
+  }, HEALTH_MONITOR_INTERVAL_MS);
+
   runningServerRef = {
     close: async () => {
+      clearInterval(healthMonitor);
       terminalRegistry.dispose();
       portForwardRegistry.dispose();
       await browserPreviewRegistry.dispose();
