@@ -107,6 +107,7 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     imageUrl: true,
     localImage: true,
     skills: true,
+    fileMentions: true,
   },
   interaction: {
     userInput: false,

@@ -107,3 +107,25 @@ class FsChangeEvent {
   final String path;
   final List<String> changedPaths;
 }
+
+
+class FsSearchResult {
+  const FsSearchResult({
+    required this.path,
+    required this.name,
+    required this.isDirectory,
+    required this.score,
+  });
+
+  final String path;
+  final String name;
+  final bool isDirectory;
+  final int score;
+
+  factory FsSearchResult.fromJson(Map<String, dynamic> json) => FsSearchResult(
+        path: (json['path'] ?? '').toString(),
+        name: (json['name'] ?? '').toString(),
+        isDirectory: json['isDirectory'] == true,
+        score: (json['score'] as num?)?.toInt() ?? 0,
+      );
+}
