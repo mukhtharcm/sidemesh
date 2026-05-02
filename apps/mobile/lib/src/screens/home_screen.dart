@@ -988,6 +988,11 @@ class _RecentPaneState extends State<RecentPane> {
   final SessionLocalStore _localStore = SessionLocalStore.instance;
   final RecentSessionsStore _store = RecentSessionsStore();
 
+  // Search mode state
+  List<RemoteSessionEntry>? _searchEntries;
+  bool _searchLoading = false;
+  Timer? _searchDebounce;
+
   @override
   void initState() {
     super.initState();
@@ -1044,6 +1049,9 @@ class _RecentPaneState extends State<RecentPane> {
       _clearScreenAwakeSource(oldWidget.screenAwakeSourceKey);
       _syncScreenAwakeSource(_screenAwakeActiveEntryCount() > 0);
     }
+    if (widget.query != oldWidget.query) {
+      _onQueryChanged(widget.query);
+    }
     _store.configure(hosts: widget.hosts, api: widget.api);
   }
 
@@ -1088,7 +1096,82 @@ class _RecentPaneState extends State<RecentPane> {
         .clearSource(key);
   }
 
+  void _onQueryChanged(String query) {
+    _searchDebounce?.cancel();
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _searchEntries = null;
+          _searchLoading = false;
+        });
+      }
+      return;
+    }
+    if (trimmed.length < 2) return;
+    if (mounted) {
+      setState(() => _searchLoading = true);
+    }
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      _performSearch(trimmed);
+    });
+  }
+
+  Future<void> _performSearch(String query) async {
+    if (!mounted) return;
+    final hosts = widget.hosts.where((h) => h.enabled).toList();
+    if (hosts.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _searchEntries = [];
+          _searchLoading = false;
+        });
+      }
+      return;
+    }
+
+    final results = <RemoteSessionEntry>[];
+    await Future.wait(
+      hosts.map((host) async {
+        try {
+          final sessions = await widget.api.searchSessions(
+            host,
+            query: query,
+            limit: 40,
+          );
+          for (final session in sessions) {
+            results.add(RemoteSessionEntry(host: host, session: session));
+          }
+        } catch (_) {
+          // Silently ignore per-host failures
+        }
+      }),
+      eagerError: false,
+    );
+
+    if (!mounted) return;
+    results.sort((a, b) => b.session.updatedAt.compareTo(a.session.updatedAt));
+
+    setState(() {
+      _searchEntries = results;
+      _searchLoading = false;
+    });
+  }
+
   List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
+    // When in search mode, use server results directly
+    if (_searchEntries != null) {
+      final overrides = SessionOverridesStore.instance;
+      return _searchEntries!
+          .map(
+            (entry) => RemoteSessionEntry(
+              host: entry.host,
+              session: overrides.overlay(entry.host.id, entry.session),
+            ),
+          )
+          .toList();
+    }
+
     final overrides = SessionOverridesStore.instance;
     final overlaid = entries
         .map(
@@ -1194,10 +1277,12 @@ class _RecentPaneState extends State<RecentPane> {
                       : Icons.search_off_rounded,
                   title: widget.query.trim().isEmpty
                       ? 'No reachable sessions'
-                      : 'No matches',
+                      : (_searchLoading ? 'Searching…' : 'No matches'),
                   body: widget.query.trim().isEmpty
                       ? 'Saved hosts look fine, but none returned recent sessions right now.'
-                      : 'No sessions match "${widget.query.trim()}". Clear the filter to see everything.',
+                      : (_searchLoading
+                          ? 'Looking across all your sessions…'
+                          : 'No sessions match "${widget.query.trim()}". Clear the filter to see everything.'),
                 ),
               ],
             ),
@@ -1207,6 +1292,11 @@ class _RecentPaneState extends State<RecentPane> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_searchLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              ),
             SizedBox(height: widget.dense ? 4 : 8),
             Expanded(
               child: RefreshIndicator(
@@ -1253,7 +1343,10 @@ class _RecentPaneState extends State<RecentPane> {
                             favorite: _localStore.isFavorite(entry.host, entry.session.id),
                             selected: widget.selectedSessionId == entry.session.id,
                             dense: widget.dense,
-                            onTap: () => widget.onOpenSession(entry.host, entry.session),
+                            onTap: () {
+                              _localStore.updateGhost(entry.host, entry.session);
+                              widget.onOpenSession(entry.host, entry.session);
+                            },
                             onToggleFavorite: () {
                               _localStore.toggleFavorite(entry.host, entry.session.id);
                             },

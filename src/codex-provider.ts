@@ -1870,6 +1870,7 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     history: true,
     eventReplay: true,
     recentFallback: true,
+    searchSessions: true,
   },
   input: {
     text: true,
