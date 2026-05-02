@@ -662,8 +662,27 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   // materially larger than plain-text turns.
   app.use(express.json({ limit: "16mb" }));
 
-  app.get("/healthz", (_request, response) => {
-    response.json({ ok: true, label: config.label });
+  app.get("/healthz", async (_request, response) => {
+    const probe = provider.health
+      ? provider.health()
+      : provider.getVersion().then(() => true).catch(() => false);
+    let timer: NodeJS.Timeout | null = null;
+    const providerHealthy = await Promise.race([
+      probe,
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), 3_000);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (providerHealthy) {
+      response.json({ ok: true, label: config.label });
+      return;
+    }
+    response.status(503).json({
+      ok: false,
+      label: config.label,
+      error: "provider unreachable",
+    });
   });
 
   app.use((request, response, next) => {
