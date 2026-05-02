@@ -330,12 +330,19 @@ export async function main(argv = process.argv): Promise<void> {
       .command("setup")
       .description("create or update the persisted Sidemesh config")
       .option("--dev", "include internal test providers in the setup wizard")
-      .action(async (options: { config?: string; dev?: boolean }) => {
-        await runSetup({
-          configPath: options.config,
-          includeDevProviders: options.dev,
-        });
-      }),
+      .option(
+        "--advanced",
+        "show advanced prompts for daemon port and state directory",
+      )
+      .action(
+        async (options: { config?: string; dev?: boolean; advanced?: boolean }) => {
+          await runSetup({
+            configPath: options.config,
+            includeDevProviders: options.dev,
+            advanced: options.advanced === true,
+          });
+        },
+      ),
   );
 
   withConfigOption(
