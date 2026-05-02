@@ -1,0 +1,80 @@
+---
+title: API Endpoints
+description: HTTP and WebSocket endpoints exposed by the Sidemesh daemon.
+---
+
+## Health
+
+| Method | Path | Auth |
+|--------|------|------|
+| GET | `/healthz` | No |
+
+## Node info
+
+| Method | Path | Auth |
+|--------|------|------|
+| GET | `/api/node` | Bearer |
+| GET | `/api/providers` | Bearer |
+| GET | `/api/workspaces` | Bearer |
+
+## Sessions
+
+| Method | Path | Auth |
+|--------|------|------|
+| GET | `/api/sessions` | Bearer |
+| GET | `/api/sessions/:id/log` | Bearer |
+| GET | `/api/sessions/:id/resources` | Bearer |
+| GET | `/api/sessions/:id/events?since=<seq>` | Bearer |
+| GET | `/api/sessions/:id/status` | Bearer |
+| POST | `/api/sessions/create` | Bearer |
+| POST | `/api/sessions/:id/input` | Bearer |
+| POST | `/api/sessions/:id/stop` | Bearer |
+| POST | `/api/sessions/:id/name` | Bearer |
+| POST | `/api/sessions/:id/archive` | Bearer |
+| POST | `/api/sessions/:id/unarchive` | Bearer |
+
+## Git
+
+| Method | Path | Auth |
+|--------|------|------|
+| GET | `/api/sessions/:id/git` | Bearer |
+| GET | `/api/sessions/:id/git/diff?kind=working|staged|unstaged|remote` | Bearer |
+
+## Models, profiles, skills
+
+| Method | Path | Auth |
+|--------|------|------|
+| GET | `/api/models` | Bearer |
+| GET | `/api/profiles` | Bearer |
+| GET | `/api/skills` | Bearer |
+| POST | `/api/skills/config` | Bearer |
+
+## Actions
+
+| Method | Path | Auth |
+|--------|------|------|
+| GET | `/api/actions` | Bearer |
+| POST | `/api/actions/:id/respond` | Bearer |
+
+## Filesystem
+
+| Method | Path | Auth |
+|--------|------|------|
+| GET | `/api/fs/roots` | Bearer |
+| GET | `/api/fs/list?path=...` | Bearer |
+| GET | `/api/fs/metadata?path=...` | Bearer |
+| GET | `/api/fs/read?path=...` | Bearer |
+| POST | `/api/fs/write` | Bearer |
+| POST | `/api/fs/createDir` | Bearer |
+| POST | `/api/fs/remove` | Bearer |
+| POST | `/api/fs/copy` | Bearer |
+
+## WebSockets
+
+| Path | Purpose |
+|------|---------|
+| `WS /api/live?sessionId=...` | Live session events |
+| `WS /api/actions/live` | Live approval events |
+| `WS /api/fs/live` | Live filesystem events |
+
+All WebSocket connections require the bearer token in the `Authorization` header or as a query parameter.

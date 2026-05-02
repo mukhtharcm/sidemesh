@@ -1,0 +1,58 @@
+---
+title: Codex Provider
+description: OpenAI Codex CLI adapter for Sidemesh.
+---
+
+The Codex provider is the default and most feature-complete adapter. It shells out to the official `@openai/codex` CLI and translates Codex events into the Sidemesh provider contract.
+
+## Prerequisites
+
+```bash
+npm install -g @openai/codex
+codex --version
+```
+
+## Setup
+
+Select Codex during `sidemesh setup` or add it manually to `~/.sidemesh/config.json`:
+
+```json
+{
+  "providers": [
+    {
+      "kind": "codex",
+      "model": null,
+      "profile": null,
+      "approvalPolicy": "suggest"
+    }
+  ],
+  "defaultProviderKind": "codex"
+}
+```
+
+## Capabilities
+
+Codex supports the full Sidemesh capability set:
+
+- Sessions, input, interrupts
+- Local images and image URLs
+- Skills and model switching
+- Reasoning effort control
+- Compaction
+- Approvals (command, file, permissions)
+
+## Events
+
+The Codex adapter translates native Codex events into Sidemesh live events:
+
+- `turn_started`
+- `assistant_delta`
+- `activity_output_delta`
+- `activity_terminal_input`
+- `action_opened`
+- `fs_changed`
+- `turn_completed`
+
+## Version
+
+`GET /api/node` returns the Codex CLI version under `providerVersion` (and `codexVersion` for backward compatibility).

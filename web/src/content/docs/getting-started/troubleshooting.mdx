@@ -1,0 +1,42 @@
+---
+title: Troubleshooting
+description: Common issues and how to resolve them.
+---
+
+## "No providers configured"
+
+Run `sidemesh setup` and select at least one provider.
+
+## "Port already in use"
+
+Another Sidemesh daemon is running. Run `sidemesh status` to find it.
+Use `--allow-duplicate` if you genuinely need two daemons.
+
+## "Unknown provider: pi"
+
+The daemon was built before the Pi provider. Rebuild:
+```bash
+npm run build && npm link
+```
+
+## "Connection failed" in mobile app
+
+- Verify host and client are on the same network (or Tailscale)
+- Check `sidemesh status` shows healthy
+- Verify token matches exactly
+- Try `http://HOST:PORT/healthz` in a browser
+
+## Pi model list is empty
+
+Pi has no authenticated providers. Run `pi /login` for your model provider.
+
+## "Port already in use" with systemd
+
+A stale daemon is holding the port:
+```bash
+sudo sidemesh service restart --yes
+```
+
+## Slow session list with Pi
+
+The first scan after startup walks all `.jsonl` files. Subsequent calls use a stat-based fingerprint cache. Large session files (>10 MB) may still parse slowly on cache misses.

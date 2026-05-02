@@ -1,0 +1,40 @@
+---
+title: Network Model
+description: Trusted-network architecture and why Sidemesh avoids public exposure.
+---
+
+Sidemesh is designed for trusted networks. The daemon does not implement a public-internet auth layer and should not be exposed directly to the internet.
+
+## Trusted networks
+
+Recommended deployment patterns:
+
+| Network | Setup | Use case |
+|---------|-------|----------|
+| **Tailscale** | Install Tailscale on host and client | Remote access from anywhere |
+| **Private LAN** | Same Wi-Fi or wired network | Home or office use |
+| **localhost** | Client and host on same machine | Local development |
+
+## Why no public auth
+
+The current auth model is a single shared bearer token with no per-device revocation. This is sufficient for a small set of trusted devices on a private network, but it is not adequate for public exposure.
+
+If you need public access, place the daemon behind a reverse proxy with:
+- TLS termination
+- Per-client certificate auth or OAuth
+- Rate limiting
+- IP allowlisting
+
+## Network behavior
+
+- The daemon binds to `0.0.0.0:PORT` by default
+- All `/api/*` routes and WebSocket endpoints require `Authorization: Bearer <token>`
+- `GET /healthz` is intentionally unauthenticated for local service checks
+- `SIDEMESH_TOKEN` is deleted from the environment before spawning shells or child processes
+
+## Daemon lifecycle security
+
+- `sidemesh start` refuses to launch if another daemon is already healthy on the port
+- Managed process state is written to `~/.sidemesh/daemon-state-v1.json`
+- Config is written atomically with `0o600` permissions
+- State directory defaults to `~/.sidemesh` and can be overridden with `SIDEMESH_STATE_DIR`

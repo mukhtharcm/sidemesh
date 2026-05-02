@@ -1,0 +1,33 @@
+---
+title: Port Forwarding
+description: Forward local host ports to the mobile client.
+---
+
+Port forwarding creates a tunnel from the host to the client device. This lets you access HTTP services running on the host (or forwarded through the host) from the in-app browser or Safari.
+
+## How it works
+
+1. The daemon opens a WebSocket tunnel for each forwarded port
+2. The client binds to `127.0.0.1:PORT` on the device
+3. HTTP traffic is proxied through the tunnel
+
+## Configuration
+
+Targets must resolve to loopback by default (`127.0.0.1` or `::1`). Enable `allowNonLoopbackTargets` in config to forward to LAN addresses.
+
+## Security
+
+- Forwarded ports bind to localhost on the client, not to all interfaces
+- On iOS, the in-app browser can access `http://127.0.0.1:PORT` directly
+- From Safari, use `http://localhost:PORT` if the tunnel is active
+
+## Use cases
+
+- Preview a dev server (Vite, Next.js, Rails) from your phone
+- Access a database admin UI (pgAdmin, phpMyAdmin) on the go
+- Debug a web app on mobile Safari using the host dev server
+- Reach internal dashboards behind a firewall
+
+## Comparison with browser preview
+
+Port forwarding gives you the full website; browser preview gives you a screenshot stream. See [Browser vs Port Forwarding](/comparisons/browser-vs-port-forwarding/) for details.
