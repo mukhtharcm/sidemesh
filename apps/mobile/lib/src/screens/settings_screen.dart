@@ -12,6 +12,7 @@ import '../screen_awake_settings_store.dart';
 import '../session_local_store.dart';
 import '../session_policy_store.dart';
 import '../session_send_outbox_store.dart';
+import '../host_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import '../theme/theme_controller.dart';
@@ -788,6 +789,15 @@ class _SettingsContent extends StatelessWidget {
             ),
           ],
         ),
+        const SizedBox(height: AppSpacing.lg),
+        _SettingsSection(
+          icon: Icons.medical_services_rounded,
+          title: 'Host diagnostics',
+          subtitle: 'Restart the provider or the daemon when stuck.',
+          children: [
+            _HostDiagnosticsCard(),
+          ],
+        ),
         const SizedBox(height: AppSpacing.xl),
         _AboutFooter(
           platformLabel: platformLabel,
@@ -1276,3 +1286,81 @@ class _ToggleTile extends StatelessWidget {
     );
   }
 }
+
+class _HostDiagnosticsCard extends StatefulWidget {
+  const _HostDiagnosticsCard();
+
+  @override
+  State<_HostDiagnosticsCard> createState() => _HostDiagnosticsCardState();
+}
+
+class _HostDiagnosticsCardState extends State<_HostDiagnosticsCard> {
+  final HostStore _store = HostStore();
+  final ApiClient _api = ApiClient();
+  bool _busy = false;
+  String? _message;
+
+  Future<HostProfile?> _getHost() async {
+    final hosts = await _store.loadHosts();
+    return hosts.where((h) => h.enabled).firstOrNull;
+  }
+
+  Future<void> _restartProvider() async {
+    await _doRestart((host) => _api.restartProvider(host, 'codex'));
+  }
+
+  Future<void> _restartDaemon() async {
+    await _doRestart((host) => _api.restartDaemon(host));
+  }
+
+  Future<void> _doRestart(Future<void> Function(HostProfile host) action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final host = await _getHost();
+      if (host == null) {
+        setState(() => _message = 'No active host.');
+        return;
+      }
+      await action(host);
+      if (!mounted) return;
+      setState(() => _message = 'Restart requested.');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _message = 'Restart failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return _SettingsCard(
+      icon: Icons.medical_services_rounded,
+      title: 'Remote recovery',
+      subtitle: _message ?? 'Restart provider or daemon without SSH.',
+      footer: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _ActionRow(
+            icon: Icons.refresh_rounded,
+            title: 'Restart Codex provider',
+            subtitle: 'Preserves terminals and port forwards.',
+            busy: _busy,
+            onTap: () => unawaited(_restartProvider()),
+          ),
+          Divider(color: colors.border),
+          _ActionRow(
+            icon: Icons.restart_alt_rounded,
+            title: 'Restart Sidemesh daemon',
+            subtitle: 'Full daemon restart via systemd.',
+            busy: _busy,
+            onTap: () => unawaited(_restartDaemon()),
+          ),
+        ],
+      ),
+    );
+  }
+}
+

@@ -169,6 +169,28 @@ class ApiClient {
         .toList();
   }
 
+  // -------------------------- Admin diagnostics --------------------------
+
+  Future<void> restartProvider(HostProfile host, String kind) async {
+    await _post(
+      host,
+      '/api/admin/provider/$kind/restart',
+      body: const {},
+      timeout: const Duration(seconds: 15),
+      operation: 'restart provider',
+    );
+  }
+
+  Future<void> restartDaemon(HostProfile host) async {
+    await _post(
+      host,
+      '/api/admin/restart',
+      body: const {},
+      timeout: const Duration(seconds: 15),
+      operation: 'restart daemon',
+    );
+  }
+
   Future<HostTerminalInfo> createTerminal(
     HostProfile host, {
     required String cwd,
