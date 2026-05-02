@@ -9,9 +9,11 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
 import 'package:sidemesh_mobile/src/create_session_defaults_store.dart';
 import 'package:sidemesh_mobile/src/db.dart';
+import 'package:sidemesh_mobile/src/live_activity_service.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/create_session_sheet.dart';
 import 'package:sidemesh_mobile/src/screens/host_detail_screen.dart';
+import 'package:sidemesh_mobile/src/screens/home_screen.dart';
 import 'package:sidemesh_mobile/src/screens/session_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
 import 'package:sidemesh_mobile/src/session_policy_store.dart';
@@ -508,6 +510,58 @@ void main() {
     expect(find.text('0/3'), findsOneWidget);
     expect(find.text('0/8'), findsOneWidget);
   });
+
+  testWidgets('recent search skips hosts that do not advertise search support', (
+    tester,
+  ) async {
+    final api = _CapabilityFakeApi(_nodeForCapabilities(_minimalCapabilities));
+
+    await _pumpApp(
+      tester,
+      RecentPane(
+        hosts: [_host('recent-search-minimal')],
+        api: api,
+        onOpenSession: (_, __) {},
+        onActiveCountChanged: (_) {},
+      ),
+      size: const Size(1200, 900),
+    );
+    await _pumpFrames(tester);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildLightTheme(ThemeVariant.codexAmber.light),
+        darkTheme: buildDarkTheme(ThemeVariant.codexAmber.dark),
+        home: Scaffold(
+          body: RecentPane(
+            hosts: [_host('recent-search-minimal')],
+            api: api,
+            onOpenSession: (_, __) {},
+            onActiveCountChanged: (_) {},
+            query: 'hello',
+          ),
+        ),
+      ),
+    );
+    await _pumpFrames(tester);
+
+    expect(api.searchSessionsCallCount, 0);
+  });
+
+  test('primary live activity session preserves normalized status', () {
+    final summary = PrimaryLiveActivitySession(
+      hostId: 'host-1',
+      sessionId: 'session-1',
+      title: 'Fake session',
+      preview: 'preview',
+      cwd: '/repo',
+      model: 'fake-balanced',
+      updatedAt: DateTime(2026, 1, 1, 12),
+    ).toSessionSummary(status: 'interrupted');
+
+    expect(summary.status, 'interrupted');
+    expect(summary.isActive, isFalse);
+  });
 }
 
 Future<void> _pumpFrames(WidgetTester tester) async {
@@ -760,6 +814,7 @@ class _CapabilityFakeApi extends ApiClient {
   final List<ProviderProfileSummary> profiles;
   final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
   _CapturedCreateSessionRequest? lastCreateRequest;
+  int searchSessionsCallCount = 0;
 
   @override
   Future<NodeInfo> fetchNode(HostProfile host) async => node;
@@ -769,6 +824,16 @@ class _CapabilityFakeApi extends ApiClient {
     HostProfile host, {
     int? limit,
   }) async => const [];
+
+  @override
+  Future<List<SessionSummary>> searchSessions(
+    HostProfile host, {
+    required String query,
+    int? limit,
+  }) async {
+    searchSessionsCallCount += 1;
+    return const [];
+  }
 
   @override
   Future<List<ModelCatalogEntry>> fetchModels(

@@ -94,6 +94,15 @@ class NodeInfo {
     return hostCapabilities.supports(section, feature);
   }
 
+  bool get supportsSessionSearch {
+    if (supportedProviders.isNotEmpty) {
+      return supportedProviders.any(
+        (provider) => provider.capabilities.supports('sessions', 'searchSessions'),
+      );
+    }
+    return providerCapabilities.supports('sessions', 'searchSessions');
+  }
+
   ProviderDefinitionSummary providerSummary(String? kind) {
     if ((kind ?? '').isEmpty) {
       return supportedProviders.firstWhere(

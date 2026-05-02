@@ -653,7 +653,7 @@ class PrimaryLiveActivitySession {
   final String? model;
   final DateTime updatedAt;
 
-  SessionSummary toSessionSummary({required bool isRunning}) {
+  SessionSummary toSessionSummary({required String status}) {
     final now = DateTime.now();
     final modelValue = model?.trim();
     return SessionSummary(
@@ -665,7 +665,7 @@ class PrimaryLiveActivitySession {
       updatedAt: now,
       source: '',
       provider: null,
-      status: isRunning ? 'running' : 'completed',
+      status: status,
       runtime: modelValue == null || modelValue.isEmpty
           ? null
           : SessionRuntimeSummary(model: modelValue),

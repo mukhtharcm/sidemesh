@@ -987,6 +987,7 @@ class _SessionGroup {
 class _RecentPaneState extends State<RecentPane> {
   final SessionLocalStore _localStore = SessionLocalStore.instance;
   final RecentSessionsStore _store = RecentSessionsStore();
+  final Map<String, Future<NodeInfo?>> _nodeInfoFutures = {};
 
   // Search mode state
   List<RemoteSessionEntry>? _searchEntries;
@@ -1049,10 +1050,28 @@ class _RecentPaneState extends State<RecentPane> {
       _clearScreenAwakeSource(oldWidget.screenAwakeSourceKey);
       _syncScreenAwakeSource(_screenAwakeActiveEntryCount() > 0);
     }
+    if (!_sameHostList(oldWidget.hosts, widget.hosts)) {
+      _nodeInfoFutures.clear();
+    }
     if (widget.query != oldWidget.query) {
       _onQueryChanged(widget.query);
     }
     _store.configure(hosts: widget.hosts, api: widget.api);
+  }
+
+  Future<NodeInfo?> _loadNodeInfo(HostProfile host) {
+    final cached = _nodeInfoFutures[host.id];
+    if (cached != null) {
+      return cached;
+    }
+    final future = widget.api.fetchNode(host).then<NodeInfo?>((node) => node).catchError((
+      _,
+    ) {
+      _nodeInfoFutures.remove(host.id);
+      return null;
+    });
+    _nodeInfoFutures[host.id] = future;
+    return future;
   }
 
   void _handleStoreChanged() {
@@ -1133,6 +1152,10 @@ class _RecentPaneState extends State<RecentPane> {
     final results = <RemoteSessionEntry>[];
     await Future.wait(
       hosts.map((host) async {
+        final node = await _loadNodeInfo(host);
+        if (node?.supportsSessionSearch != true) {
+          return;
+        }
         try {
           final sessions = await widget.api.searchSessions(
             host,
@@ -4416,4 +4439,3 @@ class _SubAgentBadge extends StatelessWidget {
     );
   }
 }
-
