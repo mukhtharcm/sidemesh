@@ -9,6 +9,7 @@ import { parseJsonLine } from "./codex-history.js";
 export interface SessionSearchResult {
   sessionId: string;
   rank: number;
+  snippet: string | null;
 }
 
 export interface SessionSearchIndexStats {
@@ -169,16 +170,18 @@ export class SessionSearchIndex {
     }
 
     const stmt = this.db.prepare(
-      `SELECT session_id, rank FROM session_fts WHERE session_fts MATCH ? ORDER BY rank LIMIT ?`,
+      `SELECT session_id, rank, snippet(session_fts, 1, '', '', '...', 20) AS snippet FROM session_fts WHERE session_fts MATCH ? ORDER BY rank LIMIT ?`,
     );
     const rows = stmt.all(query, limit) as Array<{
       session_id: string;
       rank: number;
+      snippet: string;
     }>;
 
     return rows.map((row) => ({
       sessionId: row.session_id,
       rank: row.rank,
+      snippet: row.snippet ?? null,
     }));
   }
 
