@@ -22,7 +22,7 @@ interface InitializeResult {
 const SHELL_ENV_START_MARKER = "__SIDEMESH_SHELL_ENV_START__";
 const SHELL_ENV_END_MARKER = "__SIDEMESH_SHELL_ENV_END__";
 const CODEX_APP_SERVER_CLOSE_TIMEOUT_MS = 4_000;
-const CODEX_RPC_REQUEST_TIMEOUT_MS = 30_000;
+const CODEX_RPC_REQUEST_TIMEOUT_MS = 120_000;
 
 function buildSeededCodexSpawnEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
