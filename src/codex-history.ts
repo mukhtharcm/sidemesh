@@ -687,22 +687,32 @@ export function parseRuntime(parsed: any): SessionRuntimeSummary | null {
     if (currentTokens == null) {
       return null;
     }
+    const tokenLimit = asOptionalNumber(typed.model_context_window);
     const updatedAt = parseTimestamp(parsed.timestamp);
+    const contextWindow =
+      tokenLimit == null
+        ? null
+        : {
+            currentTokens,
+            tokenLimit,
+            updatedAt,
+          };
+    const lastUsage = {
+      inputTokens: asOptionalNumber(last?.input_tokens),
+      outputTokens: asOptionalNumber(last?.output_tokens),
+      reasoningTokens: asOptionalNumber(last?.reasoning_output_tokens),
+      cacheReadTokens: asOptionalNumber(last?.cached_input_tokens),
+      updatedAt,
+    };
+    const hasLastUsage =
+      lastUsage.inputTokens != null ||
+      lastUsage.outputTokens != null ||
+      lastUsage.reasoningTokens != null ||
+      lastUsage.cacheReadTokens != null;
     return {
       telemetry: {
-        contextWindow: {
-          currentTokens,
-          tokenLimit: asOptionalNumber(typed.model_context_window) ?? 0,
-          messagesLength: 0,
-          updatedAt,
-        },
-        lastUsage: {
-          inputTokens: asOptionalNumber(last?.input_tokens),
-          outputTokens: asOptionalNumber(last?.output_tokens),
-          reasoningTokens: asOptionalNumber(last?.reasoning_output_tokens),
-          cacheReadTokens: asOptionalNumber(last?.cached_input_tokens),
-          updatedAt,
-        },
+        ...(contextWindow ? { contextWindow } : {}),
+        ...(hasLastUsage ? { lastUsage } : {}),
       },
       updatedAt,
       turnId: undefined,

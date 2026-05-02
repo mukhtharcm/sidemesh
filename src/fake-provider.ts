@@ -101,7 +101,7 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     history: true,
     eventReplay: true,
     recentFallback: true,
-    searchSessions: true,
+    searchSessions: false,
   },
   input: {
     text: true,
