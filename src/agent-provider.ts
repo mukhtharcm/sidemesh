@@ -308,6 +308,7 @@ export interface AgentProviderCore extends EventEmitter<AgentProviderEvents> {
   start(): Promise<void>;
   close?(): Promise<void>;
   restart?(): Promise<void>;
+  health?(): Promise<boolean>;
   getVersion(): Promise<string>;
 }
 
