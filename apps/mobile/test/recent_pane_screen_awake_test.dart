@@ -2,21 +2,35 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screen_awake_controller.dart';
 import 'package:sidemesh_mobile/src/screen_awake_settings_store.dart';
 import 'package:sidemesh_mobile/src/screens/home_screen.dart';
-import 'package:sidemesh_mobile/src/session_cache_store.dart';
+import 'package:sidemesh_mobile/src/session_local_store.dart';
+import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+class _FakePathProvider extends PathProviderPlatform
+    with MockPlatformInterfaceMixin {
+  @override
+  Future<String?> getApplicationDocumentsPath() async => '/tmp/sidemesh_test';
+  @override
+  Future<String?> getTemporaryPath() async => '/tmp/sidemesh_test';
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfiNoIsolate;
+  PathProviderPlatform.instance = _FakePathProvider();
 
   const host = HostProfile(
     id: 'host-1',
@@ -25,7 +39,10 @@ void main() {
     token: 'secret',
   );
 
-  setUp(() {
+  setUp(() async {
+    SessionLocalStore.instance.resetMigrationState();
+    final db = await SidemeshDb.instance;
+    await db.delete('sessions');
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
@@ -33,7 +50,7 @@ void main() {
     tester,
   ) async {
     final active = _summary('session-1', status: 'active');
-    await SessionCacheStore.instance.saveRecentSessions(host, [active]);
+    await tester.runAsync(() => SessionLocalStore.instance.upsertSessions(host, [active]));
     final store = ScreenAwakeSettingsStore.forTesting();
     await store.setKeepScreenAwakeWhileAgentRuns(true);
     final binding = _FakeScreenAwakeBinding();

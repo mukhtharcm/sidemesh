@@ -2,15 +2,32 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/recent_sessions_live_store.dart';
-import 'package:sidemesh_mobile/src/session_cache_store.dart';
+import 'package:sidemesh_mobile/src/session_local_store.dart';
+import 'package:sidemesh_mobile/src/db.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+class _FakePathProvider extends PathProviderPlatform
+    with MockPlatformInterfaceMixin {
+  @override
+  Future<String?> getApplicationDocumentsPath() async => '/tmp/sidemesh_test';
+  @override
+  Future<String?> getTemporaryPath() async => '/tmp/sidemesh_test';
+}
 
 void main() {
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfiNoIsolate;
+    PathProviderPlatform.instance = _FakePathProvider();
+  });
+
   const host = HostProfile(
     id: 'host-1',
     label: 'MacBook',
@@ -18,7 +35,10 @@ void main() {
     token: 'secret',
   );
 
-  setUp(() {
+  setUp(() async {
+    SessionLocalStore.instance.resetMigrationState();
+    final db = await SidemeshDb.instance;
+    await db.delete('sessions');
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
@@ -44,7 +64,7 @@ void main() {
     'hydrates cached sessions before a slower network refresh completes',
     () async {
       final cached = _session('session-1', title: 'Cached first');
-      await SessionCacheStore.instance.saveRecentSessions(host, [cached]);
+      await SessionLocalStore.instance.upsertSessions(host, [cached]);
       final api = _FakeApiClient()
         ..throwOnOpenSessionsLive = true
         ..fetchDelay = const Duration(milliseconds: 50)
