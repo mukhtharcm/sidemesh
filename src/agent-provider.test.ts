@@ -61,6 +61,9 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
     filesystem: false,
     remoteGitDiff: false,
   },
+  lifecycle: {
+    restart: false,
+  },
 };
 
 function makeProvider(methods: Partial<AgentProvider> = {}): AgentProvider {

@@ -212,6 +212,9 @@ class StubProvider
       filesystem: false,
       remoteGitDiff: false,
     },
+    lifecycle: {
+      restart: true,
+    },
   };
 
   public readonly createdSessions: AgentCreateSessionRequest[] = [];
@@ -321,6 +324,11 @@ class StubProvider
   public respondToPendingAction(): boolean {
     return true;
   }
+
+  public restartCalls = 0;
+  public async restart(): Promise<void> {
+    this.restartCalls++;
+  }
 }
 
 function stubThread(id: string, cwd: string, source: string) {
@@ -351,3 +359,55 @@ function emptyOverrides() {
     profile: null,
   };
 }
+
+describe("MultiAgentProvider restart", () => {
+  it("routes restartProvider to the correct child", async () => {
+    const codex = new StubProvider("codex", "Codex");
+    const copilot = new StubProvider("copilot", "GitHub Copilot");
+
+    const provider = new MultiAgentProvider(
+      [
+        { kind: "codex", config: { kind: "codex", bin: "codex" }, provider: codex },
+        { kind: "copilot", config: { kind: "copilot", bin: "copilot", stateDir: null, allowAll: false, configuredModel: null }, provider: copilot },
+      ],
+      "codex",
+    );
+
+    await provider.restartProvider("codex");
+    assert.equal(codex.restartCalls, 1);
+    assert.equal(copilot.restartCalls, 0);
+  });
+
+  it("throws for unknown provider kind", async () => {
+    const codex = new StubProvider("codex", "Codex");
+    const provider = new MultiAgentProvider(
+      [
+        { kind: "codex", config: { kind: "codex", bin: "codex" }, provider: codex },
+      ],
+      "codex",
+    );
+
+    await assert.rejects(
+      () => provider.restartProvider("copilot" as any),
+      /Unknown provider "copilot"/,
+    );
+  });
+
+  it("throws for provider without restart support", async () => {
+    const codex = new StubProvider("codex", "Codex");
+    codex.capabilities.lifecycle.restart = false;
+    (codex as any).restart = undefined;
+
+    const provider = new MultiAgentProvider(
+      [
+        { kind: "codex", config: { kind: "codex", bin: "codex" }, provider: codex },
+      ],
+      "codex",
+    );
+
+    await assert.rejects(
+      () => provider.restartProvider("codex"),
+      /does not support restart/,
+    );
+  });
+});
