@@ -110,8 +110,8 @@ Current workflows:
 - `Deploy Website`: deploys the static `web/` marketing site and Pages
   Functions to Cloudflare Pages when `web/**` changes on `main`.
 - `Publish npm Package`: publishes the daemon package to npm on manual dispatch
-  or when a GitHub Release is published. It uses npm trusted publishing via
-  GitHub Actions OIDC instead of a long-lived `NPM_TOKEN`.
+  or when a GitHub Release is published. It currently uses the `NPM_TOKEN`
+  GitHub Actions secret for the first publish and early releases.
 - `Secret Scan`: manual gitleaks scan over full git history.
 
 ## npm Publish Setup
@@ -119,22 +119,19 @@ Current workflows:
 The npm workflow assumes:
 
 - package name: `sidemesh`
-- npm trusted publishing is configured for this repository and workflow
 - GitHub environment name: `npm`
+- GitHub Actions secret: `NPM_TOKEN`
 
 Before the first publish:
 
 1. Create or log into the npm user account that will own `sidemesh`.
-2. On npm, configure a trusted publisher for:
-   - repository: `mukhtharcm/sidemesh`
-   - workflow file: `.github/workflows/publish-npm.yml`
-   - environment: `npm`
+2. Add an npm publish token to the repository Actions secrets as `NPM_TOKEN`.
 3. Create the `npm` GitHub environment in this repository.
 4. Confirm the package version in `package.json` is the version you want to
    publish.
 
-No `NPM_TOKEN` secret is required when trusted publishing is configured
-correctly.
+After the first successful npm publish, switch to npm trusted publishing and
+remove the long-lived token if you want a tighter setup.
 
 Store deployment is intentionally opt-in. Run TestFlight only when you actually
 need a mobile build; use server tags/releases for daemon-only changes.
