@@ -225,3 +225,12 @@ header.header {
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--sl-color-gray-3); }
+
+/* ═══════════════════════════════════════════════════════════════
+   Logo rounding
+   ═══════════════════════════════════════════════════════════════ */
+
+header.header img[alt="Sidemesh"] {
+  border-radius: 10px;
+  overflow: hidden;
+}
