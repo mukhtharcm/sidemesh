@@ -591,6 +591,7 @@ function mergeCapabilities(
       history: any((caps) => caps.sessions.history),
       eventReplay: any((caps) => caps.sessions.eventReplay),
       recentFallback: any((caps) => caps.sessions.recentFallback),
+      searchSessions: any((caps) => caps.sessions.searchSessions),
     },
     input: {
       text: any((caps) => caps.input.text),

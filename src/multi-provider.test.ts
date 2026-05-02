@@ -173,6 +173,7 @@ class StubProvider
       history: true,
       eventReplay: true,
       recentFallback: true,
+    searchSessions: true,
     },
     input: {
       fileMentions: true,

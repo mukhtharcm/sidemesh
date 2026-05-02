@@ -1964,6 +1964,7 @@ class _SessionScreenState extends State<SessionScreen>
       _refreshThinkingState();
       _syncSessionLiveActivity();
       _markCurrentSessionSeen();
+      unawaited(_localStore.updateGhost(widget.host, log.session));
       // Replay live events that landed during the fetch so action_opened /
       // activity_updated aren't silently dropped.
       for (final event in bufferedEvents) {

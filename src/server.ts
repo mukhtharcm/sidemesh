@@ -92,6 +92,7 @@ import {
 import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionReplayIndex } from "./session-replay-index.js";
+import { SessionSearchIndex } from "./session-search-index.js";
 
 const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
@@ -187,6 +188,9 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, SessionActivity>>();
   const replayIndex = new SessionReplayIndex();
+  const searchIndex = new SessionSearchIndex(
+    nodePath.join(config.stateDir, "search-index-v1.db"),
+  );
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
   const logCache = new Map<string, SessionLogCacheEntry>();
   const sessionSeqCursor = new Map<string, number>();
@@ -690,6 +694,8 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       providerConfig: summarizeProviderConfig(config.provider),
       providerCapabilities: provider.capabilities,
       hostCapabilities,
+      searchSessions: provider.capabilities.sessions.searchSessions,
+      searchIndexStats: searchIndex.getStats(),
       supportedProviders,
       startedAt: process.uptime(),
       tokenSource: config.tokenSource,
@@ -778,6 +784,34 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         (_request.query as Record<string, unknown>)?.runtime,
       );
       const sessions = await loadRecentSessions(requestedLimit, runtimeMode);
+      response.json(sessions);
+    }),
+  );
+
+  app.get(
+    "/api/sessions/search",
+    asyncRoute(async (request, response) => {
+      if (!provider.capabilities.sessions.searchSessions) {
+        response.status(503).json({ error: "Session search is not available" });
+        return;
+      }
+      const query = asString((request.query as Record<string, unknown>)?.q);
+      if (!query || query.length < 2) {
+        response.status(400).json({ error: "Query must be at least 2 characters" });
+        return;
+      }
+      const limit = Math.min(
+        asInteger((request.query as Record<string, unknown>)?.limit) ?? 20,
+        100,
+      );
+      const searchResults = await searchIndex.search(query, limit);
+      const sessions: SessionSummary[] = [];
+      for (const result of searchResults) {
+        const thread = await readSession(provider, result.sessionId, false).catch(() => null);
+        if (!thread) continue;
+        const runtime = await loadCachedSessionRuntime(provider, thread, runtimeCache, "active");
+        sessions.push(mapSession(thread, runtime));
+      }
       response.json(sessions);
     }),
   );
@@ -1151,6 +1185,11 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       if (session.path && session.path.endsWith(".jsonl")) {
         try {
           const entry = await replayIndex.load(sessionId, session.path);
+          if (provider.capabilities.sessions.searchSessions) {
+            void searchIndex.indexRollout(session.path).catch(() => {
+              // Ignore indexing errors for live sessions
+            });
+          }
           ensureSeqCursor(sessionId, entry.nextSeq);
           const delta = replayIndex.getDelta(entry, since);
           newMessages = delta.messages;
@@ -2170,6 +2209,22 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   );
 
   await listen(server, config.port);
+
+  // Open search index and catch up in the background
+  searchIndex.open().then(() => {
+    const codexHomePath = getCodexHomePath(provider);
+    return searchIndex.catchUp(codexHomePath);
+  }).then((result) => {
+    if (result.indexed > 0 || result.removed > 0) {
+      console.log(`Search index caught up: ${result.indexed} indexed, ${result.removed} removed`);
+    }
+  }).catch((error: unknown) => {
+    console.error(
+      "Failed to open search index:",
+      error instanceof Error ? error.message : error,
+    );
+  });
+
   for (const line of startupSummaryLines({
     config,
     providerDisplayName: provider.displayName,
@@ -2243,6 +2298,11 @@ async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
   });
 }
 
+
+function getCodexHomePath(provider: AgentProvider): string | null {
+  const runtimeHome = (provider as { runtimeHome?: string }).runtimeHome;
+  return typeof runtimeHome === "string" ? runtimeHome : null;
+}
 function asyncRoute(
   handler: (
     request: Request,
