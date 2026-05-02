@@ -145,7 +145,7 @@ class ApprovalBackgroundPoller {
           .timeout(_perHostTimeout);
       await LiveActivityService.instance.syncPrimarySession(
         host: host,
-        session: primary.toSessionSummary(isRunning: status.isRunning),
+        session: primary.toSessionSummary(status: status.status),
         isRunning: status.isRunning,
         isThinking: status.isRunning && status.pendingAction == null,
         isResponding: false,
