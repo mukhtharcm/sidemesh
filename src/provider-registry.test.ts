@@ -229,6 +229,7 @@ describe("provider registry", () => {
     assert.equal(provider.capabilities.input.skills, true);
     assert.equal(provider.capabilities.configuration.models, true);
     assert.equal(provider.capabilities.configuration.skills, true);
+    assert.equal(provider.capabilities.configuration.prompts, true);
     assert.equal(provider.capabilities.configuration.skillManagement, false);
     assert.equal(provider.capabilities.runtimeControls.model, true);
     assert.equal(provider.capabilities.runtimeControls.reasoningEffort, true);
@@ -278,6 +279,7 @@ describe("provider registry", () => {
     assert.equal(provider.capabilities.interaction.elicitation, true);
     assert.equal(provider.capabilities.configuration.models, true);
     assert.equal(provider.capabilities.configuration.skills, true);
+    assert.equal(provider.capabilities.configuration.prompts, false);
     assert.equal(provider.capabilities.configuration.skillManagement, true);
     assert.equal(provider.capabilities.runtimeControls.model, true);
     assert.equal(provider.capabilities.runtimeControls.mode, true);

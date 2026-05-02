@@ -626,6 +626,7 @@ function mergeCapabilities(
       models: any((caps) => caps.configuration.models),
       profiles: any((caps) => caps.configuration.profiles),
       skills: any((caps) => caps.configuration.skills),
+      prompts: any((caps) => caps.configuration.prompts),
       skillManagement: any((caps) => caps.configuration.skillManagement),
     },
     runtimeControls: {
