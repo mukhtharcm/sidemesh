@@ -36,8 +36,6 @@ import 'inspector/inspector_search.dart';
 import 'inspector/inspector_terminal.dart';
 import 'port_forward_screen.dart';
 import 'workspace_browser_dialog.dart';
-import '../session_favorites_store.dart';
-import '../session_cache_store.dart';
 import '../session_message_seed_store.dart';
 import '../session_overrides_store.dart';
 import '../session_pins_store.dart';
@@ -45,6 +43,7 @@ import '../session_policy_store.dart';
 import '../session_read_store.dart';
 import '../session_send_outbox_store.dart';
 import '../session_send_outbox_worker.dart';
+import '../session_local_store.dart';
 import '../session_send_overrides.dart';
 import '../session_turn_config_store.dart';
 import '../session_runtime.dart';
@@ -547,7 +546,7 @@ class _SessionScreenState extends State<SessionScreen>
   final _composerFocusNode = FocusNode(debugLabel: 'session_composer');
   final _searchFocusNode = FocusNode(debugLabel: 'session_search');
   final _scrollController = ScrollController();
-  final SessionFavoritesStore _favorites = SessionFavoritesStore.instance;
+  final SessionLocalStore _localStore = SessionLocalStore.instance;
   final SessionPinsStore _pinsStore = SessionPinsStore.instance;
   final SessionPolicyStore _policyStore = SessionPolicyStore.instance;
   final SessionReadStore _readStore = SessionReadStore.instance;
@@ -777,7 +776,7 @@ class _SessionScreenState extends State<SessionScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _favorites.ensureLoaded();
+    
     _pinsStore.ensureLoaded();
     _pinsStore.addListener(_handlePinsChanged);
     _sendOutbox.addListener(_handleSendOutboxChanged);
@@ -2003,7 +2002,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<bool> _loadCachedSnapshot() async {
     try {
-      final cached = await SessionCacheStore.instance.loadSessionLog(
+      final cached = await SessionLocalStore.instance.loadSessionLog(
         widget.host,
         widget.session.id,
       );
@@ -2159,7 +2158,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     unawaited(
-      SessionCacheStore.instance.saveSessionLog(
+      SessionLocalStore.instance.saveSessionLog(
         widget.host,
         SessionLog(
           session: session,
@@ -3929,7 +3928,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _toggleFavorite() async {
-    await _favorites.toggleFavorite(widget.host, widget.session.id);
+    await _localStore.toggleFavorite(widget.host, widget.session.id);
   }
 
   Future<void> _markSessionUnread() async {
@@ -5079,9 +5078,9 @@ class _SessionScreenState extends State<SessionScreen>
       children: [
         if (!isCompact)
           ListenableBuilder(
-            listenable: _favorites,
+            listenable: SessionLocalStore.instance,
             builder: (context, _) {
-              final favorite = _favorites.isFavorite(widget.host, session.id);
+              final favorite = _localStore.isFavorite(widget.host, session.id);
               return _SessionHeader(
                 host: widget.host,
                 session: session,
@@ -5490,9 +5489,9 @@ class _SessionScreenState extends State<SessionScreen>
             ),
           ),
           ListenableBuilder(
-            listenable: _favorites,
+            listenable: SessionLocalStore.instance,
             builder: (context, _) {
-              final favorite = _favorites.isFavorite(widget.host, session.id);
+              final favorite = _localStore.isFavorite(widget.host, session.id);
               final gitAvailable =
                   _supportsGitStatus &&
                   _gitHeaderLabel(session, _gitStatus) != null;
