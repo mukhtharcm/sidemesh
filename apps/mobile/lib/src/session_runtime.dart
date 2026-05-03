@@ -38,10 +38,14 @@ List<String> buildRuntimeHighlights(SessionRuntimeSummary? runtime) {
   }
   final context = runtime.telemetry?.contextWindow;
   if (context != null && context.tokenLimit > 0) {
-    final percent = ((1 - (context.currentTokens / context.tokenLimit)) * 100)
-        .clamp(0, 100)
-        .round();
-    labels.add('ctx $percent% left');
+    if (context.currentTokens == null) {
+      labels.add('ctx ?/${context.tokenLimit} left');
+    } else {
+      final percent = ((1 - (context.currentTokens! / context.tokenLimit)) * 100)
+          .clamp(0, 100)
+          .round();
+      labels.add('ctx $percent% left');
+    }
   }
   final compaction = runtime.telemetry?.compaction;
   if (compaction?.status == 'running') {
@@ -72,6 +76,40 @@ String runtimeServiceTierValue(String? value) {
     'fast' => 'Fast',
     _ => value,
   };
+}
+
+/// Trims the highlights to just the two signals that matter at list level:
+/// which model, and which mode. Everything else (approval policy, network,
+/// context %, …) is detail for the session header, not the session row.
+List<String> buildRuntimeCardHighlights(SessionRuntimeSummary? runtime) {
+  if (runtime == null) return const [];
+  final labels = <String>[];
+  if ((runtime.model ?? '').isNotEmpty) labels.add(runtime.model!);
+  if ((runtime.mode ?? '').isNotEmpty) labels.add(sessionModeLabel(runtime.mode!));
+  return labels;
+}
+
+/// Compact runtime indicator for list cards — shows only model + mode.
+class SessionRuntimeCardWrap extends StatelessWidget {
+  const SessionRuntimeCardWrap({super.key, required this.runtime});
+
+  final SessionRuntimeSummary? runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = buildRuntimeCardHighlights(runtime);
+    if (labels.isEmpty) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: labels
+          .map(
+            (label) =>
+                MeshPill(label: label, tone: MeshPillTone.accent, mono: true),
+          )
+          .toList(),
+    );
+  }
 }
 
 class SessionRuntimeWrap extends StatelessWidget {

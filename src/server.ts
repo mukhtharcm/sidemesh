@@ -117,6 +117,9 @@ const HOST_CAPABILITIES: HostCapabilities = {
     portForwarding: false,
     browserPreview: false,
   },
+  sessions: {
+    search: true,
+  },
 };
 
 interface SessionRuntimeCacheEntry {
@@ -169,6 +172,7 @@ export async function startServer(
   await provider.start();
   let runningServerRef: RunningServer | null = null;
   const hostCapabilities: HostCapabilities = {
+    ...HOST_CAPABILITIES,
     workspace: {
       ...HOST_CAPABILITIES.workspace,
       terminal: config.terminal.enabled,
@@ -603,6 +607,7 @@ export async function startServer(
         liveActivities.delete(event.sessionId);
         clearSessionLogCache(logCache, event.sessionId);
         scheduleRecentSessionUpsert(event.sessionId, 0);
+        void indexSessionForSearch(searchIndex, provider, event.sessionId).catch(() => {});
         // NOTE: do NOT reset sessionSeqCursor between turns — clients rely on
         // a monotonically increasing seq across the whole session lifetime to
         // detect gaps after a reconnect.
@@ -706,7 +711,7 @@ export async function startServer(
       providerCapabilities: defaultProviderCapabilities,
       defaultProviderCapabilities,
       hostCapabilities,
-      searchSessions: defaultProviderCapabilities.sessions.searchSessions,
+      searchSessions: hostCapabilities.sessions.search,
       searchIndexStats: searchIndex.getStats(),
       supportedProviders,
       startedAt: process.uptime(),
@@ -840,7 +845,7 @@ export async function startServer(
   app.get(
     "/api/sessions/search",
     asyncRoute(async (request, response) => {
-      if (!provider.capabilities.sessions.searchSessions) {
+      if (!hostCapabilities.sessions.search) {
         response.status(503).json({ error: "Session search is not available" });
         return;
       }
@@ -856,6 +861,8 @@ export async function startServer(
       const searchResults = await searchIndex.search(query, limit);
       const sessions: SessionSummary[] = [];
       for (const result of searchResults) {
+        const sessionProvider = providerEntryForSessionId(result.sessionId);
+        if (!sessionProvider) continue;
         const thread = await readSession(provider, result.sessionId, false).catch(() => null);
         if (!thread) continue;
         const runtime = await loadCachedSessionRuntime(provider, thread, runtimeCache, "active");
@@ -1235,8 +1242,8 @@ export async function startServer(
       if (session.path && session.path.endsWith(".jsonl")) {
         try {
           const entry = await replayIndex.load(sessionId, session.path);
-          if (provider.capabilities.sessions.searchSessions) {
-            void searchIndex.indexRollout(session.path).catch(() => {
+          if (hostCapabilities.sessions.search) {
+            void indexSessionForSearch(searchIndex, provider, sessionId).catch(() => {
               // Ignore indexing errors for live sessions
             });
           }
@@ -1700,6 +1707,7 @@ export async function startServer(
         activeTurnId: started.activeTurnId,
       });
       broadcastRecentSessionsLive({ type: "upsert", session });
+      void indexSessionForSearch(searchIndex, provider, started.thread.id).catch(() => {});
     }),
   );
 
@@ -1981,6 +1989,7 @@ export async function startServer(
       const session = mapSession(thread);
       response.json({ session });
       broadcastRecentSessionsLive({ type: "upsert", session });
+      void indexSessionForSearch(searchIndex, provider, sessionId).catch(() => {});
     }),
   );
 
@@ -2011,6 +2020,7 @@ export async function startServer(
       sessionSeqCursor.delete(sessionId);
       response.json({ archived: true });
       broadcastRecentSessionRemove(sessionId);
+      void searchIndex.remove(sessionId).catch(() => {});
     }),
   );
 
@@ -2037,6 +2047,7 @@ export async function startServer(
       await provider.unarchiveSession!(sessionId);
       response.json({ unarchived: true });
       void broadcastRecentSessionUpsert(sessionId);
+      void indexSessionForSearch(searchIndex, provider, sessionId).catch(() => {});
     }),
   );
 
@@ -2261,9 +2272,36 @@ export async function startServer(
   await listen(server, config.port);
 
   // Open search index and catch up in the background
-  searchIndex.open().then(() => {
-    const codexHomePath = getCodexHomePath(provider);
-    return searchIndex.catchUp(codexHomePath);
+  searchIndex.open().then(async () => {
+    if (
+      !hasProviderMethod(provider, "listSessionThreads") ||
+      !hasProviderMethod(provider, "readSessionLog")
+    ) {
+      return { indexed: 0, removed: 0 };
+    }
+    const threads = await provider.listSessionThreads!({
+      limit: 50,
+      archived: false,
+    });
+    let indexed = 0;
+    for (const thread of threads) {
+      try {
+        const log = await provider.readSessionLog!(thread);
+        await searchIndex.indexDocument({
+          sessionKey: thread.id,
+          title: thread.name || thread.preview,
+          preview: thread.preview,
+          cwd: thread.cwd,
+          fingerprint: `${thread.name || ""}|${thread.preview}|${thread.cwd}|${log.nextSeq}`,
+          messages: log.messages,
+          activities: log.activities,
+        });
+        indexed++;
+      } catch {
+        // Ignore per-session indexing errors during catch-up
+      }
+    }
+    return { indexed, removed: 0 };
   }).then((result) => {
     if (result.indexed > 0 || result.removed > 0) {
       console.log(`Search index caught up: ${result.indexed} indexed, ${result.removed} removed`);
@@ -2744,6 +2782,32 @@ async function listPendingActions(
       });
     }),
   );
+}
+
+async function indexSessionForSearch(
+  searchIndex: SessionSearchIndex,
+  provider: AgentProvider,
+  sessionId: string,
+): Promise<void> {
+  if (!provider.capabilities.sessions.history) return;
+  if (!hasProviderMethod(provider, "readSessionThread") || !hasProviderMethod(provider, "readSessionLog")) {
+    return;
+  }
+  try {
+    const thread = await readSession(provider, sessionId, false);
+    const log = await provider.readSessionLog!(thread);
+    await searchIndex.indexDocument({
+      sessionKey: sessionId,
+      title: thread.name || thread.preview,
+      preview: thread.preview,
+      cwd: thread.cwd,
+      fingerprint: `${thread.name || ""}|${thread.preview}|${thread.cwd}|${log.nextSeq}`,
+      messages: log.messages,
+      activities: log.activities,
+    });
+  } catch {
+    // Ignore indexing errors
+  }
 }
 
 async function readSession(
