@@ -436,7 +436,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
             _HomeStickyHeader(
               tab: tab,
               searchController: _searchController,
-              searchVisible: tab.title == 'Hosts' || enabledHosts.length >= 4,
+              searchVisible: tab.title != 'Hosts' || enabledHosts.length >= 4,
               viewMode: _tabIndex == 0 ? _recentViewMode : null,
               onViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
               onRefresh: _refreshHosts,
@@ -517,7 +517,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           setState(() {
             _tabIndex = index;
             final tab = _tabs[index];
-            final showSearch = tab.title == 'Hosts' || _enabledHosts.length >= 4;
+            final showSearch = tab.title != 'Hosts' || _enabledHosts.length >= 4;
             if (!showSearch && (_query.isNotEmpty || _searchController.text.isNotEmpty)) {
               _query = '';
               _searchController.clear();
