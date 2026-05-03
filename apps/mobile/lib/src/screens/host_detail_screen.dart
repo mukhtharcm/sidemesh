@@ -261,31 +261,20 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                   _NodeCard(host: widget.host, node: data.node),
                   const SizedBox(height: AppSpacing.sm),
                   _ProviderContractCard(node: data.node),
+                  if (data.workspaces.length > 1) ...[
                   const SizedBox(height: AppSpacing.lg),
                   _SectionHeader(
                     icon: Icons.folder_open_rounded,
-                    title: 'Workspaces',
-                    subtitle:
-                        '${data.workspaces.length} ${data.workspaces.length == 1 ? "entry" : "entries"}',
+                    title: 'Quick launch',
+                    subtitle: 'Tap a folder to start a new session there.',
                   ),
                   const SizedBox(height: AppSpacing.sm),
-                  if (data.workspaces.isEmpty)
-                    const MeshEmptyState(
-                      icon: Icons.folder_off_rounded,
-                      title: 'No workspaces',
-                      body: 'Start a session and this host will remember it.',
-                    )
-                  else
-                    ...data.workspaces.map(
-                      (workspace) => Padding(
-                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                        child: _WorkspaceCard(
-                          workspace: workspace,
-                          onTap: () =>
-                              _startSession(prefilledCwd: workspace.cwd),
-                        ),
-                      ),
-                    ),
+                  _WorkspaceLaunchRow(
+                    workspaces: data.workspaces,
+                    onTap: (workspace) =>
+                        _startSession(prefilledCwd: workspace.cwd),
+                  ),
+                  ],
                   const SizedBox(height: AppSpacing.lg),
                   _SectionHeader(
                     icon: Icons.history_rounded,
@@ -1090,52 +1079,76 @@ String _humanizeCamelCase(String value) {
   return withSpaces.replaceAll('_', ' ');
 }
 
-class _WorkspaceCard extends StatelessWidget {
-  const _WorkspaceCard({required this.workspace, required this.onTap});
+class _WorkspaceLaunchRow extends StatelessWidget {
+  const _WorkspaceLaunchRow({
+    required this.workspaces,
+    required this.onTap,
+  });
 
-  final WorkspaceSummary workspace;
-  final VoidCallback onTap;
+  final List<WorkspaceSummary> workspaces;
+  final ValueChanged<WorkspaceSummary> onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return MeshCard(
-      onTap: onTap,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      child: Row(
-        children: [
-          Icon(Icons.folder_rounded, color: colors.accent, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  workspace.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.emphasis),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  workspace.cwd,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
-                ),
-              ],
+    return SizedBox(
+      height: 36,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        itemCount: workspaces.length,
+        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
+        itemBuilder: (context, i) {
+          final ws = workspaces[i];
+          return InkWell(
+            borderRadius: AppShapes.pill,
+            onTap: () => onTap(ws),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: colors.surfaceMuted,
+                borderRadius: AppShapes.pill,
+                border: Border.all(color: colors.border),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.folder_rounded, size: 14, color: colors.accent),
+                  const SizedBox(width: 6),
+                  Text(
+                    ws.label,
+                    style: monoStyle(
+                      color: colors.textPrimary,
+                      fontSize: 12,
+                      fontWeight: AppWeights.emphasis,
+                    ),
+                  ),
+                  if (ws.sessionCount > 1) ...[                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colors.surfaceElevated,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Text(
+                        '${ws.sessionCount}',
+                        style: monoStyle(
+                          color: colors.textTertiary,
+                          fontSize: 10,
+                          fontWeight: AppWeights.emphasis,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          MeshPill(
-            label: '${workspace.sessionCount}',
-            icon: Icons.forum_rounded,
-            tone: MeshPillTone.neutral,
-            mono: true,
-          ),
-        ],
+          );
+        },
       ),
     );
   }
