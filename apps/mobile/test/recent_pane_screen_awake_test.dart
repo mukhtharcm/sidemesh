@@ -23,6 +23,8 @@ class _FakePathProvider extends PathProviderPlatform
   @override
   Future<String?> getApplicationDocumentsPath() async => '/tmp/sidemesh_test';
   @override
+  Future<String?> getApplicationSupportPath() async => '/tmp/sidemesh_test';
+  @override
   Future<String?> getTemporaryPath() async => '/tmp/sidemesh_test';
 }
 

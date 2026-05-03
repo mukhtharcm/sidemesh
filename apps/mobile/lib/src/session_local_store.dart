@@ -23,20 +23,38 @@ class SessionLocalStore extends ChangeNotifier {
   static final SessionLocalStore instance = SessionLocalStore._();
 
   bool _migrated = false;
+  Future<void>? _migrationFuture;
 
   @visibleForTesting
   void resetMigrationState() {
     _migrated = false;
+    _migrationFuture = null;
     _favoritesLoaded = false;
+    _favoritesLoadFuture = null;
     _favoriteKeys.clear();
   }
   final Set<String> _favoriteKeys = <String>{};
   bool _favoritesLoaded = false;
+  Future<void>? _favoritesLoadFuture;
 
   Future<void> _ensureMigrated() async {
     if (_migrated) return;
-    await _migrateFromSharedPreferences();
-    _migrated = true;
+    final migrationFuture = _migrationFuture;
+    if (migrationFuture != null) {
+      await migrationFuture;
+      return;
+    }
+
+    final future = _migrateFromSharedPreferences();
+    _migrationFuture = future;
+    try {
+      await future;
+      _migrated = true;
+    } finally {
+      if (identical(_migrationFuture, future)) {
+        _migrationFuture = null;
+      }
+    }
   }
 
   String _favoriteKey(String hostId, String sessionId) =>
@@ -48,18 +66,34 @@ class SessionLocalStore extends ChangeNotifier {
 
   Future<void> _ensureFavoritesLoaded() async {
     if (_favoritesLoaded) return;
-    await _ensureMigrated();
-    final db = await SidemeshDb.instance;
-    final rows = await db.rawQuery(
-      'SELECT host_id, session_id FROM sessions WHERE is_favorite = 1',
-    );
-    _favoriteKeys.clear();
-    for (final row in rows) {
-      final hostId = row['host_id'] as String;
-      final sessionId = row['session_id'] as String;
-      _favoriteKeys.add(_favoriteKey(hostId, sessionId));
+    final favoritesLoadFuture = _favoritesLoadFuture;
+    if (favoritesLoadFuture != null) {
+      await favoritesLoadFuture;
+      return;
     }
-    _favoritesLoaded = true;
+
+    final future = () async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      final rows = await db.rawQuery(
+        'SELECT host_id, session_id FROM sessions WHERE is_favorite = 1',
+      );
+      _favoriteKeys.clear();
+      for (final row in rows) {
+        final hostId = row['host_id'] as String;
+        final sessionId = row['session_id'] as String;
+        _favoriteKeys.add(_favoriteKey(hostId, sessionId));
+      }
+      _favoritesLoaded = true;
+    }();
+    _favoritesLoadFuture = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_favoritesLoadFuture, future)) {
+        _favoritesLoadFuture = null;
+      }
+    }
   }
 
   // ─── Favorites (sync read, async write) ───
