@@ -40,11 +40,16 @@ class _LiveAssistantMessageState {
     id: id,
     role: 'assistant',
     text: text,
+    content: <ContentBlock>[
+      if (reasoning.isNotEmpty)
+        ThinkingBlock(reasoning),
+      if (text.isNotEmpty)
+        TextBlock(text),
+    ],
     attachments: const <SessionMessageAttachment>[],
     createdAt: createdAt,
     seq: seq,
     phase: phase,
-    reasoning: reasoning,
   );
 }
 
@@ -53,7 +58,6 @@ enum _TimelineEntryKind {
   activity,
   providerWarning,
   planUpdated,
-  reasoning,
   liveAssistant,
 }
 
@@ -86,7 +90,6 @@ class _TimelineEntry {
     this.message,
     this.activity,
     this.runtimeEvent,
-    this.reasoning,
   });
 
   factory _TimelineEntry.message(SessionMessage message) => _TimelineEntry._(
@@ -118,19 +121,6 @@ class _TimelineEntry {
         runtimeEvent: event,
       );
 
-  factory _TimelineEntry.reasoning({
-    required String id,
-    required String text,
-    required DateTime createdAt,
-    required int seq,
-  }) => _TimelineEntry._(
-    kind: _TimelineEntryKind.reasoning,
-    createdAt: createdAt,
-    seq: seq,
-    keyId: 'reasoning:$id',
-    reasoning: text,
-  );
-
   factory _TimelineEntry.liveAssistant(_LiveAssistantMessageState message) =>
       _TimelineEntry._(
         kind: _TimelineEntryKind.liveAssistant,
@@ -146,7 +136,6 @@ class _TimelineEntry {
   final SessionMessage? message;
   final SessionActivity? activity;
   final _TimelineLiveEventRecord? runtimeEvent;
-  final String? reasoning;
 }
 
 class _LiveAssistantBubble extends StatelessWidget {
@@ -177,7 +166,6 @@ class _LiveAssistantBubble extends StatelessWidget {
             api: api,
             message: liveMessage.toMessage(),
             live: liveMessage.live,
-            reasoning: liveMessage.reasoning,
             onOpenFile: onOpenFile,
           ),
         );
@@ -900,7 +888,6 @@ class _MessageBubble extends StatelessWidget {
     required this.message,
     this.live = false,
     this.pinned = false,
-    this.reasoning,
     this.onTogglePin,
     this.onOpenFile,
   });
@@ -910,7 +897,6 @@ class _MessageBubble extends StatelessWidget {
   final SessionMessage message;
   final bool live;
   final bool pinned;
-  final String? reasoning;
   final VoidCallback? onTogglePin;
   final void Function(String path)? onOpenFile;
 
@@ -920,7 +906,6 @@ class _MessageBubble extends StatelessWidget {
     final isUser = message.role == 'user';
     final isAssistant = message.role == 'assistant';
     final hasText = message.text.trim().isNotEmpty;
-    final reasoningText = reasoning;
     final canPin = onTogglePin != null && message.hasVisibleContent;
 
     final bubbleColor = switch (message.role) {
@@ -977,38 +962,28 @@ class _MessageBubble extends StatelessWidget {
                         ],
                       ),
                     ),
-                  if (reasoningText != null && reasoningText.isNotEmpty && isAssistant)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: _ReasoningBlock(
-                        reasoning: reasoningText,
+                  for (final block in message.content)
+                    if (block is ThinkingBlock)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _ReasoningBlock(
+                          reasoning: block.thinking,
+                          onOpenFile: onOpenFile,
+                        ),
+                      )
+                    else if (block is TextBlock)
+                      _MarkdownMessageBody(
+                        text: block.text,
+                        textColor: textColor,
                         onOpenFile: onOpenFile,
                       ),
-                    ),
                   if (message.attachments.isNotEmpty) ...[
                     _MessageAttachmentsSection(
                       host: host,
                       api: api,
                       attachments: message.attachments,
                     ),
-                    if (hasText) const SizedBox(height: 10),
                   ],
-                  if (hasText)
-                    if (isAssistant)
-                      _MarkdownMessageBody(
-                        text: message.text,
-                        textColor: textColor,
-                        onOpenFile: onOpenFile,
-                      )
-                    else
-                      _LinkifiedSelectableText(
-                        text: message.text,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: textColor,
-                          height: 1.45,
-                        ),
-                        linkColor: colors.accent,
-                      ),
                   if (canPin || (!isUser && hasText) || hasText)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),

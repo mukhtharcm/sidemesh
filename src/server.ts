@@ -532,6 +532,7 @@ export async function startServer(
             id: event.message.id,
             role: "assistant",
             text: event.message.text,
+            content: event.message.content ?? [],
             attachments: [],
             createdAt: Date.now(),
             seq,
@@ -3255,10 +3256,12 @@ function buildSubmittedUserMessage(
   clientMessageId: string | null,
   seq: number,
 ): SessionMessage {
+  const text = buildSubmittedUserMessageText(input);
   return {
     id: clientMessageId || randomUUID(),
     role: "user",
-    text: buildSubmittedUserMessageText(input),
+    text,
+    content: [{ type: "text", text }],
     attachments: buildSubmittedUserMessageAttachments(input),
     createdAt: Date.now(),
     seq,
