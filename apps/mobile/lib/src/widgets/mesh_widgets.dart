@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
 
 /// Small pill chip used for status / metadata.
 class MeshPill extends StatelessWidget {
@@ -57,11 +58,11 @@ class MeshPill extends StatelessWidget {
     };
 
     final textStyle = mono
-        ? monoStyle(color: fg, fontSize: 11.5, fontWeight: FontWeight.w700)
+        ? monoStyle(color: fg, fontSize: 11.5, fontWeight: AppWeights.title)
             .copyWith(letterSpacing: 0.2)
         : Theme.of(context).textTheme.labelMedium?.copyWith(
               color: fg,
-              fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+              fontWeight: bold ? AppWeights.emphasis : AppWeights.body,
               letterSpacing: 0.2,
             );
 
@@ -221,7 +222,7 @@ class MeshEmptyState extends StatelessWidget {
             Text(
               title,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.title,
                     color: colors.textPrimary,
                   ),
               textAlign: TextAlign.center,

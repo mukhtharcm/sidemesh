@@ -255,7 +255,6 @@ class _ToastOverlayState extends State<_ToastOverlay>
                         IconButton(
                           tooltip: 'Dismiss',
                           iconSize: 16,
-                          splashRadius: 16,
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints.tightFor(
