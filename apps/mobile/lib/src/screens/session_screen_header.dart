@@ -805,10 +805,10 @@ String? _contextUsageLabel(SessionRuntimeSummary? runtime) {
   if (context.currentTokens == null) {
     return '?/${_formatTokenLimit(context.tokenLimit)} ctx';
   }
-  final leftPercent = ((1 - (context.currentTokens! / context.tokenLimit)) * 100)
+  final usedPercent = ((context.currentTokens! / context.tokenLimit) * 100)
       .clamp(0, 100)
       .round();
-  return '$leftPercent% ctx left';
+  return '$usedPercent% ctx used';
 }
 
 String? _contextUsageShortLabel(SessionRuntimeSummary? runtime) {
@@ -817,12 +817,12 @@ String? _contextUsageShortLabel(SessionRuntimeSummary? runtime) {
     return null;
   }
   if (context.currentTokens == null) {
-    return '?';
+    return '?%';
   }
-  final leftPercent = ((1 - (context.currentTokens! / context.tokenLimit)) * 100)
+  final usedPercent = ((context.currentTokens! / context.tokenLimit) * 100)
       .clamp(0, 100)
       .round();
-  return '$leftPercent%';
+  return '$usedPercent%';
 }
 
 MeshPillTone _contextUsageTone(SessionRuntimeSummary? runtime) {
