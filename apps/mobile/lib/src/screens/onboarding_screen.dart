@@ -10,6 +10,7 @@ import '../onboarding_store.dart';
 import '../pairing.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/theme_picker.dart';
@@ -40,6 +41,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final PageController _pageController = PageController();
   int _pageIndex = 0;
   static const int _pageCount = 5;
+  PairingPayload? _pairingSuccess;
 
   @override
   void dispose() {
@@ -82,7 +84,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       enabled: true,
     );
     await store.saveHosts([...hosts, host]);
-    HapticFeedback.mediumImpact();
+    HapticFeedback.heavyImpact();
+    if (mounted) setState(() => _pairingSuccess = payload);
+    await Future<void>.delayed(const Duration(milliseconds: 1600));
     await _complete();
   }
 
@@ -139,7 +143,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     colors: colors,
                     themeController: widget.themeController,
                   ),
-                  _ConnectPage(
+                  _pairingSuccess != null
+                      ? _PairingSuccessPage(
+                          colors: colors,
+                          payload: _pairingSuccess!,
+                        )
+                      : _ConnectPage(
                     colors: colors,
                     onScanQr: () async {
                       final payload = await showPairScannerSheet(context);
@@ -1121,4 +1130,64 @@ String _randomId() {
     12,
     (_) => alphabet[random.nextInt(alphabet.length)],
   ).join();
+}
+
+// ---------------------------------------------------------------------------
+// Pairing success overlay (shown for ~1.6 s before advancing)
+// ---------------------------------------------------------------------------
+
+class _PairingSuccessPage extends StatelessWidget {
+  const _PairingSuccessPage({required this.colors, required this.payload});
+
+  final AppColors colors;
+  final PairingPayload payload;
+
+  @override
+  Widget build(BuildContext context) {
+    return _OnboardingPageShell(
+      horizontalPadding: 32,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: colors.successMuted,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.check_rounded,
+              size: 40,
+              color: colors.success,
+            ),
+          ),
+          const SizedBox(height: 28),
+          Text(
+            'Connected!',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: colors.textPrimary,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            payload.label,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: AppWeights.title,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            payload.baseUrl,
+            textAlign: TextAlign.center,
+            style: monoStyle(color: colors.textSecondary, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
 }
