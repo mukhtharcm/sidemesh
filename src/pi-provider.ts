@@ -2199,7 +2199,7 @@ async function readPiSessionSummary(
     const createdAtMs = Date.parse(stringValue(header.timestamp) || "") || Date.now();
     let updatedAtMs = createdAtMs;
     let name: string | null = null;
-    let preview = cwd || "Pi session";
+    let preview: string | null = null;
     for (const entry of entries.slice(1)) {
       const role = stringValue(asRecord(entry.message)?.role);
       if (entry.type === "session_info") {
@@ -2215,7 +2215,7 @@ async function readPiSessionSummary(
           : entry.type === "branch_summary"
             ? stringValue(entry.summary)
             : null;
-      if (text && text.trim().length > 0) {
+      if (text && text.trim().length > 0 && preview === null) {
         preview = text.trim();
       }
       updatedAtMs = Math.max(
@@ -2229,7 +2229,7 @@ async function readPiSessionSummary(
       path: filePath,
       cwd,
       name,
-      preview: summarizePreview(preview),
+      preview: summarizePreview(preview ?? cwd ?? "Pi session"),
       createdAt: Math.trunc(createdAtMs / 1000),
       updatedAt: Math.trunc(
         Math.max(updatedAtMs, fileStats?.mtimeMs ?? updatedAtMs) / 1000,
