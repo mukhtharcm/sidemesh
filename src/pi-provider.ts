@@ -66,6 +66,7 @@ interface PiModelLike {
   provider: string;
   reasoning: boolean;
   input: string[];
+  contextWindow?: number;
 }
 
 interface PiSessionSummary {
@@ -662,7 +663,30 @@ export class PiAgentProvider
         normalizeStoredSessionActivity(activity),
       ]),
     );
-    state.runtime = parsed.runtime;
+    state.runtime = mergeRuntime(state.runtime, parsed.runtime);
+    if (!state.runtime?.telemetry?.contextWindow && state.runtime?.modelProvider && state.runtime?.model) {
+      try {
+        const services = await this.createServices(summary.cwd);
+        const models = services.modelRegistry.getAvailable();
+        const resolved = resolvePiModel(models, state.runtime.model);
+        if (resolved && typeof resolved.contextWindow === "number" && resolved.contextWindow > 0) {
+          state.runtime = {
+            ...state.runtime,
+            telemetry: {
+              ...(state.runtime.telemetry ?? {}),
+              contextWindow: {
+                currentTokens: null,
+                tokenLimit: resolved.contextWindow,
+                messagesLength: state.messages.length,
+                updatedAt: Date.now(),
+              },
+            },
+          };
+        }
+      } catch {
+        // Ignore missing services or registry lookup failures for history-only sessions
+      }
+    }
     state.nextSeq = parsed.nextSeq;
     state.thread.name = parsed.threadName ?? state.thread.name;
     state.thread.preview = parsed.preview || state.thread.preview;
@@ -930,9 +954,10 @@ export class PiAgentProvider
       if (active && (stopReason === "error" || stopReason === "aborted")) {
         active.status = stopReason === "aborted" ? "interrupted" : "failed";
       }
+      const assistantRuntime = runtimeFromAssistantMessage(session.runtime, message, active?.turnId ?? null);
       this.replaceRuntime(
         session,
-        runtimeFromAssistantMessage(session.runtime, message, active?.turnId ?? null),
+        runtimeFromLoadedSession(session.session ?? null, assistantRuntime, active?.turnId ?? null),
       );
       this.persistEventually();
       return;
@@ -1461,11 +1486,11 @@ function runtimeFromLoadedSession(
   };
 
   const contextUsage = session.getContextUsage?.();
-  if (contextUsage && contextUsage.contextWindow != null && contextUsage.tokens != null) {
+  if (contextUsage && contextUsage.contextWindow != null) {
     runtime.telemetry = {
       ...(existing?.telemetry ?? {}),
       contextWindow: {
-        currentTokens: contextUsage.tokens,
+        currentTokens: contextUsage.tokens ?? null,
         tokenLimit: contextUsage.contextWindow,
         messagesLength: session.messages?.length ?? 0,
         updatedAt: Date.now(),
@@ -1524,6 +1549,25 @@ function runtimeWithTurnId(
   return {
     ...runtime,
     turnId,
+  };
+}
+
+function mergeRuntime(
+  existing: SessionRuntimeSummary | null,
+  parsed: SessionRuntimeSummary | null,
+): SessionRuntimeSummary | null {
+  if (!parsed) {
+    return existing ? { ...existing } : null;
+  }
+  if (!existing) {
+    return { ...parsed };
+  }
+  return {
+    ...parsed,
+    telemetry: {
+      ...(parsed.telemetry ?? {}),
+      contextWindow: parsed.telemetry?.contextWindow ?? existing.telemetry?.contextWindow,
+    },
   };
 }
 
