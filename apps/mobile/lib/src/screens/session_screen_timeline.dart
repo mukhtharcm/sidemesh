@@ -53,6 +53,7 @@ enum _TimelineEntryKind {
   activity,
   providerWarning,
   planUpdated,
+  reasoning,
   liveAssistant,
 }
 
@@ -85,6 +86,7 @@ class _TimelineEntry {
     this.message,
     this.activity,
     this.runtimeEvent,
+    this.reasoning,
   });
 
   factory _TimelineEntry.message(SessionMessage message) => _TimelineEntry._(
@@ -116,6 +118,19 @@ class _TimelineEntry {
         runtimeEvent: event,
       );
 
+  factory _TimelineEntry.reasoning({
+    required String id,
+    required String text,
+    required DateTime createdAt,
+    required int seq,
+  }) => _TimelineEntry._(
+    kind: _TimelineEntryKind.reasoning,
+    createdAt: createdAt,
+    seq: seq,
+    keyId: 'reasoning:$id',
+    reasoning: text,
+  );
+
   factory _TimelineEntry.liveAssistant(_LiveAssistantMessageState message) =>
       _TimelineEntry._(
         kind: _TimelineEntryKind.liveAssistant,
@@ -131,6 +146,7 @@ class _TimelineEntry {
   final SessionMessage? message;
   final SessionActivity? activity;
   final _TimelineLiveEventRecord? runtimeEvent;
+  final String? reasoning;
 }
 
 class _LiveAssistantBubble extends StatelessWidget {
