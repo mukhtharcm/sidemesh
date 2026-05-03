@@ -2384,7 +2384,24 @@ class _SessionScreenState extends State<SessionScreen>
         final committedLive = _liveAssistantMessage;
         setState(() {
           if (message != null) {
-            _upsertOptimisticMessage(message);
+            if (message.reasoning.isEmpty &&
+                committedLive != null &&
+                committedLive.reasoning.isNotEmpty) {
+              _upsertOptimisticMessage(
+                SessionMessage(
+                  id: message.id,
+                  role: message.role,
+                  text: message.text,
+                  attachments: message.attachments,
+                  createdAt: message.createdAt,
+                  seq: message.seq,
+                  phase: message.phase,
+                  reasoning: committedLive.reasoning,
+                ),
+              );
+            } else {
+              _upsertOptimisticMessage(message);
+            }
           } else if (committedLive != null && committedLive.text.isNotEmpty) {
             _upsertOptimisticMessage(committedLive.toMessage());
           }
@@ -2411,6 +2428,7 @@ class _SessionScreenState extends State<SessionScreen>
               createdAt: committedLive.createdAt,
               seq: committedLive.seq,
               phase: 'final_answer',
+              reasoning: committedLive.reasoning,
             );
             _upsertOptimisticMessage(finalMsg);
           }
@@ -5389,6 +5407,7 @@ class _SessionScreenState extends State<SessionScreen>
                                     session.id,
                                     entry.message!.id,
                                   ),
+                                  reasoning: entry.message!.reasoning,
                                   onTogglePin: () =>
                                       _toggleMessagePin(entry.message!),
                                   onOpenFile: _openWorkspaceFile,

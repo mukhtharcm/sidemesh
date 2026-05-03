@@ -44,6 +44,7 @@ class _LiveAssistantMessageState {
     createdAt: createdAt,
     seq: seq,
     phase: phase,
+    reasoning: reasoning,
   );
 }
 

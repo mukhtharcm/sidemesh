@@ -1376,6 +1376,7 @@ class SessionMessage {
     required this.createdAt,
     required this.seq,
     this.phase,
+    this.reasoning = '',
   });
 
   final String id;
@@ -1385,6 +1386,7 @@ class SessionMessage {
   final DateTime createdAt;
   final int seq;
   final String? phase;
+  final String reasoning;
 
   bool get hasVisibleContent =>
       text.trim().isNotEmpty || attachments.isNotEmpty;
@@ -1402,6 +1404,7 @@ class SessionMessage {
     createdAt: _dateValue(json['createdAt']),
     seq: _intOrNull(json['seq']) ?? 0,
     phase: json['phase'] as String?,
+    reasoning: _stringOrNull(json['reasoning']) ?? '',
   );
 
   Map<String, dynamic> toJson() => {
@@ -1412,6 +1415,7 @@ class SessionMessage {
     'createdAt': createdAt.millisecondsSinceEpoch,
     'seq': seq,
     'phase': phase,
+    if (reasoning.isNotEmpty) 'reasoning': reasoning,
   };
 }
 
