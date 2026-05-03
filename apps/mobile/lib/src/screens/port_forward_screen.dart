@@ -729,7 +729,7 @@ class _PortForwardCard extends StatelessWidget {
                 FilledButton.icon(
                   onPressed: onPreview,
                   icon: const Icon(Icons.preview_rounded),
-                  label: const Text('Preview'),
+                  label: const Text('Open on device'),
                 ),
               if (running && port.scheme != 'tcp')
                 OutlinedButton.icon(
@@ -744,7 +744,7 @@ class _PortForwardCard extends StatelessWidget {
                         )
                       : const Icon(Icons.cast_connected_rounded),
                   label: Text(
-                    hasBrowserPreview ? 'Open stream' : 'Stream pixels',
+                    hasBrowserPreview ? 'Remote browser' : 'Preview on host',
                   ),
                 ),
               if (running && localUri != null)
@@ -757,7 +757,7 @@ class _PortForwardCard extends StatelessWidget {
                 OutlinedButton.icon(
                   onPressed: onExternal,
                   icon: const Icon(Icons.open_in_browser_rounded),
-                  label: const Text('Browser'),
+                  label: const Text('Phone browser'),
                 ),
               if (running)
                 TextButton.icon(
