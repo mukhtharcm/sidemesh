@@ -177,6 +177,390 @@ class _ComposerStatusStrip extends StatelessWidget {
   }
 }
 
+class _ProviderWarningCard extends StatelessWidget {
+  const _ProviderWarningCard({required this.event});
+
+  final LiveEvent event;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final level = (event.level ?? 'warning').toLowerCase();
+    final tone = switch (level) {
+      'error' => MeshPillTone.danger,
+      'info' => MeshPillTone.info,
+      _ => MeshPillTone.warning,
+    };
+    final icon = switch (level) {
+      'error' => Icons.error_outline_rounded,
+      'info' => Icons.info_outline_rounded,
+      _ => Icons.warning_amber_rounded,
+    };
+    final accent = switch (level) {
+      'error' => colors.danger,
+      'info' => colors.info,
+      _ => colors.warning,
+    };
+    return MeshCard(
+      padding: const EdgeInsets.all(14),
+      tone: MeshCardTone.muted,
+      accentStrip: accent,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              MeshPill(
+                label: 'Provider warning',
+                tone: tone,
+                icon: icon,
+              ),
+              if ((event.source ?? '').isNotEmpty)
+                MeshPill(
+                  label: event.source!,
+                  tone: MeshPillTone.neutral,
+                  mono: true,
+                ),
+              if ((event.code ?? '').isNotEmpty)
+                MeshPill(
+                  label: event.code!,
+                  tone: MeshPillTone.neutral,
+                  mono: true,
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            event.message ?? '',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlanUpdateCard extends StatelessWidget {
+  const _PlanUpdateCard({required this.event});
+
+  final LiveEvent event;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final steps = event.plan ?? const <LiveEventPlanStep>[];
+    final completedCount = steps.where((step) => step.status == 'completed').length;
+    return MeshCard(
+      padding: const EdgeInsets.all(14),
+      tone: MeshCardTone.muted,
+      accentStrip: colors.accent,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.route_rounded, size: 18, color: colors.accent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Plan update',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+              ),
+              MeshPill(
+                label: '$completedCount/${steps.length} complete',
+                tone: MeshPillTone.accent,
+                mono: true,
+              ),
+            ],
+          ),
+          if ((event.explanation ?? '').isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              event.explanation!,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          for (var index = 0; index < steps.length; index += 1) ...[
+            if (index > 0) const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  _planStepIcon(steps[index].status),
+                  size: 18,
+                  color: _planStepColor(colors, steps[index].status),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    steps[index].step,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colors.textPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                MeshPill(
+                  label: _planStepLabel(steps[index].status),
+                  tone: _planStepTone(steps[index].status),
+                  mono: true,
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  IconData _planStepIcon(String status) => switch (status) {
+    'completed' => Icons.check_circle_rounded,
+    'in_progress' => Icons.timelapse_rounded,
+    _ => Icons.radio_button_unchecked_rounded,
+  };
+
+  Color _planStepColor(AppColors colors, String status) => switch (status) {
+    'completed' => colors.success,
+    'in_progress' => colors.accent,
+    _ => colors.textTertiary,
+  };
+
+  MeshPillTone _planStepTone(String status) => switch (status) {
+    'completed' => MeshPillTone.success,
+    'in_progress' => MeshPillTone.accent,
+    _ => MeshPillTone.neutral,
+  };
+
+  String _planStepLabel(String status) => switch (status) {
+    'completed' => 'Completed',
+    'in_progress' => 'In progress',
+    _ => 'Pending',
+  };
+}
+
+class _RuntimeSignalStrip extends StatelessWidget {
+  const _RuntimeSignalStrip({
+    required this.threadStatus,
+    required this.queueUpdated,
+    required this.autoRetryUpdated,
+  });
+
+  final LiveEvent? threadStatus;
+  final LiveEvent? queueUpdated;
+  final LiveEvent? autoRetryUpdated;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final pills = <Widget>[];
+    final details = <String>[];
+
+    final thread = threadStatus;
+    if (_shouldShowThreadStatus(thread)) {
+      pills.add(
+        MeshPill(
+          label: _threadStatusLabel(thread!),
+          tone: _threadStatusTone(thread.status),
+          icon: _threadStatusIcon(thread.status),
+        ),
+      );
+      final message = (thread.message ?? '').trim();
+      if (message.isNotEmpty) {
+        details.add(message);
+      } else if ((thread.pendingActionKind ?? '').isNotEmpty) {
+        details.add(
+          'Pending ${thread.pendingActionKind!.replaceAll('_', ' ')} action.',
+        );
+      }
+    }
+
+    final queue = queueUpdated;
+    if (_hasQueueData(queue)) {
+      pills.add(
+        MeshPill(
+          label:
+              'Queue · ${queue!.steeringCount ?? 0} steering · ${queue.followUpCount ?? 0} follow-up',
+          tone: MeshPillTone.info,
+          icon: Icons.queue_rounded,
+        ),
+      );
+      final queuePreview = _queuePreview(queue);
+      if (queuePreview.isNotEmpty) {
+        details.add(queuePreview);
+      }
+    }
+
+    final retry = autoRetryUpdated;
+    if (retry != null) {
+      pills.add(
+        MeshPill(
+          label: _retryLabel(retry),
+          tone: _retryTone(retry),
+          icon: _retryIcon(retry),
+        ),
+      );
+      final retryDetail =
+          (retry.phase == 'started' ? retry.errorMessage : retry.finalError) ??
+          '';
+      if (retryDetail.trim().isNotEmpty) {
+        details.add(retryDetail.trim());
+      }
+    }
+
+    if (pills.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: AppShapes.input,
+        border: Border.all(color: colors.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(spacing: 8, runSpacing: 8, children: pills),
+            if (details.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                details.join(' • '),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool _shouldShowThreadStatus(LiveEvent? event) {
+    if (event == null) {
+      return false;
+    }
+    final status = (event.status ?? '').trim();
+    if (status.isEmpty) {
+      return false;
+    }
+    return status != 'running' ||
+        (event.message?.isNotEmpty ?? false) ||
+        (event.pendingActionKind?.isNotEmpty ?? false);
+  }
+
+  bool _hasQueueData(LiveEvent? event) {
+    if (event == null) {
+      return false;
+    }
+    return (event.steeringCount ?? 0) > 0 ||
+        (event.followUpCount ?? 0) > 0 ||
+        (event.steeringPreview?.isNotEmpty ?? false) ||
+        (event.followUpPreview?.isNotEmpty ?? false);
+  }
+
+  String _threadStatusLabel(LiveEvent event) {
+    final status = event.status ?? 'unknown';
+    if (status == 'waiting_for_approval' &&
+        (event.pendingActionKind?.isNotEmpty ?? false)) {
+      return 'Waiting for ${event.pendingActionKind!.replaceAll('_', ' ')}';
+    }
+    return switch (status) {
+      'idle' => 'Idle',
+      'running' => 'Running',
+      'waiting_for_input' => 'Waiting for input',
+      'waiting_for_approval' => 'Waiting for approval',
+      'errored' => 'Errored',
+      'closed' => 'Closed',
+      _ => 'Unknown status',
+    };
+  }
+
+  MeshPillTone _threadStatusTone(String? status) => switch (status) {
+    'waiting_for_input' || 'waiting_for_approval' => MeshPillTone.warning,
+    'errored' => MeshPillTone.danger,
+    'running' => MeshPillTone.accent,
+    _ => MeshPillTone.neutral,
+  };
+
+  IconData _threadStatusIcon(String? status) => switch (status) {
+    'waiting_for_input' => Icons.keyboard_rounded,
+    'waiting_for_approval' => Icons.gpp_maybe_rounded,
+    'errored' => Icons.error_outline_rounded,
+    'closed' => Icons.lock_outline_rounded,
+    'running' => Icons.play_circle_outline_rounded,
+    _ => Icons.info_outline_rounded,
+  };
+
+  String _queuePreview(LiveEvent event) {
+    final parts = <String>[];
+    final steering = event.steeringPreview;
+    if (steering != null && steering.isNotEmpty) {
+      parts.add('Steering: ${steering.join(', ')}');
+    }
+    final followUp = event.followUpPreview;
+    if (followUp != null && followUp.isNotEmpty) {
+      parts.add('Follow-up: ${followUp.join(', ')}');
+    }
+    return parts.join(' • ');
+  }
+
+  String _retryLabel(LiveEvent event) {
+    if (event.phase == 'started') {
+      final maxAttempts = event.maxAttempts;
+      final delayMs = event.delayMs;
+      final delayLabel = delayMs == null ? 'soon' : _formatDelay(delayMs);
+      return maxAttempts == null
+          ? 'Retry ${event.attempt ?? '?'} in $delayLabel'
+          : 'Retry ${event.attempt ?? '?'} / $maxAttempts in $delayLabel';
+    }
+    if (event.success == true) {
+      return 'Retry recovered on attempt ${event.attempt ?? '?'}';
+    }
+    return 'Retry failed on attempt ${event.attempt ?? '?'}';
+  }
+
+  MeshPillTone _retryTone(LiveEvent event) {
+    if (event.phase == 'started') {
+      return MeshPillTone.warning;
+    }
+    return event.success == true ? MeshPillTone.success : MeshPillTone.danger;
+  }
+
+  IconData _retryIcon(LiveEvent event) {
+    if (event.phase == 'started') {
+      return Icons.schedule_rounded;
+    }
+    return event.success == true
+        ? Icons.check_circle_outline_rounded
+        : Icons.error_outline_rounded;
+  }
+
+  String _formatDelay(int delayMs) {
+    final seconds = delayMs / 1000;
+    final whole = delayMs % 1000 == 0;
+    return whole ? '${seconds.toStringAsFixed(0)}s' : '${seconds.toStringAsFixed(1)}s';
+  }
+}
+
 class _PendingSendStrip extends StatelessWidget {
   const _PendingSendStrip({
     required this.host,

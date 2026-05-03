@@ -224,7 +224,7 @@ describe("provider registry", () => {
     assert.equal(provider.kind, "pi");
     assert.equal(provider.displayName, "Pi");
     assert.equal(provider.capabilities.input.text, true);
-    assert.equal(provider.capabilities.input.imageUrl, false);
+    assert.equal(provider.capabilities.input.imageUrl, true);
     assert.equal(provider.capabilities.input.localImage, true);
     assert.equal(provider.capabilities.input.skills, true);
     assert.equal(provider.capabilities.configuration.models, true);

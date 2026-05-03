@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -188,7 +189,20 @@ class _FakeApiClient extends ApiClient {
   }
 
   @override
-  WebSocketChannel openSessionsLive(HostProfile host) => _channel;
+  WebSocketChannel openSessionsLive(HostProfile host) {
+    if (_error == null) {
+      scheduleMicrotask(() {
+        _channel.emit(jsonEncode({'type': 'hello'}));
+        _channel.emit(
+          jsonEncode({
+            'type': 'snapshot',
+            'sessions': _sessions.map((session) => session.toJson()).toList(),
+          }),
+        );
+      });
+    }
+    return _channel;
+  }
 }
 
 class _FakeScreenAwakeBinding implements ScreenAwakeBinding {
@@ -222,6 +236,10 @@ class _IdleWebSocketChannel extends StreamChannelMixin<dynamic>
 
   @override
   Future<void> get ready async {}
+
+  void emit(String raw) {
+    _incoming.add(raw);
+  }
 }
 
 class _IdleWebSocketSink implements WebSocketSink {

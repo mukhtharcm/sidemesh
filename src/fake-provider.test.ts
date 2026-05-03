@@ -410,6 +410,141 @@ describe("fake test provider", () => {
     assert.equal(minimal.capabilities.workspace.remoteGitDiff, false);
   });
 
+  it("emits rich runtime envelope events for UI testing", async () => {
+    const cwd = await tempRoot(tempRoots);
+    const provider = new FakeAgentProvider({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: cwd,
+    });
+    const events: AgentProviderLiveEvent[] = [];
+    provider.on("liveEvent", (event) => events.push(event));
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd,
+      input: [
+        {
+          type: "text",
+          text: "rich-events",
+          text_elements: [],
+        },
+      ],
+      overrides: EMPTY_OVERRIDES,
+    });
+
+    const warning = await waitFor(
+      () =>
+        events.find(
+          (event) =>
+            event.type === "provider_warning" &&
+            event.sessionId === created.thread.id,
+        ),
+      "provider warning",
+    );
+    if (warning.type !== "provider_warning") {
+      throw new Error("Expected provider_warning event");
+    }
+    assert.equal(warning.level, "warning");
+    assert.equal(warning.code, "fake_runtime_signal");
+
+    const threadStatus = await waitFor(
+      () =>
+        events.find(
+          (event) =>
+            event.type === "thread_status_changed" &&
+            event.sessionId === created.thread.id,
+        ),
+      "thread status",
+    );
+    if (threadStatus.type !== "thread_status_changed") {
+      throw new Error("Expected thread_status_changed event");
+    }
+    assert.equal(threadStatus.status, "running");
+
+    const plan = await waitFor(
+      () =>
+        events.find(
+          (event) =>
+            event.type === "plan_updated" && event.sessionId === created.thread.id,
+        ),
+      "plan update",
+    );
+    if (plan.type !== "plan_updated") {
+      throw new Error("Expected plan_updated event");
+    }
+    assert.equal(plan.plan.length, 3);
+    assert.equal(plan.plan[1]?.status, "in_progress");
+
+    const reasoning = await waitFor(
+      () =>
+        events.find(
+          (event) =>
+            event.type === "reasoning_delta" &&
+            event.sessionId === created.thread.id,
+        ),
+      "reasoning delta",
+    );
+    if (reasoning.type !== "reasoning_delta") {
+      throw new Error("Expected reasoning_delta event");
+    }
+    assert.equal(reasoning.summary, true);
+
+    const queue = await waitFor(
+      () =>
+        events.find(
+          (event) =>
+            event.type === "queue_updated" && event.sessionId === created.thread.id,
+        ),
+      "queue update",
+    );
+    if (queue.type !== "queue_updated") {
+      throw new Error("Expected queue_updated event");
+    }
+    assert.equal(queue.steeringCount, 1);
+    assert.equal(queue.followUpCount, 2);
+
+    const retryStarted = await waitFor(
+      () =>
+        events.find(
+          (event) =>
+            event.type === "auto_retry_updated" &&
+            event.sessionId === created.thread.id &&
+            event.phase === "started",
+        ),
+      "retry start",
+    );
+    if (retryStarted.type !== "auto_retry_updated") {
+      throw new Error("Expected auto_retry_updated start event");
+    }
+    assert.equal(retryStarted.delayMs, 1500);
+
+    const retryEnded = await waitFor(
+      () =>
+        events.find(
+          (event) =>
+            event.type === "auto_retry_updated" &&
+            event.sessionId === created.thread.id &&
+            event.phase === "ended",
+        ),
+      "retry end",
+    );
+    if (retryEnded.type !== "auto_retry_updated") {
+      throw new Error("Expected auto_retry_updated end event");
+    }
+    assert.equal(retryEnded.success, true);
+
+    await waitFor(
+      () =>
+        events.find(
+          (event) =>
+            event.type === "turn_completed" &&
+            event.sessionId === created.thread.id,
+        ),
+      "rich event turn completion",
+    );
+  });
+
   it("can fail and interrupt turns deterministically", async () => {
     const cwd = await tempRoot(tempRoots);
     const provider = new FakeAgentProvider({

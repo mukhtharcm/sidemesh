@@ -9,6 +9,7 @@ import type {
   AgentProvider,
   AgentProviderCapabilities,
   AgentProviderEvents,
+  AgentProviderLiveEvent,
   AgentSessionListOptions,
   AgentSubmitInputRequest,
   AgentSubmitInputResult,
@@ -121,6 +122,102 @@ describe("MultiAgentProvider", () => {
     const action = await opened;
     assert.match(action.id, /^codex:/);
     assert.match(action.sessionId, /^codex:/);
+  });
+
+  it("wraps rich session live events from child providers", async () => {
+    const codex = new StubProvider("codex", "Codex");
+    const provider = new MultiAgentProvider(
+      [
+        {
+          kind: "codex",
+          config: { kind: "codex", bin: "codex" },
+          provider: codex,
+        },
+      ],
+      "codex",
+    );
+
+    const events: AgentProviderLiveEvent[] = [];
+    provider.on("liveEvent", (event) => {
+      if (
+        event.type === "provider_warning" ||
+        event.type === "thread_status_changed" ||
+        event.type === "plan_updated" ||
+        event.type === "reasoning_delta" ||
+        event.type === "queue_updated" ||
+        event.type === "auto_retry_updated"
+      ) {
+        events.push(event);
+      }
+    });
+
+    codex.emit("liveEvent", {
+      type: "provider_warning",
+      sessionId: "thread-1",
+      level: "warning",
+      code: "warning-1",
+      message: "Heads up",
+      source: "codex",
+    });
+    codex.emit("liveEvent", {
+      type: "thread_status_changed",
+      sessionId: "thread-1",
+      status: "waiting_for_approval",
+      pendingActionKind: "command",
+    });
+    codex.emit("liveEvent", {
+      type: "plan_updated",
+      sessionId: "thread-1",
+      turnId: "turn-1",
+      explanation: "Do the work",
+      plan: [
+        { step: "Read the docs", status: "completed" },
+        { step: "Ship the change", status: "in_progress" },
+      ],
+    });
+    codex.emit("liveEvent", {
+      type: "reasoning_delta",
+      sessionId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      reasoningId: "reason-1",
+      delta: "Thinking...",
+      summary: true,
+    });
+    codex.emit("liveEvent", {
+      type: "queue_updated",
+      sessionId: "thread-1",
+      steeringCount: 1,
+      followUpCount: 2,
+      steeringPreview: ["Keep it neutral"],
+      followUpPreview: ["Add tests", "Run typecheck"],
+    });
+    codex.emit("liveEvent", {
+      type: "auto_retry_updated",
+      sessionId: "thread-1",
+      phase: "started",
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 2000,
+      errorMessage: "Overloaded",
+    });
+
+    assert.equal(events.length, 6);
+    for (const event of events) {
+      if ("sessionId" in event && typeof event.sessionId === "string") {
+        assert.match(event.sessionId, /^codex:/);
+      }
+    }
+    const warning = events.find((event) => event.type === "provider_warning");
+    if (warning?.type !== "provider_warning") {
+      throw new Error("Expected provider_warning event");
+    }
+    assert.equal(warning.code, "warning-1");
+    const plan = events.find((event) => event.type === "plan_updated");
+    if (plan?.type !== "plan_updated") {
+      throw new Error("Expected plan_updated event");
+    }
+    assert.equal(plan.plan[1]?.step, "Ship the change");
   });
 
   it("advertises default provider capabilities instead of provider union", async () => {

@@ -434,6 +434,24 @@ export type PendingActionKind =
   | "user_input"
   | "elicitation";
 
+export type ProviderWarningLevel = "info" | "warning" | "error";
+
+export type LiveThreadStatus =
+  | "idle"
+  | "running"
+  | "waiting_for_input"
+  | "waiting_for_approval"
+  | "errored"
+  | "closed"
+  | "unknown";
+
+export type LivePlanStepStatus = "pending" | "in_progress" | "completed";
+
+export interface LivePlanStep {
+  step: string;
+  status: LivePlanStepStatus;
+}
+
 export type PendingActionDecisionId =
   | "accept"
   | "acceptForSession"
@@ -619,6 +637,12 @@ export interface LiveEvent {
     | "turn_completed"
     | "activity_updated"
     | "runtime_updated"
+    | "provider_warning"
+    | "thread_status_changed"
+    | "plan_updated"
+    | "reasoning_delta"
+    | "queue_updated"
+    | "auto_retry_updated"
     | "action_opened"
     | "action_resolved"
     | "skills_changed"
@@ -629,7 +653,26 @@ export interface LiveEvent {
   turnId?: string;
   itemId?: string;
   delta?: string;
+  reasoningId?: string;
+  summary?: boolean;
   status?: string;
+  pendingActionKind?: PendingActionKind;
+  explanation?: string;
+  plan?: LivePlanStep[];
+  steeringCount?: number;
+  followUpCount?: number;
+  steeringPreview?: string[];
+  followUpPreview?: string[];
+  phase?: "started" | "ended";
+  attempt?: number;
+  maxAttempts?: number;
+  delayMs?: number;
+  errorMessage?: string;
+  success?: boolean;
+  finalError?: string;
+  level?: ProviderWarningLevel;
+  code?: string;
+  source?: string;
   action?: PendingAction;
   actionId?: string;
   message?: string;
