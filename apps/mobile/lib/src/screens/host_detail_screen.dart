@@ -258,16 +258,16 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                 ),
                 children: [
                   _NodeCard(host: widget.host, node: data.node),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: AppSpacing.sm),
                   _ProviderContractCard(node: data.node),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: AppSpacing.lg),
                   _SectionHeader(
                     icon: Icons.folder_open_rounded,
                     title: 'Workspaces',
                     subtitle:
                         '${data.workspaces.length} ${data.workspaces.length == 1 ? "entry" : "entries"}',
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   if (data.workspaces.isEmpty)
                     const MeshEmptyState(
                       icon: Icons.folder_off_rounded,
@@ -277,7 +277,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                   else
                     ...data.workspaces.map(
                       (workspace) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                         child: _WorkspaceCard(
                           workspace: workspace,
                           onTap: () =>
@@ -285,14 +285,14 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                         ),
                       ),
                     ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: AppSpacing.lg),
                   _SectionHeader(
                     icon: Icons.history_rounded,
                     title: 'Recent sessions',
                     subtitle:
                         '${data.sessions.length} ${data.sessions.length == 1 ? "session" : "sessions"}',
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   if (sortedSessions.isEmpty)
                     const MeshEmptyState(
                       icon: Icons.chat_bubble_outline_rounded,
@@ -302,7 +302,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                   else
                     ...sortedSessions.map(
                       (session) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                         child: _SessionRow(
                           host: widget.host,
                           session: session,
@@ -414,43 +414,43 @@ class _NodeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return MeshCard(
-      tone: MeshCardTone.elevated,
-      padding: const EdgeInsets.all(18),
+      tone: MeshCardTone.surface,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
                   color: colors.accentMuted,
-                  borderRadius: BorderRadius.circular(13),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: colors.accent.withValues(alpha: 0.3),
                   ),
                 ),
                 alignment: Alignment.center,
-                child: Icon(Icons.dns_rounded, color: colors.accent, size: 22),
+                child: Icon(Icons.dns_rounded, color: colors.accent, size: 18),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       node.label.isNotEmpty ? node.label : host.label,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: AppWeights.emphasis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: AppWeights.title,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       host.baseUrl,
                       style: monoStyle(
-                        color: colors.textSecondary,
-                        fontSize: 11.5,
+                        color: colors.textTertiary,
+                        fontSize: 11,
                       ),
                     ),
                   ],
@@ -458,7 +458,7 @@ class _NodeCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: AppSpacing.sm),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -547,18 +547,18 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          tilePadding: const EdgeInsets.fromLTRB(16, 10, 14, 10),
+          tilePadding: const EdgeInsets.fromLTRB(14, 8, 12, 8),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           leading: Container(
-            width: 34,
-            height: 34,
+            width: 30,
+            height: 30,
             decoration: BoxDecoration(
               color: colors.infoMuted,
-              borderRadius: BorderRadius.circular(11),
+              borderRadius: BorderRadius.circular(9),
               border: Border.all(color: colors.info.withValues(alpha: 0.35)),
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.hub_rounded, color: colors.info, size: 18),
+            child: Icon(Icons.hub_rounded, color: colors.info, size: 16),
           ),
           title: Text(
             'Provider contract',
@@ -858,9 +858,8 @@ class _CapabilityGroupRow extends StatelessWidget {
     final colors = context.colors;
     final allEnabled = group.enabledCount == group.totalCount;
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
       decoration: BoxDecoration(
-        color: colors.surface,
         borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
@@ -927,7 +926,7 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+      padding: const EdgeInsets.fromLTRB(2, 0, 2, 0),
       child: Row(
         children: [
           Icon(icon, size: 18, color: colors.accent),
@@ -1180,7 +1179,6 @@ class _SessionRow extends StatelessWidget {
                     tooltip: favorite ? 'Remove favorite' : 'Add favorite',
                     visualDensity: VisualDensity.compact,
                     iconSize: 20,
-                    splashRadius: 18,
                     constraints: const BoxConstraints(
                       minWidth: 32,
                       minHeight: 32,
