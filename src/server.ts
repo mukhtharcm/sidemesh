@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { hostname, platform } from "node:os";
+import { homedir, hostname, platform } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import nodePath from "node:path";
 
@@ -701,6 +701,7 @@ export async function startServer(
       label: config.label,
       hostname: hostname(),
       platform: platform(),
+      homeDirectory: homedir(),
       codexVersion: providerVersion,
       provider: providerRuntime.defaultProviderKind,
       providerName:
