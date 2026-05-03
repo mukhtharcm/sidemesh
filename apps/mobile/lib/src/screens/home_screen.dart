@@ -436,6 +436,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
             _HomeStickyHeader(
               tab: tab,
               searchController: _searchController,
+              searchVisible: tab.title == 'Hosts' || enabledHosts.length >= 4,
               viewMode: _tabIndex == 0 ? _recentViewMode : null,
               onViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
               onRefresh: _refreshHosts,
@@ -512,7 +513,17 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       bottomNavigationBar: _MeshNavBar(
         tabs: _tabs,
         currentIndex: _tabIndex,
-        onTap: (index) => setState(() => _tabIndex = index),
+        onTap: (index) {
+          setState(() {
+            _tabIndex = index;
+            final tab = _tabs[index];
+            final showSearch = tab.title == 'Hosts' || _enabledHosts.length >= 4;
+            if (!showSearch && (_query.isNotEmpty || _searchController.text.isNotEmpty)) {
+              _query = '';
+              _searchController.clear();
+            }
+          });
+        },
         badges: [_activeCount, _inboxCount, 0],
       ),
     );
@@ -539,6 +550,7 @@ class _HomeStickyHeader extends StatelessWidget {
   const _HomeStickyHeader({
     required this.tab,
     required this.searchController,
+    required this.searchVisible,
     required this.viewMode,
     required this.onViewModeChanged,
     required this.onRefresh,
@@ -548,6 +560,7 @@ class _HomeStickyHeader extends StatelessWidget {
 
   final _TabDef tab;
   final TextEditingController searchController;
+  final bool searchVisible;
   final SessionViewMode? viewMode;
   final ValueChanged<SessionViewMode>? onViewModeChanged;
   final VoidCallback onRefresh;
@@ -638,11 +651,16 @@ class _HomeStickyHeader extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
-          _HomeSearchField(
-            controller: searchController,
-            hintText: 'Search ${tab.title.toLowerCase()}',
-            viewMode: viewMode,
-            onViewModeChanged: onViewModeChanged,
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            child: searchVisible
+                ? _HomeSearchField(
+                    controller: searchController,
+                    hintText: 'Search ${tab.title.toLowerCase()}',
+                    viewMode: viewMode,
+                    onViewModeChanged: onViewModeChanged,
+                  )
+                : const SizedBox(key: ValueKey('no-search'), height: 0),
           ),
         ],
       ),
