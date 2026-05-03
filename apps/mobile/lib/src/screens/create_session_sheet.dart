@@ -225,11 +225,6 @@ class _HostPickerSurface extends StatelessWidget {
                               ],
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          Icon(
-                            Icons.chevron_right_rounded,
-                            color: colors.textTertiary,
-                          ),
                         ],
                       ),
                     );
@@ -1410,7 +1405,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
       child: Column(
@@ -1872,7 +1867,7 @@ class _LaunchFieldFrame extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
       child: Row(
@@ -1940,13 +1935,13 @@ class _LaunchSelectorRow extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppShapes.input,
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
           decoration: BoxDecoration(
             color: colors.surfaceMuted,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: AppShapes.input,
             border: Border.all(color: colors.border),
           ),
           child: Row(
@@ -2425,8 +2420,6 @@ class _ProviderPickerTile extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Icon(Icons.chevron_right_rounded, size: 18, color: colors.border),
             ],
           ),
         ),
