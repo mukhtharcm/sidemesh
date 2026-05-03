@@ -138,7 +138,8 @@ Every provider implements the interface in `src/agent-provider.ts`.
 - When `config.providers.length > 1`, `provider-factory.ts` wraps them in
   `MultiAgentProvider` automatically.
 - IDs are namespaced: `kind:base64url(rawId)`.
-- Capabilities merge with **OR** semantics.
+- `MultiAgentProvider.capabilities` reflects the default provider only; use
+  `supportedProviders[].capabilities` from `/api/node` for per-provider truth.
 - `stderr` gets a `[kind] ` prefix for non-default providers.
 - If the resolved provider lacks a capability, the call throws even if another
   provider has it.

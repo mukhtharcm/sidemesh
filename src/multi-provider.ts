@@ -17,22 +17,12 @@ import {
   type AgentSubmitInputRequest,
   type AgentSubmitInputResult,
 } from "./agent-provider.js";
-import type {
-  AgentModelListOptions,
-  AgentProfileListOptions,
-  AgentRemoteGitDiff,
-  AgentSkillConfigWriteRequest,
-  AgentSkillListOptions,
-} from "./agent-provider.js";
 import type { PendingActionResponseInput } from "./approvals.js";
 import type {
   AgentProviderConfig,
   AgentProviderKind,
-  ModelSummary,
-  ProviderProfileCatalog,
   SessionLogSnapshot,
   SessionRuntimeSummary,
-  SkillCatalogEntry,
   ThreadRecord,
 } from "./types.js";
 
@@ -323,60 +313,6 @@ export class MultiAgentProvider
       "respondToPendingAction",
       "approval response",
     ).call(resolved.provider, resolved.action, decision);
-  }
-
-  public async listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry> {
-    const entry = this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "listSkills",
-      "skills",
-    ).call(entry.provider, options);
-  }
-
-  public async writeSkillConfig(
-    request: AgentSkillConfigWriteRequest,
-  ): Promise<unknown> {
-    const entry = this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "writeSkillConfig",
-      "skill management",
-    ).call(entry.provider, request);
-  }
-
-  public async listModels(
-    options: AgentModelListOptions,
-  ): Promise<ModelSummary[]> {
-    const entry = this.resolveProviderKind(options.provider);
-    return requireProviderMethod(
-      entry.provider,
-      "listModels",
-      "model catalog",
-    ).call(entry.provider, {
-      ...options,
-      provider: null,
-    });
-  }
-
-  public async listProfiles(
-    options: AgentProfileListOptions,
-  ): Promise<ProviderProfileCatalog> {
-    const entry = this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "listProfiles",
-      "profiles",
-    ).call(entry.provider, options);
-  }
-
-  public async readRemoteGitDiff(cwd: string): Promise<AgentRemoteGitDiff> {
-    const entry = this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "readRemoteGitDiff",
-      "remote git diff",
-    ).call(entry.provider, cwd);
   }
 
   public getProviderEntries(): ProviderEntry[] {

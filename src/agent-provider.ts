@@ -229,7 +229,6 @@ export interface AgentProviderCapabilities {
     webSearch: boolean;
   };
   workspace: {
-    filesystem: boolean;
     remoteGitDiff: boolean;
   };
   lifecycle: {

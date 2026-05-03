@@ -288,7 +288,6 @@ describe("fake test provider", () => {
     assert.equal(provider.capabilities.configuration.models, false);
     assert.equal(provider.capabilities.runtimeControls.model, false);
     assert.equal(provider.capabilities.approvals.command, false);
-    assert.equal(provider.capabilities.workspace.filesystem, false);
 
     const created = await provider.createSession({
       cwd,
@@ -339,7 +338,6 @@ describe("fake test provider", () => {
     noFiles.on("liveEvent", (event) => noFilesEvents.push(event));
     await noFiles.start();
 
-    assert.equal(noFiles.capabilities.workspace.filesystem, false);
     assert.equal(noFiles.capabilities.workspace.remoteGitDiff, false);
     assert.equal(noFiles.capabilities.configuration.models, true);
 
@@ -376,7 +374,7 @@ describe("fake test provider", () => {
     assert.equal(noModelControls.capabilities.runtimeControls.model, false);
     assert.equal(noModelControls.capabilities.runtimeControls.fastMode, false);
     assert.equal(noModelControls.capabilities.approvals.command, true);
-    assert.equal(noModelControls.capabilities.workspace.filesystem, true);
+    assert.equal(noModelControls.capabilities.workspace.remoteGitDiff, true);
   });
 
   it("can simulate providers without approvals and minimal session controls", async () => {
@@ -391,7 +389,7 @@ describe("fake test provider", () => {
     assert.equal(noApprovals.capabilities.approvals.permissions, false);
     assert.equal(noApprovals.capabilities.runtimeControls.approvalPolicy, false);
     assert.equal(noApprovals.capabilities.configuration.models, true);
-    assert.equal(noApprovals.capabilities.workspace.filesystem, true);
+    assert.equal(noApprovals.capabilities.workspace.remoteGitDiff, true);
 
     const minimal = new FakeAgentProvider({
       latencyMs: 0,
@@ -409,7 +407,7 @@ describe("fake test provider", () => {
     assert.equal(minimal.capabilities.input.text, true);
     assert.equal(minimal.capabilities.input.imageUrl, false);
     assert.equal(minimal.capabilities.configuration.models, false);
-    assert.equal(minimal.capabilities.workspace.filesystem, false);
+    assert.equal(minimal.capabilities.workspace.remoteGitDiff, false);
   });
 
   it("can fail and interrupt turns deterministically", async () => {

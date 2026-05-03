@@ -175,7 +175,6 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     webSearch: false,
   },
   workspace: {
-    filesystem: false,
     remoteGitDiff: false,
   },
   lifecycle: {

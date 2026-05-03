@@ -1927,7 +1927,6 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     webSearch: true,
   },
   workspace: {
-    filesystem: true,
     remoteGitDiff: true,
   },
   lifecycle: {

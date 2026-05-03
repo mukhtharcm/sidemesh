@@ -6,18 +6,28 @@ import nodePath from "node:path";
 import http from "node:http";
 
 import { startServer, type RunningServer } from "./server.js";
-import type { NodeConfig } from "./types.js";
+import type { FakeCapabilityProfile, NodeConfig } from "./types.js";
 import { FakeAgentProvider } from "./fake-provider.js";
 
-function makeConfig(stateDir: string): NodeConfig {
+function makeConfig(
+  stateDir: string,
+  options: { capabilityProfile?: FakeCapabilityProfile } = {},
+): NodeConfig {
   const token = "test-token-" + Math.random().toString(36).slice(2);
+  const provider = {
+    kind: "fake" as const,
+    latencyMs: 0,
+    seedSessions: false,
+    workspaceRoot: null,
+    capabilityProfile: options.capabilityProfile ?? "full",
+  };
   return {
     label: "test",
     port: 0,
     token,
     tokenSource: "generated",
-    provider: { kind: "fake", latencyMs: 0, seedSessions: false, workspaceRoot: null, capabilityProfile: "full" },
-    providers: [{ kind: "fake", latencyMs: 0, seedSessions: false, workspaceRoot: null, capabilityProfile: "full" }],
+    provider,
+    providers: [provider],
     defaultProviderKind: "fake",
     stateDir,
     terminal: { enabled: false, shell: null, requirePty: false },
@@ -141,6 +151,128 @@ describe("GET /api/node", () => {
       assert.equal(body.supportedProviders[0].kind, "fake");
       assert.equal(body.supportedProviders[0].capabilities.sessions.create, true);
     });
+  });
+});
+
+describe("provider-scoped catalog routes", () => {
+  it("uses the default provider when agentProvider is omitted", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const baseRequest = {
+        hostname: "127.0.0.1",
+        port: server.port,
+        headers: { Authorization: "Bearer " + config.token },
+      };
+
+      assert.equal(
+        (await request({ ...baseRequest, path: "/api/models", method: "GET" })).statusCode,
+        200,
+      );
+      assert.equal(
+        (await request({ ...baseRequest, path: "/api/profiles", method: "GET" })).statusCode,
+        200,
+      );
+      assert.equal(
+        (await request({
+          ...baseRequest,
+          path: `/api/skills?cwd=${encodeURIComponent("/tmp")}`,
+          method: "GET",
+        })).statusCode,
+        200,
+      );
+      assert.equal(
+        (await request({
+          ...baseRequest,
+          path: "/api/skills/config/write",
+          method: "POST",
+          headers: {
+            ...baseRequest.headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: "fake code review",
+            enabled: false,
+          }),
+        })).statusCode,
+        200,
+      );
+    });
+  });
+
+  it("rejects unknown catalog providers", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const baseRequest = {
+        hostname: "127.0.0.1",
+        port: server.port,
+        headers: { Authorization: "Bearer " + config.token },
+      };
+
+      for (const path of [
+        "/api/models?agentProvider=unknown",
+        "/api/profiles?agentProvider=unknown",
+        `/api/skills?agentProvider=unknown&cwd=${encodeURIComponent("/tmp")}`,
+      ]) {
+        const res = await request({ ...baseRequest, path, method: "GET" });
+        assert.equal(res.statusCode, 400, path);
+        assert.equal((res.body as any).error, "unknown provider");
+      }
+
+      const writeRes = await request({
+        ...baseRequest,
+        path: "/api/skills/config/write",
+        method: "POST",
+        headers: {
+          ...baseRequest.headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          agentProvider: "unknown",
+          name: "fake code review",
+          enabled: false,
+        }),
+      });
+      assert.equal(writeRes.statusCode, 400);
+      assert.equal((writeRes.body as any).error, "unknown provider");
+    });
+  });
+
+  it("does not fall through when the selected provider lacks catalog capabilities", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(
+      makeConfig(stateDir, { capabilityProfile: "chat-only" }),
+      async (server, config) => {
+        const baseRequest = {
+          hostname: "127.0.0.1",
+          port: server.port,
+          headers: { Authorization: "Bearer " + config.token },
+        };
+
+        for (const path of [
+          "/api/models",
+          "/api/profiles",
+          `/api/skills?cwd=${encodeURIComponent("/tmp")}`,
+        ]) {
+          const res = await request({ ...baseRequest, path, method: "GET" });
+          assert.equal(res.statusCode, 501, path);
+        }
+
+        const writeRes = await request({
+          ...baseRequest,
+          path: "/api/skills/config/write",
+          method: "POST",
+          headers: {
+            ...baseRequest.headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: "fake code review",
+            enabled: false,
+          }),
+        });
+        assert.equal(writeRes.statusCode, 501);
+      },
+    );
   });
 });
 

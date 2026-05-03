@@ -218,7 +218,7 @@ void main() {
             'skills': false,
           },
           'runtimeControls': {'model': false, 'approvalPolicy': false},
-          'workspace': {'filesystem': false, 'remoteGitDiff': false},
+          'workspace': {'remoteGitDiff': false},
         },
       ),
     );
@@ -238,10 +238,6 @@ void main() {
       chatOnly.providerCapabilities.supports('runtimeControls', 'model'),
       isFalse,
     );
-    expect(
-      chatOnly.providerCapabilities.supports('workspace', 'filesystem'),
-      isFalse,
-    );
 
     final noFiles = NodeInfo.fromJson(
       _fakeNodePayload(
@@ -250,7 +246,7 @@ void main() {
           'input': {'imageUrl': true, 'skills': true},
           'configuration': {'models': true, 'skills': true},
           'runtimeControls': {'model': true},
-          'workspace': {'filesystem': false, 'remoteGitDiff': false},
+          'workspace': {'remoteGitDiff': false},
         },
       ),
     );
@@ -259,10 +255,6 @@ void main() {
     expect(
       noFiles.providerCapabilities.supports('configuration', 'models'),
       isTrue,
-    );
-    expect(
-      noFiles.providerCapabilities.supports('workspace', 'filesystem'),
-      isFalse,
     );
     expect(
       noFiles.providerCapabilities.supports('workspace', 'remoteGitDiff'),

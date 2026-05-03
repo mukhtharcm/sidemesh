@@ -14,6 +14,17 @@ structured so future agents can be added behind the same host/session API.
 - Use `src/fake-provider.ts` as the deterministic contract harness when adding
   or testing provider-neutral app behavior.
 
+## Runtime Selection
+
+`AgentProviderRuntime` is the provider registry and selection layer. Server
+routes should ask it for the default provider, a requested catalog provider, or
+the provider that owns a namespaced session id.
+
+`MultiAgentProvider` is only the session aggregation/routing facade. It owns
+session id namespacing, event wrapping, and session operation dispatch. It does
+not advertise an OR-merged capability surface, and provider-owned catalog routes
+should use concrete runtime entries instead of default-provider forwarding.
+
 ## Required Core
 
 Every provider must implement:
@@ -80,8 +91,8 @@ port forwarding are daemon-owned host features. Providers only own
 `readRemoteGitDiff`, because that may require agent/provider-specific context.
 Local filesystem browse/read/write/watch is also daemon-owned and implemented
 in `src/fs-routes.ts`; do not add local filesystem methods to
-`AgentProvider`. The provider `workspace.filesystem` flag is reserved for
-provider-native workspace/tool semantics, not the host filesystem API.
+`AgentProvider`, and do not advertise local filesystem support through provider
+capabilities.
 
 ## Runtime Events
 
@@ -154,9 +165,9 @@ Copilot SDK for session discovery, transcript replay, turns, model controls,
 permission requests, and tool execution events. It intentionally does not read
 Copilot's on-disk session files directly and does not ship a hand-written model
 catalog; model controls are advertised from SDK `listModels()` metadata, with
-explicit host defaults layered on top when configured. Images, skills,
-filesystem, and richer native tool translation should be enabled only when the
-adapter can report honest capabilities and translate SDK events into Sidemesh
-event types. The Copilot adapter uses `auto` as the Sidemesh default for
+explicit host defaults layered on top when configured. Images and richer native
+tool translation should be enabled only when the adapter can report honest
+capabilities and translate SDK events into Sidemesh event types. The Copilot
+adapter uses `auto` as the Sidemesh default for
 app-started turns, so a costly persistent Copilot setting is not consumed by
 accident.

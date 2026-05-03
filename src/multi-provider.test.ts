@@ -125,10 +125,8 @@ describe("MultiAgentProvider", () => {
 
   it("advertises default provider capabilities instead of provider union", async () => {
     const codex = new StubProvider("codex", "Codex");
-    codex.capabilities.workspace.filesystem = false;
     codex.capabilities.configuration.profiles = false;
     const copilot = new StubProvider("copilot", "GitHub Copilot");
-    copilot.capabilities.workspace.filesystem = true;
     copilot.capabilities.configuration.profiles = true;
 
     const provider = new MultiAgentProvider(
@@ -153,7 +151,6 @@ describe("MultiAgentProvider", () => {
       "codex",
     );
 
-    assert.equal(provider.capabilities.workspace.filesystem, false);
     assert.equal(provider.capabilities.configuration.profiles, false);
     assert.equal(
       provider.getProviderEntries().find((entry) => entry.kind === "copilot")
@@ -215,7 +212,6 @@ class StubProvider
       webSearch: false,
     },
     workspace: {
-      filesystem: false,
       remoteGitDiff: false,
     },
     lifecycle: {
