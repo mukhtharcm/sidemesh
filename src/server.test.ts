@@ -132,7 +132,7 @@ function makeMultiProviderRuntime(fakeOptions: FakeAgentProviderOptions, seconda
     defaultProviderKind: "fake",
     defaultProvider: fakeEntry,
     providerForKind(kind) {
-      if (kind == null) return fakeEntry;
+      if (kind === null || kind === undefined) return fakeEntry;
       const trimmed = kind.trim();
       if (!trimmed) return null;
       return providersByKind.get(trimmed) ?? null;

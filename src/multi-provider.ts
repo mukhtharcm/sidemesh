@@ -67,15 +67,15 @@ export class MultiAgentProvider
     // Session fan-out methods (listSessionThreads, listRecentUnindexedSessionThreads,
     // /api/sessions/search) operate across all configured providers, so reflect the
     // union of those flags while keeping everything else default-provider-scoped.
-    const anySession = (selector: (caps: AgentProviderCapabilities) => boolean) =>
+    const anyProvider = (selector: (caps: AgentProviderCapabilities) => boolean) =>
       entries.some((entry) => selector(entry.provider.capabilities));
     this.capabilities = {
       ...defaultEntry.provider.capabilities,
       sessions: {
         ...defaultEntry.provider.capabilities.sessions,
-        history: anySession((caps) => caps.sessions.history),
-        recentFallback: anySession((caps) => caps.sessions.recentFallback),
-        searchSessions: anySession((caps) => caps.sessions.searchSessions),
+        history: anyProvider((caps) => caps.sessions.history),
+        recentFallback: anyProvider((caps) => caps.sessions.recentFallback),
+        searchSessions: anyProvider((caps) => caps.sessions.searchSessions),
       },
     };
     for (const entry of this.orderedEntries) {
