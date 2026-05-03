@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:xterm/xterm.dart' as xterm;
 
@@ -9,6 +10,7 @@ import '../api_client.dart';
 import '../models.dart';
 import '../terminal_input_filter.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
@@ -717,7 +719,7 @@ class _TerminalKeyBar extends StatelessWidget {
         height: compact ? 46 : 52,
         padding: EdgeInsets.symmetric(
           horizontal: compact ? 6 : 8,
-          vertical: compact ? 6 : 8,
+          vertical: compact ? 5 : 6,
         ),
         decoration: BoxDecoration(
           color: colors.surfaceElevated,
@@ -727,14 +729,29 @@ class _TerminalKeyBar extends StatelessWidget {
           scrollDirection: Axis.horizontal,
           itemBuilder: (context, index) {
             final key = keys[index];
-            return OutlinedButton(
-              onPressed: () => onInput(key.sequence),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: colors.textPrimary,
-                side: BorderSide(color: colors.border),
-                padding: EdgeInsets.symmetric(horizontal: compact ? 9 : 12),
+            return InkWell(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                onInput(key.sequence);
+              },
+              borderRadius: AppShapes.input,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 44),
+                padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14),
+                decoration: BoxDecoration(
+                  border: Border.all(color: colors.border),
+                  borderRadius: AppShapes.input,
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  key.label,
+                  style: monoStyle(
+                    color: colors.textPrimary,
+                    fontSize: compact ? 12 : 13,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
               ),
-              child: Text(key.label),
             );
           },
           separatorBuilder: (_, _) => SizedBox(width: compact ? 6 : 8),

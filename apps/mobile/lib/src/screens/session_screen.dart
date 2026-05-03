@@ -4799,6 +4799,8 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _handleSessionAction(String value, SessionSummary session) {
     switch (value) {
+      case 'stop':
+        unawaited(_stopSession());
       case 'restart_provider':
         unawaited(_restartProvider());
       case 'reload':
@@ -4902,6 +4904,14 @@ class _SessionScreenState extends State<SessionScreen>
       _SessionActionGroup(
         label: 'Quick moves',
         actions: [
+          if (_running && _supportsSessionInterrupt)
+            const _SessionActionSpec(
+              value: 'stop',
+              label: 'Stop agent',
+              detail: 'Interrupt the current turn immediately.',
+              icon: Icons.stop_circle_rounded,
+              tone: _SessionActionTone.danger,
+            ),
           const _SessionActionSpec(
             value: 'reload',
             label: 'Reload',
@@ -5405,27 +5415,20 @@ class _SessionScreenState extends State<SessionScreen>
           ],
         ),
         actions: [
-          if (_running && _supportsSessionInterrupt)
+          if (_running && _supportsSessionInterrupt && !isCompact)
             Padding(
               padding: const EdgeInsets.only(right: 6),
-              child: isCompact
-                  ? MeshIconButton(
-                      icon: Icons.stop_circle_rounded,
-                      tooltip: 'Stop session',
-                      color: colors.danger,
-                      onTap: _stopSession,
-                    )
-                  : TextButton.icon(
-                      onPressed: _stopSession,
-                      icon: Icon(
-                        Icons.stop_circle_rounded,
-                        color: colors.danger,
-                      ),
-                      label: Text(
-                        'Stop',
-                        style: TextStyle(color: colors.danger),
-                      ),
-                    ),
+              child: TextButton.icon(
+                onPressed: _stopSession,
+                icon: Icon(
+                  Icons.stop_circle_rounded,
+                  color: colors.danger,
+                ),
+                label: Text(
+                  'Stop',
+                  style: TextStyle(color: colors.danger),
+                ),
+              ),
             ),
           if (!isCompact)
             Padding(
@@ -5560,8 +5563,8 @@ class _SessionScreenState extends State<SessionScreen>
               if (isCompact) {
                 return MeshIconButton(
                   icon: Icons.more_horiz_rounded,
-                  tooltip: 'Session actions',
-                  color: colors.textPrimary,
+                  tooltip: _running ? 'Session actions (agent running)' : 'Session actions',
+                  color: _running ? colors.warning : colors.textPrimary,
                   onTap: () => unawaited(
                     _showSessionActionsSheet(
                       session: session,

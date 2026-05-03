@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api_client.dart';
 import '../create_session_defaults_store.dart';
@@ -9,6 +10,7 @@ import '../session_message_seed_store.dart';
 import '../session_policy_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_snackbar.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/launch_controls.dart';
 import '../widgets/launch_options_form.dart';
@@ -1466,6 +1468,37 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                 : null,
             brainExtras: _buildBrainExtras(context, effectiveReasoning,
                 reasoningDescription),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  onPressed: _submitting
+                      ? null
+                      : () async {
+                          await CreateSessionDefaultsStore.instance
+                              .setDefaults(
+                            CreateSessionDefaults(
+                              approval: _effectiveApproval,
+                              sandbox: _effectiveSandbox,
+                              fastMode: _effectiveFastMode,
+                              webSearch: _effectiveWebSearch,
+                            ),
+                          );
+                          if (context.mounted) {
+                            showAppSnackBar(
+                              context,
+                              'Saved as default launch options.',
+                            );
+                            HapticFeedback.mediumImpact();
+                          }
+                        },
+                  icon: const Icon(Icons.save_outlined, size: 18),
+                  label: const Text('Save as defaults'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
