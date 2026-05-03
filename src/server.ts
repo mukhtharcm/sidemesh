@@ -2374,13 +2374,16 @@ export async function startServer(
       return { indexed: 0, removed: 0 };
     }
     const threads = await provider.listSessionThreads!({
-      limit: 50,
+      limit: 200,
       archived: false,
     });
     let indexed = 0;
     for (const thread of threads) {
       try {
-        const log = await provider.readSessionLog!(thread);
+        const log = await provider.readSessionLog!(thread, {
+          messageLimit: 200,
+          activityLimit: 200,
+        });
         await searchIndex.indexDocument({
           sessionKey: thread.id,
           title: thread.name || thread.preview,
@@ -2892,7 +2895,10 @@ async function indexSessionForSearch(
   }
   try {
     const thread = await readSession(provider, sessionId, false);
-    const log = await provider.readSessionLog!(thread);
+    const log = await provider.readSessionLog!(thread, {
+      messageLimit: 200,
+      activityLimit: 200,
+    });
     await searchIndex.indexDocument({
       sessionKey: sessionId,
       title: thread.name || thread.preview,
