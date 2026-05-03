@@ -2709,7 +2709,10 @@ async function listSessions(
   runtimeMode: SessionRuntimeListMode = "active",
 ): Promise<SessionSummary[]> {
   const limit = normalizedSessionListLimit(limitOverride);
-  if (canUseRecentSessionFallback(provider)) {
+  if (
+    canUseRecentSessionFallback(provider) &&
+    !hasProviderMethod(provider, "listSessionThreads")
+  ) {
     const threads = await provider.listRecentUnindexedSessionThreads(
       Math.max(limit, RECENT_UNINDEXED_SESSION_SCAN_LIMIT),
     );
