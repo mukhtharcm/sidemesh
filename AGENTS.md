@@ -15,7 +15,10 @@
   `worktrees/` inside the repo root). Always create them outside the repo,
   e.g. `../worktrees/<branch-name>`. Stale nested worktrees pollute the repo
   and complicate cleanup.
-- The daemon is **trusted-network-only** (Tailscale, private LAN). Do not add
+- **NEVER** restart the Sidemesh daemon (`systemctl restart sidemesh`, `kill`,
+  etc.) from a session running *inside* that same daemon. systemd kills the
+  entire cgroup including your own process tree. Use an out-of-band mechanism
+  (see "Resilient Daemon Updates" below).
   public-internet exposure features without a proper auth layer.
 - Terminal, filesystem, and approval changes are **high-trust surfaces**;
   keep them conservative and well-tested.
@@ -259,6 +262,23 @@ sidemesh pair        # show host URL + token for mobile app
 
 Do not publish npm, app-store, TestFlight, or GitHub release artifacts without
 following `docs/release-playbook.md`.
+
+### Resilient Daemon Updates
+
+Because systemd kills the entire cgroup on restart, **do not** restart the
+daemon from a shell or tool spawned by the daemon itself. Instead:
+
+1. Build into `/opt/sidemesh/dist` from the repo (safe).
+2. Trigger a deferred restart outside the cgroup:
+   ```bash
+   # Runs after the current shell exits
+   (sleep 5 && systemctl restart sidemesh) & disown
+   ```
+3. Or install a systemd path/timer unit that watches `dist/cli.js` mtime and
+   restarts automatically when the binary changes.
+
+Until such a unit exists, the human operator must run the restart manually from
+a separate SSH session after confirming the build succeeded.
 
 ## Quick References
 
