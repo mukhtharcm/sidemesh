@@ -750,7 +750,7 @@ class SessionContextWindowSummary {
   final int? toolDefinitionsTokens;
 
   double? get usageFraction =>
-      tokenLimit <= 0 || currentTokens == null ? null : currentTokens / tokenLimit;
+      tokenLimit <= 0 || currentTokens == null ? null : currentTokens! / tokenLimit;
 
   factory SessionContextWindowSummary.fromJson(Map<String, dynamic> json) =>
       SessionContextWindowSummary(
