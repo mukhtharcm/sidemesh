@@ -311,6 +311,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                             widget.host,
                             session.id,
                           ),
+                          showHost: false,
                           onTap: () => widget.onOpenSession(session),
                           onToggleFavorite: () {
                             _localStore.toggleFavorite(widget.host, session.id);

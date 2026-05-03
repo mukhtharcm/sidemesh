@@ -34,6 +34,7 @@ class SessionRowCard extends StatelessWidget {
     this.selected = false,
     this.dense = false,
     this.query = '',
+    this.showHost = true,
   });
 
   final HostProfile host;
@@ -42,6 +43,7 @@ class SessionRowCard extends StatelessWidget {
   final bool selected;
   final bool dense;
   final String query;
+  final bool showHost;
   final VoidCallback onTap;
   final VoidCallback onToggleFavorite;
 
@@ -269,26 +271,32 @@ class SessionRowCard extends StatelessWidget {
           const SizedBox(height: 6),
           Row(
             children: [
-              Icon(Icons.dns_rounded, size: 13, color: colors.textTertiary),
-              const SizedBox(width: 4),
-              Flexible(
-                flex: 0,
-                child: Text(
-                  host.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+              if (showHost) ...[
+                Icon(Icons.dns_rounded, size: 13, color: colors.textTertiary),
+                const SizedBox(width: 4),
+                Flexible(
+                  flex: 0,
+                  child: Text(
+                    host.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+                  ),
                 ),
-              ),
-              if (session.provider != null) ...[
                 const SizedBox(width: 8),
-                AgentProviderBadge(providerKind: session.provider),
+              ],
+              if (session.provider != null) ...[
+                if (!showHost) const SizedBox(width: 0),
+                AgentProviderBadge(
+                  providerKind: session.provider,
+                  compact: !showHost,
+                ),
+                const SizedBox(width: 8),
               ],
               if (session.isSubAgent) ...[
-                const SizedBox(width: 6),
                 const _SubAgentBadge(),
+                const SizedBox(width: 8),
               ],
-              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   session.cwd,
