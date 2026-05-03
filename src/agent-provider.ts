@@ -6,16 +6,20 @@ import type {
   ContextCompactionActivity,
   FileChangeActivity,
   ImageGenerationActivity,
+  LivePlanStep,
+  LiveThreadStatus,
+  ModelSummary,
   PendingAction,
-  SessionLogSnapshot,
+  PendingActionKind,
+  ProviderProfileCatalog,
+  ProviderWarningLevel,
   SessionActivity,
+  SessionLogSnapshot,
   SessionMessage,
   SessionRuntimeSummary,
-  ToolActivity,
-  ModelSummary,
-  ProviderProfileCatalog,
   SkillCatalogEntry,
   ThreadRecord,
+  ToolActivity,
   TurnDiffActivity,
   WebSearchActivity,
 } from "./types.js";
@@ -287,6 +291,56 @@ export type AgentProviderLiveEvent =
       type: "runtime_updated";
       sessionId: string;
       runtime: SessionRuntimeSummary | null;
+    }
+  | {
+      type: "provider_warning";
+      sessionId?: string;
+      level: ProviderWarningLevel;
+      code?: string;
+      message: string;
+      source?: string;
+    }
+  | {
+      type: "thread_status_changed";
+      sessionId: string;
+      status: LiveThreadStatus;
+      message?: string;
+      pendingActionKind?: PendingActionKind;
+    }
+  | {
+      type: "plan_updated";
+      sessionId: string;
+      turnId?: string;
+      explanation?: string;
+      plan: LivePlanStep[];
+    }
+  | {
+      type: "reasoning_delta";
+      sessionId: string;
+      turnId?: string;
+      itemId?: string;
+      reasoningId?: string;
+      delta: string;
+      summary: boolean;
+    }
+  | {
+      type: "queue_updated";
+      sessionId: string;
+      steeringCount: number;
+      followUpCount: number;
+      steeringPreview?: string[];
+      followUpPreview?: string[];
+    }
+  | {
+      type: "auto_retry_updated";
+      sessionId: string;
+      phase: "started" | "ended";
+      attempt: number;
+      maxAttempts?: number;
+      delayMs?: number;
+      errorMessage?: string;
+      success?: boolean;
+      finalError?: string;
     }
   | {
       type: "turn_completed";
