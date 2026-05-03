@@ -735,7 +735,7 @@ export interface SessionTelemetrySummary {
 }
 
 export interface SessionContextWindowSummary {
-  currentTokens: number;
+  currentTokens: number | null;
   tokenLimit: number;
   messagesLength: number;
   conversationTokens?: number;

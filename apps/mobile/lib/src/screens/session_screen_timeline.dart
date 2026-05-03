@@ -2743,7 +2743,10 @@ String _formatTokenWindow(SessionContextWindowSummary summary) {
   final percent = summary.usageFraction == null
       ? null
       : (summary.usageFraction! * 100).clamp(0, 999).round();
-  final base = '${summary.currentTokens}/${summary.tokenLimit} tokens';
+  final current = summary.currentTokens;
+  final base = current == null
+      ? '?/${summary.tokenLimit} tokens'
+      : '$current/${summary.tokenLimit} tokens';
   return percent == null ? base : '$base ($percent%)';
 }
 
