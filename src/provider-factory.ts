@@ -4,6 +4,7 @@ import type { NodeConfig } from "./types.js";
 import type { AgentProviderKind } from "./types.js";
 import {
   createAgentProviderFromConfig,
+  isAgentProviderKind,
   listAgentProviderDefinitionSummaries,
   summarizeAgentProviderConfig,
 } from "./provider-registry.js";
@@ -18,6 +19,12 @@ export interface AgentProviderRuntimeEntry {
 export interface AgentProviderRuntime {
   provider: AgentProvider;
   providers: AgentProviderRuntimeEntry[];
+  defaultProviderKind: AgentProviderKind;
+  defaultProvider: AgentProviderRuntimeEntry;
+  providerForKind(
+    kind: string | null | undefined,
+  ): AgentProviderRuntimeEntry | null;
+  providerForSessionId(sessionId: string): AgentProviderRuntimeEntry | null;
 }
 
 export function createAgentProviderRuntime(
@@ -38,19 +45,58 @@ export function createAgentProviderRuntime(
       definitionSummary,
     };
   });
-  return {
-    provider:
-      providers.length === 1
+  const providersByKind = new Map(
+    providers.map((entry) => [entry.kind, entry]),
+  );
+  const defaultProvider = providersByKind.get(config.defaultProviderKind);
+  if (!defaultProvider) {
+    throw new Error(
+      `Default provider "${config.defaultProviderKind}" was not configured.`,
+    );
+  }
+  const provider =
+    providers.length === 1
         ? providers[0]!.provider
         : new MultiAgentProvider(
             providers.map((entry) => ({
               kind: entry.kind,
-              config: config.providers.find((candidate) => candidate.kind === entry.kind)!,
+              config: config.providers.find(
+                (candidate) => candidate.kind === entry.kind,
+              )!,
               provider: entry.provider,
             })),
             config.defaultProviderKind,
-          ),
+        );
+  return {
+    provider,
     providers,
+    defaultProviderKind: config.defaultProviderKind,
+    defaultProvider,
+    providerForKind(kind) {
+      if (kind == null) {
+        return defaultProvider;
+      }
+      const providerKind = kind.trim();
+      if (!providerKind) {
+        return null;
+      }
+      if (!isAgentProviderKind(providerKind)) {
+        return null;
+      }
+      return providersByKind.get(providerKind) ?? null;
+    },
+    providerForSessionId(sessionId) {
+      if (provider instanceof MultiAgentProvider) {
+        try {
+          return providersByKind.get(
+            provider.resolveSessionProvider(sessionId).kind,
+          ) ?? null;
+        } catch {
+          return null;
+        }
+      }
+      return defaultProvider;
+    },
   };
 }
 

@@ -17,6 +17,10 @@ void main() {
         'sessions': {'create': true},
         'workspace': {'remoteGitDiff': true},
       },
+      'defaultProviderCapabilities': {
+        'sessions': {'create': true, 'searchSessions': true},
+        'workspace': {'remoteGitDiff': true},
+      },
       'hostCapabilities': {
         'workspace': {'filesystem': true, 'gitStatus': true, 'gitDiff': true},
       },
@@ -46,6 +50,10 @@ void main() {
     expect(node.providerDisplayName, 'Codex');
     expect(node.providerDisplayVersion, 'codex-cli 0.125.0');
     expect(node.providerCapabilities.supports('sessions', 'create'), isTrue);
+    expect(
+      node.defaultProviderCapabilities.supports('sessions', 'searchSessions'),
+      isTrue,
+    );
     expect(
       node.providerCapabilities.supports('workspace', 'gitStatus'),
       isFalse,
@@ -210,7 +218,7 @@ void main() {
             'skills': false,
           },
           'runtimeControls': {'model': false, 'approvalPolicy': false},
-          'workspace': {'filesystem': false, 'remoteGitDiff': false},
+          'workspace': {'remoteGitDiff': false},
         },
       ),
     );
@@ -230,10 +238,6 @@ void main() {
       chatOnly.providerCapabilities.supports('runtimeControls', 'model'),
       isFalse,
     );
-    expect(
-      chatOnly.providerCapabilities.supports('workspace', 'filesystem'),
-      isFalse,
-    );
 
     final noFiles = NodeInfo.fromJson(
       _fakeNodePayload(
@@ -242,7 +246,7 @@ void main() {
           'input': {'imageUrl': true, 'skills': true},
           'configuration': {'models': true, 'skills': true},
           'runtimeControls': {'model': true},
-          'workspace': {'filesystem': false, 'remoteGitDiff': false},
+          'workspace': {'remoteGitDiff': false},
         },
       ),
     );
@@ -251,10 +255,6 @@ void main() {
     expect(
       noFiles.providerCapabilities.supports('configuration', 'models'),
       isTrue,
-    );
-    expect(
-      noFiles.providerCapabilities.supports('workspace', 'filesystem'),
-      isFalse,
     );
     expect(
       noFiles.providerCapabilities.supports('workspace', 'remoteGitDiff'),
@@ -324,6 +324,7 @@ Map<String, dynamic> _fakeNodePayload(
     'providerVersion': 'fake-provider 1.0.0 ($profile)',
     'providerConfig': {'kind': 'fake', 'command': 'builtin'},
     'providerCapabilities': providerCapabilities,
+    'defaultProviderCapabilities': providerCapabilities,
     'hostCapabilities': {
       'workspace': {'filesystem': true, 'gitStatus': true, 'gitDiff': true},
     },

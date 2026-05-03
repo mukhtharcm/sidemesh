@@ -138,7 +138,6 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     webSearch: true,
   },
   workspace: {
-    filesystem: true,
     remoteGitDiff: true,
   },
   lifecycle: {
@@ -241,7 +240,6 @@ function disableRuntimeControls(capabilities: AgentProviderCapabilities): void {
 }
 
 function disableWorkspace(capabilities: AgentProviderCapabilities): void {
-  capabilities.workspace.filesystem = false;
   capabilities.workspace.remoteGitDiff = false;
 }
 
@@ -1006,7 +1004,7 @@ export class FakeAgentProvider
         "",
       ].join("\n"),
     };
-    if (this.capabilities.workspace.filesystem) {
+    if (this.supportsWorkspaceFileActivities()) {
       this.upsertAndEmitActivity(session, turnId, {
         id: `fake-file-change-${turnId}`,
         type: "file_change",
@@ -1324,6 +1322,14 @@ export class FakeAgentProvider
 
   private supportsGeneratedImageScenario(): boolean {
     return this.capabilityProfile !== "chat-only" && this.capabilityProfile !== "minimal";
+  }
+
+  private supportsWorkspaceFileActivities(): boolean {
+    return (
+      this.capabilityProfile !== "chat-only" &&
+      this.capabilityProfile !== "no-files" &&
+      this.capabilityProfile !== "minimal"
+    );
   }
 
   private supportsApprovalKind(kind: FakeApprovalKind): boolean {
