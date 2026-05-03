@@ -9,6 +9,7 @@ import '../api_client.dart';
 import '../models.dart';
 import '../terminal_input_filter.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../host_reconnect_scheduler.dart';
@@ -637,7 +638,7 @@ class _TerminalStatusStrip extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     color: error == null ? colors.textSecondary : colors.danger,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.emphasis,
                   ),
                 );
               },

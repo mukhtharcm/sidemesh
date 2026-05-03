@@ -14,6 +14,7 @@ import '../local_notification_service.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/notification_permission_banner.dart';
@@ -771,7 +772,7 @@ class _DesktopShellState extends State<DesktopShell> {
                   'Inspector slot is working',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: colors.textPrimary,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.title,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1142,7 +1143,7 @@ class _Sidebar extends StatelessWidget {
                     child: Text(
                       'Sidemesh',
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.title,
                         letterSpacing: 0.1,
                       ),
                     ),
@@ -1290,7 +1291,7 @@ class _SidebarSegments extends StatelessWidget {
                           style: TextStyle(
                             color: colors.accentOn,
                             fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: AppWeights.emphasis,
                           ),
                         ),
                       ),
@@ -1590,7 +1591,7 @@ class _DetailPaneState extends State<_DetailPane> {
                         Text(
                           'Ready to launch',
                           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
+                            fontWeight: AppWeights.title,
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -2040,7 +2041,7 @@ class _InspectorPane extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
                       color: colors.textPrimary,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: AppWeights.title,
                     ),
                   ),
                 ),
