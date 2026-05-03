@@ -101,35 +101,54 @@ async function listRecentRolloutFiles(
   sessionsRoot: string,
   limit: number,
 ): Promise<string[]> {
-  const candidates: Array<{ path: string; sortKey: string }> = [];
+  const cutoffMs = Date.now() - RECENT_ROLLOUT_SCAN_DAYS * 24 * 60 * 60 * 1000;
+  const candidates = await collectRecentRolloutFiles(sessionsRoot, cutoffMs, 0);
+  return candidates
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, limit)
+    .map((candidate) => candidate.path);
+}
 
-  for (let offset = 0; offset < RECENT_ROLLOUT_SCAN_DAYS; offset += 1) {
-    const day = new Date(Date.now() - offset * 24 * 60 * 60 * 1000);
-    const dayDir = path.join(
-      sessionsRoot,
-      String(day.getFullYear()),
-      String(day.getMonth() + 1).padStart(2, "0"),
-      String(day.getDate()).padStart(2, "0"),
-    );
+async function collectRecentRolloutFiles(
+  root: string,
+  cutoffMs: number,
+  depth: number,
+): Promise<Array<{ path: string; mtimeMs: number }>> {
+  if (depth > 4) {
+    return [];
+  }
 
-    const entries = await import("node:fs/promises").then(({ readdir }) =>
-      readdir(dayDir, { withFileTypes: true }).catch(() => []),
+  let entries: any[];
+  try {
+    entries = await import("node:fs/promises").then(({ readdir }) =>
+      readdir(root, { withFileTypes: true }),
     );
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.startsWith("rollout-") || !entry.name.endsWith(".jsonl")) {
+  } catch {
+    return [];
+  }
+
+  const result: Array<{ path: string; mtimeMs: number }> = [];
+  for (const entry of entries) {
+    const fullPath = path.join(root, entry.name);
+    if (entry.isFile()) {
+      if (!entry.name.startsWith("rollout-") || !entry.name.endsWith(".jsonl")) {
         continue;
       }
-      candidates.push({
-        path: path.join(dayDir, entry.name),
-        sortKey: entry.name,
-      });
+      try {
+        const stats = await stat(fullPath);
+        if (stats.mtimeMs >= cutoffMs) {
+          result.push({ path: fullPath, mtimeMs: stats.mtimeMs });
+        }
+      } catch {
+        // Race with deletion or rotation; ignore.
+      }
+    } else if (entry.isDirectory()) {
+      const nested = await collectRecentRolloutFiles(fullPath, cutoffMs, depth + 1);
+      result.push(...nested);
     }
   }
 
-  return candidates
-    .sort((left, right) => right.sortKey.localeCompare(left.sortKey))
-    .slice(0, limit)
-    .map((candidate) => candidate.path);
+  return result;
 }
 
 function emptyRolloutLog(): SessionLogSnapshot {
