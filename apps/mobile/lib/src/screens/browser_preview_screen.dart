@@ -10,6 +10,7 @@ import '../api_client.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../host_reconnect_scheduler.dart';
@@ -807,7 +808,7 @@ class _BrowserBarButton extends StatelessWidget {
                     style: TextStyle(
                       color: colors.textSecondary,
                       fontSize: 12,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: AppWeights.title,
                     ),
                   ),
                 ],
@@ -937,9 +938,9 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
           children: [
             Text(
               'Resize browser viewport',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 color: colors.textPrimary,
-                fontWeight: FontWeight.w800,
+                fontWeight: AppWeights.title,
               ),
             ),
             const SizedBox(height: 6),
@@ -1029,7 +1030,7 @@ class _ViewportPresetButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return InkWell(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: AppShapes.input,
       onTap: onTap,
       child: Container(
         width: 150,
@@ -1038,7 +1039,7 @@ class _ViewportPresetButton extends StatelessWidget {
           color: selected
               ? colors.accent.withValues(alpha: 0.14)
               : colors.canvas.withValues(alpha: 0.72),
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: AppShapes.input,
           border: Border.all(
             color: selected
                 ? colors.accent.withValues(alpha: 0.52)
