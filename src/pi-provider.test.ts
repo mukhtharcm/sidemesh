@@ -1288,6 +1288,250 @@ describe("PiAgentProvider", () => {
     assert.equal(active[0]?.id, b.thread.id);
   });
 
+  it("reconstructs context window from persisted Pi session history via model registry", async () => {
+    const cwd = nodePath.join(tempDir, "repo-context");
+    const sessionDir = piSessionDirForCwd(cwd, agentDir);
+    await mkdir(sessionDir, { recursive: true });
+    const sessionPath = nodePath.join(sessionDir, "2026-05-01_session-context.jsonl");
+    await writeFile(
+      sessionPath,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: "session-context",
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "model_change",
+          id: "mc1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          provider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: "mc1",
+          timestamp: "2026-05-01T10:00:02.000Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hello." }],
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            usage: { input: 10, output: 20, totalTokens: 30 },
+            stopReason: "stop",
+            timestamp: 1_777_770_002_000,
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+      contextWindow: 400_000,
+    };
+    const fakeServices = {
+      cwd,
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+    });
+    await provider.start();
+
+    const threads = await provider.listSessionThreads({ limit: 10, archived: false });
+    assert.equal(threads.length, 1);
+    const log = await provider.readSessionLog(threads[0]!);
+    assert.ok(log.runtime?.telemetry?.contextWindow, "contextWindow should be reconstructed from model registry");
+    assert.equal(log.runtime?.telemetry?.contextWindow?.tokenLimit, 400_000);
+    assert.equal(log.runtime?.telemetry?.contextWindow?.currentTokens, null);
+    assert.equal(log.runtime?.telemetry?.contextWindow?.messagesLength, 1);
+  });
+
+  it("preserves existing runtime context window when reloading from history", async () => {
+    const cwd = nodePath.join(tempDir, "repo-preserve");
+    const sessionDir = piSessionDirForCwd(cwd, agentDir);
+    await mkdir(sessionDir, { recursive: true });
+    const sessionPath = nodePath.join(sessionDir, "2026-05-01_session-preserve.jsonl");
+    await writeFile(
+      sessionPath,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: "session-preserve",
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hello." }],
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            usage: { input: 10, output: 20, totalTokens: 30 },
+            stopReason: "stop",
+            timestamp: 1_777_770_001_000,
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const provider = new PiAgentProvider({ agentDir, stateDir });
+    await provider.start();
+
+    const threads = await provider.listSessionThreads({ limit: 10, archived: false });
+    assert.equal(threads.length, 1);
+
+    // First read loads the session into memory
+    await provider.readSessionLog(threads[0]!);
+
+    // Simulate a prior loaded session that had context window info
+    const state = (provider as any).sessions.get("session-preserve");
+    assert.ok(state);
+    state.runtime = {
+      model: "anthropic/claude-sonnet-4-5",
+      modelProvider: "anthropic",
+      telemetry: {
+        contextWindow: {
+          currentTokens: 1234,
+          tokenLimit: 200_000,
+          messagesLength: 1,
+          updatedAt: Date.now(),
+        },
+      },
+    };
+
+    // Reload from history should preserve the contextWindow
+    const log = await provider.readSessionLog(threads[0]!);
+    assert.equal(log.runtime?.telemetry?.contextWindow?.currentTokens, 1234);
+    assert.equal(log.runtime?.telemetry?.contextWindow?.tokenLimit, 200_000);
+  });
+
+  it("records null tokens in context window after post-compaction getContextUsage", async () => {
+    const liveEvents: Array<{ type: string; [key: string]: unknown }> = [];
+    const listeners = new Set<(event: unknown) => void>();
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const fakeSession = {
+      sessionId: "pi-null-tokens-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      getContextUsage() {
+        return { tokens: null, contextWindow: 400_000, percent: null };
+      },
+      subscribe(listener: (event: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt(_text: string) {
+        const assistant = {
+          role: "assistant",
+          content: [{ type: "text", text: "Done." }],
+          provider: "anthropic",
+          model: "claude-sonnet-4-5",
+          usage: { input: 5, output: 10, totalTokens: 15 },
+          stopReason: "stop",
+          timestamp: 1_777_770_010_000,
+        };
+        for (const listener of listeners) {
+          listener({ type: "message_update", message: assistant, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Done.", partial: assistant } });
+          listener({ type: "message_end", message: assistant });
+          listener({ type: "agent_end", messages: [] });
+        }
+      },
+      async steer() {},
+      async abort() {},
+      async compact() { return { ok: true }; },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    provider.on("liveEvent", (event) => liveEvents.push(event as never));
+    await provider.start();
+
+    const request: AgentCreateSessionRequest = {
+      cwd: "/repo",
+      input: [{ type: "text", text: "Hello", text_elements: [] }],
+      overrides: emptyOverrides(),
+    };
+    const created = await provider.createSession(request);
+    const log = await provider.readSessionLog(created.thread);
+    assert.equal(log.runtime?.telemetry?.contextWindow?.currentTokens, null);
+    assert.equal(log.runtime?.telemetry?.contextWindow?.tokenLimit, 400_000);
+    assert.equal(log.runtime?.telemetry?.contextWindow?.messagesLength, 1);
+  });
 });
 
 

@@ -732,7 +732,7 @@ class SessionTelemetrySummary {
 
 class SessionContextWindowSummary {
   const SessionContextWindowSummary({
-    required this.currentTokens,
+    this.currentTokens,
     required this.tokenLimit,
     required this.messagesLength,
     required this.updatedAt,
@@ -741,7 +741,7 @@ class SessionContextWindowSummary {
     this.toolDefinitionsTokens,
   });
 
-  final int currentTokens;
+  final int? currentTokens;
   final int tokenLimit;
   final int messagesLength;
   final DateTime updatedAt;
@@ -750,11 +750,11 @@ class SessionContextWindowSummary {
   final int? toolDefinitionsTokens;
 
   double? get usageFraction =>
-      tokenLimit <= 0 ? null : currentTokens / tokenLimit;
+      tokenLimit <= 0 || currentTokens == null ? null : currentTokens / tokenLimit;
 
   factory SessionContextWindowSummary.fromJson(Map<String, dynamic> json) =>
       SessionContextWindowSummary(
-        currentTokens: _intValue(json['currentTokens']),
+        currentTokens: _intOrNull(json['currentTokens']),
         tokenLimit: _intValue(json['tokenLimit']),
         messagesLength: _intValue(json['messagesLength']),
         updatedAt: _dateValue(json['updatedAt']),
