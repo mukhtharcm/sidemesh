@@ -11,6 +11,10 @@
 - **NEVER** run tests if `npm run typecheck` fails.
 - **NEVER** commit tokens, private hostnames, generated env files, signing
   profiles, certificates, or app-store keys.
+- **NEVER** create git worktrees inside the repo (e.g. under `.worktrees/` or
+  `worktrees/` inside the repo root). Always create them outside the repo,
+  e.g. `../worktrees/<branch-name>`. Stale nested worktrees pollute the repo
+  and complicate cleanup.
 - The daemon is **trusted-network-only** (Tailscale, private LAN). Do not add
   public-internet exposure features without a proper auth layer.
 - Terminal, filesystem, and approval changes are **high-trust surfaces**;
