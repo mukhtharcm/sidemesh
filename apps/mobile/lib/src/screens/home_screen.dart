@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api_client.dart';
 import '../approval_inbox_store.dart';
@@ -3380,6 +3381,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
   Future<void> _scanPairingQr() async {
     final payload = await showPairScannerSheet(context);
     if (!mounted || payload == null) return;
+    HapticFeedback.mediumImpact();
     setState(() {
       _labelController.text = payload.label;
       _baseUrlController.text = payload.baseUrl;
@@ -3387,6 +3389,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
       _enabled = true;
       _error = null;
     });
+    showAppSnackBar(context, 'QR scanned — ${payload.label}');
   }
 
   void _submit() {
