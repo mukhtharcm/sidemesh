@@ -11,13 +11,26 @@ describe("createAgentProviderRuntime", () => {
     assert.equal(runtime.defaultProviderKind, "copilot");
     assert.equal(runtime.defaultProvider.kind, "copilot");
     assert.equal(runtime.providerForKind(null)?.kind, "copilot");
+    assert.equal(runtime.providerForKind(undefined)?.kind, "copilot");
     assert.equal(runtime.providerForKind("fake")?.kind, "fake");
     assert.equal(runtime.providerForKind("unknown"), null);
+    // Blank / whitespace-only strings must not silently fall back to default.
+    assert.equal(runtime.providerForKind(""), null);
+    assert.equal(runtime.providerForKind("   "), null);
 
-    assert.equal(runtime.provider.capabilities.sessions.searchSessions, false);
+    // The facade OR-merges session fan-out capabilities so that a secondary
+    // provider's searchable sessions remain accessible via /api/sessions/search.
+    // copilot has searchSessions=false but fake has searchSessions=true, so
+    // the facade should advertise true.
+    assert.equal(runtime.provider.capabilities.sessions.searchSessions, true);
     assert.equal(
       runtime.providerForKind("fake")?.provider.capabilities.sessions.searchSessions,
       true,
+    );
+    // The default (copilot) provider's own flag is unaffected.
+    assert.equal(
+      runtime.defaultProvider.provider.capabilities.sessions.searchSessions,
+      false,
     );
   });
 });

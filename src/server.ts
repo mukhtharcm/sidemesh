@@ -60,7 +60,10 @@ import {
   readGitStatus,
   sanitizeGitUrl,
 } from "./git.js";
-import { createAgentProviderRuntime } from "./provider-factory.js";
+import {
+  createAgentProviderRuntime,
+  type AgentProviderRuntime,
+} from "./provider-factory.js";
 import { isAgentProviderKind } from "./provider-registry.js";
 import { buildSessionResources } from "./resources.js";
 import {
@@ -157,8 +160,11 @@ export interface RunningServer {
   close(): Promise<void>;
 }
 
-export async function startServer(config: NodeConfig): Promise<RunningServer> {
-  const providerRuntime = createAgentProviderRuntime(config);
+export async function startServer(
+  config: NodeConfig,
+  prebuiltRuntime?: AgentProviderRuntime,
+): Promise<RunningServer> {
+  const providerRuntime = prebuiltRuntime ?? createAgentProviderRuntime(config);
   const provider = providerRuntime.provider;
   await provider.start();
   let runningServerRef: RunningServer | null = null;

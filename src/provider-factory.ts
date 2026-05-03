@@ -73,9 +73,12 @@ export function createAgentProviderRuntime(
     defaultProviderKind: config.defaultProviderKind,
     defaultProvider,
     providerForKind(kind) {
-      const providerKind = kind?.trim() ?? "";
-      if (!providerKind) {
+      if (kind == null) {
         return defaultProvider;
+      }
+      const providerKind = kind.trim();
+      if (!providerKind) {
+        return null;
       }
       if (!isAgentProviderKind(providerKind)) {
         return null;
