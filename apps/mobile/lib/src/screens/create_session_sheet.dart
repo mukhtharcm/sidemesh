@@ -687,7 +687,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   Future<void> _browseDirectory() async {
     final node = _nodeInfo;
     if (node == null) return;
-    final root = _trimmedOrNull(_cwdController.text) ?? '/';
+
+    final cwdText = _trimmedOrNull(_cwdController.text);
+    final root = cwdText ?? node.homeDirectory ?? '/';
+
     final selected = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
