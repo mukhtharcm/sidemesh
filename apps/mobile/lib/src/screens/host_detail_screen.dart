@@ -318,7 +318,13 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                         ),
                       ),
                     ),
-                  const SizedBox(height: AppSpacing.lg),
+                  const SizedBox(height: AppSpacing.xl),
+                  _SectionHeader(
+                    icon: Icons.medical_services_rounded,
+                    title: 'Host management',
+                    subtitle: 'Restart the provider or daemon when stuck.',
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
                   _HostManagementCard(
                     host: widget.host,
                     api: widget.api,
@@ -1198,25 +1204,6 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.medical_services_rounded,
-                  size: 16,
-                  color: colors.textSecondary,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Host management',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: AppWeights.title,
-                  ),
-                ),
-              ],
-            ),
-          ),
           Divider(height: 1, color: colors.border),
           if (_supportsRestart)
             _ManagementRow(
