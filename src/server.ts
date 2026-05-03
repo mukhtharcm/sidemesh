@@ -586,6 +586,78 @@ export async function startServer(
         scheduleRecentSessionUpsert(event.sessionId, 0);
         return;
       }
+      case "provider_warning": {
+        if (!event.sessionId) {
+          return;
+        }
+        broadcastLive(event.sessionId, {
+          type: "provider_warning",
+          sessionId: event.sessionId,
+          level: event.level,
+          code: event.code,
+          message: event.message,
+          source: event.source,
+        });
+        return;
+      }
+      case "thread_status_changed": {
+        broadcastLive(event.sessionId, {
+          type: "thread_status_changed",
+          sessionId: event.sessionId,
+          status: event.status,
+          message: event.message,
+          pendingActionKind: event.pendingActionKind,
+        });
+        scheduleRecentSessionUpsert(event.sessionId, 0);
+        return;
+      }
+      case "plan_updated": {
+        broadcastLive(event.sessionId, {
+          type: "plan_updated",
+          sessionId: event.sessionId,
+          turnId: event.turnId,
+          explanation: event.explanation,
+          plan: event.plan,
+        });
+        return;
+      }
+      case "reasoning_delta": {
+        broadcastLive(event.sessionId, {
+          type: "reasoning_delta",
+          sessionId: event.sessionId,
+          turnId: event.turnId,
+          itemId: event.itemId,
+          reasoningId: event.reasoningId,
+          delta: event.delta,
+          summary: event.summary,
+        });
+        return;
+      }
+      case "queue_updated": {
+        broadcastLive(event.sessionId, {
+          type: "queue_updated",
+          sessionId: event.sessionId,
+          steeringCount: event.steeringCount,
+          followUpCount: event.followUpCount,
+          steeringPreview: event.steeringPreview,
+          followUpPreview: event.followUpPreview,
+        });
+        return;
+      }
+      case "auto_retry_updated": {
+        broadcastLive(event.sessionId, {
+          type: "auto_retry_updated",
+          sessionId: event.sessionId,
+          phase: event.phase,
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          errorMessage: event.errorMessage,
+          success: event.success,
+          finalError: event.finalError,
+        });
+        return;
+      }
       case "turn_completed":
         // Broadcast the completion first so any concurrent snapshot reader
         // sees both the provider-flushed history AND the live state still in

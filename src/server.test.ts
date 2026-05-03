@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import http from "node:http";
 
+import { WebSocket } from "ws";
+
 import { startServer, type RunningServer } from "./server.js";
 import type { FakeCapabilityProfile, NodeConfig } from "./types.js";
 import { FakeAgentProvider, type FakeAgentProviderOptions } from "./fake-provider.js";
@@ -14,6 +16,18 @@ import {
   summarizeAgentProviderConfig,
 } from "./provider-registry.js";
 import type { AgentProviderRuntime, AgentProviderRuntimeEntry } from "./provider-factory.js";
+
+const EMPTY_OVERRIDES = {
+  model: null,
+  mode: null,
+  reasoningEffort: null,
+  fastMode: null,
+  approvalPolicy: null,
+  sandboxMode: null,
+  networkAccess: null,
+  webSearch: null,
+  profile: null,
+} as const;
 
 function makeConfig(
   stateDir: string,
@@ -148,6 +162,100 @@ function makeMultiProviderRuntime(fakeOptions: FakeAgentProviderOptions, seconda
   };
 }
 
+function makeSingleProviderRuntime(
+  fakeOptions: FakeAgentProviderOptions,
+): { runtime: AgentProviderRuntime; provider: FakeAgentProvider } {
+  const provider = new FakeAgentProvider(fakeOptions);
+  const defSummaries = listAgentProviderDefinitionSummaries();
+  const fakeDef = defSummaries.find((d) => d.kind === "fake")!;
+  const fakeConfig = {
+    kind: "fake" as const,
+    latencyMs: fakeOptions.latencyMs ?? 0,
+    seedSessions: fakeOptions.seedSessions ?? false,
+    workspaceRoot: fakeOptions.workspaceRoot ?? null,
+    capabilityProfile: fakeOptions.capabilityProfile ?? "full",
+  };
+  const entry: AgentProviderRuntimeEntry = {
+    kind: "fake",
+    provider,
+    configSummary: summarizeAgentProviderConfig(fakeConfig),
+    definitionSummary: fakeDef,
+  };
+  return {
+    provider,
+    runtime: {
+      provider,
+      providers: [entry],
+      defaultProviderKind: "fake",
+      defaultProvider: entry,
+      providerForKind(kind) {
+        if (kind === null || kind === undefined) {
+          return entry;
+        }
+        const trimmed = kind.trim();
+        if (!trimmed || trimmed === "fake") {
+          return entry;
+        }
+        return null;
+      },
+      providerForSessionId() {
+        return entry;
+      },
+    },
+  };
+}
+
+async function openSessionLiveSocket(
+  port: number,
+  token: string,
+  sessionId: string,
+): Promise<{ socket: WebSocket; events: any[] }> {
+  const events: any[] = [];
+  const socket = await new Promise<WebSocket>((resolve, reject) => {
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${port}/api/live?sessionId=${encodeURIComponent(sessionId)}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    ws.on("message", (data) => {
+      const raw = typeof data === "string" ? data : data.toString();
+      events.push(JSON.parse(raw));
+    });
+    const handleError = (error: Error) => reject(error);
+    ws.once("error", handleError);
+    ws.once("open", () => {
+      ws.off("error", handleError);
+      resolve(ws);
+    });
+  });
+  return { socket, events };
+}
+
+async function closeSessionLiveSocket(socket: WebSocket): Promise<void> {
+  if (socket.readyState === socket.CLOSED) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    socket.once("close", () => resolve());
+    socket.close();
+  });
+}
+
+async function waitFor<T>(
+  getValue: () => T | null | undefined,
+  label: string,
+): Promise<NonNullable<T>> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const value = getValue();
+    if (value !== null && value !== undefined) {
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+}
+
 describe("/healthz", () => {
   it("returns 200 when provider is healthy", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
@@ -272,6 +380,142 @@ describe("GET /api/node", () => {
       const defaultEntry = body.supportedProviders.find((p: any) => p.isDefault);
       assert.ok(defaultEntry);
       assert.equal(defaultEntry.capabilities.configuration.models, true);
+    });
+  });
+});
+
+describe("session live rich events", () => {
+  it("broadcasts rich envelope events only to the matching session socket", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const primary = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const secondary = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const primaryLive = await openSessionLiveSocket(
+        server.port,
+        config.token,
+        primary.thread.id,
+      );
+      const secondaryLive = await openSessionLiveSocket(
+        server.port,
+        config.token,
+        secondary.thread.id,
+      );
+      try {
+        await waitFor(
+          () => primaryLive.events.find((event) => event.type === "hello"),
+          "primary hello",
+        );
+        await waitFor(
+          () => secondaryLive.events.find((event) => event.type === "hello"),
+          "secondary hello",
+        );
+
+        provider.emit("liveEvent", {
+          type: "provider_warning",
+          sessionId: primary.thread.id,
+          level: "warning",
+          code: "warn-1",
+          message: "Heads up",
+          source: "fake/runtime",
+        });
+        provider.emit("liveEvent", {
+          type: "thread_status_changed",
+          sessionId: primary.thread.id,
+          status: "running",
+          message: "Working",
+        });
+        provider.emit("liveEvent", {
+          type: "plan_updated",
+          sessionId: primary.thread.id,
+          turnId: "turn-1",
+          explanation: "Follow the envelope plan.",
+          plan: [
+            { step: "Read docs", status: "completed" },
+            { step: "Wire the server", status: "in_progress" },
+          ],
+        });
+        provider.emit("liveEvent", {
+          type: "reasoning_delta",
+          sessionId: primary.thread.id,
+          turnId: "turn-1",
+          itemId: "item-1",
+          reasoningId: "reason-1",
+          delta: "Thinking...",
+          summary: true,
+        });
+        provider.emit("liveEvent", {
+          type: "queue_updated",
+          sessionId: primary.thread.id,
+          steeringCount: 1,
+          followUpCount: 2,
+          steeringPreview: ["Keep it provider-neutral"],
+          followUpPreview: ["Add tests", "Run analyze"],
+        });
+        provider.emit("liveEvent", {
+          type: "auto_retry_updated",
+          sessionId: primary.thread.id,
+          phase: "started",
+          attempt: 2,
+          maxAttempts: 3,
+          delayMs: 2000,
+          errorMessage: "Overloaded",
+        });
+
+        const richTypes = [
+          "provider_warning",
+          "thread_status_changed",
+          "plan_updated",
+          "reasoning_delta",
+          "queue_updated",
+          "auto_retry_updated",
+        ];
+        await waitFor(
+          () =>
+            richTypes.every((type) =>
+              primaryLive.events.some((event) => event.type === type),
+            )
+              ? true
+              : null,
+          "primary rich live events",
+        );
+
+        for (const type of richTypes) {
+          assert.equal(
+            secondaryLive.events.some((event) => event.type === type),
+            false,
+            `unexpected ${type} on unrelated session socket`,
+          );
+        }
+
+        const warning = primaryLive.events.find(
+          (event) => event.type === "provider_warning",
+        );
+        assert.equal(warning?.code, "warn-1");
+        const plan = primaryLive.events.find(
+          (event) => event.type === "plan_updated",
+        );
+        assert.equal(plan?.plan?.[1]?.step, "Wire the server");
+        const retry = primaryLive.events.find(
+          (event) => event.type === "auto_retry_updated",
+        );
+        assert.equal(retry?.delayMs, 2000);
+      } finally {
+        await closeSessionLiveSocket(primaryLive.socket);
+        await closeSessionLiveSocket(secondaryLive.socket);
+      }
     });
   });
 });

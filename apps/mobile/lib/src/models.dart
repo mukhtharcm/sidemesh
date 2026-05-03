@@ -2515,6 +2515,19 @@ class RecentSessionsLiveEvent {
       );
 }
 
+class LiveEventPlanStep {
+  const LiveEventPlanStep({required this.step, required this.status});
+
+  final String step;
+  final String status;
+
+  factory LiveEventPlanStep.fromJson(Map<String, dynamic> json) =>
+      LiveEventPlanStep(
+        step: _stringValue(json['step']),
+        status: _stringValue(json['status']),
+      );
+}
+
 class LiveEvent {
   const LiveEvent({
     required this.type,
@@ -2524,7 +2537,26 @@ class LiveEvent {
     this.turnId,
     this.itemId,
     this.delta,
+    this.reasoningId,
+    this.summary,
     this.status,
+    this.pendingActionKind,
+    this.explanation,
+    this.plan,
+    this.steeringCount,
+    this.followUpCount,
+    this.steeringPreview,
+    this.followUpPreview,
+    this.phase,
+    this.attempt,
+    this.maxAttempts,
+    this.delayMs,
+    this.errorMessage,
+    this.success,
+    this.finalError,
+    this.level,
+    this.code,
+    this.source,
     this.action,
     this.actionId,
     this.message,
@@ -2540,7 +2572,26 @@ class LiveEvent {
   final String? turnId;
   final String? itemId;
   final String? delta;
+  final String? reasoningId;
+  final bool? summary;
   final String? status;
+  final String? pendingActionKind;
+  final String? explanation;
+  final List<LiveEventPlanStep>? plan;
+  final int? steeringCount;
+  final int? followUpCount;
+  final List<String>? steeringPreview;
+  final List<String>? followUpPreview;
+  final String? phase;
+  final int? attempt;
+  final int? maxAttempts;
+  final int? delayMs;
+  final String? errorMessage;
+  final bool? success;
+  final String? finalError;
+  final String? level;
+  final String? code;
+  final String? source;
   final PendingAction? action;
   final String? actionId;
   final String? message;
@@ -2553,15 +2604,45 @@ class LiveEvent {
     sessionId: _stringValue(json['sessionId']),
     seq: _intOrNull(json['seq']),
     nextSeq: _intOrNull(json['nextSeq']),
-    turnId: json['turnId'] as String?,
-    itemId: json['itemId'] as String?,
-    delta: json['delta'] as String?,
-    status: json['status'] as String?,
+    turnId: _stringOrNull(json['turnId']),
+    itemId: _stringOrNull(json['itemId']),
+    delta: _stringOrNull(json['delta']),
+    reasoningId: _stringOrNull(json['reasoningId']),
+    summary: _boolOrNull(json['summary']),
+    status: _stringOrNull(json['status']),
+    pendingActionKind: _stringOrNull(json['pendingActionKind']),
+    explanation: _stringOrNull(json['explanation']),
+    plan: json['plan'] is List<dynamic>
+        ? (json['plan'] as List<dynamic>)
+              .whereType<Map<dynamic, dynamic>>()
+              .map(
+                (item) =>
+                    LiveEventPlanStep.fromJson(item.cast<String, dynamic>()),
+              )
+              .where(
+                (item) => item.step.isNotEmpty && item.status.isNotEmpty,
+              )
+              .toList(growable: false)
+        : null,
+    steeringCount: _intOrNull(json['steeringCount']),
+    followUpCount: _intOrNull(json['followUpCount']),
+    steeringPreview: _stringListOrNull(json['steeringPreview']),
+    followUpPreview: _stringListOrNull(json['followUpPreview']),
+    phase: _stringOrNull(json['phase']),
+    attempt: _intOrNull(json['attempt']),
+    maxAttempts: _intOrNull(json['maxAttempts']),
+    delayMs: _intOrNull(json['delayMs']),
+    errorMessage: _stringOrNull(json['errorMessage']),
+    success: _boolOrNull(json['success']),
+    finalError: _stringOrNull(json['finalError']),
+    level: _stringOrNull(json['level']),
+    code: _stringOrNull(json['code']),
+    source: _stringOrNull(json['source']),
     action: json['action'] == null
         ? null
         : PendingAction.fromJson(json['action'] as Map<String, dynamic>),
-    actionId: json['actionId'] as String?,
-    message: json['message'] as String?,
+    actionId: _stringOrNull(json['actionId']),
+    message: _stringOrNull(json['message']),
     messageItem: json['messageItem'] == null
         ? null
         : SessionMessage.fromJson(json['messageItem'] as Map<String, dynamic>),
@@ -2603,7 +2684,21 @@ int? _intOrNull(Object? value) {
   return null;
 }
 
+List<String>? _stringListOrNull(Object? value) {
+  if (value is! List<dynamic>) {
+    return null;
+  }
+  return value.whereType<String>().toList(growable: false);
+}
+
 bool _boolValue(Object? value) => value == true;
+
+bool? _boolOrNull(Object? value) {
+  if (value is bool) {
+    return value;
+  }
+  return null;
+}
 
 DateTime _dateValue(Object? value) {
   if (value is int) {

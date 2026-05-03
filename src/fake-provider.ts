@@ -44,7 +44,10 @@ import {
 } from "./agent-provider.js";
 import type {
   FakeCapabilityProfile,
+  LivePlanStep,
+  LiveThreadStatus,
   ModelSummary,
+  PendingActionKind,
   ProviderProfileCatalog,
   ProviderProfileSummary,
   SessionActivity,
@@ -358,6 +361,7 @@ export class FakeAgentProvider
     const session = this.requireSession(threadId);
     session.archived = true;
     this.interruptActiveTurn(session);
+    session.thread.status = { type: "closed" };
     this.loadedSessionIds.delete(threadId);
     this.touch(session);
     return { archived: true };
@@ -366,6 +370,7 @@ export class FakeAgentProvider
   public async unarchiveSession(threadId: string): Promise<unknown> {
     const session = this.requireSession(threadId);
     session.archived = false;
+    session.thread.status = { type: "idle" };
     this.touch(session);
     return { unarchived: true };
   }
@@ -473,6 +478,10 @@ export class FakeAgentProvider
       return false;
     }
     this.pendingApprovals.delete(action.id);
+    const session = this.sessions.get(action.sessionId);
+    if (session) {
+      this.emitThreadStatus(session, "running");
+    }
     pending.resolve(normalized.legacyDecision);
     return true;
   }
@@ -739,7 +748,7 @@ export class FakeAgentProvider
         "This is a deterministic fake provider session.",
         "",
         "Try prompts containing `tools`, `approval:command`, `approval:tool`, `approval:file`,",
-        "`approval:permissions`, `image`, `slow`, or `fail` to exercise UI states.",
+        "`approval:permissions`, `image`, `rich-events`, `slow`, or `fail` to exercise UI states.",
       ].join("\n"),
       attachments: [],
       phase: "final_answer",
@@ -770,7 +779,7 @@ export class FakeAgentProvider
       cwd: nodePath.resolve(options.cwd || this.workspaceRoot),
       source: "fake",
       path: null,
-      status: { type: "loaded" },
+      status: { type: "idle" },
       gitInfo: {
         sha: "fake-sha",
         branch: "fake/main",
@@ -831,10 +840,14 @@ export class FakeAgentProvider
       sessionId,
       turnId,
     });
+    this.emitThreadStatus(session, "running");
 
     const text = inputText(input);
     if (scenarioRequested(text, "tools") && this.supportsToolingScenario()) {
       await this.emitToolingScenario(session, turnId);
+    }
+    if (scenarioRequested(text, "rich-events")) {
+      await this.emitRichEventScenario(session, turnId);
     }
 
     const approvalKinds = requestedApprovalKinds(text);
@@ -1034,6 +1047,104 @@ export class FakeAgentProvider
     }
   }
 
+  private emitThreadStatus(
+    session: FakeSessionState,
+    status: LiveThreadStatus,
+    options: {
+      message?: string;
+      pendingActionKind?: PendingActionKind;
+    } = {},
+  ): void {
+    const activeFlags = options.pendingActionKind
+      ? [options.pendingActionKind]
+      : status === "running"
+        ? ["inProgress"]
+        : undefined;
+    session.thread.status = { type: status, activeFlags };
+    this.touch(session);
+    this.emit("liveEvent", {
+      type: "thread_status_changed",
+      sessionId: session.thread.id,
+      status,
+      message: options.message,
+      pendingActionKind: options.pendingActionKind,
+    });
+  }
+
+  private async emitRichEventScenario(
+    session: FakeSessionState,
+    turnId: string,
+  ): Promise<void> {
+    if (!this.isTurnActive(session.thread.id, turnId)) {
+      return;
+    }
+    const plan: LivePlanStep[] = [
+      { step: "Review the rich event envelope doc.", status: "completed" },
+      { step: "Normalize provider runtime events.", status: "in_progress" },
+      { step: "Render a minimal mobile UI.", status: "pending" },
+    ];
+    this.emit("liveEvent", {
+      type: "plan_updated",
+      sessionId: session.thread.id,
+      turnId,
+      explanation: "Fake provider rich event walkthrough.",
+      plan,
+    });
+    await sleep(this.latencyMs);
+    if (!this.isTurnActive(session.thread.id, turnId)) {
+      return;
+    }
+    const reasoningId = `fake-reasoning-${turnId}`;
+    this.emit("liveEvent", {
+      type: "reasoning_delta",
+      sessionId: session.thread.id,
+      turnId,
+      itemId: reasoningId,
+      reasoningId,
+      delta: "Reviewing provider-neutral runtime signals...\n",
+      summary: true,
+    });
+    this.emit("liveEvent", {
+      type: "queue_updated",
+      sessionId: session.thread.id,
+      steeringCount: 1,
+      followUpCount: 2,
+      steeringPreview: ["Keep the event envelope provider-neutral."],
+      followUpPreview: [
+        "Wire the server broadcast path.",
+        "Render a minimal mobile UI.",
+      ],
+    });
+    this.emit("liveEvent", {
+      type: "provider_warning",
+      sessionId: session.thread.id,
+      level: "warning",
+      code: "fake_runtime_signal",
+      message: "Fake provider injected a rich runtime warning for envelope testing.",
+      source: "fake/runtime",
+    });
+    this.emit("liveEvent", {
+      type: "auto_retry_updated",
+      sessionId: session.thread.id,
+      phase: "started",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 1500,
+      errorMessage: "Transient fake upstream overload.",
+    });
+    await sleep(this.latencyMs);
+    if (!this.isTurnActive(session.thread.id, turnId)) {
+      return;
+    }
+    this.emit("liveEvent", {
+      type: "auto_retry_updated",
+      sessionId: session.thread.id,
+      phase: "ended",
+      attempt: 1,
+      success: true,
+    });
+  }
+
   private async openApproval(
     session: FakeSessionState,
     turnId: string,
@@ -1057,6 +1168,10 @@ export class FakeAgentProvider
       providerRequestKind: `fake/${kind}/requestApproval`,
       providerPayload: { kind, cwd: session.thread.cwd },
     };
+    this.emitThreadStatus(session, "waiting_for_approval", {
+      pendingActionKind: kind,
+      message: `Waiting for fake ${kind.replaceAll("_", " ")} approval.`,
+    });
     this.emit("liveEvent", {
       type: "action_opened",
       action,
@@ -1230,7 +1345,17 @@ export class FakeAgentProvider
           : "failed";
     turn.completedAt = nowSeconds();
     this.activeTurnIds.delete(session.thread.id);
-    session.thread.status = { type: session.archived ? "archived" : "loaded" };
+    this.emitThreadStatus(
+      session,
+      session.archived
+        ? "closed"
+        : status === "failed"
+          ? "errored"
+          : "idle",
+      status === "failed"
+        ? { message: "Fake provider turn failed." }
+        : undefined,
+    );
     this.touch(session);
     this.emit("liveEvent", {
       type: "turn_completed",
