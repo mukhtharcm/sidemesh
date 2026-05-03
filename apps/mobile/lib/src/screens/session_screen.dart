@@ -2384,19 +2384,28 @@ class _SessionScreenState extends State<SessionScreen>
         final committedLive = _liveAssistantMessage;
         setState(() {
           if (message != null) {
-            if (message.reasoning.isEmpty &&
-                committedLive != null &&
-                committedLive.reasoning.isNotEmpty) {
+            final hasThinkingBlocks = message.content.any(
+              (b) => b is ThinkingBlock,
+            );
+            final liveThinking = committedLive != null &&
+                committedLive.reasoning.isNotEmpty;
+            if (!hasThinkingBlocks && liveThinking) {
               _upsertOptimisticMessage(
                 SessionMessage(
                   id: message.id,
                   role: message.role,
                   text: message.text,
+                  content: [
+                    ThinkingBlock(committedLive.reasoning),
+                    ...message.content.whereType<TextBlock>(),
+                    if (!message.content.any((b) => b is TextBlock) &&
+                        message.text.isNotEmpty)
+                      TextBlock(message.text),
+                  ],
                   attachments: message.attachments,
                   createdAt: message.createdAt,
                   seq: message.seq,
                   phase: message.phase,
-                  reasoning: committedLive.reasoning,
                 ),
               );
             } else {
@@ -2420,17 +2429,7 @@ class _SessionScreenState extends State<SessionScreen>
           _running = false;
           _awaitingAssistantReply = false;
           if (committedLive != null && committedLive.text.isNotEmpty) {
-            final finalMsg = SessionMessage(
-              id: committedLive.id,
-              role: 'assistant',
-              text: committedLive.text,
-              attachments: const <SessionMessageAttachment>[],
-              createdAt: committedLive.createdAt,
-              seq: committedLive.seq,
-              phase: 'final_answer',
-              reasoning: committedLive.reasoning,
-            );
-            _upsertOptimisticMessage(finalMsg);
+            _upsertOptimisticMessage(committedLive.toMessage());
           }
           _clearLiveAssistantMessage();
         });
@@ -4747,30 +4746,8 @@ class _SessionScreenState extends State<SessionScreen>
 
     final entries =
         <_TimelineEntry>[
-          ..._messages.expand((msg) => <_TimelineEntry>[
-            if (msg.role == 'assistant' && msg.reasoning.isNotEmpty)
-              _TimelineEntry.reasoning(
-                id: msg.id,
-                text: msg.reasoning,
-                createdAt: msg.createdAt.subtract(
-                  const Duration(microseconds: 1),
-                ),
-                seq: msg.seq,
-              ),
-            _TimelineEntry.message(msg),
-          ]),
-          ..._optimisticMessages.expand((msg) => <_TimelineEntry>[
-            if (msg.role == 'assistant' && msg.reasoning.isNotEmpty)
-              _TimelineEntry.reasoning(
-                id: msg.id,
-                text: msg.reasoning,
-                createdAt: msg.createdAt.subtract(
-                  const Duration(microseconds: 1),
-                ),
-                seq: msg.seq,
-              ),
-            _TimelineEntry.message(msg),
-          ]),
+          ..._messages.map(_TimelineEntry.message),
+          ..._optimisticMessages.map(_TimelineEntry.message),
           ..._activities.map(_TimelineEntry.activity),
           ..._timelineLiveEvents.map(_TimelineEntry.runtimeEvent),
           if (liveAssistant != null)
@@ -4803,8 +4780,7 @@ class _SessionScreenState extends State<SessionScreen>
     for (final entry in entries) {
       if (entry.kind == _TimelineEntryKind.liveAssistant ||
           entry.kind == _TimelineEntryKind.providerWarning ||
-          entry.kind == _TimelineEntryKind.planUpdated ||
-          entry.kind == _TimelineEntryKind.reasoning) {
+          entry.kind == _TimelineEntryKind.planUpdated) {
         continue;
       }
       if (entry.kind == _TimelineEntryKind.message) {
@@ -5451,11 +5427,6 @@ class _SessionScreenState extends State<SessionScreen>
                                 _TimelineEntryKind.planUpdated =>
                                   _PlanUpdateCard(
                                     event: entry.runtimeEvent!.event,
-                                  ),
-                                _TimelineEntryKind.reasoning =>
-                                  _ReasoningBlock(
-                                    reasoning: entry.reasoning!,
-                                    onOpenFile: _openWorkspaceFile,
                                   ),
                                 _TimelineEntryKind.liveAssistant =>
                                   _LiveAssistantBubble(

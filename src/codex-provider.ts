@@ -59,6 +59,8 @@ import type {
   SkillErrorInfo,
   SkillSummary,
   ThreadRecord,
+  SessionMessageContentBlock,
+  SessionMessageContentBlockThinking,
 } from "./types.js";
 import type { AgentSessionInputItem } from "./agent-provider.js";
 
@@ -85,6 +87,10 @@ export class CodexAgentProvider
   implements AgentProvider
 {
   private readonly bridge: CodexBridge;
+  private readonly turnReasoningBlocks = new Map<
+    string,
+    SessionMessageContentBlock[]
+  >();
 
   public readonly kind = "codex";
   public readonly displayName = "Codex";
@@ -536,6 +542,7 @@ public async health(): Promise<boolean> {
         : null;
       const turnId = asString(turn?.id);
       if (turnId) {
+        this.turnReasoningBlocks.delete(turnId);
         this.emit("liveEvent", { type: "turn_started", sessionId, turnId });
       }
       return;
@@ -570,8 +577,28 @@ public async health(): Promise<boolean> {
     ) {
       const delta = asString(typed.delta);
       const itemId = asString(typed.itemId);
+      const turnId = asString(typed.turnId) || sessionId;
       if (!delta || !itemId) {
         return;
+      }
+      let blocks = this.turnReasoningBlocks.get(turnId);
+      if (!blocks) {
+        blocks = [];
+        this.turnReasoningBlocks.set(turnId, blocks);
+      }
+      const existing = blocks.find(
+        (b): b is SessionMessageContentBlockThinking =>
+          b.type === "thinking" && b.reasoningId === itemId,
+      );
+      if (existing) {
+        existing.thinking += delta;
+      } else {
+        blocks.push({
+          type: "thinking",
+          thinking: delta,
+          reasoningId: itemId,
+          summary: method === "item/reasoning/summaryTextDelta",
+        });
       }
       this.emit("liveEvent", {
         type: "reasoning_delta",
@@ -610,7 +637,13 @@ public async health(): Promise<boolean> {
 
       const itemType = asString(item.type);
       if (method === "item/completed" && itemType === "agentMessage") {
-        const message = buildCodexAssistantMessageDraft(item);
+        const content = turnId
+          ? this.turnReasoningBlocks.get(turnId) ?? []
+          : [];
+        const message = buildCodexAssistantMessageDraft(item, content);
+        if (turnId) {
+          this.turnReasoningBlocks.delete(turnId);
+        }
         if (message) {
           this.emit("liveEvent", {
             type: "assistant_message_completed",
@@ -802,7 +835,8 @@ function buildRuntimeFromCodexTokenUsage(
 
 function buildCodexAssistantMessageDraft(
   item: Record<string, unknown>,
-): { id: string; text: string; phase?: "commentary" | "final_answer" } | null {
+  content: SessionMessageContentBlock[] = [],
+): { id: string; text: string; phase?: "commentary" | "final_answer"; content: SessionMessageContentBlock[] } | null {
   const id = asString(item.id);
   const text = asString(item.text);
   if (!id || !text) {
@@ -810,6 +844,10 @@ function buildCodexAssistantMessageDraft(
   }
 
   const phase = asString(item.phase);
+  const blocks: SessionMessageContentBlock[] = [...content];
+  if (text.trim()) {
+    blocks.push({ type: "text", text });
+  }
   return {
     id,
     text,
@@ -817,6 +855,7 @@ function buildCodexAssistantMessageDraft(
       phase === "commentary" || phase === "final_answer"
         ? phase
         : undefined,
+    content: blocks,
   };
 }
 

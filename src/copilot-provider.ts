@@ -67,6 +67,8 @@ import type {
   ToolActivity,
   ThreadRecord,
   TurnRecord,
+  SessionMessageContentBlock,
+  SessionMessageContentBlockThinking,
 } from "./types.js";
 
 export interface CopilotAgentProviderOptions {
@@ -109,6 +111,7 @@ interface ActiveCopilotTurn {
   turnId: string;
   sdkSession: CopilotSdkSession;
   assistantBuffers: Map<string, string>;
+  reasoningBlocks: SessionMessageContentBlock[];
   completedAssistantMessageIds: Set<string>;
   resolve(status: string): void;
 }
@@ -798,6 +801,7 @@ export class CopilotAgentProvider
           turnId,
           sdkSession,
           assistantBuffers: new Map(),
+          reasoningBlocks: [],
           completedAssistantMessageIds: new Set(),
           resolve,
         });
@@ -989,12 +993,27 @@ export class CopilotAgentProvider
       if (!delta) {
         return;
       }
+      const reasoningId = event.data.reasoningId ?? event.id;
+      const existing = active.reasoningBlocks.find(
+        (b): b is SessionMessageContentBlockThinking =>
+          b.type === "thinking" && b.reasoningId === reasoningId,
+      );
+      if (existing) {
+        existing.thinking += delta;
+      } else {
+        active.reasoningBlocks.push({
+          type: "thinking",
+          thinking: delta,
+          reasoningId,
+          summary: false,
+        });
+      }
       this.emit("liveEvent", {
         type: "reasoning_delta",
         sessionId,
         turnId: active.turnId,
         itemId: event.id,
-        reasoningId: event.data.reasoningId,
+        reasoningId,
         delta,
         summary: false,
       });
@@ -1009,12 +1028,27 @@ export class CopilotAgentProvider
       if (!delta) {
         return;
       }
+      const reasoningId = event.data.reasoningId ?? event.id;
+      const existing = active.reasoningBlocks.find(
+        (b): b is SessionMessageContentBlockThinking =>
+          b.type === "thinking" && b.reasoningId === reasoningId,
+      );
+      if (existing) {
+        existing.thinking += delta;
+      } else {
+        active.reasoningBlocks.push({
+          type: "thinking",
+          thinking: delta,
+          reasoningId,
+          summary: false,
+        });
+      }
       this.emit("liveEvent", {
         type: "reasoning_delta",
         sessionId,
         turnId: active.turnId,
         itemId: event.id,
-        reasoningId: event.data.reasoningId,
+        reasoningId,
         delta,
         summary: false,
       });
@@ -1489,10 +1523,13 @@ export class CopilotAgentProvider
     phase: "commentary" | "final_answer",
     id = `copilot-assistant-${randomUUID()}`,
   ): void {
+    const active = this.activeTurns.get(session.thread.id);
+    const content = active?.reasoningBlocks ?? [];
     this.appendMessage(session, {
       id,
       role: "assistant",
       text,
+      content,
       attachments: [],
       phase,
     });
@@ -1509,14 +1546,19 @@ export class CopilotAgentProvider
       id?: string;
       role: SessionMessage["role"];
       text: string;
+      content?: SessionMessageContentBlock[];
       attachments: SessionMessageAttachment[];
       phase?: "commentary" | "final_answer";
     },
   ): SessionMessage {
+    const blocks = message.content && message.content.length > 0
+      ? message.content
+      : [{ type: "text" as const, text: message.text }];
     const next: SessionMessage = {
       id: message.id ?? `copilot-message-${randomUUID()}`,
       role: message.role,
       text: message.text,
+      content: blocks,
       attachments: message.attachments,
       phase: message.phase,
       createdAt: Date.now(),
@@ -2844,6 +2886,7 @@ function parseSdkSessionEvents(
         id: typeof event.id === "string" ? event.id : `copilot-user-${seq}`,
         role: "user",
         text: data.content,
+        content: [{ type: "text", text: data.content }],
         attachments: [],
         createdAt: timestamp,
         seq: seq++,
@@ -2872,6 +2915,7 @@ function parseSdkSessionEvents(
                 : `copilot-assistant-${seq}`,
           role: "assistant",
           text,
+          content: [{ type: "text", text }],
           attachments: [],
           createdAt: timestamp,
           seq: seq++,

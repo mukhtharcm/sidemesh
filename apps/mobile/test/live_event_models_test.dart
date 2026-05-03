@@ -103,26 +103,31 @@ void main() {
     expect(event.steeringPreview, ['alpha']);
   });
 
-  test('SessionMessage preserves reasoning field', () {
+  test('SessionMessage preserves content blocks', () {
     final msg = SessionMessage(
       id: 'msg-1',
       role: 'assistant',
       text: 'Hello',
+      content: const [
+        ThinkingBlock('Step one. Step two.'),
+        TextBlock('Hello'),
+      ],
       attachments: const [],
       createdAt: DateTime(2026, 1, 1),
       seq: 1,
-      reasoning: 'Step one. Step two.',
     );
-    expect(msg.reasoning, 'Step one. Step two.');
+    expect(msg.content.length, 2);
+    expect((msg.content.first as ThinkingBlock).thinking, 'Step one. Step two.');
 
     final json = msg.toJson();
-    expect(json['reasoning'], 'Step one. Step two.');
+    expect(json['content'], hasLength(2));
 
     final parsed = SessionMessage.fromJson(json);
-    expect(parsed.reasoning, 'Step one. Step two.');
+    expect(parsed.content.length, 2);
+    expect((parsed.content.first as ThinkingBlock).thinking, 'Step one. Step two.');
   });
 
-  test('SessionMessage defaults reasoning to empty string', () {
+  test('SessionMessage derives content from text when absent in fromJson', () {
     final msg = SessionMessage(
       id: 'msg-1',
       role: 'assistant',
@@ -131,7 +136,7 @@ void main() {
       createdAt: DateTime(2026, 1, 1),
       seq: 1,
     );
-    expect(msg.reasoning, '');
+    expect(msg.content, isEmpty);
 
     final parsed = SessionMessage.fromJson({
       'id': 'msg-1',
@@ -141,6 +146,7 @@ void main() {
       'createdAt': 0,
       'seq': 1,
     });
-    expect(parsed.reasoning, '');
+    expect(parsed.content, hasLength(1));
+    expect((parsed.content.single as TextBlock).text, 'Hello');
   });
 }
