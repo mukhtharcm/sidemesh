@@ -356,6 +356,9 @@ export interface AgentConfigurationProvider {
   listProfiles(options: AgentProfileListOptions): Promise<ProviderProfileCatalog>;
 }
 
+// Provider-native remote filesystem APIs are intentionally not part of the
+// shared AgentProvider surface. Local filesystem access is daemon-owned in
+// src/fs-routes.ts and advertised through hostCapabilities.
 export interface AgentFilesystemProvider {
   fsReadDirectory(path: string): Promise<AgentFsDirectoryListing>;
   fsGetMetadata(path: string): Promise<AgentFsMetadata>;
@@ -378,8 +381,7 @@ export interface AgentProvider
     Partial<AgentSessionLifecycleProvider>,
     Partial<AgentApprovalProvider>,
     Partial<AgentWorkspaceProvider>,
-    Partial<AgentConfigurationProvider>,
-    Partial<AgentFilesystemProvider> {}
+    Partial<AgentConfigurationProvider> {}
 
 export type AgentProviderMethod<K extends keyof AgentProvider> = Extract<
   NonNullable<AgentProvider[K]>,

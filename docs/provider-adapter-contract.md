@@ -74,11 +74,14 @@ to inspect provider-specific model names:
 Workspace:
 
 - `readRemoteGitDiff`
-- filesystem methods under `fs*`
 
 Local git status, local working/staged/unstaged diffs, integrated terminals, and
 port forwarding are daemon-owned host features. Providers only own
 `readRemoteGitDiff`, because that may require agent/provider-specific context.
+Local filesystem browse/read/write/watch is also daemon-owned and implemented
+in `src/fs-routes.ts`; do not add local filesystem methods to
+`AgentProvider`. The provider `workspace.filesystem` flag is reserved for
+provider-native workspace/tool semantics, not the host filesystem API.
 
 ## Runtime Events
 
@@ -115,7 +118,8 @@ reliable upstream.
 Compatibility endpoints:
 
 - `/api/node` exposes the active provider, provider version,
-  `providerCapabilities`, `hostCapabilities`, and supported provider metadata.
+  `providerCapabilities`, `defaultProviderCapabilities`, `hostCapabilities`,
+  and supported provider metadata with per-provider capability maps.
 - `/api/providers` exposes daemon-supported provider definitions for future
   provider-selection UI.
 - `codexVersion` remains as a compatibility alias in `/api/node`; new code

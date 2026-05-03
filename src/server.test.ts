@@ -118,6 +118,32 @@ describe("POST /api/admin/provider/:kind/restart", () => {
   });
 });
 
+describe("GET /api/node", () => {
+  it("exposes default-provider and per-provider capability maps", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/node",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.body as any;
+      assert.equal(body.provider, "fake");
+      assert.equal(body.providerCapabilities.sessions.create, true);
+      assert.equal(body.defaultProviderCapabilities.sessions.create, true);
+      assert.equal(body.searchSessions, true);
+      assert.equal(body.hostCapabilities.workspace.filesystem, true);
+      assert.equal(body.supportedProviders.length, 1);
+      assert.equal(body.supportedProviders[0].kind, "fake");
+      assert.equal(body.supportedProviders[0].capabilities.sessions.create, true);
+    });
+  });
+});
+
 
 
 describe("GET /api/sessions/:sessionId/status", () => {

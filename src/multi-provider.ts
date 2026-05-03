@@ -18,10 +18,6 @@ import {
   type AgentSubmitInputResult,
 } from "./agent-provider.js";
 import type {
-  AgentFsDirectoryListing,
-  AgentFsFile,
-  AgentFsMetadata,
-  AgentFsWatchResult,
   AgentModelListOptions,
   AgentProfileListOptions,
   AgentRemoteGitDiff,
@@ -78,9 +74,7 @@ export class MultiAgentProvider
     }
     this.kind = defaultEntry.provider.kind;
     this.displayName = defaultEntry.provider.displayName;
-    this.capabilities = mergeCapabilities(
-      entries.map((entry) => entry.provider.capabilities),
-    );
+    this.capabilities = defaultEntry.provider.capabilities;
     for (const entry of this.orderedEntries) {
       entry.provider.on("liveEvent", (event) => {
         this.emit("liveEvent", this.wrapLiveEvent(entry.kind, event));
@@ -111,7 +105,10 @@ export class MultiAgentProvider
     if (!entry) {
       throw new Error(`Unknown provider "${kind}".`);
     }
-    if (!entry.provider.restart) {
+    if (
+      !entry.provider.capabilities.lifecycle.restart ||
+      !entry.provider.restart
+    ) {
       throw new Error(`${entry.provider.displayName} does not support restart.`);
     }
     await entry.provider.restart();
@@ -382,103 +379,6 @@ export class MultiAgentProvider
     ).call(entry.provider, cwd);
   }
 
-  public async fsReadDirectory(path: string): Promise<AgentFsDirectoryListing> {
-    const entry = this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "fsReadDirectory",
-      "filesystem",
-    ).call(entry.provider, path);
-  }
-
-  public async fsGetMetadata(path: string): Promise<AgentFsMetadata> {
-    const entry = this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "fsGetMetadata",
-      "filesystem",
-    ).call(entry.provider, path);
-  }
-
-  public async fsReadFile(path: string): Promise<AgentFsFile> {
-    const entry = this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "fsReadFile",
-      "filesystem",
-    ).call(entry.provider, path);
-  }
-
-  public async fsWriteFile(path: string, dataBase64: string): Promise<unknown> {
-    const entry = this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "fsWriteFile",
-      "filesystem",
-    ).call(entry.provider, path, dataBase64);
-  }
-
-  public async fsCreateDirectory(
-    path: string,
-    recursive: boolean,
-  ): Promise<unknown> {
-    const entry = this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "fsCreateDirectory",
-      "filesystem",
-    ).call(entry.provider, path, recursive);
-  }
-
-  public async fsRemove(
-    path: string,
-    options: { recursive: boolean; force: boolean },
-  ): Promise<unknown> {
-    const entry = this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "fsRemove",
-      "filesystem",
-    ).call(entry.provider, path, options);
-  }
-
-  public async fsCopy(params: {
-    sourcePath: string;
-    destinationPath: string;
-    recursive: boolean;
-  }): Promise<unknown> {
-    const entry = this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "fsCopy",
-      "filesystem",
-    ).call(entry.provider, params);
-  }
-
-  public async fsWatch(path: string): Promise<AgentFsWatchResult> {
-    const entry = this.defaultEntry();
-    const result = await requireProviderMethod(
-      entry.provider,
-      "fsWatch",
-      "filesystem",
-    ).call(entry.provider, path);
-    return {
-      watchId: wrapProviderScopedId(entry.kind, result.watchId),
-    };
-  }
-
-  public async fsUnwatch(watchId: string): Promise<unknown> {
-    const resolved = unwrapProviderScopedId(watchId);
-    const entry = resolved
-      ? this.resolveProviderKind(resolved.kind)
-      : this.defaultEntry();
-    return requireProviderMethod(
-      entry.provider,
-      "fsUnwatch",
-      "filesystem",
-    ).call(entry.provider, resolved?.rawId ?? watchId);
-  }
-
   public getProviderEntries(): ProviderEntry[] {
     return [...this.orderedEntries];
   }
@@ -584,68 +484,6 @@ export class MultiAgentProvider
   private defaultEntry(): ProviderEntry {
     return this.resolveProviderKind(this.defaultProviderKind);
   }
-}
-
-function mergeCapabilities(
-  capabilitiesList: AgentProviderCapabilities[],
-): AgentProviderCapabilities {
-  const any = (selector: (caps: AgentProviderCapabilities) => boolean) =>
-    capabilitiesList.some(selector);
-  return {
-    sessions: {
-      create: any((caps) => caps.sessions.create),
-      resume: any((caps) => caps.sessions.resume),
-      rename: any((caps) => caps.sessions.rename),
-      archive: any((caps) => caps.sessions.archive),
-      compact: any((caps) => caps.sessions.compact),
-      interrupt: any((caps) => caps.sessions.interrupt),
-      history: any((caps) => caps.sessions.history),
-      eventReplay: any((caps) => caps.sessions.eventReplay),
-      recentFallback: any((caps) => caps.sessions.recentFallback),
-      searchSessions: any((caps) => caps.sessions.searchSessions),
-    },
-    input: {
-      text: any((caps) => caps.input.text),
-      imageUrl: any((caps) => caps.input.imageUrl),
-      localImage: any((caps) => caps.input.localImage),
-      skills: any((caps) => caps.input.skills),
-      fileMentions: any((caps) => caps.input.fileMentions),
-    },
-    interaction: {
-      userInput: any((caps) => caps.interaction.userInput),
-      elicitation: any((caps) => caps.interaction.elicitation),
-    },
-    approvals: {
-      command: any((caps) => caps.approvals.command),
-      tool: any((caps) => caps.approvals.tool),
-      fileChange: any((caps) => caps.approvals.fileChange),
-      permissions: any((caps) => caps.approvals.permissions),
-      approveForSession: any((caps) => caps.approvals.approveForSession),
-    },
-    configuration: {
-      models: any((caps) => caps.configuration.models),
-      profiles: any((caps) => caps.configuration.profiles),
-      skills: any((caps) => caps.configuration.skills),
-      skillManagement: any((caps) => caps.configuration.skillManagement),
-    },
-    runtimeControls: {
-      model: any((caps) => caps.runtimeControls.model),
-      mode: any((caps) => caps.runtimeControls.mode),
-      reasoningEffort: any((caps) => caps.runtimeControls.reasoningEffort),
-      fastMode: any((caps) => caps.runtimeControls.fastMode),
-      approvalPolicy: any((caps) => caps.runtimeControls.approvalPolicy),
-      sandboxMode: any((caps) => caps.runtimeControls.sandboxMode),
-      networkAccess: any((caps) => caps.runtimeControls.networkAccess),
-      webSearch: any((caps) => caps.runtimeControls.webSearch),
-    },
-    workspace: {
-      filesystem: any((caps) => caps.workspace.filesystem),
-      remoteGitDiff: any((caps) => caps.workspace.remoteGitDiff),
-    },
-    lifecycle: {
-      restart: any((caps) => caps.lifecycle.restart),
-    },
-  };
 }
 
 function wrapProviderScopedId(kind: AgentProviderKind, rawId: string): string {

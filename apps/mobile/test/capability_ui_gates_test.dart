@@ -581,6 +581,7 @@ NodeInfo _nodeForCapabilities(
   'providerVersion': providerVersion,
   'providerConfig': {'kind': providerKind, 'command': providerCommand},
   'providerCapabilities': capabilities,
+  'defaultProviderCapabilities': capabilities,
   'hostCapabilities': {
     'workspace': {'filesystem': true, 'gitStatus': false, 'gitDiff': false},
   },
