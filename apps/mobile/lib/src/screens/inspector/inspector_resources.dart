@@ -463,7 +463,7 @@ class _ResourceListCard extends StatelessWidget {
       padding: EdgeInsets.zero,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppShapes.input,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           child: Row(
@@ -581,9 +581,9 @@ class _ResourceMediaCard extends StatelessWidget {
       padding: EdgeInsets.zero,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppShapes.input,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: AppShapes.input,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

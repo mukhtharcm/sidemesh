@@ -11,6 +11,7 @@ import '../models.dart';
 import '../port_forward_bridge.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import 'browser_preview_screen.dart';
@@ -464,7 +465,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                         'Forward a dev server',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           color: colors.textPrimary,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: AppWeights.title,
                         ),
                       ),
                     ),
@@ -690,7 +691,7 @@ class _PortForwardCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: colors.textPrimary,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: AppWeights.title,
                   ),
                 ),
               ),
@@ -865,7 +866,7 @@ class _InlinePortForwardPreviewState extends State<_InlinePortForwardPreview> {
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           color: colors.textPrimary,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: AppWeights.title,
                         ),
                       ),
                       const SizedBox(height: 2),
