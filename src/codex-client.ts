@@ -320,6 +320,10 @@ export class CodexBridge extends EventEmitter<{
     this.send({ id, result });
   }
 
+  public error(id: number | string, code: number, message: string): void {
+    this.send({ id, error: { code, message } });
+  }
+
   public notify(method: string, params: unknown): void {
     this.send({ method, params });
   }

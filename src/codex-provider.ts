@@ -30,6 +30,8 @@ import {
 } from "./agent-provider.js";
 import {
   normalizePendingActionDecision,
+  parsePendingActionElicitationResponse,
+  parsePendingActionUserInputResponse,
   type PendingActionDecisionInput,
   type PendingActionResponseInput,
 } from "./approvals.js";
@@ -61,6 +63,7 @@ import type {
   ThreadRecord,
   SessionMessageContentBlock,
   SessionMessageContentBlockThinking,
+  PendingActionElicitationField,
 } from "./types.js";
 import type { AgentSessionInputItem } from "./agent-provider.js";
 
@@ -765,7 +768,9 @@ public async health(): Promise<boolean> {
     if (
       method !== "item/commandExecution/requestApproval" &&
       method !== "item/fileChange/requestApproval" &&
-      method !== "item/permissions/requestApproval"
+      method !== "item/permissions/requestApproval" &&
+      method !== "item/tool/requestUserInput" &&
+      method !== "mcpServer/elicitation/request"
     ) {
       return;
     }
@@ -775,9 +780,50 @@ public async health(): Promise<boolean> {
       return;
     }
 
+    let action: AgentPendingAction | null = null;
+    if (
+      method === "item/commandExecution/requestApproval" ||
+      method === "item/fileChange/requestApproval" ||
+      method === "item/permissions/requestApproval"
+    ) {
+      action = buildCodexPendingAction(method, params, id, sessionId);
+    } else if (method === "item/tool/requestUserInput") {
+      action = buildCodexUserInputAction(params, id, sessionId);
+    } else if (method === "mcpServer/elicitation/request") {
+      action = buildCodexElicitationAction(params, id, sessionId);
+    }
+
+    if (!action) {
+      this.emit("liveEvent", {
+        type: "provider_warning",
+        sessionId,
+        level: "warning",
+        code: "invalid_request",
+        message: `Malformed ${method} request params`,
+        source: "codex",
+      });
+      this.bridge.error(id, -32600, "Invalid request params");
+      return;
+    }
+
+    if (
+      method === "item/tool/requestUserInput" &&
+      Array.isArray((params as Record<string, any>)?.questions) &&
+      (params as Record<string, any>).questions.length > 1
+    ) {
+      this.emit("liveEvent", {
+        type: "provider_warning",
+        sessionId,
+        level: "info",
+        code: "multi_question_truncated",
+        message: "Codex sent multiple questions; only the first is shown.",
+        source: "codex",
+      });
+    }
+
     this.emit("liveEvent", {
       type: "action_opened",
-      action: buildCodexPendingAction(method, params, id, sessionId),
+      action,
     });
   }
 }
@@ -1941,6 +1987,9 @@ function extractSessionId(method: string, params: unknown): string | null {
   if (typeof typed.threadId === "string") {
     return typed.threadId;
   }
+  if (typeof typed.thread_id === "string") {
+    return typed.thread_id;
+  }
   if (method === "turn/started" && typeof typed.turn?.threadId === "string") {
     return typed.turn.threadId;
   }
@@ -2139,8 +2188,8 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     fileMentions: true,
   },
   interaction: {
-    userInput: false,
-    elicitation: false,
+    userInput: true,
+    elicitation: true,
   },
   approvals: {
     command: true,
@@ -2173,10 +2222,278 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
 };
 
+
+function buildCodexUserInputAction(
+  params: unknown,
+  providerRequestId: number | string,
+  sessionId: string,
+): AgentPendingAction | null {
+  const typed = (params || {}) as Record<string, any>;
+  const questions = typed.questions;
+  if (!Array.isArray(questions) || questions.length === 0) {
+    return null;
+  }
+
+  const firstQuestion = questions[0];
+  if (!firstQuestion || typeof firstQuestion !== "object") {
+    return null;
+  }
+
+  if (firstQuestion.is_secret === true) {
+    return null;
+  }
+
+  const questionText =
+    asString(firstQuestion.question) ||
+    asString(firstQuestion.header) ||
+    "Agent question";
+  const options = Array.isArray(firstQuestion.options)
+    ? firstQuestion.options.filter(
+        (opt: unknown): opt is string =>
+          typeof opt === "string" && opt.trim().length > 0,
+      )
+    : [];
+  const isOther = firstQuestion.is_other === true;
+
+  return {
+    id: randomFallbackId(),
+    sessionId,
+    kind: "user_input",
+    title: "Agent question",
+    detail: questionText,
+    requestedAt: Date.now(),
+    canApprove: false,
+    canApproveForSession: false,
+    canDecline: false,
+    userInput: {
+      question: questionText,
+      choices: options,
+      allowFreeform: isOther || options.length === 0,
+    },
+    providerRequestId,
+    providerRequestKind: "item/tool/requestUserInput",
+    providerPayload: {
+      threadId: sessionId,
+      turnId: asString(typed.turnId) || asString(typed.turn_id) || undefined,
+      itemId: asString(typed.itemId) || asString(typed.item_id) || undefined,
+      questionId: asString(firstQuestion.id) || "default",
+    },
+  };
+}
+
+function buildCodexElicitationAction(
+  params: unknown,
+  providerRequestId: number | string,
+  sessionId: string,
+): AgentPendingAction | null {
+  const typed = (params || {}) as Record<string, any>;
+  const mode = asString(typed.mode);
+  const message = asString(typed.message) || "Structured input requested";
+  const source = asString(typed.server_name) || asString(typed.serverName) || undefined;
+
+  if (mode === "url") {
+    const url = asString(typed.url);
+    if (!url) {
+      return null;
+    }
+    return {
+      id: randomFallbackId(),
+      sessionId,
+      kind: "elicitation",
+      title: "Browser sign-in required",
+      detail: message,
+      requestedAt: Date.now(),
+      canApprove: false,
+      canApproveForSession: false,
+      canDecline: true,
+      elicitation: {
+        mode: "url",
+        message,
+        ...(source ? { source } : {}),
+        url,
+        fields: [],
+      },
+      providerRequestId,
+      providerRequestKind: "mcpServer/elicitation/request",
+      providerPayload: {
+        threadId: sessionId,
+        turnId: asString(typed.turnId) || asString(typed.turn_id) || undefined,
+        elicitationId:
+          asString(typed.elicitation_id) || asString(typed.elicitationId) || undefined,
+        serverName: source,
+      },
+    };
+  }
+
+  if (mode === "form") {
+    const schema =
+      typed.requested_schema && typeof typed.requested_schema === "object"
+        ? (typed.requested_schema as Record<string, any>)
+        : null;
+    const fields = schema ? normalizeCodexElicitationFields(schema) : [];
+
+    if (schema && Array.isArray(schema.required)) {
+      const producedKeys = new Set(fields.map((f) => f.key));
+      for (const req of schema.required as string[]) {
+        if (!producedKeys.has(req)) {
+          return null;
+        }
+      }
+    }
+
+    return {
+      id: randomFallbackId(),
+      sessionId,
+      kind: "elicitation",
+      title: "Structured input requested",
+      detail: message,
+      requestedAt: Date.now(),
+      canApprove: false,
+      canApproveForSession: false,
+      canDecline: true,
+      elicitation: {
+        mode: "form",
+        message,
+        ...(source ? { source } : {}),
+        fields,
+      },
+      providerRequestId,
+      providerRequestKind: "mcpServer/elicitation/request",
+      providerPayload: {
+        threadId: sessionId,
+        turnId: asString(typed.turnId) || asString(typed.turn_id) || undefined,
+        elicitationId:
+          asString(typed.elicitation_id) || asString(typed.elicitationId) || undefined,
+        serverName: source,
+      },
+    };
+  }
+
+  return null;
+}
+
+function normalizeCodexElicitationFields(
+  schema: Record<string, any>,
+): PendingActionElicitationField[] {
+  if (schema.type !== "object" || !schema.properties) {
+    return [];
+  }
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  return Object.entries(schema.properties as Record<string, any>)
+    .map(([key, field]) => normalizeCodexElicitationField(key, field, required))
+    .filter((field): field is PendingActionElicitationField => field !== null);
+}
+
+function normalizeCodexElicitationField(
+  key: string,
+  field: Record<string, any>,
+  required: Set<string>,
+): PendingActionElicitationField | null {
+  const title = asString(field.title) || key;
+  const description = asString(field.description) ?? undefined;
+  const isRequired = required.has(key);
+
+  if (field.type === "boolean") {
+    return {
+      key,
+      type: "boolean",
+      title,
+      description,
+      required: isRequired,
+      ...(typeof field.default === "boolean" ? { defaultValue: field.default } : {}),
+    };
+  }
+
+  if (field.type === "number" || field.type === "integer") {
+    return {
+      key,
+      type: "number",
+      title,
+      description,
+      required: isRequired,
+      integer: field.type === "integer",
+      ...(typeof field.default === "number" ? { defaultValue: field.default } : {}),
+      ...(typeof field.minimum === "number" ? { minimum: field.minimum } : {}),
+      ...(typeof field.maximum === "number" ? { maximum: field.maximum } : {}),
+    };
+  }
+
+  if (field.type === "array" && field.items && typeof field.items === "object") {
+    const items = field.items as Record<string, any>;
+    const options = Array.isArray(items.enum)
+      ? items.enum
+          .filter((v: unknown): v is string => typeof v === "string")
+          .map((value: string) => ({ value, label: value }))
+      : undefined;
+    return {
+      key,
+      type: "string[]",
+      title,
+      description,
+      required: isRequired,
+      options: options ?? [],
+      ...(Array.isArray(field.default) ? { defaultValue: field.default } : {}),
+      ...(typeof field.minItems === "number" ? { minItems: field.minItems } : {}),
+      ...(typeof field.maxItems === "number" ? { maxItems: field.maxItems } : {}),
+    };
+  }
+
+  if (field.type !== "string" && field.type !== undefined && field.type !== null) {
+    return null;
+  }
+
+  const options = Array.isArray(field.enum)
+    ? field.enum
+        .filter((v: unknown): v is string => typeof v === "string")
+        .map((value: string) => ({ value, label: value }))
+    : undefined;
+
+  return {
+    key,
+    type: "string",
+    title,
+    description,
+    required: isRequired,
+    ...(typeof field.default === "string" ? { defaultValue: field.default } : {}),
+    ...(options && options.length > 0 ? { options } : {}),
+    ...(typeof field.minLength === "number" ? { minLength: field.minLength } : {}),
+    ...(typeof field.maxLength === "number" ? { maxLength: field.maxLength } : {}),
+    ...(asString(field.format) ? { format: asString(field.format) as any } : {}),
+  };
+}
+
 function buildCodexActionResponse(
   action: AgentPendingAction,
   input: PendingActionResponseInput,
 ): unknown | null {
+  if (action.providerRequestKind === "item/tool/requestUserInput") {
+    const userInput = parsePendingActionUserInputResponse(input);
+    if (!userInput) {
+      return null;
+    }
+    const payload = action.providerPayload as Record<string, any> | undefined;
+    const questionId = asString(payload?.questionId) || "default";
+    return {
+      answers: {
+        [questionId]: { answers: [userInput.answer] },
+      },
+    };
+  }
+
+  if (action.providerRequestKind === "mcpServer/elicitation/request") {
+    const elicitation = parsePendingActionElicitationResponse(input);
+    if (!elicitation) {
+      return null;
+    }
+    const result: Record<string, unknown> = {
+      action: elicitation.action,
+    };
+    if (elicitation.action === "accept" && elicitation.content) {
+      result.content = elicitation.content;
+    }
+    return result;
+  }
+
   const decision = normalizePendingActionDecision(
     input as PendingActionDecisionInput,
   );

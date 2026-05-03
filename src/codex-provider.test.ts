@@ -452,3 +452,443 @@ describe("codex provider restart", () => {
     assert.ok(stderrLines[0].includes("Restarting app-server"));
   });
 });
+
+describe("codex interaction bridge", () => {
+  it("emits user_input pending action for tool requestUserInput", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const events: unknown[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest(42, "item/tool/requestUserInput", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      questions: [
+        {
+          id: "q1",
+          header: "Header text",
+          question: "What is your name?",
+          is_other: false,
+          is_secret: false,
+          options: ["Alice", "Bob"],
+        },
+      ],
+    });
+
+    assert.equal(events.length, 1);
+    const event = events[0] as any;
+    assert.equal(event.type, "action_opened");
+    assert.equal(event.action.kind, "user_input");
+    assert.equal(event.action.sessionId, "thread-1");
+    assert.equal(event.action.userInput.question, "What is your name?");
+    assert.deepEqual(event.action.userInput.choices, ["Alice", "Bob"]);
+    assert.equal(event.action.userInput.allowFreeform, false);
+    assert.equal(event.action.providerRequestId, 42);
+    assert.equal(event.action.providerRequestKind, "item/tool/requestUserInput");
+    assert.equal(event.action.providerPayload.questionId, "q1");
+    assert.equal(event.action.providerPayload.itemId, "item-1");
+    assert.equal(event.action.providerPayload.isSecret, undefined);
+  });
+
+  it("emits user_input with allowFreeform when is_other is true", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const events: unknown[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest(1, "item/tool/requestUserInput", {
+      threadId: "thread-1",
+      questions: [
+        {
+          id: "q1",
+          question: "Describe the issue",
+          is_other: true,
+          is_secret: false,
+          options: [],
+        },
+      ],
+    });
+
+    const event = events[0] as any;
+    assert.equal(event.action.userInput.allowFreeform, true);
+    assert.deepEqual(event.action.userInput.choices, []);
+  });
+
+  it("warns and errors on malformed userInput params", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const errors: unknown[] = [];
+    provider.bridge = {
+      error: (_id: number | string, code: number, message: string) => {
+        errors.push({ code, message });
+      },
+    };
+    const events: unknown[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest(1, "item/tool/requestUserInput", {
+      threadId: "thread-1",
+      questions: [],
+    });
+
+    assert.equal(events.length, 1);
+    assert.equal((events[0] as any).type, "provider_warning");
+    assert.equal(errors.length, 1);
+    assert.equal((errors[0] as any).code, -32600);
+  });
+
+  it("emits elicitation pending action for MCP url mode", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const events: unknown[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest(42, "mcpServer/elicitation/request", {
+      threadId: "thread-1",
+      server_name: "github",
+      mode: "url",
+      message: "Sign in to GitHub",
+      url: "https://github.com/login",
+      elicitation_id: "elic-1",
+    });
+
+    assert.equal(events.length, 1);
+    const event = events[0] as any;
+    assert.equal(event.type, "action_opened");
+    assert.equal(event.action.kind, "elicitation");
+    assert.equal(event.action.sessionId, "thread-1");
+    assert.equal(event.action.elicitation.mode, "url");
+    assert.equal(event.action.elicitation.message, "Sign in to GitHub");
+    assert.equal(event.action.elicitation.url, "https://github.com/login");
+    assert.equal(event.action.elicitation.source, "github");
+    assert.equal(event.action.canDecline, true);
+    assert.equal(event.action.providerRequestId, 42);
+  });
+
+  it("emits elicitation pending action for MCP form mode", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const events: unknown[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest(42, "mcpServer/elicitation/request", {
+      threadId: "thread-1",
+      server_name: "postgres",
+      mode: "form",
+      message: "Enter connection details",
+      requested_schema: {
+        type: "object",
+        required: ["host"],
+        properties: {
+          host: {
+            type: "string",
+            title: "Host",
+            description: "Database host",
+          },
+          port: {
+            type: "integer",
+            title: "Port",
+            default: 5432,
+          },
+          ssl: {
+            type: "boolean",
+            title: "Use SSL",
+            default: true,
+          },
+          tags: {
+            type: "array",
+            items: {
+              enum: ["prod", "dev"],
+            },
+            title: "Tags",
+          },
+        },
+      },
+    });
+
+    assert.equal(events.length, 1);
+    const event = events[0] as any;
+    assert.equal(event.action.kind, "elicitation");
+    assert.equal(event.action.elicitation.mode, "form");
+    assert.equal(event.action.elicitation.fields.length, 4);
+
+    const hostField = event.action.elicitation.fields.find(
+      (f: any) => f.key === "host",
+    );
+    assert.equal(hostField.type, "string");
+    assert.equal(hostField.required, true);
+    assert.equal(hostField.title, "Host");
+
+    const portField = event.action.elicitation.fields.find(
+      (f: any) => f.key === "port",
+    );
+    assert.equal(portField.type, "number");
+    assert.equal(portField.integer, true);
+    assert.equal(portField.defaultValue, 5432);
+
+    const sslField = event.action.elicitation.fields.find(
+      (f: any) => f.key === "ssl",
+    );
+    assert.equal(sslField.type, "boolean");
+    assert.equal(sslField.defaultValue, true);
+
+    const tagsField = event.action.elicitation.fields.find(
+      (f: any) => f.key === "tags",
+    );
+    assert.equal(tagsField.type, "string[]");
+    assert.deepEqual(tagsField.options, [
+      { value: "prod", label: "prod" },
+      { value: "dev", label: "dev" },
+    ]);
+  });
+
+  it("warns and errors on malformed elicitation params", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const errors: unknown[] = [];
+    provider.bridge = {
+      error: (_id: number | string, code: number, message: string) => {
+        errors.push({ code, message });
+      },
+    };
+    const events: unknown[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest(1, "mcpServer/elicitation/request", {
+      threadId: "thread-1",
+      mode: "url",
+      // missing url
+    });
+
+    assert.equal(events.length, 1);
+    assert.equal((events[0] as any).type, "provider_warning");
+    assert.equal(errors.length, 1);
+    assert.equal((errors[0] as any).code, -32600);
+  });
+
+  it("serializes user_input response with answers map", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    let responded: unknown = null;
+    provider.bridge = {
+      respond: (_id: number | string, result: unknown) => {
+        responded = result;
+      },
+    };
+
+    const action: any = {
+      providerRequestId: 42,
+      providerRequestKind: "item/tool/requestUserInput",
+      providerPayload: { questionId: "q1" },
+    };
+
+    const handled = provider.respondToPendingAction(action, {
+      answer: "Alice",
+      wasFreeform: false,
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(responded, {
+      answers: {
+        q1: { answers: ["Alice"] },
+      },
+    });
+  });
+
+  it("serializes elicitation accept response", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    let responded: unknown = null;
+    provider.bridge = {
+      respond: (_id: number | string, result: unknown) => {
+        responded = result;
+      },
+    };
+
+    const action: any = {
+      providerRequestId: 42,
+      providerRequestKind: "mcpServer/elicitation/request",
+    };
+
+    const handled = provider.respondToPendingAction(action, {
+      action: "accept",
+      content: { host: "localhost" },
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(responded, {
+      action: "accept",
+      content: { host: "localhost" },
+    });
+  });
+
+  it("serializes elicitation decline without content", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    let responded: unknown = null;
+    provider.bridge = {
+      respond: (_id: number | string, result: unknown) => {
+        responded = result;
+      },
+    };
+
+    const action: any = {
+      providerRequestId: 42,
+      providerRequestKind: "mcpServer/elicitation/request",
+    };
+
+    const handled = provider.respondToPendingAction(action, {
+      action: "decline",
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(responded, {
+      action: "decline",
+    });
+  });
+
+  it("serializes elicitation cancel without content", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    let responded: unknown = null;
+    provider.bridge = {
+      respond: (_id: number | string, result: unknown) => {
+        responded = result;
+      },
+    };
+
+    const action: any = {
+      providerRequestId: 42,
+      providerRequestKind: "mcpServer/elicitation/request",
+    };
+
+    const handled = provider.respondToPendingAction(action, {
+      action: "cancel",
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(responded, {
+      action: "cancel",
+    });
+  });
+
+
+
+  it("warns when Codex sends multiple questions but uses only the first", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const events: unknown[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest(1, "item/tool/requestUserInput", {
+      threadId: "thread-1",
+      questions: [
+        { id: "q1", question: "First?", is_other: false, is_secret: false, options: [] },
+        { id: "q2", question: "Second?", is_other: false, is_secret: false, options: [] },
+      ],
+    });
+
+    assert.equal(events.length, 2);
+    assert.equal((events[0] as any).type, "provider_warning");
+    assert.equal((events[0] as any).code, "multi_question_truncated");
+    assert.equal((events[1] as any).type, "action_opened");
+    assert.equal((events[1] as any).action.userInput.question, "First?");
+  });
+  it("rejects secret user input requests", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const errors: unknown[] = [];
+    provider.bridge = {
+      error: (_id: number | string, code: number, message: string) => {
+        errors.push({ code, message });
+      },
+    };
+    const events: unknown[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest(1, "item/tool/requestUserInput", {
+      threadId: "thread-1",
+      questions: [
+        {
+          id: "q1",
+          question: "What is your password?",
+          is_other: false,
+          is_secret: true,
+          options: [],
+        },
+      ],
+    });
+
+    assert.equal(events.length, 1);
+    assert.equal((events[0] as any).type, "provider_warning");
+    assert.equal(errors.length, 1);
+    assert.equal((errors[0] as any).code, -32600);
+  });
+
+  it("serializes user_input response with default questionId when missing", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    let responded: unknown = null;
+    provider.bridge = {
+      respond: (_id: number | string, result: unknown) => {
+        responded = result;
+      },
+    };
+
+    const action: any = {
+      providerRequestId: 42,
+      providerRequestKind: "item/tool/requestUserInput",
+      providerPayload: {},
+    };
+
+    const handled = provider.respondToPendingAction(action, {
+      answer: "Freeform answer",
+      wasFreeform: true,
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(responded, {
+      answers: {
+        default: { answers: ["Freeform answer"] },
+      },
+    });
+  });
+
+  it("declines elicitation form with unknown required field type", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const errors: unknown[] = [];
+    provider.bridge = {
+      error: (_id: number | string, code: number, message: string) => {
+        errors.push({ code, message });
+      },
+    };
+    const events: unknown[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest(1, "mcpServer/elicitation/request", {
+      threadId: "thread-1",
+      server_name: "bad",
+      mode: "form",
+      message: "Bad schema",
+      requested_schema: {
+        type: "object",
+        required: ["nested"],
+        properties: {
+          nested: {
+            type: "object",
+            title: "Nested object",
+          },
+        },
+      },
+    });
+
+    assert.equal(events.length, 1);
+    assert.equal((events[0] as any).type, "provider_warning");
+    assert.equal(errors.length, 1);
+    assert.equal((errors[0] as any).code, -32600);
+  });
+
+  it("returns false for unsupported decisions on new action kinds", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+
+    const action: any = {
+      providerRequestId: 42,
+      providerRequestKind: "item/tool/requestUserInput",
+    };
+
+    const handled = provider.respondToPendingAction(action, {
+      decision: "approve",
+    } as any);
+
+    assert.equal(handled, false);
+  });
+});
+
