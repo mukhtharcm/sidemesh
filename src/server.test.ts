@@ -518,6 +518,129 @@ describe("session live rich events", () => {
       }
     });
   });
+
+  it("fans out provider warnings without a session id to every open session room", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const primary = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const secondary = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const primaryLive = await openSessionLiveSocket(
+        server.port,
+        config.token,
+        primary.thread.id,
+      );
+      const secondaryLive = await openSessionLiveSocket(
+        server.port,
+        config.token,
+        secondary.thread.id,
+      );
+      try {
+        await waitFor(
+          () => primaryLive.events.find((event) => event.type === "hello"),
+          "primary hello",
+        );
+        await waitFor(
+          () => secondaryLive.events.find((event) => event.type === "hello"),
+          "secondary hello",
+        );
+
+        provider.emit("liveEvent", {
+          type: "provider_warning",
+          level: "info",
+          code: "global-1",
+          message: "Global provider warning",
+          source: "fake/config",
+        });
+
+        const primaryWarning = await waitFor(
+          () =>
+            primaryLive.events.find(
+              (event) =>
+                event.type === "provider_warning" && event.code === "global-1",
+            ),
+          "primary global warning",
+        );
+        const secondaryWarning = await waitFor(
+          () =>
+            secondaryLive.events.find(
+              (event) =>
+                event.type === "provider_warning" && event.code === "global-1",
+            ),
+          "secondary global warning",
+        );
+
+        assert.equal(primaryWarning.sessionId, primary.thread.id);
+        assert.equal(secondaryWarning.sessionId, secondary.thread.id);
+      } finally {
+        await closeSessionLiveSocket(primaryLive.socket);
+        await closeSessionLiveSocket(secondaryLive.socket);
+      }
+    });
+  });
+
+  it("ignores unknown provider live events without crashing the session stream", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const primary = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const primaryLive = await openSessionLiveSocket(
+        server.port,
+        config.token,
+        primary.thread.id,
+      );
+      try {
+        await waitFor(
+          () => primaryLive.events.find((event) => event.type === "hello"),
+          "primary hello",
+        );
+
+        provider.emit(
+          "liveEvent",
+          {
+            type: "provider.custom_runtime_thing",
+            sessionId: primary.thread.id,
+          } as never,
+        );
+        provider.emit("liveEvent", {
+          type: "queue_updated",
+          sessionId: primary.thread.id,
+          steeringCount: 1,
+          followUpCount: 0,
+          steeringPreview: ["Still alive"],
+        });
+
+        const queueEvent = await waitFor(
+          () =>
+            primaryLive.events.find((event) => event.type === "queue_updated"),
+          "queue event after unknown event",
+        );
+        assert.equal(queueEvent.steeringCount, 1);
+      } finally {
+        await closeSessionLiveSocket(primaryLive.socket);
+      }
+    });
+  });
 });
 
 describe("provider-scoped catalog routes", () => {

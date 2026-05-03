@@ -966,6 +966,52 @@ export class CopilotAgentProvider
       return;
     }
 
+    const warning = buildCopilotProviderWarningEvent(sessionId, event);
+    if (warning) {
+      this.emit("liveEvent", warning);
+      return;
+    }
+
+    if (event.type === "assistant.reasoning") {
+      if (!active) {
+        return;
+      }
+      const delta = event.data.content.trim();
+      if (!delta) {
+        return;
+      }
+      this.emit("liveEvent", {
+        type: "reasoning_delta",
+        sessionId,
+        turnId: active.turnId,
+        itemId: event.id,
+        reasoningId: event.data.reasoningId,
+        delta,
+        summary: false,
+      });
+      return;
+    }
+
+    if (event.type === "assistant.reasoning_delta") {
+      if (!active) {
+        return;
+      }
+      const delta = event.data.deltaContent;
+      if (!delta) {
+        return;
+      }
+      this.emit("liveEvent", {
+        type: "reasoning_delta",
+        sessionId,
+        turnId: active.turnId,
+        itemId: event.id,
+        reasoningId: event.data.reasoningId,
+        delta,
+        summary: false,
+      });
+      return;
+    }
+
     if (
       event.type === "session.usage_info" ||
       event.type === "assistant.usage" ||
@@ -1783,6 +1829,48 @@ function reasoningEffortForSdk(
     return effort;
   }
   return undefined;
+}
+
+function buildCopilotProviderWarningEvent(
+  sessionId: string,
+  event: CopilotSdkSessionEvent,
+): {
+  type: "provider_warning";
+  sessionId: string;
+  level: "info" | "warning" | "error";
+  code?: string;
+  message: string;
+  source?: string;
+} | null {
+  if (event.type === "session.warning") {
+    const message = event.data.message.trim();
+    if (!message) {
+      return null;
+    }
+    return {
+      type: "provider_warning",
+      sessionId,
+      level: "warning",
+      code: event.data.warningType,
+      message,
+      source: "copilot",
+    };
+  }
+  if (event.type === "session.info") {
+    const message = event.data.message.trim();
+    if (!message) {
+      return null;
+    }
+    return {
+      type: "provider_warning",
+      sessionId,
+      level: "info",
+      code: event.data.infoType,
+      message,
+      source: "copilot",
+    };
+  }
+  return null;
 }
 
 function assistantPhase(

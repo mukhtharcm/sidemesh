@@ -825,6 +825,15 @@ export class PiAgentProvider
         );
         this.persistEventually();
         return;
+      case "queue_update":
+        this.emitPiQueueUpdated(session, event);
+        return;
+      case "auto_retry_start":
+        this.emitPiAutoRetryStarted(session, event);
+        return;
+      case "auto_retry_end":
+        this.emitPiAutoRetryEnded(session, event);
+        return;
       case "compaction_start": {
         const createdAt = Date.now();
         const activityId = `pi-compaction:${createdAt}`;
@@ -882,6 +891,16 @@ export class PiAgentProvider
           },
           updatedAt: completedAt,
         });
+        if (event.errorMessage) {
+          this.emit("liveEvent", {
+            type: "provider_warning",
+            sessionId: session.thread.id,
+            level: "error",
+            code: "pi_compaction_failed",
+            message: event.errorMessage,
+            source: "pi/compaction",
+          });
+        }
         this.persistEventually();
         return;
       }
@@ -908,6 +927,61 @@ export class PiAgentProvider
       }
       default:
         return;
+    }
+  }
+
+  private emitPiQueueUpdated(
+    session: PiSessionState,
+    event: Extract<AgentSessionEvent, { type: "queue_update" }>,
+  ): void {
+    this.emit("liveEvent", {
+      type: "queue_updated",
+      sessionId: session.thread.id,
+      steeringCount: event.steering.length,
+      followUpCount: event.followUp.length,
+      steeringPreview: previewPiQueue(event.steering),
+      followUpPreview: previewPiQueue(event.followUp),
+    });
+  }
+
+  private emitPiAutoRetryStarted(
+    session: PiSessionState,
+    event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>,
+  ): void {
+    this.emit("liveEvent", {
+      type: "auto_retry_updated",
+      sessionId: session.thread.id,
+      phase: "started",
+      attempt: event.attempt,
+      maxAttempts: event.maxAttempts,
+      delayMs: event.delayMs,
+      errorMessage: event.errorMessage,
+    });
+  }
+
+  private emitPiAutoRetryEnded(
+    session: PiSessionState,
+    event: Extract<AgentSessionEvent, { type: "auto_retry_end" }>,
+  ): void {
+    this.emit("liveEvent", {
+      type: "auto_retry_updated",
+      sessionId: session.thread.id,
+      phase: "ended",
+      attempt: event.attempt,
+      success: event.success,
+      finalError: event.finalError,
+    });
+    if (!event.success) {
+      this.emit("liveEvent", {
+        type: "provider_warning",
+        sessionId: session.thread.id,
+        level: "error",
+        code: "pi_auto_retry_failed",
+        message:
+          event.finalError ??
+          `Pi auto-retry failed on attempt ${event.attempt}.`,
+        source: "pi/retry",
+      });
     }
   }
 
@@ -2459,6 +2533,17 @@ function appendOutputDelta(previous: string, nextOutput: string): string | null 
     return null;
   }
   return nextOutput;
+}
+
+function previewPiQueue(
+  values: readonly string[],
+): string[] | undefined {
+  const preview = values
+    .slice(0, 3)
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .map((value) => value.length > 160 ? `${value.slice(0, 159)}…` : value);
+  return preview.length > 0 ? preview : undefined;
 }
 
 function activityIdForToolCall(toolName: string, toolCallId: string): string {
