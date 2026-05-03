@@ -142,7 +142,7 @@ class _ComposerStatusStrip extends StatelessWidget {
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: colors.surface,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: AppShapes.input,
               border: Border.all(color: colors.border),
             ),
             child: Padding(
@@ -241,7 +241,7 @@ class _PendingSendStrip extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: colors.surface,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: AppShapes.input,
           border: Border.all(color: colors.border),
         ),
         child: Padding(

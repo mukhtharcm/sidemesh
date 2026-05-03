@@ -201,7 +201,7 @@ class _SessionActionSheet extends StatelessWidget {
                                   style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(
                                         color: colors.textPrimary,
-                                        fontWeight: FontWeight.w800,
+                                        fontWeight: AppWeights.title,
                                         letterSpacing: -0.2,
                                       ),
                                 ),
@@ -362,8 +362,6 @@ class _SessionActionRow extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Icon(Icons.chevron_right_rounded, size: 18, color: colors.border),
             ],
           ),
         ),
@@ -892,8 +890,8 @@ class _GitDetailsSheet extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'Git details',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: AppWeights.title,
                     ),
                   ),
                 ),
@@ -1012,8 +1010,8 @@ class _GitDetailsSheet extends StatelessWidget {
                 const SizedBox(height: 20),
                 Text(
                   'Changed files',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: AppWeights.title,
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -1123,7 +1121,7 @@ class _GitDiffSheet extends StatelessWidget {
                   title,
                   style: Theme.of(
                     context,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ).textTheme.titleMedium?.copyWith(fontWeight: AppWeights.title),
                 ),
                 const SizedBox(height: 12),
                 Expanded(
@@ -1311,7 +1309,7 @@ class _PinnedMessageSheet extends StatelessWidget {
                     'Pinned ${pin.roleLabel.toLowerCase()} message',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: colors.textPrimary,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: AppWeights.title,
                     ),
                   ),
                 ),
