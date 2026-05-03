@@ -1421,6 +1421,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
   final Map<String, bool> _boolValues = <String, bool>{};
   final Map<String, String?> _singleValues = <String, String?>{};
   final Map<String, Set<String>> _multiValues = <String, Set<String>>{};
+  bool _responding = false;
 
   PendingAction get action => widget.action;
 
@@ -1846,7 +1847,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     if (action.isUserInput) {
       return [
         FilledButton.icon(
-          onPressed: _submitUserInput,
+          onPressed: _responding ? null : _submitUserInput,
           icon: const Icon(Icons.send_rounded, size: 18),
           label: const Text('Send answer'),
         ),
@@ -1855,7 +1856,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     if (action.isElicitation) {
       return [
         FilledButton.icon(
-          onPressed: _submitElicitation,
+          onPressed: _responding ? null : _submitElicitation,
           icon: const Icon(Icons.check_rounded, size: 18),
           label: Text(
             action.elicitation?.mode == 'url' ? 'Continue' : 'Submit',
@@ -1888,8 +1889,10 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     return [
       if (action.canApprove)
         FilledButton.icon(
-          onPressed: () =>
-              widget.onRespond(PendingActionResponseDraft.approval('accept')),
+          onPressed: _responding ? null : () {
+              if (!_responding) setState(() => _responding = true);
+              widget.onRespond(PendingActionResponseDraft.approval('accept'));
+            },
           icon: const Icon(Icons.check_rounded, size: 18),
           label: const Text('Approve'),
         ),
@@ -1903,8 +1906,10 @@ class _PendingActionCardState extends State<_PendingActionCard> {
         ),
       if (action.canDecline)
         OutlinedButton.icon(
-          onPressed: () =>
-              widget.onRespond(PendingActionResponseDraft.approval('decline')),
+          onPressed: _responding ? null : () {
+              if (!_responding) setState(() => _responding = true);
+              widget.onRespond(PendingActionResponseDraft.approval('decline'));
+            },
           icon: Icon(Icons.close_rounded, size: 18, color: colors.danger),
           label: Text('Decline', style: TextStyle(color: colors.danger)),
           style: OutlinedButton.styleFrom(
