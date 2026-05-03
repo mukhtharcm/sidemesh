@@ -4018,6 +4018,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (action == null) {
       return;
     }
+    HapticFeedback.mediumImpact();   // immediate tactile confirmation
     try {
       await widget.api.respondToAction(
         widget.host,
