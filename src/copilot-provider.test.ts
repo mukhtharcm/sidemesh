@@ -1663,6 +1663,84 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
           }),
         );
       }
+      if (options.prompt.includes("subagent")) {
+        this.emit(
+          event("subagent.started", {
+            toolCallId: "subagent-1",
+            agentName: "docs-agent",
+            agentDisplayName: "Documentation Agent",
+            agentDescription: "Reads docs",
+          }),
+        );
+        this.emit(
+          event("subagent.completed", {
+            toolCallId: "subagent-1",
+            agentName: "docs-agent",
+            agentDisplayName: "Documentation Agent",
+            durationMs: 3400,
+            totalTokens: 120,
+          }),
+        );
+      }
+      if (options.prompt.includes("subagent fail")) {
+        this.emit(
+          event("subagent.started", {
+            toolCallId: "subagent-2",
+            agentName: "search-agent",
+            agentDisplayName: "Search Agent",
+            agentDescription: "Searches",
+          }),
+        );
+        this.emit(
+          event("subagent.failed", {
+            toolCallId: "subagent-2",
+            agentName: "search-agent",
+            agentDisplayName: "Search Agent",
+            error: "Search timeout",
+            durationMs: 5000,
+          }),
+        );
+      }
+      if (options.prompt.includes("background")) {
+        this.emit(event("session.background_tasks_changed", {}));
+      }
+      if (options.prompt.includes("mcp status")) {
+        this.emit(
+          event("session.mcp_server_status_changed", {
+            serverName: "github",
+            status: "failed",
+          }),
+        );
+        this.emit(
+          event("session.mcp_servers_loaded", {
+            servers: [
+              { name: "github", status: "failed", error: "Connection refused" },
+              { name: "postgres", status: "ok" },
+            ],
+          }),
+        );
+      }
+      if (options.prompt.includes("capabilities")) {
+        this.emit(
+          event("capabilities.changed", {
+            ui: { elicitation: true },
+          }),
+        );
+      }
+      if (options.prompt.includes("oauth")) {
+        this.emit(
+          event("mcp.oauth_required", {
+            requestId: "oauth-1",
+            serverName: "github",
+            serverUrl: "https://github.com/login",
+          }),
+        );
+        this.emit(
+          event("mcp.oauth_completed", {
+            requestId: "oauth-1",
+          }),
+        );
+      }
       const suffix = userInputResult != null
           ? ` -> ${userInputResult.answer}`
           : elicitationResult != null
@@ -1858,3 +1936,282 @@ function event(
     data,
   } as CopilotSdkSessionEvent;
 }
+
+describe("copilot rich event cleanup", () => {
+  it("maps subagent started and completed to activity rows", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-subagent-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const activities: any[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "activity_updated") {
+          activities.push(liveEvent.activity);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [
+          {
+            type: "text",
+            text: "hello subagent",
+            text_elements: [],
+          },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const started = activities.find((a) => a.id === "subagent-1" && a.status === "in_progress");
+      assert.ok(started, "Expected subagent started activity");
+      assert.equal(started?.type, "tool");
+      assert.equal(started?.toolName, "docs-agent");
+      assert.equal(started?.title, "Documentation Agent");
+
+      const completedActivity = activities.find(
+        (a) => a.id === "subagent-1" && a.status === "completed",
+      );
+      assert.ok(completedActivity, "Expected subagent completed activity");
+      assert.equal(completedActivity?.result?.type, "success");
+    } finally {
+      await new Promise((r) => setTimeout(r, 50));
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("maps subagent failed to activity row with error", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-subagent-fail-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const activities: any[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "activity_updated") {
+          activities.push(liveEvent.activity);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [
+          {
+            type: "text",
+            text: "hello subagent fail",
+            text_elements: [],
+          },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const failed = activities.find((a) => a.id === "subagent-2" && a.status === "failed");
+      assert.ok(failed, "Expected subagent failed activity");
+      assert.equal(failed?.result?.type, "error");
+      assert.equal((failed?.result as any)?.summary, "Search timeout");
+    } finally {
+      await new Promise((r) => setTimeout(r, 50));
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("emits provider_warning for background_tasks_changed", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-bg-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const warnings: any[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "provider_warning") {
+          warnings.push(liveEvent);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [
+          {
+            type: "text",
+            text: "hello background",
+            text_elements: [],
+          },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const bg = warnings.find(
+        (w) => w.type === "provider_warning" && w.code === "background_tasks_changed",
+      );
+      assert.ok(bg);
+      assert.equal(bg?.level, "info");
+      assert.equal(bg?.message, "Background tasks changed");
+    } finally {
+      await new Promise((r) => setTimeout(r, 50));
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("emits provider_warning for MCP status and load errors", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-mcp-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const warnings: any[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "provider_warning") {
+          warnings.push(liveEvent);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [
+          {
+            type: "text",
+            text: "hello mcp status",
+            text_elements: [],
+          },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const statusWarning = warnings.find(
+        (w) => w.code === "mcp_server_status_changed" && w.level === "error",
+      );
+      assert.ok(statusWarning);
+      assert.ok(statusWarning?.message.includes("github"));
+      assert.ok(statusWarning?.message.includes("failed"));
+
+      const loadWarning = warnings.find(
+        (w) => w.code === "mcp_servers_loaded" && w.level === "warning",
+      );
+      assert.ok(loadWarning);
+      assert.ok(loadWarning?.message.includes("Connection refused"));
+    } finally {
+      await new Promise((r) => setTimeout(r, 50));
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("emits provider_warning for capabilities.changed", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-capabilities-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const warnings: any[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "provider_warning") {
+          warnings.push(liveEvent);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [
+          {
+            type: "text",
+            text: "hello capabilities",
+            text_elements: [],
+          },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const cap = warnings.find((w) => w.code === "capabilities_changed");
+      assert.ok(cap);
+      assert.equal(cap?.level, "info");
+      assert.equal(cap?.message, "Elicitation enabled");
+    } finally {
+      await new Promise((r) => setTimeout(r, 50));
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("emits provider_warning for mcp.oauth_required", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-oauth-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const warnings: any[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "provider_warning") {
+          warnings.push(liveEvent);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [
+          {
+            type: "text",
+            text: "hello oauth",
+            text_elements: [],
+          },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const oauth = warnings.find((w) => w.code === "mcp_oauth_required");
+      assert.ok(oauth);
+      assert.equal(oauth?.level, "info");
+      assert.ok(oauth?.message.includes("github"));
+      assert.equal(oauth?.source, "copilot/mcp");
+    } finally {
+      await new Promise((r) => setTimeout(r, 50));
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
