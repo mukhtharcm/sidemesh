@@ -735,6 +735,9 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsPortForwarding =>
       _supportsHostCapability('workspace', 'portForwarding');
 
+  bool get _supportsProviderRestart =>
+      _supportsProviderCapability('lifecycle', 'restart');
+
   bool _supportsGitDiffKind(String kind) {
     if (kind == 'remote') {
       return _supportsProviderCapability('workspace', 'remoteGitDiff');
@@ -1829,6 +1832,23 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _reloadSnapshot() {
     unawaited(_loadSnapshot(scrollToBottom: false));
+  }
+
+  Future<void> _restartProvider() async {
+    if (!_supportsProviderRestart) return;
+    final providerKind = widget.session.provider;
+    if (providerKind == null || providerKind.isEmpty) return;
+    try {
+      await widget.api.restartProvider(widget.host, providerKind);
+      if (!mounted) return;
+      showAppSnackBar(context, 'Provider restarting…');
+      await Future<void>.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      _reloadSnapshot();
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(context, 'Restart failed: ${friendlyError(error)}');
+    }
   }
 
   void _retryFreshnessSync() {
@@ -4777,6 +4797,8 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _handleSessionAction(String value, SessionSummary session) {
     switch (value) {
+      case 'restart_provider':
+        unawaited(_restartProvider());
       case 'reload':
         _reloadSnapshot();
         break;
@@ -4890,6 +4912,14 @@ class _SessionScreenState extends State<SessionScreen>
             detail: 'Start beside this working directory.',
             icon: Icons.add_circle_outline_rounded,
           ),
+          if (_supportsProviderRestart)
+            const _SessionActionSpec(
+              value: 'restart_provider',
+              label: 'Restart provider',
+              detail: 'Restart the agent process on this host.',
+              icon: Icons.restart_alt_rounded,
+              tone: _SessionActionTone.warning,
+            ),
           if (_supportsTerminal)
             _SessionActionSpec(
               value: 'terminal',
