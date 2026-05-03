@@ -39,12 +39,12 @@ List<String> buildRuntimeHighlights(SessionRuntimeSummary? runtime) {
   final context = runtime.telemetry?.contextWindow;
   if (context != null && context.tokenLimit > 0) {
     if (context.currentTokens == null) {
-      labels.add('ctx ?/${context.tokenLimit} left');
+      labels.add('ctx ?/${context.tokenLimit} tok');
     } else {
-      final percent = ((1 - (context.currentTokens! / context.tokenLimit)) * 100)
+      final usedPercent = ((context.currentTokens! / context.tokenLimit) * 100)
           .clamp(0, 100)
           .round();
-      labels.add('ctx $percent% left');
+      labels.add('ctx $usedPercent% used');
     }
   }
   final compaction = runtime.telemetry?.compaction;
