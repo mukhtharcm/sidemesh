@@ -51,6 +51,7 @@ class NodeInfo {
     required this.label,
     required this.hostname,
     required this.platform,
+    this.homeDirectory,
     required this.codexVersion,
     required this.provider,
     required this.providerName,
@@ -65,6 +66,7 @@ class NodeInfo {
   final String label;
   final String hostname;
   final String platform;
+  final String? homeDirectory;
   final String codexVersion;
   final String provider;
   final String providerName;
@@ -131,6 +133,7 @@ class NodeInfo {
       label: _stringValue(json['label']),
       hostname: _stringValue(json['hostname']),
       platform: _stringValue(json['platform']),
+      homeDirectory: _stringOrNull(json['homeDirectory']),
       codexVersion: _stringValue(json['codexVersion']),
       provider: _stringOrNull(json['provider']) ?? 'codex',
       providerName: _stringOrNull(json['providerName']) ?? 'Codex',
