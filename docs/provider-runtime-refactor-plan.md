@@ -8,13 +8,18 @@ and provider startup.
 
 ## Current Conclusion
 
-`AgentProviderRuntime` is not currently a runtime abstraction. It is a small
-container that returns:
+At the start of the research, `AgentProviderRuntime` was not a runtime
+abstraction. It was a small container that returned:
 
 - `provider`: either a concrete provider or a `MultiAgentProvider`.
 - `providers`: concrete provider entries with config and definition summaries.
 
 Reference: `src/provider-factory.ts`
+
+The current branch has upgraded it into a lightweight provider registry and
+selection layer by adding default-provider and concrete-provider lookup helpers.
+It is still intentionally not a deep provider emulator; provider-native
+semantics stay inside adapters.
 
 The real abstraction is spread across:
 
@@ -27,6 +32,39 @@ The real abstraction is spread across:
 
 The current implementation is useful as a lowest-common-denominator UI/session
 facade, but it does not accurately model what the upstream provider runtimes are.
+
+## Implementation Status
+
+Status as of 2026-05-03 on the `provider-runtime-refactor` branch:
+
+- The first provider-runtime slice is implemented in PR #120.
+- `/api/node` now reports `providerCapabilities` as a compatibility alias for
+  `defaultProviderCapabilities`, not an OR-merged multi-provider union.
+  Reference: `src/server.ts`.
+- `/api/node` and `/api/providers` now include per-provider capability maps and
+  provider versions. References: `src/server.ts`,
+  `apps/mobile/lib/src/models.dart`, and
+  `apps/mobile/test/provider_metadata_models_test.dart`.
+- `AgentProviderRuntime` now exposes the default provider, concrete provider
+  lookup by kind, and session-id based provider lookup. Reference:
+  `src/provider-factory.ts`.
+- Server catalog routes and remote Git diff selection use concrete providers
+  rather than the merged session facade. Reference: `src/server.ts`.
+- `MultiAgentProvider` now uses the default provider's capabilities and is
+  limited to lifecycle/session aggregation, namespaced session routing, pending
+  action routing, event wrapping, and stderr prefixing. Reference:
+  `src/multi-provider.ts`.
+- Local filesystem browse/read/write/watch is daemon-owned through
+  `hostCapabilities` and `src/fs-routes.ts`; the shared `AgentProvider` surface
+  no longer extends provider filesystem methods. Reference:
+  `src/agent-provider.ts`.
+- The adapter contract has been updated to match the landed boundary.
+  Reference: `docs/provider-adapter-contract.md`.
+
+The remaining work is no longer the basic capability/runtime split. The
+remaining work is expanding the abstraction so Sidemesh can preserve richer
+provider-native behavior without leaking raw Codex, Copilot, or Pi payloads to
+the Flutter client.
 
 ## Source References
 
@@ -52,21 +90,33 @@ facade, but it does not accurately model what the upstream provider runtimes are
 ### Upstream Provider Source References
 
 The study used version-matched local clones in
-`/tmp/sidemesh-provider-research`.
+`/tmp/sidemesh-provider-research`. A second refresh pass was run on
+2026-05-03 against the currently installed/deployed provider versions.
 
 - Codex:
-  - Installed CLI version observed during research: `codex-cli 0.124.0`.
-  - Upstream tag used: `openai/codex` `rust-v0.124.0`.
+  - Installed and deployed CLI version observed during refresh:
+    `codex-cli 0.128.0`.
+  - Original upstream tag used: `openai/codex` `rust-v0.124.0`.
+  - Refresh upstream tag used: `openai/codex` `rust-v0.128.0`
+    (`e4310be51f617f5e60382038fa9cbf53a2429ca4`, 2026-04-30).
   - Protocol definitions:
     `codex-rs/app-server-protocol/src/protocol/common.rs`
   - Detailed v2 types:
     `codex-rs/app-server-protocol/src/protocol/v2.rs`
   - Python SDK wrapper:
     `sdk/python/src/codex_app_server/api.py`
+  - Refresh-specific seams:
+    `common.rs` includes `skills/list`, `hooks/list`, `plugin/list`,
+    `plugin/install`, `fs/*`, `skills/config/write`,
+    `item/tool/requestUserInput`, `mcpServer/elicitation/request`,
+    `item/permissions/requestApproval`, `thread/status/changed`,
+    `thread/goal/updated`, `turn/plan/updated`, reasoning deltas, warnings,
+    guardian warnings, account/rate-limit updates, and external-agent import
+    completion notifications.
 
 - GitHub Copilot SDK:
   - Dependency version: `@github/copilot-sdk@0.3.0`.
-  - Upstream tag used: `github/copilot-sdk` `v0.3.0`.
+  - Upstream tag used: `github/copilot-sdk` `v0.3.0` / `go/v0.3.0`.
   - Client/session creation:
     `nodejs/src/client.ts`
   - Session object and session RPC:
@@ -75,10 +125,19 @@ The study used version-matched local clones in
     `nodejs/src/types.ts`
   - Generated session events:
     `nodejs/src/generated/session-events.ts`
+  - Refresh-specific seams:
+    `client.ts` registers permission, user-input, elicitation, hooks, tools,
+    commands, session filesystem, model/reasoning, MCP, custom-agent, skill,
+    disabled-skill, infinite-session, and token options before
+    `session.create` / `session.resume`.
 
 - Pi coding agent:
   - Dependency version: `@mariozechner/pi-coding-agent@0.71.1`.
+  - Latest npm version observed during refresh: `0.72.1`. This plan still uses
+    `v0.71.1` source references because that is the version locked by the repo.
   - Upstream tag used: `badlogic/pi-mono` `v0.71.1`.
+  - Low-level agent core:
+    `packages/agent/src/agent.ts`
   - Runtime/session core:
     `packages/coding-agent/src/core/agent-session.ts`
   - Runtime replacement:
@@ -91,6 +150,74 @@ The study used version-matched local clones in
     `packages/coding-agent/docs/skills.md`
   - JSON event stream:
     `packages/coding-agent/docs/json.md`
+  - Refresh-specific seams:
+    `agent-session.ts` defines queue, compaction, thinking-level, and auto-retry
+    session events; `agent.ts` owns steering/follow-up queues; extensions can
+    register tools, commands, providers, custom UI, and tool-call gates.
+
+### Concrete Source Anchors
+
+Local Sidemesh anchors:
+
+- `src/provider-factory.ts:19` defines the runtime registry shape, including
+  `defaultProvider`, `providerForKind()`, and `providerForSessionId()`.
+- `src/provider-factory.ts:57` constructs either one concrete provider or a
+  `MultiAgentProvider` session facade.
+- `src/server.ts:679` builds `/api/node` with
+  `defaultProviderCapabilities`, `hostCapabilities`, and per-provider
+  `supportedProviders[].capabilities`.
+- `src/server.ts:1494`, `src/server.ts:1528`, `src/server.ts:1571`, and
+  `src/server.ts:1605` route skills, skill config, models, and profiles through
+  concrete provider selection.
+- `src/multi-provider.ts:65` exposes default-provider identity/capabilities
+  instead of a union.
+- `src/multi-provider.ts:326` wraps provider live events with namespaced
+  session/action/watch IDs.
+- `src/agent-provider.ts:358` documents provider-native filesystem APIs as
+  outside the shared `AgentProvider` surface.
+- `apps/mobile/lib/src/models.dart:112` resolves provider-scoped capabilities
+  for UI gates.
+
+Provider source anchors:
+
+- Codex `common.rs:579` exposes `skills/list`; `common.rs:584` exposes
+  `hooks/list`; `common.rs:604` exposes `plugin/list`; `common.rs:636` starts
+  the `fs/*` method group; `common.rs:681` exposes `skills/config/write`.
+- Codex `common.rs:1226` exposes `item/tool/requestUserInput`;
+  `common.rs:1232` exposes `mcpServer/elicitation/request`;
+  `common.rs:1238` exposes `item/permissions/requestApproval`.
+- Codex `common.rs:1355`, `common.rs:1361`, `common.rs:1371`,
+  `common.rs:1397`, and `common.rs:1404` define thread-status, thread-goal,
+  plan, reasoning, and warning notifications.
+- Codex `v2.rs:3922`, `v2.rs:3991`, `v2.rs:7211`, and `v2.rs:7712` define
+  elicitation counters, thread goals, MCP elicitation payloads, and
+  request-user-input payloads.
+- Copilot `client.ts:664` creates sessions; `client.ts:681` registers a session
+  before RPC so early events are not dropped; `client.ts:691` through
+  `client.ts:697` register permission, user-input, and elicitation handlers.
+- Copilot `client.ts:727` through `client.ts:767` serializes session create
+  options, including permission/user-input/elicitation flags, streaming,
+  subagent streaming, MCP, custom agents, skill directories, disabled skills,
+  infinite sessions, and tokens.
+- Copilot `generated/session-events.ts:6` shows the generated event union;
+  `generated/session-events.ts:740`, `generated/session-events.ts:1702`,
+  `generated/session-events.ts:1736`, `generated/session-events.ts:3154`,
+  `generated/session-events.ts:3808`, `generated/session-events.ts:4358`,
+  `generated/session-events.ts:4510`, and
+  `generated/session-events.ts:4532` anchor plan, reasoning, permission,
+  elicitation, capability, background-task, and skill-loaded events.
+- Pi `agent-session.ts:113` defines `AgentSessionEvent`, including queue,
+  compaction, thinking-level, and auto-retry events.
+- Pi `agent.ts:251` through `agent.ts:318` define steering/follow-up queueing
+  and active-run behavior.
+- Pi `docs/extensions.md:9` lists extension capabilities, including custom
+  tools, event interception, user interaction, custom UI, commands, state, and
+  rendering.
+- Pi `docs/extensions.md:180` through `docs/extensions.md:217` shows async
+  extension startup and provider registration.
+- Pi `examples/extensions/questionnaire.ts:76` and
+  `examples/extensions/permission-gate.ts:13` show extension-owned custom UI
+  and tool-call approval flows that would need a deliberate Sidemesh bridge.
 
 ## Current Architecture Findings
 
@@ -109,26 +236,36 @@ The study used version-matched local clones in
   and profiles. Reference: `/api/models`, `/api/skills`, and `/api/profiles` in
   `src/server.ts`.
 
-### What Does Not Work
+### Original Problems And Current Status
 
-- `MultiAgentProvider` OR-merges capabilities across providers and exposes that
-  merged map through `provider.capabilities`. Reference:
-  `mergeCapabilities()` in `src/multi-provider.ts`.
-- Some facade methods still call only the default provider:
-  `listSkills`, `writeSkillConfig`, `listProfiles`, `readRemoteGitDiff`, and
-  every `fs*` method. Reference: `src/multi-provider.ts`.
-- `/api/node` exposes `providerCapabilities: provider.capabilities`, which can
-  be the OR-merged facade map in multi-provider mode. Reference: `src/server.ts`.
-- The test suite currently asserts the OR-merged behavior instead of guarding
-  against over-advertising. Reference: `src/multi-provider.test.ts`.
-- The contract says optional methods must match advertised capabilities, while
-  the multi-provider facade can advertise a capability that the default-provider
-  facade method cannot actually serve. Reference: `AGENTS.md` and
-  `docs/provider-adapter-contract.md`.
-- Host-vs-provider ownership is inconsistent:
-  `AGENTS.md` says local filesystem is host-owned, but `AgentProvider` still
-  includes `fsReadDirectory`, `fsReadFile`, `fsWriteFile`, `fsWatch`, and related
-  methods.
+The initial research identified these problems. The current branch has fixed
+the capability and host-boundary issues, but the richer provider-runtime event
+model is still pending.
+
+- Fixed: `MultiAgentProvider` no longer OR-merges capabilities as public
+  provider truth. Its `capabilities` field now mirrors the default provider.
+  Reference: `src/multi-provider.ts`.
+- Fixed: catalog routes no longer go through default-provider forwarding on the
+  multi-provider facade. Skills, skill config, models, and profiles now select a
+  concrete provider through runtime helpers. Reference: `src/server.ts`.
+- Fixed: `/api/node` no longer exposes OR-merged `providerCapabilities`.
+  `providerCapabilities` is now the default-provider compatibility alias, and
+  `defaultProviderCapabilities` is explicit. Reference: `src/server.ts`.
+- Fixed: server and mobile tests now exercise provider-scoped capability
+  parsing/gating rather than OR-merged public truth. References:
+  `src/provider-factory.test.ts`, `src/server.test.ts`,
+  `apps/mobile/test/provider_metadata_models_test.dart`,
+  `apps/mobile/test/api_client_provider_scoping_test.dart`, and
+  `apps/mobile/test/capability_ui_gates_test.dart`.
+- Fixed: `AgentProvider` no longer includes local filesystem methods in the
+  shared surface. Provider-native filesystem helpers still exist on Codex and
+  fake adapters as concrete methods, but they are not part of the common
+  provider contract. Reference: `src/agent-provider.ts`.
+- Still pending: the common `AgentProviderLiveEvent` union remains intentionally
+  small and still drops or compresses provider-native events such as Codex goal,
+  hook, warning, reasoning, and plan events; Copilot background/subagent/
+  capability events; and Pi queue, auto-retry, and extension UI events.
+  Reference: `src/agent-provider.ts`.
 
 ## Provider Fit Analysis
 
@@ -153,28 +290,39 @@ Upstream fit:
 
 - Codex app-server exposes first-class thread, turn, skill, filesystem,
   approval, and notification RPCs.
+- The `rust-v0.128.0` refresh keeps those primitives and adds additional app
+  server seams for thread goals (`thread/goal/*`), hooks (`hooks/list` plus
+  hook lifecycle notifications), plugin list/read/install/uninstall, external
+  agent config import, active permission-profile metadata, and account/rate
+  limit notifications.
 - Native thread status has richer flags such as waiting on approval and waiting
   on user input.
 - Native notifications include plan updates, reasoning deltas, token usage,
   filesystem changes, skill changes, turn diffs, command output, terminal input,
   and file patch changes.
-- Native server requests include structured user input and permissions approval.
+- Native server requests include structured user input, MCP elicitation, and
+  permissions approval.
 
 Mismatch:
 
 - The local `AgentProviderLiveEvent` surface drops several native Codex events:
+  goal updates, hook lifecycle, account/rate-limit changes, plugin changes,
   plan updates, reasoning text/summary deltas, richer thread status, and
   structured user-input requests.
 - Codex upstream has user-input and elicitation-style primitives, but local
   `CODEX_PROVIDER_CAPABILITIES.interaction.userInput` and `elicitation` are
   currently false.
-- Codex filesystem support is provider-native, but local filesystem browsing is
-  documented as host-owned. This makes `fs*` in `AgentProvider` ambiguous.
+- Codex filesystem support is still provider-native upstream, but Sidemesh now
+  treats local filesystem browsing as host-owned. Any future use of Codex
+  `fs/*` should be treated as a provider-native remote-workspace exception, not
+  as the daemon's local file API.
 
 Implication:
 
 Codex can remain the reference adapter, but its provider-native richness should
-not force every provider to implement Codex-shaped workspace methods.
+not force every provider to implement Codex-shaped workspace methods or every
+Codex notification. Add new Sidemesh event and capability facets only when a
+mobile UI or diagnostic consumer can render them.
 
 ### GitHub Copilot SDK
 
@@ -203,6 +351,9 @@ Upstream fit:
   provider, model capabilities, hooks, working directory, streaming,
   sub-agent streaming, MCP servers, custom agents, config discovery, skill
   directories, disabled skills, infinite sessions, and GitHub token.
+- Session configuration can also register a session filesystem provider, but
+  that is session-scoped Copilot runtime storage. It should not be confused
+  with Sidemesh's host-owned filesystem API.
 - `CopilotSession` exposes `send`, `sendAndWait`, `abort`, `disconnect`,
   `setModel`, `getMessages`, typed event subscriptions, session RPC, and
   capability updates.
@@ -217,13 +368,16 @@ Mismatch:
   have equivalents.
 - Copilot has richer interaction support than Codex locally, but only because
   the adapter maps SDK callbacks into Sidemesh pending actions.
+- Copilot has dynamic session capability events such as
+  `capabilities.changed`; Sidemesh currently treats provider capabilities as
+  provider-level metadata rather than session-runtime state.
 
 Implication:
 
 Copilot supports the current provider abstraction at the UI/session boundary,
 but the adapter is doing substantial translation and state ownership. The core
-contract should avoid implying that all providers expose session history and
-event replay in the same way.
+contract should avoid implying that all providers expose session history, event
+replay, session filesystem, or dynamic session capabilities in the same way.
 
 ### Pi Coding Agent
 
@@ -255,6 +409,9 @@ Upstream fit:
   settings, and CLI locations.
 - Pi extensions can register tools, commands, shortcuts, flags, providers,
   custom UI, and event handlers.
+- Pi extension examples show both blocking tool-call gates and custom UI flows.
+  Those are real interaction primitives, but they are embedded in Pi's runtime
+  and TUI model rather than exposed as Sidemesh pending actions today.
 
 Mismatch:
 
@@ -269,7 +426,9 @@ Implication:
 
 Pi should be treated as an embedded agent runtime adapter. It can implement the
 common session facade, but Sidemesh should avoid forcing Pi into a Codex-shaped
-provider model.
+provider model. A Sidemesh bridge for Pi interaction should start with typed
+queue/thinking/retry/status events, then add `ctx.ui` pending-action support
+only if the mobile client can render the requested UI.
 
 ## Desired Target Architecture
 
@@ -306,6 +465,16 @@ Remove or isolate from the shared contract:
 
 The local filesystem API should remain host-owned in `src/fs-routes.ts`.
 
+Landed status:
+
+- The shared `AgentProvider` interface now extends only core, session,
+  approval, workspace, and configuration provider facets.
+- `AgentFilesystemProvider` remains as an explicitly provider-native extension
+  interface, but it is not part of the common `AgentProvider` surface.
+- Codex and fake adapters still have concrete `fs*` methods. Treat those as
+  legacy/provider-native implementation details until there is a specific
+  remote-workspace feature that needs them.
+
 ### Runtime Registry
 
 `AgentProviderRuntime` should become the explicit registry and selection layer.
@@ -338,6 +507,15 @@ This does not need to be the exact final API. The key design point is that the
 server should select concrete providers through runtime helpers instead of
 depending on a merged provider facade.
 
+Landed status:
+
+- The branch implements `defaultProviderKind`, `defaultProvider`,
+  `providerForKind()`, and `providerForSessionId()` in
+  `src/provider-factory.ts`.
+- The branch keeps `provider` as the session facade for existing session routes.
+- The exact candidate method names were simplified, but the selection-layer
+  behavior is now in place.
+
 ### Multi-Provider Facade
 
 `MultiAgentProvider` should stay focused on session-scoped behavior.
@@ -363,6 +541,14 @@ Remove or stop using for:
 - Remote Git diff routes, unless explicitly scoped to a selected provider.
 - Global capability truth.
 
+Landed status:
+
+- `MultiAgentProvider` keeps lifecycle/session/action/event behavior.
+- Default-provider forwarding for catalog and remote Git routes has been
+  removed from the facade and moved to concrete provider selection.
+- Event wrapping still includes `fs_changed` watch IDs for compatibility, but
+  local filesystem live updates are served by the host filesystem WebSocket.
+
 ### Capability Reporting
 
 Expose capability data in layers:
@@ -377,7 +563,32 @@ Expose capability data in layers:
 
 Avoid presenting OR-merged provider capabilities as one callable provider.
 
+Landed status:
+
+- `/api/node` exposes `defaultProviderCapabilities`, `hostCapabilities`, and
+  `supportedProviders[].capabilities`.
+- The compatibility field `providerCapabilities` is now the default provider's
+  capabilities.
+- `/api/providers` mirrors provider summaries for provider-selection UI.
+
 ## Phased Implementation Plan
+
+Phase status as of 2026-05-03:
+
+- Phase 1 is complete in the current branch.
+- Phase 2 is complete in the current branch, with helper names adjusted to the
+  implemented `providerForKind()` / `providerForSessionId()` API.
+- Phase 3 is complete for public capability truth and catalog routing; the only
+  leftover is the compatibility `fs_changed` live-event wrapper.
+- Phase 4 is complete for the shared contract and HTTP capability model; the
+  concrete Codex/fake `fs*` helpers remain as provider-native implementation
+  details.
+- Phase 5 is complete for server routes and mobile capability parsing/gating.
+- Phase 6 remains open, especially Codex `request_user_input` and MCP
+  elicitation mapping plus any Pi `ctx.ui` bridge.
+- Phase 7 remains open and is now the main next-phase expansion.
+- Phase 8 is partially complete through `docs/provider-adapter-contract.md`;
+  this document is being updated with the second research pass.
 
 ### Phase 1: Make `/api/node` Capabilities Honest
 
@@ -734,13 +945,218 @@ Specific doc updates:
   - provider model/profile/skill catalogs
   - provider-specific remote Git diff, if retained
 
+## Expanded Remaining Work
+
+The second research pass changes the priority order. The base runtime boundary
+is in place, so the next useful work is to add typed provider-native richness in
+small vertical slices.
+
+### 1. Rich Event Envelope
+
+Current Sidemesh reference:
+
+- `src/agent-provider.ts` defines the current `AgentProviderLiveEvent` union.
+- `src/multi-provider.ts` wraps session/action IDs and still wraps
+  `fs_changed` watch IDs for compatibility.
+- `src/server.ts` forwards provider `liveEvent` messages to the WebSocket
+  stream.
+
+Provider source evidence:
+
+- Codex `rust-v0.128.0` emits `thread/status/changed`,
+  `thread/goal/updated`, `thread/goal/cleared`, `turn/plan/updated`,
+  `item/reasoning/textDelta`, `item/reasoning/summaryTextDelta`,
+  `warning`, `guardianWarning`, `hook/started`, `hook/completed`,
+  `account/rateLimits/updated`, and `externalAgentConfig/import/completed`.
+- Copilot SDK `0.3.0` exposes `session.plan_changed`,
+  `assistant.reasoning`, `assistant.reasoning_delta`,
+  `permission.requested`, `elicitation.requested`,
+  `capabilities.changed`, `session.background_tasks_changed`, and
+  `session.skills_loaded`.
+- Pi `v0.71.1` exposes `queue_update`, `thinking_level_changed`,
+  `compaction_start`, `compaction_end`, `auto_retry_start`, and
+  `auto_retry_end` at the `AgentSessionEvent` layer.
+
+Implementation tasks:
+
+- Add typed optional events rather than a raw `nativePayload` escape hatch.
+- Start with diagnostic-safe events:
+  `provider_warning`, `thread_status_changed`, `plan_updated`,
+  `reasoning_delta`, `reasoning_summary_delta`, `queue_updated`,
+  `auto_retry_started`, and `auto_retry_finished`.
+- Add `thread_goal_updated` only after deciding whether Sidemesh wants a UI for
+  Codex's persisted goal workflow.
+- Keep raw upstream IDs and provider-specific payloads behind adapter-local
+  translation.
+- Update `MultiAgentProvider.wrapLiveEvent()` to namespace every event shape
+  that includes `sessionId`, `action.sessionId`, or future provider-owned IDs.
+
+Acceptance:
+
+- Provider adapter tests prove translation for each added event.
+- WebSocket serialization preserves backward compatibility for existing event
+  types.
+- Flutter adds parsing only for events it will render or store.
+
+### 2. Codex Interaction Bridge
+
+Current Sidemesh reference:
+
+- `src/codex-provider.ts` still advertises
+  `interaction.userInput: false` and `interaction.elicitation: false`.
+- `src/approvals.ts` and `AgentPendingAction` already support a provider
+  pending-action normalization layer.
+- `src/copilot-provider.ts` already maps Copilot user input and elicitation into
+  Sidemesh pending actions and is the best local template.
+
+Provider source evidence:
+
+- Codex `item/tool/requestUserInput` carries `threadId`, `turnId`, `itemId`,
+  and multiple questions with optional choices.
+- Codex `mcpServer/elicitation/request` carries `threadId`, optional `turnId`,
+  `serverName`, and either form-mode schema or URL-mode request data.
+- Codex has `thread/increment_elicitation` and `thread/decrement_elicitation`
+  for out-of-band blocking state.
+
+Implementation tasks:
+
+- Map `item/tool/requestUserInput` to `AgentPendingAction.kind:
+  "user_input"`.
+- Map `mcpServer/elicitation/request` to `AgentPendingAction.kind:
+  "elicitation"` using the same mobile-visible schema concepts as Copilot.
+- Implement response serialization for accepted, declined, canceled, and
+  free-form/other answers.
+- Turn on Codex `interaction.userInput` and `interaction.elicitation` only after
+  the request and response paths have tests.
+- Emit `thread_status_changed` or runtime updates when Codex reports waiting on
+  approval/user input.
+
+Acceptance:
+
+- Codex provider tests cover request parsing, action opening, action response,
+  cancellation/decline, and namespaced multi-provider action routing.
+- Mobile capability gates show user-input/elicitation UI only after the Codex
+  capability flags are true.
+
+### 3. Copilot Rich Event Cleanup
+
+Current Sidemesh reference:
+
+- `src/copilot-provider.ts` already translates messages, activities, pending
+  actions, runtime summaries, and skill invalidation.
+- The adapter owns a Sidemesh shadow session model, so events must update that
+  model before being forwarded to the client.
+
+Provider source evidence:
+
+- SDK sessions register handlers before `session.create` / `session.resume` so
+  early events are not dropped.
+- `SessionConfig` includes streaming, subagent streaming, custom agents, MCP
+  servers, skill directories, disabled skills, infinite sessions, hooks, and
+  `createSessionFsHandler`.
+- Generated events include plan, reasoning, background task, subagent,
+  capabilities, skill-loaded, permission, and elicitation events.
+
+Implementation tasks:
+
+- Map `session.plan_changed` into `plan_updated` only when the resulting plan
+  has enough content for mobile to render.
+- Map `assistant.reasoning_delta` to `reasoning_delta` if streaming is enabled
+  and if the UI will accumulate it.
+- Map `capabilities.changed` into session runtime updates rather than mutating
+  provider-level capabilities.
+- Keep Copilot `sessionFs` out of the host filesystem contract. Consider it
+  only for a future persistent remote workspace feature.
+- Avoid surfacing subagent/background-task events as generic activities until
+  there is a stable UX for them.
+
+Acceptance:
+
+- Copilot event fixtures cover all translated event types.
+- The Sidemesh session snapshot stays consistent after replaying translated SDK
+  events.
+- No raw SDK event objects are emitted to Flutter.
+
+### 4. Pi Runtime Bridge
+
+Current Sidemesh reference:
+
+- `src/pi-provider.ts` maps the shared session facade and reasoning effort to
+  Pi thinking level.
+- Pi interaction and approvals remain false in provider capabilities.
+
+Provider source evidence:
+
+- `AgentSessionEvent` already has queue, compaction, thinking-level, and
+  auto-retry events.
+- `Agent` owns steering and follow-up queues separately.
+- Pi extensions can register providers, tools, commands, shortcuts, flags,
+  custom UI, and tool-call gates. Example extensions include questionnaire and
+  permission-gate flows.
+
+Implementation tasks:
+
+- Map `queue_update` to `queue_updated` with separate steering and follow-up
+  counts/text previews.
+- Map `auto_retry_start` and `auto_retry_end` to provider events or runtime
+  updates.
+- Map `thinking_level_changed` into `runtime_updated` if the runtime summary can
+  represent it cleanly.
+- Do not turn on Pi approvals or interaction until `ctx.ui.confirm`,
+  `ctx.ui.select`, `ctx.ui.input`, and `ctx.ui.custom` have a deliberate
+  Sidemesh pending-action bridge.
+- Evaluate the `0.71.1` to `0.72.1` dependency bump separately before relying
+  on any source behavior introduced after `v0.71.1`.
+
+Acceptance:
+
+- Pi adapter tests cover queue, retry, compaction, and thinking-level event
+  mapping.
+- Flutter ignores unknown Pi events safely.
+- Pi extension UI remains internal until the Sidemesh bridge exists.
+
+### 5. Legacy Surface Cleanup
+
+Current Sidemesh reference:
+
+- `providerCapabilities` remains for old clients.
+- `AgentFilesystemProvider` exists as an explicit non-shared provider-native
+  interface.
+- Codex and fake adapters still expose concrete `fs*` helpers.
+- `fs_changed` remains in `AgentProviderLiveEvent`.
+
+Implementation tasks:
+
+- Keep `providerCapabilities` until the mobile release matrix no longer needs
+  the compatibility alias.
+- Decide whether Codex/fake concrete `fs*` helpers are still useful. If not,
+  delete them and their tests.
+- If provider-side `fs_changed` has no consumer after host FS live updates,
+  deprecate it or rename it to a provider-native workspace event.
+- Avoid adding Codex plugin/hook/goal APIs to the core provider contract until
+  another provider has a comparable concept or the UI has a Codex-specific
+  provider page.
+
+Acceptance:
+
+- Removing any legacy method does not change host filesystem behavior.
+- `docs/provider-adapter-contract.md`, `AGENTS.md`, and this plan stay aligned.
+- Old clients still work until compatibility fields are deliberately removed.
+
 ## API Migration Detail
 
 ### `/api/node`
 
-Current problem:
+Original problem:
 
 - `providerCapabilities` can be the OR-merged `MultiAgentProvider.capabilities`.
+
+Current status:
+
+- This is fixed in the current branch.
+- `providerCapabilities` is a compatibility alias for
+  `defaultProviderCapabilities`.
+- Per-provider capability truth lives in `supportedProviders[].capabilities`.
 
 Target response:
 
@@ -748,7 +1164,7 @@ Target response:
 {
   "provider": "codex",
   "providerName": "Codex",
-  "providerVersion": "codex-cli 0.124.0",
+  "providerVersion": "codex-cli 0.128.0",
   "providerCapabilities": {},
   "defaultProviderCapabilities": {},
   "hostCapabilities": {},
@@ -810,7 +1226,8 @@ Target rule:
 
 ### Capabilities
 
-Current capability map is provider-local but is sometimes used globally.
+The capability map is provider-local. The current branch no longer uses an
+OR-merged provider map as public truth.
 
 Target:
 
@@ -852,7 +1269,7 @@ Target:
 
 Risk:
 
-- Older clients may expect OR-merged `providerCapabilities`.
+- Older clients may have expected OR-merged `providerCapabilities`.
 
 Mitigation:
 
@@ -928,7 +1345,7 @@ Do not run tests if `npm run typecheck` fails.
 
 ### Focused Server Tests
 
-Add or update tests for:
+Already covered by the current branch:
 
 - `src/provider-factory.test.ts`
   - runtime helper selection
@@ -948,11 +1365,16 @@ Add or update tests for:
   - unknown provider route errors
   - unsupported capability route errors
 
-- Provider-specific tests:
-  - `src/codex-provider.test.ts`
-  - `src/copilot-provider.test.ts`
-  - `src/pi-provider.test.ts`
-  - `src/fake-provider.test.ts`
+Add next-phase provider-specific tests for:
+
+- `src/codex-provider.test.ts`: Codex user-input, MCP elicitation, warning,
+  thread-status, plan, and reasoning event mapping.
+- `src/copilot-provider.test.ts`: Copilot plan, reasoning, capability,
+  skill-loaded, and background/subagent event filtering/mapping.
+- `src/pi-provider.test.ts`: Pi queue, thinking-level, auto-retry, and
+  extension UI bridge behavior.
+- `src/fake-provider.test.ts`: fake rich-event fixtures for mobile/WebSocket
+  tests.
 
 ### Flutter Gates
 
@@ -968,7 +1390,7 @@ flutter analyze
 
 ### Flutter Focus Areas
 
-Add or update tests for:
+Already covered by the current branch:
 
 - Parsing `defaultProviderCapabilities`.
 - Parsing per-provider capabilities.
@@ -977,35 +1399,58 @@ Add or update tests for:
 - Default provider fallback behavior.
 - Unknown provider error rendering if applicable.
 
+Add next-phase tests only when the corresponding event/UI is implemented:
+
+- Parsing `provider_warning`, `plan_updated`, and reasoning events.
+- Rendering pending user input and elicitation for Codex.
+- Ignoring unknown rich provider events safely.
+- Showing Pi queue/retry/thinking status if the UI consumes those events.
+
 ## Recommended Implementation Order
 
-1. Add tests that demonstrate the current capability over-advertising problem.
-2. Change `/api/node` to expose default-provider and per-provider capabilities.
-3. Update Flutter API models and capability gates to consume provider-scoped
+Completed first-slice order:
+
+1. Added tests that demonstrate the capability over-advertising problem.
+2. Changed `/api/node` to expose default-provider and per-provider capabilities.
+3. Updated Flutter API models and capability gates to consume provider-scoped
    capabilities.
-4. Add runtime selection helpers in `src/provider-factory.ts`.
-5. Move server provider lookup to runtime helpers.
-6. Narrow `MultiAgentProvider` to session-scoped routing.
-7. Remove or isolate provider filesystem methods.
-8. Update provider contract docs and `AGENTS.md`.
-9. Add optional richer runtime events provider by provider.
+4. Added runtime selection helpers in `src/provider-factory.ts`.
+5. Moved server provider lookup to runtime helpers.
+6. Narrowed `MultiAgentProvider` to session-scoped routing.
+7. Removed local filesystem methods from the shared provider surface.
+8. Updated provider contract docs.
+
+Next-phase order:
+
+1. Add typed rich event shapes and fake-provider fixtures.
+2. Implement Codex warning/thread-status/plan/reasoning event mapping.
+3. Implement Codex user-input and MCP elicitation pending actions.
+4. Implement Copilot event cleanup for plan, reasoning, capability, skill, and
+   background/subagent signals that have a UI consumer.
+5. Implement Pi queue/retry/thinking events.
+6. Decide whether Pi `ctx.ui` should bridge to Sidemesh pending actions.
+7. Remove or deprecate legacy provider-native `fs*` helpers if no remote
+   workspace feature uses them.
+8. Revisit Codex goal/plugin/hook APIs only after deciding on a provider-page
+   or provider-specific capability model.
 
 ## First Slice Recommendation
 
-The first implementation slice should be small and observable:
+The first implementation slice was small and observable:
 
-- Add failing tests around `/api/node` multi-provider capability reporting.
-- Add `defaultProviderCapabilities`.
-- Add provider capabilities to provider summaries if missing.
-- Make `providerCapabilities` reflect the default provider.
-- Update only the Flutter parsing/gating code needed for those fields.
+- Added failing tests around `/api/node` multi-provider capability reporting.
+- Added `defaultProviderCapabilities`.
+- Added provider capabilities to provider summaries.
+- Made `providerCapabilities` reflect the default provider.
+- Updated only the Flutter parsing/gating code needed for those fields.
 
-This slice fixes the most misleading behavior without forcing a large adapter
-rewrite.
+This slice fixed the most misleading behavior without forcing a large adapter
+rewrite. The next slice should be one provider/event path at a time, starting
+with Codex user input or Codex warning/status events.
 
 ## Acceptance Criteria
 
-The refactor is done when:
+First-slice criteria, satisfied by the current branch:
 
 - `/api/node` no longer exposes OR-merged provider capabilities as the active
   provider's callable capability set.
@@ -1016,3 +1461,13 @@ The refactor is done when:
 - `docs/provider-adapter-contract.md` matches the implemented contract.
 - Codex, Copilot, Pi, and fake provider tests pass.
 - Focused Flutter provider metadata and capability-gate tests pass.
+
+Expanded runtime criteria, still open:
+
+- Codex user-input and MCP elicitation requests become Sidemesh pending actions.
+- Codex, Copilot, and Pi rich events are represented by typed Sidemesh events.
+- Raw provider payloads are not emitted to Flutter.
+- Mobile parsing/rendering exists only for rich events with a real UI or
+  diagnostic consumer.
+- Legacy provider-native filesystem helpers are either removed or documented as
+  provider-specific remote workspace exceptions.
