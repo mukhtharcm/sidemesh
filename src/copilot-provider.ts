@@ -52,6 +52,7 @@ import {
 } from "./copilot-sdk-client.js";
 import { normalizeStoredSessionActivity } from "./activity.js";
 import type {
+  LivePlanStep,
   ModelSummary,
   PendingActionElicitationField,
   SessionActivity,
@@ -966,6 +967,14 @@ export class CopilotAgentProvider
       return;
     }
 
+    if (event.type === "session.plan_changed") {
+      const sdkSession = session.sdkSession ?? active?.sdkSession ?? null;
+      if (sdkSession) {
+        void this.emitCopilotPlanUpdated(sessionId, sdkSession, active?.turnId ?? null);
+      }
+      return;
+    }
+
     const warning = buildCopilotProviderWarningEvent(sessionId, event);
     if (warning) {
       this.emit("liveEvent", warning);
@@ -1175,6 +1184,32 @@ export class CopilotAgentProvider
         ),
       });
     }
+  }
+
+  private async emitCopilotPlanUpdated(
+    sessionId: string,
+    sdkSession: CopilotSdkSession,
+    turnId: string | null,
+  ): Promise<void> {
+    const planRpc = sdkSession.rpc?.plan;
+    if (!planRpc) {
+      return;
+    }
+    const plan = await planRpc.read().catch(() => null);
+    if (!plan?.exists || !plan.content) {
+      return;
+    }
+    const normalized = parseCopilotPlanContent(plan.content);
+    if (normalized.plan.length === 0) {
+      return;
+    }
+    this.emit("liveEvent", {
+      type: "plan_updated",
+      sessionId,
+      turnId: turnId ?? undefined,
+      explanation: normalized.explanation,
+      plan: normalized.plan,
+    });
   }
 
   private completeActiveTurn(sessionId: string, status: string): void {
@@ -1829,6 +1864,69 @@ function reasoningEffortForSdk(
     return effort;
   }
   return undefined;
+}
+
+function parseCopilotPlanContent(content: string): {
+  explanation?: string;
+  plan: LivePlanStep[];
+} {
+  const explanationParts: string[] = [];
+  const plan: LivePlanStep[] = [];
+
+  for (const rawLine of content.split(/\r?\n/u)) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    const checkboxMatch =
+      /^\s*(?:[-*+]|	*\d+\.)\s+\[( |x|X|~|-)\]\s+(.+?)\s*$/u.exec(rawLine);
+    if (checkboxMatch) {
+      const marker = checkboxMatch[1] ?? " ";
+      const step = normalizeCopilotPlanLine(checkboxMatch[2] ?? "");
+      if (step) {
+        plan.push({
+          step,
+          status:
+            marker === "x" || marker === "X"
+              ? "completed"
+              : marker === "~" || marker === "-"
+                ? "in_progress"
+                : "pending",
+        });
+      }
+      continue;
+    }
+
+    const bulletMatch = /^\s*(?:[-*+]|	*\d+\.)\s+(.+?)\s*$/u.exec(rawLine);
+    if (bulletMatch) {
+      const step = normalizeCopilotPlanLine(bulletMatch[1] ?? "");
+      if (step) {
+        plan.push({ step, status: "pending" });
+      }
+      continue;
+    }
+
+    if (plan.length === 0) {
+      const text = normalizeCopilotPlanLine(trimmed.replace(/^#+\s*/u, ""));
+      if (text) {
+        explanationParts.push(text);
+      }
+    }
+  }
+
+  const explanation = explanationParts.length > 0
+    ? explanationParts.join(" ")
+    : undefined;
+  return { explanation, plan };
+}
+
+function normalizeCopilotPlanLine(value: string): string {
+  return value
+    .replace(/\*\*/gu, "")
+    .replace(/__+/gu, "")
+    .replace(/`/gu, "")
+    .trim();
 }
 
 function buildCopilotProviderWarningEvent(

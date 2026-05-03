@@ -554,6 +554,7 @@ class _SessionScreenState extends State<SessionScreen>
   final SessionTurnConfigStore _turnConfigStore =
       SessionTurnConfigStore.instance;
   final StringBuffer _assistantDeltaBuffer = StringBuffer();
+  final StringBuffer _reasoningDeltaBuffer = StringBuffer();
   final Map<String, SessionActivity> _pendingActivityUpdates =
       <String, SessionActivity>{};
 
@@ -766,6 +767,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _clearLiveAssistantMessage() {
     _liveAssistantNotifier.value = null;
+    _reasoningDeltaBuffer.clear();
   }
 
   String get _screenAwakeSourceKey =>
@@ -2497,8 +2499,12 @@ class _SessionScreenState extends State<SessionScreen>
           );
         });
       case 'reasoning_delta':
-        // Parsed for compatibility, but intentionally not rendered until a
-        // dedicated thinking UI is product-approved.
+        final delta = event.delta;
+        if (delta == null || delta.isEmpty) {
+          return;
+        }
+        _reasoningDeltaBuffer.write(delta);
+        _scheduleLiveFlush();
         break;
       case 'queue_updated':
         setState(() {
@@ -2646,6 +2652,7 @@ class _SessionScreenState extends State<SessionScreen>
     _liveFlushTimer = null;
     if (!mounted) {
       _assistantDeltaBuffer.clear();
+      _reasoningDeltaBuffer.clear();
       _pendingActivityUpdates.clear();
       return;
     }
@@ -2654,20 +2661,28 @@ class _SessionScreenState extends State<SessionScreen>
     final delta = hasDelta ? _assistantDeltaBuffer.toString() : '';
     _assistantDeltaBuffer.clear();
 
+    final hasReasoning = _reasoningDeltaBuffer.isNotEmpty;
+    final reasoningDelta = hasReasoning ? _reasoningDeltaBuffer.toString() : '';
+    _reasoningDeltaBuffer.clear();
+
     final activities = _pendingActivityUpdates.values.toList();
     _pendingActivityUpdates.clear();
 
-    if (!hasDelta && activities.isEmpty) {
+    if (!hasDelta && !hasReasoning && activities.isEmpty) {
       return;
     }
 
     final currentLive = _liveAssistantMessage;
-    final updatedLive = hasDelta
-        ? _appendLiveAssistantDelta(currentLive, delta)
-        : currentLive;
-    final needsLiveInsert = hasDelta && currentLive == null;
-
+    var updatedLive = currentLive;
     if (hasDelta) {
+      updatedLive = _appendLiveAssistantDelta(updatedLive, delta);
+    }
+    if (hasReasoning) {
+      updatedLive = _appendLiveAssistantReasoning(updatedLive, reasoningDelta);
+    }
+    final needsLiveInsert = updatedLive != null && currentLive == null;
+
+    if (updatedLive != null) {
       if (needsLiveInsert || activities.isNotEmpty) {
         setState(() {
           _running = true;
@@ -4593,6 +4608,25 @@ class _SessionScreenState extends State<SessionScreen>
       );
     }
     return current.copyWith(text: '${current.text}$delta');
+  }
+
+  _LiveAssistantMessageState _appendLiveAssistantReasoning(
+    _LiveAssistantMessageState? current,
+    String delta,
+  ) {
+    if (current == null) {
+      return _LiveAssistantMessageState(
+        id: 'local-stream-${DateTime.now().microsecondsSinceEpoch}',
+        text: '',
+        createdAt: DateTime.now(),
+        seq: _nextTimelineSeq(),
+        phase: 'commentary',
+        reasoning: delta,
+      );
+    }
+    return current.copyWith(
+      reasoning: '${current.reasoning}$delta',
+    );
   }
 
   int _nextTimelineSeq() {

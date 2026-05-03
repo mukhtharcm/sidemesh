@@ -989,16 +989,27 @@ export class PiAgentProvider
     session: PiSessionState,
     event: Extract<AgentSessionEvent, { type: "message_update" }>,
   ): void {
-    if (event.assistantMessageEvent.type !== "text_delta") {
+    const active = this.activeTurns.get(session.thread.id);
+    const msgEvent = event.assistantMessageEvent;
+    if (msgEvent.type === "text_delta") {
+      this.emit("liveEvent", {
+        type: "assistant_delta",
+        sessionId: session.thread.id,
+        turnId: active?.turnId,
+        delta: msgEvent.delta,
+      });
       return;
     }
-    const active = this.activeTurns.get(session.thread.id);
-    this.emit("liveEvent", {
-      type: "assistant_delta",
-      sessionId: session.thread.id,
-      turnId: active?.turnId,
-      delta: event.assistantMessageEvent.delta,
-    });
+    if (msgEvent.type === "thinking_delta") {
+      this.emit("liveEvent", {
+        type: "reasoning_delta",
+        sessionId: session.thread.id,
+        turnId: active?.turnId,
+        delta: msgEvent.delta,
+        summary: false,
+      });
+      return;
+    }
   }
 
   private handleMessageEnd(

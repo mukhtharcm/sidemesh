@@ -8,10 +8,12 @@ class _LiveAssistantMessageState {
     required this.seq,
     required this.phase,
     this.live = true,
+    this.reasoning = '',
   });
 
   final String id;
   final String text;
+  final String reasoning;
   final DateTime createdAt;
   final int seq;
   final String? phase;
@@ -19,12 +21,14 @@ class _LiveAssistantMessageState {
 
   _LiveAssistantMessageState copyWith({
     String? text,
+    String? reasoning,
     String? phase,
     bool? live,
   }) {
     return _LiveAssistantMessageState(
       id: id,
       text: text ?? this.text,
+      reasoning: reasoning ?? this.reasoning,
       createdAt: createdAt,
       seq: seq,
       phase: phase ?? this.phase,
@@ -156,10 +160,90 @@ class _LiveAssistantBubble extends StatelessWidget {
             api: api,
             message: liveMessage.toMessage(),
             live: liveMessage.live,
+            reasoning: liveMessage.reasoning,
             onOpenFile: onOpenFile,
           ),
         );
       },
+    );
+  }
+}
+
+class _ReasoningBlock extends StatefulWidget {
+  const _ReasoningBlock({
+    required this.reasoning,
+    this.onOpenFile,
+  });
+
+  final String reasoning;
+  final void Function(String path)? onOpenFile;
+
+  @override
+  State<_ReasoningBlock> createState() => _ReasoningBlockState();
+}
+
+class _ReasoningBlockState extends State<_ReasoningBlock> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOut,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.psychology_outlined,
+                  size: 16,
+                  color: colors.textTertiary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _expanded ? 'Thinking' : 'Thinking…',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colors.textTertiary,
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  _expanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  size: 16,
+                  color: colors.textTertiary,
+                ),
+              ],
+            ),
+          ),
+          if (_expanded) ...[
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: SingleChildScrollView(
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceMuted,
+                    borderRadius: AppShapes.input,
+                  ),
+                  child: _MarkdownMessageBody(
+                    text: widget.reasoning,
+                    textColor: colors.textSecondary,
+                    onOpenFile: widget.onOpenFile,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -799,6 +883,7 @@ class _MessageBubble extends StatelessWidget {
     required this.message,
     this.live = false,
     this.pinned = false,
+    this.reasoning,
     this.onTogglePin,
     this.onOpenFile,
   });
@@ -808,6 +893,7 @@ class _MessageBubble extends StatelessWidget {
   final SessionMessage message;
   final bool live;
   final bool pinned;
+  final String? reasoning;
   final VoidCallback? onTogglePin;
   final void Function(String path)? onOpenFile;
 
@@ -817,6 +903,7 @@ class _MessageBubble extends StatelessWidget {
     final isUser = message.role == 'user';
     final isAssistant = message.role == 'assistant';
     final hasText = message.text.trim().isNotEmpty;
+    final reasoningText = reasoning;
     final canPin = onTogglePin != null && message.hasVisibleContent;
 
     final bubbleColor = switch (message.role) {
@@ -871,6 +958,14 @@ class _MessageBubble extends StatelessWidget {
                                 ),
                           ),
                         ],
+                      ),
+                    ),
+                  if (reasoningText != null && reasoningText.isNotEmpty && isAssistant)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _ReasoningBlock(
+                        reasoning: reasoningText,
+                        onOpenFile: onOpenFile,
                       ),
                     ),
                   if (message.attachments.isNotEmpty) ...[

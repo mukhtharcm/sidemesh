@@ -255,7 +255,7 @@ describe("Copilot provider", () => {
     }
   });
 
-  it("emits reasoning deltas and provider warnings from SDK rich events", async () => {
+  it("emits plan updates, reasoning deltas, and provider warnings from SDK rich events", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-rich-events-"),
     );
@@ -270,6 +270,7 @@ describe("Copilot provider", () => {
       const liveEvents: AgentProviderLiveEvent[] = [];
       provider.on("liveEvent", (liveEvent) => {
         if (
+          liveEvent.type === "plan_updated" ||
           liveEvent.type === "reasoning_delta" ||
           liveEvent.type === "provider_warning"
         ) {
@@ -281,11 +282,35 @@ describe("Copilot provider", () => {
       await provider.createSession({
         cwd: dir,
         input: [
-          { type: "text", text: "hello reasoning warning", text_elements: [] },
+          {
+            type: "text",
+            text: "hello plan event reasoning warning",
+            text_elements: [],
+          },
         ],
         overrides: emptyOverrides(),
       });
       await completed;
+      await waitFor(
+        () =>
+          liveEvents.some((liveEvent) => liveEvent.type === "plan_updated") &&
+          liveEvents.some((liveEvent) => liveEvent.type === "reasoning_delta") &&
+          liveEvents.filter((liveEvent) => liveEvent.type === "provider_warning")
+                .length >= 2,
+      );
+
+      const planUpdated = liveEvents.find(
+        (liveEvent) => liveEvent.type === "plan_updated",
+      );
+      if (planUpdated?.type !== "plan_updated") {
+        throw new Error("Expected Copilot plan_updated event");
+      }
+      assert.equal(planUpdated.explanation, "Shipping plan Keep the rollout small and safe.");
+      assert.deepEqual(planUpdated.plan, [
+        { step: "Review the current state", status: "completed" },
+        { step: "Wire the shared event envelope", status: "in_progress" },
+        { step: "Validate on mobile", status: "pending" },
+      ]);
 
       const reasoning = liveEvents.find(
         (liveEvent) => liveEvent.type === "reasoning_delta",
@@ -1389,6 +1414,17 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         this.skillReloadCount += 1;
       },
     },
+    plan: {
+      read: async (): Promise<{
+        exists: boolean;
+        content: string | null;
+        path: string | null;
+      }> => ({
+        exists: this.planContent != null,
+        content: this.planContent,
+        path: this.planContent == null ? null : `/tmp/${this.sessionId}/plan.md`,
+      }),
+    },
     compaction: {
       compact: async (): Promise<{
         success: boolean;
@@ -1429,6 +1465,7 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
   public skillReloadCount = 0;
   public compactCallCount = 0;
   private currentMode: CopilotSdkSessionMode = "interactive";
+  private planContent: string | null = null;
   private readonly holdResponses: boolean;
   private readonly heldResponses: Array<() => void> = [];
 
@@ -1591,6 +1628,18 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
             result: { content: "tool output" },
           }),
         );
+      }
+      if (options.prompt.includes("plan event")) {
+        this.planContent = [
+          "# Shipping plan",
+          "",
+          "Keep the rollout small and safe.",
+          "",
+          "- [x] Review the current state",
+          "- [~] Wire the shared event envelope",
+          "- [ ] Validate on mobile",
+        ].join("\n");
+        this.emit(event("session.plan_changed", { operation: "update" }));
       }
       if (options.prompt.includes("reasoning")) {
         this.emit(

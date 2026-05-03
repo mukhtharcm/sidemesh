@@ -73,6 +73,12 @@ export interface CopilotSdkServerSkillListResult {
   skills: CopilotSdkServerSkill[];
 }
 
+export interface CopilotSdkPlanReadResult {
+  exists: boolean;
+  content: string | null;
+  path: string | null;
+}
+
 export interface CopilotSdkSession {
   readonly sessionId: string;
   send(options: CopilotSdkMessageOptions): Promise<string>;
@@ -96,6 +102,9 @@ export interface CopilotSdkSession {
       enable(params: { name: string }): Promise<void>;
       disable(params: { name: string }): Promise<void>;
       reload(): Promise<void>;
+    };
+    plan?: {
+      read(): Promise<CopilotSdkPlanReadResult>;
     };
     compaction?: {
       compact(): Promise<{
