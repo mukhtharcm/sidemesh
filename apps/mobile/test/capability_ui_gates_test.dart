@@ -581,6 +581,7 @@ NodeInfo _nodeForCapabilities(
   'providerVersion': providerVersion,
   'providerConfig': {'kind': providerKind, 'command': providerCommand},
   'providerCapabilities': capabilities,
+  'defaultProviderCapabilities': capabilities,
   'hostCapabilities': {
     'workspace': {'filesystem': true, 'gitStatus': false, 'gitDiff': false},
   },
@@ -624,7 +625,7 @@ const Map<String, Object?> _fullCapabilities = {
     'networkAccess': true,
     'webSearch': true,
   },
-  'workspace': {'filesystem': true, 'remoteGitDiff': true},
+  'workspace': {'remoteGitDiff': true},
 };
 
 const Map<String, Object?> _minimalCapabilities = {
@@ -652,7 +653,7 @@ const Map<String, Object?> _minimalCapabilities = {
     'networkAccess': false,
     'webSearch': false,
   },
-  'workspace': {'filesystem': false, 'remoteGitDiff': false},
+  'workspace': {'remoteGitDiff': false},
 };
 
 const Map<String, Object?> _copilotApprovalCapabilities = {
@@ -675,7 +676,7 @@ const Map<String, Object?> _copilotApprovalCapabilities = {
     'networkAccess': false,
     'webSearch': false,
   },
-  'workspace': {'filesystem': false, 'remoteGitDiff': false},
+  'workspace': {'remoteGitDiff': false},
 };
 
 const _fakeModel = ModelCatalogEntry(

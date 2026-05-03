@@ -6,18 +6,34 @@ import nodePath from "node:path";
 import http from "node:http";
 
 import { startServer, type RunningServer } from "./server.js";
-import type { NodeConfig } from "./types.js";
-import { FakeAgentProvider } from "./fake-provider.js";
+import type { FakeCapabilityProfile, NodeConfig } from "./types.js";
+import { FakeAgentProvider, type FakeAgentProviderOptions } from "./fake-provider.js";
+import { MultiAgentProvider } from "./multi-provider.js";
+import {
+  listAgentProviderDefinitionSummaries,
+  summarizeAgentProviderConfig,
+} from "./provider-registry.js";
+import type { AgentProviderRuntime, AgentProviderRuntimeEntry } from "./provider-factory.js";
 
-function makeConfig(stateDir: string): NodeConfig {
+function makeConfig(
+  stateDir: string,
+  options: { capabilityProfile?: FakeCapabilityProfile } = {},
+): NodeConfig {
   const token = "test-token-" + Math.random().toString(36).slice(2);
+  const provider = {
+    kind: "fake" as const,
+    latencyMs: 0,
+    seedSessions: false,
+    workspaceRoot: null,
+    capabilityProfile: options.capabilityProfile ?? "full",
+  };
   return {
     label: "test",
     port: 0,
     token,
     tokenSource: "generated",
-    provider: { kind: "fake", latencyMs: 0, seedSessions: false, workspaceRoot: null, capabilityProfile: "full" },
-    providers: [{ kind: "fake", latencyMs: 0, seedSessions: false, workspaceRoot: null, capabilityProfile: "full" }],
+    provider,
+    providers: [provider],
     defaultProviderKind: "fake",
     stateDir,
     terminal: { enabled: false, shell: null, requirePty: false },
@@ -55,6 +71,76 @@ async function withServer(config: NodeConfig, fn: (server: RunningServer, config
     await server.close();
     await rm(config.stateDir, { recursive: true, force: true });
   }
+}
+
+async function withServerRuntime(
+  config: NodeConfig,
+  runtime: AgentProviderRuntime,
+  fn: (server: RunningServer, config: NodeConfig) => Promise<void>,
+): Promise<void> {
+  const server = await startServer(config, runtime);
+  try {
+    await fn(server, config);
+  } finally {
+    await server.close();
+    await rm(config.stateDir, { recursive: true, force: true });
+  }
+}
+
+function makeMultiProviderRuntime(fakeOptions: FakeAgentProviderOptions, secondaryOptions: FakeAgentProviderOptions): AgentProviderRuntime {
+  const defaultProvider = new FakeAgentProvider(fakeOptions);
+  const secondaryProvider = new FakeAgentProvider(secondaryOptions);
+
+  const defSummaries = listAgentProviderDefinitionSummaries();
+  const fakeDef = defSummaries.find((d) => d.kind === "fake")!;
+  const codexDef = defSummaries.find((d) => d.kind === "codex")!;
+
+  const fakeConfig = { kind: "fake" as const, latencyMs: 0, seedSessions: false, workspaceRoot: null, capabilityProfile: fakeOptions.capabilityProfile ?? "full" };
+  // The secondary entry uses "codex" as a kind label to keep kinds distinct; the
+  // underlying provider is FakeAgentProvider so no external binary is needed.
+  const codexConfig = { kind: "codex" as const, bin: "codex" };
+
+  const fakeEntry: AgentProviderRuntimeEntry = {
+    kind: "fake",
+    provider: defaultProvider,
+    configSummary: summarizeAgentProviderConfig(fakeConfig),
+    definitionSummary: fakeDef,
+  };
+  const secondaryEntry: AgentProviderRuntimeEntry = {
+    kind: "codex",
+    provider: secondaryProvider,
+    configSummary: summarizeAgentProviderConfig(codexConfig),
+    definitionSummary: codexDef,
+  };
+
+  const multiProvider = new MultiAgentProvider(
+    [
+      { kind: "fake", config: fakeConfig, provider: defaultProvider },
+      { kind: "codex", config: codexConfig, provider: secondaryProvider },
+    ],
+    "fake",
+  );
+
+  const providersByKind = new Map<string, AgentProviderRuntimeEntry>([
+    ["fake", fakeEntry],
+    ["codex", secondaryEntry],
+  ]);
+
+  return {
+    provider: multiProvider,
+    providers: [fakeEntry, secondaryEntry],
+    defaultProviderKind: "fake",
+    defaultProvider: fakeEntry,
+    providerForKind(kind) {
+      if (kind === null || kind === undefined) return fakeEntry;
+      const trimmed = kind.trim();
+      if (!trimmed) return null;
+      return providersByKind.get(trimmed) ?? null;
+    },
+    providerForSessionId(_sessionId) {
+      return fakeEntry;
+    },
+  };
 }
 
 describe("/healthz", () => {
@@ -115,6 +201,195 @@ describe("POST /api/admin/provider/:kind/restart", () => {
       assert.equal(res.statusCode, 501);
       assert.equal((res.body as any).error, "provider does not support restart");
     });
+  });
+});
+
+describe("GET /api/node", () => {
+  it("exposes default-provider and per-provider capability maps", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/node",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.body as any;
+      assert.equal(body.provider, "fake");
+      assert.equal(body.providerCapabilities.sessions.create, true);
+      assert.equal(body.defaultProviderCapabilities.sessions.create, true);
+      assert.equal(body.searchSessions, true);
+      assert.equal(body.hostCapabilities.workspace.filesystem, true);
+      assert.equal(body.supportedProviders.length, 1);
+      assert.equal(body.supportedProviders[0].kind, "fake");
+      assert.equal(body.supportedProviders[0].capabilities.sessions.create, true);
+    });
+  });
+
+  it("with two providers: providerCapabilities reflects default; per-provider caps are preserved", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    // Default provider: full profile (has models, skills, searchSessions, etc.)
+    // Secondary provider: chat-only profile (no models, no skills, no searchSessions)
+    const runtime = makeMultiProviderRuntime(
+      { capabilityProfile: "full" },
+      { capabilityProfile: "chat-only" },
+    );
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/node",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.body as any;
+
+      assert.equal(body.provider, "fake");
+      assert.equal(body.supportedProviders.length, 2);
+
+      // providerCapabilities and defaultProviderCapabilities both reflect the
+      // default (full) provider.
+      assert.equal(body.providerCapabilities.configuration.models, true);
+      assert.equal(body.defaultProviderCapabilities.configuration.models, true);
+
+      // The secondary (chat-only) entry must retain its own distinct flags.
+      const secondary = body.supportedProviders.find((p: any) => !p.isDefault);
+      assert.ok(secondary, "secondary provider entry missing");
+      assert.equal(secondary.capabilities.configuration.models, false);
+      assert.equal(secondary.capabilities.configuration.skills, false);
+
+      // The default entry must show full capabilities.
+      const defaultEntry = body.supportedProviders.find((p: any) => p.isDefault);
+      assert.ok(defaultEntry);
+      assert.equal(defaultEntry.capabilities.configuration.models, true);
+    });
+  });
+});
+
+describe("provider-scoped catalog routes", () => {
+  it("uses the default provider when agentProvider is omitted", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const baseRequest = {
+        hostname: "127.0.0.1",
+        port: server.port,
+        headers: { Authorization: "Bearer " + config.token },
+      };
+
+      assert.equal(
+        (await request({ ...baseRequest, path: "/api/models", method: "GET" })).statusCode,
+        200,
+      );
+      assert.equal(
+        (await request({ ...baseRequest, path: "/api/profiles", method: "GET" })).statusCode,
+        200,
+      );
+      assert.equal(
+        (await request({
+          ...baseRequest,
+          path: `/api/skills?cwd=${encodeURIComponent("/tmp")}`,
+          method: "GET",
+        })).statusCode,
+        200,
+      );
+      assert.equal(
+        (await request({
+          ...baseRequest,
+          path: "/api/skills/config/write",
+          method: "POST",
+          headers: {
+            ...baseRequest.headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: "fake code review",
+            enabled: false,
+          }),
+        })).statusCode,
+        200,
+      );
+    });
+  });
+
+  it("rejects unknown catalog providers", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const baseRequest = {
+        hostname: "127.0.0.1",
+        port: server.port,
+        headers: { Authorization: "Bearer " + config.token },
+      };
+
+      for (const path of [
+        "/api/models?agentProvider=unknown",
+        "/api/profiles?agentProvider=unknown",
+        `/api/skills?agentProvider=unknown&cwd=${encodeURIComponent("/tmp")}`,
+      ]) {
+        const res = await request({ ...baseRequest, path, method: "GET" });
+        assert.equal(res.statusCode, 400, path);
+        assert.equal((res.body as any).error, "unknown provider");
+      }
+
+      const writeRes = await request({
+        ...baseRequest,
+        path: "/api/skills/config/write",
+        method: "POST",
+        headers: {
+          ...baseRequest.headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          agentProvider: "unknown",
+          name: "fake code review",
+          enabled: false,
+        }),
+      });
+      assert.equal(writeRes.statusCode, 400);
+      assert.equal((writeRes.body as any).error, "unknown provider");
+    });
+  });
+
+  it("does not fall through when the selected provider lacks catalog capabilities", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(
+      makeConfig(stateDir, { capabilityProfile: "chat-only" }),
+      async (server, config) => {
+        const baseRequest = {
+          hostname: "127.0.0.1",
+          port: server.port,
+          headers: { Authorization: "Bearer " + config.token },
+        };
+
+        for (const path of [
+          "/api/models",
+          "/api/profiles",
+          `/api/skills?cwd=${encodeURIComponent("/tmp")}`,
+        ]) {
+          const res = await request({ ...baseRequest, path, method: "GET" });
+          assert.equal(res.statusCode, 501, path);
+        }
+
+        const writeRes = await request({
+          ...baseRequest,
+          path: "/api/skills/config/write",
+          method: "POST",
+          headers: {
+            ...baseRequest.headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: "fake code review",
+            enabled: false,
+          }),
+        });
+        assert.equal(writeRes.statusCode, 501);
+      },
+    );
   });
 });
 

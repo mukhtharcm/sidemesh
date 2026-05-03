@@ -57,6 +57,7 @@ class NodeInfo {
     required this.providerVersion,
     required this.providerConfig,
     required this.providerCapabilities,
+    required this.defaultProviderCapabilities,
     required this.hostCapabilities,
     required this.supportedProviders,
   });
@@ -70,6 +71,7 @@ class NodeInfo {
   final String providerVersion;
   final ProviderConfigSummary providerConfig;
   final ProviderCapabilities providerCapabilities;
+  final ProviderCapabilities defaultProviderCapabilities;
   final ProviderCapabilities hostCapabilities;
   final List<ProviderDefinitionSummary> supportedProviders;
 
@@ -113,30 +115,39 @@ class NodeInfo {
       return summary.capabilities;
     }
     if ((kind ?? '').isEmpty || kind == provider) {
-      return providerCapabilities;
+      return defaultProviderCapabilities;
     }
     return ProviderCapabilities.empty;
   }
 
-  factory NodeInfo.fromJson(Map<String, dynamic> json) => NodeInfo(
-    label: _stringValue(json['label']),
-    hostname: _stringValue(json['hostname']),
-    platform: _stringValue(json['platform']),
-    codexVersion: _stringValue(json['codexVersion']),
-    provider: _stringOrNull(json['provider']) ?? 'codex',
-    providerName: _stringOrNull(json['providerName']) ?? 'Codex',
-    providerVersion:
-        _stringOrNull(json['providerVersion']) ??
-        _stringValue(json['codexVersion']),
-    providerConfig: ProviderConfigSummary.fromJson(json['providerConfig']),
-    providerCapabilities: ProviderCapabilities.fromJson(
+  factory NodeInfo.fromJson(Map<String, dynamic> json) {
+    final providerCapabilities = ProviderCapabilities.fromJson(
       json['providerCapabilities'],
-    ),
-    hostCapabilities: ProviderCapabilities.fromJson(json['hostCapabilities']),
-    supportedProviders: ProviderDefinitionSummary.listFromJson(
-      json['supportedProviders'],
-    ),
-  );
+    );
+    final defaultProviderCapabilities = ProviderCapabilities.fromJson(
+      json['defaultProviderCapabilities'],
+    );
+    return NodeInfo(
+      label: _stringValue(json['label']),
+      hostname: _stringValue(json['hostname']),
+      platform: _stringValue(json['platform']),
+      codexVersion: _stringValue(json['codexVersion']),
+      provider: _stringOrNull(json['provider']) ?? 'codex',
+      providerName: _stringOrNull(json['providerName']) ?? 'Codex',
+      providerVersion:
+          _stringOrNull(json['providerVersion']) ??
+          _stringValue(json['codexVersion']),
+      providerConfig: ProviderConfigSummary.fromJson(json['providerConfig']),
+      providerCapabilities: providerCapabilities,
+      defaultProviderCapabilities: defaultProviderCapabilities.isEmpty
+          ? providerCapabilities
+          : defaultProviderCapabilities,
+      hostCapabilities: ProviderCapabilities.fromJson(json['hostCapabilities']),
+      supportedProviders: ProviderDefinitionSummary.listFromJson(
+        json['supportedProviders'],
+      ),
+    );
+  }
 }
 
 class ProviderMetadata {

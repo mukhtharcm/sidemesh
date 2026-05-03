@@ -193,6 +193,7 @@ NodeInfo _nodeForProvider({
     providerVersion: '0.0.0',
     providerConfig: ProviderConfigSummary(kind: kind, command: kind),
     providerCapabilities: capabilities,
+    defaultProviderCapabilities: capabilities,
     hostCapabilities: capabilities,
     supportedProviders: <ProviderDefinitionSummary>[
       ProviderDefinitionSummary(

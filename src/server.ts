@@ -54,17 +54,18 @@ import {
   parsePendingActionResponseBody,
   toPublicPendingAction,
 } from "./approvals.js";
-import { summarizeProviderConfig } from "./config.js";
 import {
   buildGitDiff,
   readGitDiff,
   readGitStatus,
   sanitizeGitUrl,
 } from "./git.js";
-import { createAgentProviderRuntime } from "./provider-factory.js";
+import {
+  createAgentProviderRuntime,
+  type AgentProviderRuntime,
+} from "./provider-factory.js";
 import { isAgentProviderKind } from "./provider-registry.js";
 import { buildSessionResources } from "./resources.js";
-import { MultiAgentProvider } from "./multi-provider.js";
 import {
   FsWatchRegistry,
   attachFsLiveSocket,
@@ -159,8 +160,11 @@ export interface RunningServer {
   close(): Promise<void>;
 }
 
-export async function startServer(config: NodeConfig): Promise<RunningServer> {
-  const providerRuntime = createAgentProviderRuntime(config);
+export async function startServer(
+  config: NodeConfig,
+  prebuiltRuntime?: AgentProviderRuntime,
+): Promise<RunningServer> {
+  const providerRuntime = prebuiltRuntime ?? createAgentProviderRuntime(config);
   const provider = providerRuntime.provider;
   await provider.start();
   let runningServerRef: RunningServer | null = null;
@@ -213,9 +217,6 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   }
   let providerVersion = "unknown";
   const providerVersions = new Map<string, string>();
-  const providerEntriesByKind = new Map(
-    providerRuntime.providers.map((entry) => [entry.kind, entry]),
-  );
   const terminalRegistry = new TerminalRegistry({
     enabled: hostCapabilities.workspace.terminal,
     shell: normalizeTerminalShell(config.terminal.shell),
@@ -258,25 +259,11 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   }
 
   function providerEntryForKind(kind: string | null | undefined) {
-    if (!kind) {
-      return providerEntriesByKind.get(config.defaultProviderKind) ?? null;
-    }
-    if (!isAgentProviderKind(kind)) {
-      return null;
-    }
-    return providerEntriesByKind.get(kind) ?? null;
+    return providerRuntime.providerForKind(kind);
   }
 
   function providerEntryForSessionId(sessionId: string) {
-    if (provider instanceof MultiAgentProvider) {
-      try {
-        const resolved = provider.resolveSessionProvider(sessionId);
-        return providerEntryForKind(resolved.kind);
-      } catch {
-        return null;
-      }
-    }
-    return providerEntryForKind(null);
+    return providerRuntime.providerForSessionId(sessionId);
   }
 
   async function getSessionCwd(sessionId: string): Promise<string | null> {
@@ -644,7 +631,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
     );
   }
   providerVersion =
-    providerVersions.get(config.defaultProviderKind) ??
+    providerVersions.get(providerRuntime.defaultProviderKind) ??
     (await provider.getVersion().catch(() => "unknown"));
 
   app.use(cors());
@@ -696,26 +683,30 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
   });
 
   app.get("/api/node", (_request, response) => {
+    const defaultProvider = providerRuntime.defaultProvider;
+    const defaultProviderCapabilities = defaultProvider.provider.capabilities;
     const supportedProviders = providerRuntime.providers.map((entry) => ({
       ...entry.definitionSummary,
       config: entry.configSummary,
+      capabilities: entry.provider.capabilities,
       version: providerVersions.get(entry.kind) ?? "unknown",
-      isDefault: entry.kind === config.defaultProviderKind,
+      isDefault: entry.kind === providerRuntime.defaultProviderKind,
     }));
     response.json({
       label: config.label,
       hostname: hostname(),
       platform: platform(),
       codexVersion: providerVersion,
-      provider: config.defaultProviderKind,
+      provider: providerRuntime.defaultProviderKind,
       providerName:
         supportedProviders.find((item) => item.isDefault)?.displayName ??
-        provider.displayName,
+        defaultProvider.provider.displayName,
       providerVersion,
-      providerConfig: summarizeProviderConfig(config.provider),
-      providerCapabilities: provider.capabilities,
+      providerConfig: defaultProvider.configSummary,
+      providerCapabilities: defaultProviderCapabilities,
+      defaultProviderCapabilities,
       hostCapabilities,
-      searchSessions: provider.capabilities.sessions.searchSessions,
+      searchSessions: defaultProviderCapabilities.sessions.searchSessions,
       searchIndexStats: searchIndex.getStats(),
       supportedProviders,
       startedAt: process.uptime(),
@@ -725,12 +716,13 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
 
   app.get("/api/providers", (_request, response) => {
     response.json({
-      currentProvider: config.defaultProviderKind,
+      currentProvider: providerRuntime.defaultProviderKind,
       providers: providerRuntime.providers.map((entry) => ({
         ...entry.definitionSummary,
         config: entry.configSummary,
+        capabilities: entry.provider.capabilities,
         version: providerVersions.get(entry.kind) ?? "unknown",
-        isDefault: entry.kind === config.defaultProviderKind,
+        isDefault: entry.kind === providerRuntime.defaultProviderKind,
       })),
     });
   });
@@ -750,7 +742,7 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
       hostname: hostname(),
       platform: platform(),
       uptimeSeconds: Math.round(process.uptime()),
-      provider: config.defaultProviderKind,
+      provider: providerRuntime.defaultProviderKind,
       memory: process.memoryUsage(),
       resourceUsage: process.resourceUsage(),
       caches: {
@@ -792,14 +784,16 @@ export async function startServer(config: NodeConfig): Promise<RunningServer> {
         response.status(400).json({ error: "unknown provider kind" });
         return;
       }
-      if (provider instanceof MultiAgentProvider) {
-        await provider.restartProvider(kind);
-      } else if (provider.kind === kind && provider.capabilities.lifecycle?.restart) {
-        await provider.restart!();
-      } else {
+      const selectedProvider = providerRuntime.providerForKind(kind);
+      if (
+        !selectedProvider ||
+        !selectedProvider.provider.capabilities.lifecycle.restart ||
+        !selectedProvider.provider.restart
+      ) {
         response.status(501).json({ error: "provider does not support restart" });
         return;
       }
+      await selectedProvider.provider.restart();
       response.json({ ok: true, kind });
     }),
   );
