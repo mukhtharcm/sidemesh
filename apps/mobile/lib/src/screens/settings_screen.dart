@@ -12,9 +12,6 @@ import '../screen_awake_settings_store.dart';
 import '../session_local_store.dart';
 import '../session_policy_store.dart';
 import '../session_send_outbox_store.dart';
-import '../api_client.dart';
-import '../host_store.dart';
-import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import '../theme/theme_controller.dart';
@@ -791,15 +788,7 @@ class _SettingsContent extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: AppSpacing.lg),
-        _SettingsSection(
-          icon: Icons.medical_services_rounded,
-          title: 'Host diagnostics',
-          subtitle: 'Restart the provider or the daemon when stuck.',
-          children: [
-            _HostDiagnosticsCard(),
-          ],
-        ),
+
         const SizedBox(height: AppSpacing.xl),
         _AboutFooter(
           platformLabel: platformLabel,
@@ -1217,8 +1206,6 @@ class _ActionRow extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Icon(Icons.chevron_right_rounded, color: colors.textTertiary),
             ],
           ),
         ),
@@ -1283,127 +1270,6 @@ class _ToggleTile extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Switch(value: value, onChanged: onChanged),
-        ],
-      ),
-    );
-  }
-}
-
-class _HostDiagnosticsCard extends StatefulWidget {
-  const _HostDiagnosticsCard();
-
-  @override
-  State<_HostDiagnosticsCard> createState() => _HostDiagnosticsCardState();
-}
-
-class _HostDiagnosticsCardState extends State<_HostDiagnosticsCard> {
-  final HostStore _store = HostStore();
-  final ApiClient _api = ApiClient();
-  bool _busy = false;
-  String? _message;
-  ProviderMetadata? _metadata;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_loadMetadata());
-  }
-
-  Future<void> _loadMetadata() async {
-    try {
-      final host = await _getHost();
-      if (host == null) {
-        return;
-      }
-      final metadata = await _api.fetchProviders(host);
-      if (!mounted) return;
-      setState(() => _metadata = metadata);
-    } catch (_) {
-      // ignore
-    }
-  }
-
-  Future<HostProfile?> _getHost() async {
-    final hosts = await _store.loadHosts();
-    return hosts.where((h) => h.enabled).firstOrNull;
-  }
-
-  String get _providerDisplayName {
-    final kind = _metadata?.currentProvider ?? 'codex';
-    final provider = _metadata?.providers
-        .firstWhere((p) => p.kind == kind, orElse: () => ProviderDefinitionSummary.empty);
-    return (provider?.displayName.isNotEmpty == true)
-        ? provider!.displayName
-        : 'Provider';
-  }
-
-  String get _providerKind {
-    return _metadata?.currentProvider ?? 'codex';
-  }
-
-  bool get _providerSupportsRestart {
-    final kind = _providerKind;
-    final provider = _metadata?.providers
-        .firstWhere((p) => p.kind == kind, orElse: () => ProviderDefinitionSummary.empty);
-    return provider?.capabilities.supports('lifecycle', 'restart') ?? false;
-  }
-
-  Future<void> _restartProvider() async {
-    await _doRestart((host) => _api.restartProvider(host, _providerKind));
-  }
-
-  Future<void> _restartDaemon() async {
-    await _doRestart((host) => _api.restartDaemon(host));
-  }
-
-  Future<void> _doRestart(Future<void> Function(HostProfile host) action) async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      final host = await _getHost();
-      if (host == null) {
-        setState(() => _message = 'No active host.');
-        return;
-      }
-      await action(host);
-      if (!mounted) return;
-      setState(() => _message = 'Restart requested.');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _message = 'Restart failed: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final displayName = _providerDisplayName;
-    final supportsRestart = _providerSupportsRestart;
-    return _SettingsCard(
-      icon: Icons.medical_services_rounded,
-      title: 'Remote recovery',
-      subtitle: _message ?? 'Restart provider or daemon without SSH.',
-      footer: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (supportsRestart)
-            _ActionRow(
-              icon: Icons.refresh_rounded,
-              title: 'Restart $displayName provider',
-              subtitle: 'Preserves terminals and port forwards.',
-              busy: _busy,
-              onTap: () => unawaited(_restartProvider()),
-            ),
-          if (supportsRestart) Divider(color: colors.border),
-          _ActionRow(
-            icon: Icons.restart_alt_rounded,
-            title: 'Restart Sidemesh daemon',
-            subtitle: 'Full daemon restart via systemd.',
-            busy: _busy,
-            onTap: () => unawaited(_restartDaemon()),
-          ),
         ],
       ),
     );
