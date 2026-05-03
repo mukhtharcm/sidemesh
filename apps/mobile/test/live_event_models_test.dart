@@ -102,4 +102,45 @@ void main() {
     expect(event.plan!.single.step, 'Still parseable');
     expect(event.steeringPreview, ['alpha']);
   });
+
+  test('SessionMessage preserves reasoning field', () {
+    final msg = SessionMessage(
+      id: 'msg-1',
+      role: 'assistant',
+      text: 'Hello',
+      attachments: const [],
+      createdAt: DateTime(2026, 1, 1),
+      seq: 1,
+      reasoning: 'Step one. Step two.',
+    );
+    expect(msg.reasoning, 'Step one. Step two.');
+
+    final json = msg.toJson();
+    expect(json['reasoning'], 'Step one. Step two.');
+
+    final parsed = SessionMessage.fromJson(json);
+    expect(parsed.reasoning, 'Step one. Step two.');
+  });
+
+  test('SessionMessage defaults reasoning to empty string', () {
+    final msg = SessionMessage(
+      id: 'msg-1',
+      role: 'assistant',
+      text: 'Hello',
+      attachments: const [],
+      createdAt: DateTime(2026, 1, 1),
+      seq: 1,
+    );
+    expect(msg.reasoning, '');
+
+    final parsed = SessionMessage.fromJson({
+      'id': 'msg-1',
+      'role': 'assistant',
+      'text': 'Hello',
+      'attachments': [],
+      'createdAt': 0,
+      'seq': 1,
+    });
+    expect(parsed.reasoning, '');
+  });
 }
