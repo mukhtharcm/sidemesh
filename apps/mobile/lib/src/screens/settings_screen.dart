@@ -721,9 +721,9 @@ class _SettingsContent extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.lg),
         _SettingsSection(
-          icon: Icons.storage_rounded,
-          title: 'Storage & recovery',
-          subtitle: 'Clear caches and queued local state.',
+          icon: Icons.warning_amber_rounded,
+          title: 'Data & storage',
+          subtitle: 'Permanent actions — cannot be undone.',
           children: [
             _SettingsCard(
               icon: Icons.storage_rounded,
@@ -735,6 +735,7 @@ class _SettingsContent extends StatelessWidget {
                   _ActionRow(
                     icon: Icons.history_rounded,
                     title: 'Clear saved transcript cache',
+                    danger: true,
                     subtitle: 'Drop saved recent sessions and saved logs.',
                     busy: busyAction == 'transcript-cache',
                     onTap: () => unawaited(
@@ -752,6 +753,7 @@ class _SettingsContent extends StatelessWidget {
                   _ActionRow(
                     icon: Icons.image_rounded,
                     title: 'Clear saved image cache',
+                    danger: true,
                     subtitle: 'Remove saved image blobs from disk.',
                     busy: busyAction == 'image-cache',
                     onTap: () => unawaited(
@@ -769,6 +771,7 @@ class _SettingsContent extends StatelessWidget {
                   _ActionRow(
                     icon: Icons.outbox_rounded,
                     title: 'Clear queued sends',
+                    danger: true,
                     subtitle:
                         'Discard queued retries that have not already started.',
                     busy: busyAction == 'queued-sends',
@@ -1144,6 +1147,7 @@ class _ActionRow extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
     this.busy = false,
+    this.danger = false,
   });
 
   final IconData icon;
@@ -1151,10 +1155,19 @@ class _ActionRow extends StatelessWidget {
   final String subtitle;
   final VoidCallback onTap;
   final bool busy;
+  final bool danger;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final iconColor = danger ? colors.danger : colors.accent;
+    final titleColor = danger ? colors.danger : colors.textPrimary;
+    final iconBg = danger
+        ? colors.dangerMuted
+        : colors.surfaceMuted;
+    final iconBorder = danger
+        ? colors.danger.withValues(alpha: 0.25)
+        : colors.border;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1168,9 +1181,9 @@ class _ActionRow extends StatelessWidget {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: colors.surfaceMuted,
+                  color: iconBg,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: colors.border),
+                  border: Border.all(color: iconBorder),
                 ),
                 alignment: Alignment.center,
                 child: busy
@@ -1179,10 +1192,10 @@ class _ActionRow extends StatelessWidget {
                         height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: colors.accent,
+                          color: iconColor,
                         ),
                       )
-                    : Icon(icon, size: 17, color: colors.accent),
+                    : Icon(icon, size: 17, color: iconColor),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1193,6 +1206,7 @@ class _ActionRow extends StatelessWidget {
                       title,
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: AppWeights.emphasis,
+                        color: titleColor,
                       ),
                     ),
                     const SizedBox(height: 2),
