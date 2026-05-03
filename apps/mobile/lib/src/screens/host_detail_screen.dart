@@ -2,16 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../api_client.dart';
+import '../api_client.dart' show ApiClient, friendlyError;
 import '../models.dart';
 import '../session_local_store.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';
-import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/session_row_card.dart';
 import 'create_session_sheet.dart';
 
 class HostDetailScreen extends StatefulWidget {
@@ -303,7 +304,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                     ...sortedSessions.map(
                       (session) => Padding(
                         padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                        child: _SessionRow(
+                        child: SessionRowCard(
                           host: widget.host,
                           session: session,
                           favorite: _localStore.isFavorite(
@@ -317,6 +318,12 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                         ),
                       ),
                     ),
+                  const SizedBox(height: AppSpacing.lg),
+                  _HostManagementCard(
+                    host: widget.host,
+                    api: widget.api,
+                    node: data.node,
+                  ),
                 ],
               ),
             );
@@ -1127,105 +1134,187 @@ class _WorkspaceCard extends StatelessWidget {
   }
 }
 
-class _SessionRow extends StatelessWidget {
-  const _SessionRow({
+
+class _HostManagementCard extends StatefulWidget {
+  const _HostManagementCard({
     required this.host,
-    required this.session,
-    required this.favorite,
-    required this.onTap,
-    required this.onToggleFavorite,
+    required this.api,
+    required this.node,
   });
 
   final HostProfile host;
-  final SessionSummary session;
-  final bool favorite;
-  final VoidCallback onTap;
-  final VoidCallback onToggleFavorite;
+  final ApiClient api;
+  final NodeInfo node;
+
+  @override
+  State<_HostManagementCard> createState() => _HostManagementCardState();
+}
+
+class _HostManagementCardState extends State<_HostManagementCard> {
+  bool _busy = false;
+
+  bool get _supportsRestart => widget.node
+      .capabilitiesForProvider(null)
+      .supports('lifecycle', 'restart');
+
+  String get _providerDisplayName => widget.node.providerDisplayName;
+
+  Future<void> _restartProvider() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.api.restartProvider(widget.host, widget.node.provider);
+      if (!mounted) return;
+      showAppSnackBar(context, '$_providerDisplayName restarting…');
+    } catch (e) {
+      if (!mounted) return;
+      showAppSnackBar(context, 'Restart failed: ${friendlyError(e)}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _restartDaemon() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.api.restartDaemon(widget.host);
+      if (!mounted) return;
+      showAppSnackBar(context, 'Daemon restarting…');
+    } catch (e) {
+      if (!mounted) return;
+      showAppSnackBar(context, 'Restart failed: ${friendlyError(e)}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final running = session.isActive;
-    return ListenableBuilder(
-      listenable: SessionReadStore.instance,
-      builder: (context, _) {
-        final unread = SessionReadStore.instance.isUnread(host, session);
-        return MeshCard(
-          onTap: onTap,
-          accentStrip: running ? colors.success : null,
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      session.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: unread ? AppWeights.title : AppWeights.emphasis,
-                      ),
-                    ),
+    return MeshCard(
+      tone: MeshCardTone.muted,
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.medical_services_rounded,
+                  size: 16,
+                  color: colors.textSecondary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Host management',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: AppWeights.title,
                   ),
-                  if (unread) ...[
-                    const SizedBox(width: 6),
-                    _UnreadDot(color: colors.accent),
-                    const SizedBox(width: 6),
-                  ],
-                  IconButton(
-                    onPressed: onToggleFavorite,
-                    tooltip: favorite ? 'Remove favorite' : 'Add favorite',
-                    visualDensity: VisualDensity.compact,
-                    iconSize: 20,
-                    constraints: const BoxConstraints(
-                      minWidth: 32,
-                      minHeight: 32,
-                    ),
-                    icon: Icon(
-                      favorite
-                          ? Icons.star_rounded
-                          : Icons.star_outline_rounded,
-                      color: favorite ? colors.warning : colors.textTertiary,
-                    ),
-                  ),
-                  Icon(Icons.chevron_right_rounded, color: colors.textTertiary),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                session.cwd,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
-              ),
-              if (session.runtime != null) ...[
-                const SizedBox(height: 8),
-                SessionRuntimeWrap(runtime: session.runtime),
+                ),
               ],
-            ],
+            ),
           ),
-        );
-      },
+          Divider(height: 1, color: colors.border),
+          if (_supportsRestart)
+            _ManagementRow(
+              icon: Icons.refresh_rounded,
+              label: 'Restart $_providerDisplayName provider',
+              detail: 'Preserves terminals and port forwards.',
+              busy: _busy,
+              onTap: _restartProvider,
+            ),
+          if (_supportsRestart) Divider(height: 1, indent: 46, color: colors.border),
+          _ManagementRow(
+            icon: Icons.restart_alt_rounded,
+            label: 'Restart Sidemesh daemon',
+            detail: 'Full process restart — reconnect automatically.',
+            busy: _busy,
+            onTap: _restartDaemon,
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _UnreadDot extends StatelessWidget {
-  const _UnreadDot({required this.color});
+class _ManagementRow extends StatelessWidget {
+  const _ManagementRow({
+    required this.icon,
+    required this.label,
+    required this.detail,
+    required this.busy,
+    required this.onTap,
+  });
 
-  final Color color;
+  final IconData icon;
+  final String label;
+  final String detail;
+  final bool busy;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    final colors = context.colors;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: busy ? null : onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: colors.surfaceMuted,
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: colors.border),
+                ),
+                alignment: Alignment.center,
+                child: busy
+                    ? SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: colors.textSecondary,
+                        ),
+                      )
+                    : Icon(icon, size: 16, color: colors.textSecondary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: AppWeights.emphasis,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      detail,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
+
 
 class _HostOverview {
   const _HostOverview({
