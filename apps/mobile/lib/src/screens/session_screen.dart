@@ -5160,6 +5160,8 @@ class _SessionScreenState extends State<SessionScreen>
         Expanded(
           child: (_loading && timelineEntries.isEmpty)
               ? const MeshLoader()
+              : (!_loading && timelineEntries.isEmpty && _running)
+              ? _SessionWaitingState()
               : Stack(
                   children: [
                     RefreshIndicator(

@@ -2908,3 +2908,38 @@ class _DaySeparator extends StatelessWidget {
     );
   }
 }
+
+/// Shown when the session has loaded (no longer _loading) but has no
+/// messages yet — typically the first 0.5-5 s of a newly created session
+/// while the agent initialises.
+class _SessionWaitingState extends StatelessWidget {
+  const _SessionWaitingState();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LivePulse(color: colors.accent),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'Waiting for agent\u2026',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: colors.textSecondary,
+              fontWeight: AppWeights.emphasis,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Your prompt was sent. The agent is starting.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textTertiary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
