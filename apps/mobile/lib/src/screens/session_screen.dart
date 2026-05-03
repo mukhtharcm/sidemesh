@@ -3847,7 +3847,8 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     final current = (_session ?? widget.session).title;
-    final controller = TextEditingController(text: current);
+    final controller = TextEditingController(text: current)
+      ..selection = TextSelection(baseOffset: 0, extentOffset: current.length);
     final newName = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -5371,11 +5372,33 @@ class _SessionScreenState extends State<SessionScreen>
           children: [
             if (_running) ...[const LivePulse(), const SizedBox(width: 10)],
             Expanded(
-              child: Text(
-                session.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+              child: _supportsSessionRename
+                  ? GestureDetector(
+                      onTap: () => unawaited(_renameSession()),
+                      behavior: HitTestBehavior.opaque,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              session.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.edit_rounded,
+                            size: 13,
+                            color: colors.textTertiary,
+                          ),
+                        ],
+                      ),
+                    )
+                  : Text(
+                      session.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
             ),
           ],
         ),
