@@ -80,7 +80,7 @@ class _Composer extends StatelessWidget {
         border: InputBorder.none,
         enabledBorder: InputBorder.none,
         focusedBorder: InputBorder.none,
-        contentPadding: const EdgeInsets.symmetric(vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(vertical: 11),
       ),
     );
     field = Actions(
@@ -118,7 +118,7 @@ class _Composer extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
         decoration: BoxDecoration(
           color: colors.canvas,
           border: Border(top: BorderSide(color: colors.border)),
@@ -128,12 +128,12 @@ class _Composer extends StatelessWidget {
           children: [
             if (supportsImageInput) ...[
               _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
               _ComposerPasteButton(
                 enabled: !sending,
                 onPressed: () => unawaited(onPasteImage()),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
             ],
             Expanded(
               child: Container(
@@ -142,10 +142,14 @@ class _Composer extends StatelessWidget {
                   borderRadius: AppShapes.input,
                   border: Border.all(color: colors.border),
                 ),
-                padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  child: SingleChildScrollView(
+                    reverse: true,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                     if (supportsSkillInput && activeSkillQuery != null) ...[
                       _ComposerSkillSuggestionTray(
                         query: activeSkillQuery!,
@@ -223,6 +227,8 @@ class _Composer extends StatelessWidget {
                     field,
                   ],
                 ),
+                  ),
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -254,21 +260,14 @@ class _ComposerAttachButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
           onTap: enabled ? onPressed : null,
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.border),
-            ),
-            alignment: Alignment.center,
+          child: Padding(
+            padding: const EdgeInsets.all(9),
             child: Icon(
               Icons.add_photo_alternate_rounded,
               color: enabled ? colors.accent : colors.textTertiary,
-              size: 20,
+              size: 22,
             ),
           ),
         ),
@@ -291,21 +290,14 @@ class _ComposerPasteButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
           onTap: enabled ? onPressed : null,
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.border),
-            ),
-            alignment: Alignment.center,
+          child: Padding(
+            padding: const EdgeInsets.all(9),
             child: Icon(
               Icons.content_paste_rounded,
               color: enabled ? colors.accent : colors.textTertiary,
-              size: 20,
+              size: 22,
             ),
           ),
         ),
@@ -344,14 +336,14 @@ class _SendButton extends StatelessWidget {
         return Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(12),
+            customBorder: const CircleBorder(),
             onTap: canSend ? onSend : null,
             child: Container(
               width: 44,
               height: 44,
               decoration: BoxDecoration(
                 color: bgColor,
-                borderRadius: BorderRadius.circular(12),
+                shape: BoxShape.circle,
                 boxShadow: showActive && canSend
                     ? [
                         BoxShadow(
