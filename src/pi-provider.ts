@@ -143,7 +143,7 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   input: {
     text: true,
-    imageUrl: false,
+    imageUrl: true,
     localImage: true,
     skills: true,
     fileMentions: true,
@@ -2159,9 +2159,22 @@ async function preparePiInput(
         attachments.push({ type: "localImage", path: item.path });
         break;
       }
-      case "image":
-        ignoredImageUrlCount += 1;
+      case "image": {
+        // Mobile clients send images as base64 data URLs.  Pi's own wire
+        // format (PiImageInput) already stores images as { data, mimeType }
+        // so we can parse the data URL inline — no temp-file round-trip.
+        const url = item.url ?? "";
+        const match = url.match(/^data:([^;,]+);base64,(.+)$/s);
+        if (match) {
+          const mimeType = match[1].trim();
+          const base64Data = match[2].trim();
+          images.push({ type: "image", data: base64Data, mimeType });
+        } else {
+          // Non-data-URL (e.g. http:// link) — Pi can't fetch it.
+          ignoredImageUrlCount += 1;
+        }
         break;
+      }
       case "file": {
         const fileContent = await inlinePiFile(item.path, item.isDirectory ?? false);
         if (fileContent) {
