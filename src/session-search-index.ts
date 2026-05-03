@@ -5,6 +5,7 @@ import readline from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 
 import { parseJsonLine } from "./codex-history.js";
+import type { SessionActivity, SessionMessage } from "./types.js";
 
 export interface SessionSearchResult {
   sessionId: string;
@@ -17,10 +18,26 @@ export interface SessionSearchIndexStats {
   indexSizeMB: number;
 }
 
-interface ManifestEntry {
+export interface SessionSearchDocument {
+  sessionKey: string;
+  title: string;
+  preview: string;
+  cwd: string;
+  fingerprint: string;
+  messages: SessionMessage[];
+  activities: SessionActivity[];
+}
+
+interface RolloutManifestEntry {
   rolloutPath: string;
   size: number;
   mtimeMs: number;
+  indexedAt: number;
+}
+
+interface SessionManifestEntry {
+  sessionKey: string;
+  fingerprint: string;
   indexedAt: number;
 }
 
@@ -118,10 +135,79 @@ function extractText(parsed: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * Daemon-side full-text search index backed by SQLite FTS5.
- * Indexes selective content from Codex rollout .jsonl files.
- */
+function buildSearchableContent(doc: SessionSearchDocument): string {
+  const parts: string[] = [];
+  parts.push(doc.title);
+  parts.push(doc.preview);
+  parts.push(doc.cwd);
+
+  for (const message of doc.messages) {
+    parts.push(message.text);
+    for (const attachment of message.attachments) {
+      if (attachment.path) parts.push(attachment.path);
+      if (attachment.url) parts.push(attachment.url);
+    }
+  }
+
+  for (const activity of doc.activities) {
+    switch (activity.type) {
+      case "command":
+        parts.push(activity.command);
+        if (activity.output) parts.push(activity.output);
+        break;
+      case "tool":
+        parts.push(activity.toolName);
+        if (activity.args) parts.push(JSON.stringify(activity.args));
+        if (activity.output) parts.push(activity.output);
+        if (activity.semantic) {
+          for (const target of activity.semantic.targets) {
+            if (target.type === "file") parts.push(target.path);
+            if (target.type === "url") parts.push(target.url);
+            if (target.type === "query") parts.push(target.value);
+            if (target.type === "command") parts.push(target.command);
+            if (target.type === "unknown") parts.push(target.label);
+          }
+        }
+        break;
+      case "file_change":
+        for (const change of activity.changes) {
+          parts.push(change.path);
+          if (change.movePath) parts.push(change.movePath);
+          if (change.diff) parts.push(change.diff);
+        }
+        break;
+      case "turn_diff":
+        if (activity.diff) parts.push(activity.diff);
+        break;
+      case "web_search":
+        if (activity.query) parts.push(activity.query);
+        for (const q of activity.queries) parts.push(q);
+        if (activity.targetUrl) parts.push(activity.targetUrl);
+        if (activity.pattern) parts.push(activity.pattern);
+        break;
+      case "image_generation":
+        if (activity.revisedPrompt) parts.push(activity.revisedPrompt);
+        if (activity.savedPath) parts.push(activity.savedPath);
+        break;
+    }
+  }
+
+  return parts.filter((p) => p && p.trim()).join("\n");
+}
+
+function buildFts5MatchQuery(query: string): string {
+  const terms = query
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0)
+    .map((t) => t.replace(/"/g, '""').replace(/\*/g, "").replace(/'/g, "''"))
+    .filter((t) => t.length > 0);
+  if (terms.length === 0) {
+    return "";
+  }
+  return terms.map((t) => `"${t}"`).join(" AND ");
+}
+
 export class SessionSearchIndex {
   private db: DatabaseSync | null = null;
   private readonly dbPath: string;
@@ -144,12 +230,15 @@ export class SessionSearchIndex {
         mtime_ms INTEGER NOT NULL,
         indexed_at INTEGER NOT NULL
       );
-    `);
-    this.db.exec(`
+      DROP TABLE IF EXISTS session_manifest;
+      CREATE TABLE IF NOT EXISTS session_manifest (
+        session_key TEXT PRIMARY KEY,
+        fingerprint TEXT NOT NULL,
+        indexed_at INTEGER NOT NULL
+      );
       CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
-        session_id,
-        content,
-        tokenize="porter"
+        session_id UNINDEXED,
+        content
       );
     `);
   }
@@ -161,91 +250,107 @@ export class SessionSearchIndex {
     }
   }
 
+  async indexDocument(doc: SessionSearchDocument): Promise<void> {
+    if (!this.db) {
+      throw new Error("Index not opened");
+    }
+
+    const manifest = this.getSessionManifestEntry(doc.sessionKey);
+    if (manifest && manifest.fingerprint === doc.fingerprint) {
+      return;
+    }
+
+    const content = buildSearchableContent(doc);
+    const deleteStmt = this.db.prepare(
+      `DELETE FROM session_fts WHERE session_id = ?`,
+    );
+    deleteStmt.run(doc.sessionKey);
+
+    const insertStmt = this.db.prepare(
+      `INSERT INTO session_fts (session_id, content) VALUES (?, ?)`,
+    );
+    insertStmt.run(doc.sessionKey, content);
+
+    this.updateSessionManifest(doc.sessionKey, doc.fingerprint);
+  }
+
+  async indexRollout(
+    rolloutPath: string,
+    namespacedSessionId?: string,
+  ): Promise<void> {
+    if (!this.db) {
+      throw new Error("Index not opened");
+    }
+
+    const sessionId =
+      namespacedSessionId ?? extractSessionIdFromRolloutPath(rolloutPath);
+    const deleteStmt = this.db.prepare(
+      `DELETE FROM session_fts WHERE session_id = ?`,
+    );
+    deleteStmt.run(sessionId);
+
+    const insert = this.db.prepare(
+      `INSERT INTO session_fts (session_id, content) VALUES (?, ?)`,
+    );
+
+    const lines: string[] = [];
+    const stream = createReadStream(rolloutPath, { encoding: "utf8" });
+    const rl = readline.createInterface({ input: stream });
+    for await (const line of rl) {
+      const parsed = parseJsonLine(line);
+      const text = extractText(parsed);
+      if (text) {
+        lines.push(text);
+      }
+    }
+
+    if (lines.length > 0) {
+      insert.run(sessionId, lines.join("\n"));
+    }
+
+    const stats = await stat(rolloutPath);
+    await this.updateRolloutManifest(
+      rolloutPath,
+      stats.size,
+      Math.floor(stats.mtimeMs),
+    );
+  }
+
   async search(query: string, limit: number): Promise<SessionSearchResult[]> {
     if (!this.db) {
       throw new Error("Index not opened");
     }
-    if (query.trim().length < 2) {
+    const matchExpr = buildFts5MatchQuery(query);
+    if (!matchExpr) {
       return [];
     }
-
     const stmt = this.db.prepare(
-      `SELECT session_id, rank, snippet(session_fts, 1, '', '', '...', 20) AS snippet FROM session_fts WHERE session_fts MATCH ? ORDER BY rank LIMIT ?`,
+      `SELECT session_id, rank, snippet(session_fts, 1, '<<<', '>>>', '...', 48) AS snippet FROM session_fts WHERE session_fts MATCH ? ORDER BY rank LIMIT ?`,
     );
-    const rows = stmt.all(query, limit) as Array<{
+    const rows = stmt.all(matchExpr, limit) as Array<{
       session_id: string;
       rank: number;
-      snippet: string;
+      snippet: string | null;
     }>;
-
     return rows.map((row) => ({
       sessionId: row.session_id,
       rank: row.rank,
-      snippet: row.snippet ?? null,
+      snippet: row.snippet,
     }));
   }
 
-  async indexRollout(rolloutPath: string): Promise<void> {
-    if (!this.db) {
-      throw new Error("Index not opened");
-    }
-
-    const stats = await stat(rolloutPath).catch(() => null);
-    if (!stats) {
-      await this.removeByRolloutPath(rolloutPath);
-      return;
-    }
-
-    const manifest = this.getManifestEntry(rolloutPath);
-    if (
-      manifest &&
-      manifest.size === stats.size &&
-      manifest.mtimeMs === Math.floor(stats.mtimeMs)
-    ) {
-      return;
-    }
-
-    await this.removeByRolloutPath(rolloutPath);
-
-    const sessionId = extractSessionIdFromRolloutPath(rolloutPath);
-    const chunks: string[] = [];
-
-    const file = createReadStream(rolloutPath, { encoding: "utf8" });
-    const lines = readline.createInterface({ input: file, crlfDelay: Infinity });
-
-    for await (const line of lines) {
-      const parsed = parseJsonLine(line);
-      if (!parsed) continue;
-      const text = extractText(parsed);
-      if (text) {
-        chunks.push(text);
-      }
-    }
-
-    if (chunks.length > 0) {
-      const content = chunks.join("\n");
-      const insert = this.db.prepare(
-        `INSERT INTO session_fts (session_id, content) VALUES (?, ?)`,
-      );
-      insert.run(sessionId, content);
-    }
-
-    this.updateManifest(rolloutPath, stats.size, Math.floor(stats.mtimeMs));
-  }
-
-  async catchUp(
-    codexHomePath: string | null,
-  ): Promise<{ indexed: number; removed: number }> {
-    if (!this.db) {
-      throw new Error("Index not opened");
-    }
-    if (!codexHomePath) {
+  async catchUp(codexHomePath: string | null): Promise<{
+    indexed: number;
+    removed: number;
+  }> {
+    if (!this.db || !codexHomePath) {
       return { indexed: 0, removed: 0 };
     }
 
-    const sessionsRoot = nodePath.join(codexHomePath, "sessions");
-    const allFiles = await listAllRolloutFiles(sessionsRoot);
-    const manifestPaths = this.getAllManifestPaths();
+    const allFiles = await listAllRolloutFiles(
+      nodePath.join(codexHomePath, "sessions"),
+    );
+    const manifestPaths = this.getAllRolloutManifestPaths();
     const fileSet = new Set(allFiles);
 
     let removed = 0;
@@ -258,7 +363,7 @@ export class SessionSearchIndex {
 
     let indexed = 0;
     for (const filePath of allFiles) {
-      const manifest = this.getManifestEntry(filePath);
+      const manifest = this.getRolloutManifestEntry(filePath);
       const stats = await stat(filePath).catch(() => null);
       if (!stats) {
         await this.removeByRolloutPath(filePath);
@@ -285,9 +390,14 @@ export class SessionSearchIndex {
     }
     const stmt = this.db.prepare(`DELETE FROM session_fts WHERE session_id = ?`);
     stmt.run(sessionId);
+
+    const manifestStmt = this.db.prepare(
+      `DELETE FROM session_manifest WHERE session_key = ?`,
+    );
+    manifestStmt.run(sessionId);
   }
 
-  async updateManifest(
+  async updateRolloutManifest(
     rolloutPath: string,
     size: number,
     mtimeMs: number,
@@ -299,6 +409,16 @@ export class SessionSearchIndex {
       `INSERT OR REPLACE INTO manifest (rollout_path, size, mtime_ms, indexed_at) VALUES (?, ?, ?, ?)`,
     );
     stmt.run(rolloutPath, size, mtimeMs, Date.now());
+  }
+
+  updateSessionManifest(sessionKey: string, fingerprint: string): void {
+    if (!this.db) {
+      throw new Error("Index not opened");
+    }
+    const stmt = this.db.prepare(
+      `INSERT OR REPLACE INTO session_manifest (session_key, fingerprint, indexed_at) VALUES (?, ?, ?)`,
+    );
+    stmt.run(sessionKey, fingerprint, Date.now());
   }
 
   getStats(): SessionSearchIndexStats {
@@ -329,7 +449,7 @@ export class SessionSearchIndex {
     };
   }
 
-  private getManifestEntry(rolloutPath: string): ManifestEntry | null {
+  private getRolloutManifestEntry(rolloutPath: string): RolloutManifestEntry | null {
     if (!this.db) return null;
     const stmt = this.db.prepare(
       `SELECT rollout_path, size, mtime_ms, indexed_at FROM manifest WHERE rollout_path = ?`,
@@ -351,11 +471,31 @@ export class SessionSearchIndex {
     };
   }
 
-  private getAllManifestPaths(): string[] {
+  private getAllRolloutManifestPaths(): string[] {
     if (!this.db) return [];
     const stmt = this.db.prepare(`SELECT rollout_path FROM manifest`);
     const rows = stmt.all() as Array<{ rollout_path: string }>;
     return rows.map((r) => r.rollout_path);
+  }
+
+  private getSessionManifestEntry(sessionKey: string): SessionManifestEntry | null {
+    if (!this.db) return null;
+    const stmt = this.db.prepare(
+      `SELECT session_key, fingerprint, indexed_at FROM session_manifest WHERE session_key = ?`,
+    );
+    const row = stmt.get(sessionKey) as
+      | {
+          session_key: string;
+          fingerprint: string;
+          indexed_at: number;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      sessionKey: row.session_key,
+      fingerprint: row.fingerprint,
+      indexedAt: row.indexed_at,
+    };
   }
 
   private async removeByRolloutPath(rolloutPath: string): Promise<void> {

@@ -75,6 +75,9 @@ export interface HostCapabilities {
     portForwarding: boolean;
     browserPreview: boolean;
   };
+  sessions: {
+    search: boolean;
+  };
 }
 
 export interface NodeConfig {
