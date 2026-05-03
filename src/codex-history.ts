@@ -518,16 +518,19 @@ export function parseMessage(parsed: any, seq: number): SessionMessage | null {
         id: `${createdAt}-user`,
         role: "user",
         text,
+        content: [{ type: "text", text }],
         attachments,
         createdAt,
         seq,
       };
     }
     if (payloadType === "agent_message" && typeof parsed.payload?.message === "string") {
+      const text = parsed.payload.message;
       return {
         id: `${createdAt}-assistant-${parsed.payload.phase || "final_answer"}`,
         role: "assistant",
-        text: parsed.payload.message,
+        text,
+        content: [{ type: "text", text }],
         attachments: [],
         createdAt,
         seq,
@@ -535,10 +538,12 @@ export function parseMessage(parsed: any, seq: number): SessionMessage | null {
       };
     }
     if (payloadType === "turn_aborted") {
+      const text = `Turn aborted: ${parsed.payload?.reason || "unknown"}`;
       return {
         id: `${createdAt}-system-turn_aborted`,
         role: "system",
-        text: `Turn aborted: ${parsed.payload?.reason || "unknown"}`,
+        text,
+        content: [{ type: "text", text }],
         attachments: [],
         createdAt,
         seq,
@@ -549,10 +554,12 @@ export function parseMessage(parsed: any, seq: number): SessionMessage | null {
       if (!message) {
         return null;
       }
+      const text = `Error: ${message}`;
       return {
         id: `${createdAt}-system-error`,
         role: "system",
-        text: `Error: ${message}`,
+        text,
+        content: [{ type: "text", text }],
         attachments: [],
         createdAt,
         seq,

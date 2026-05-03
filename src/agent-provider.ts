@@ -22,6 +22,7 @@ import type {
   ToolActivity,
   TurnDiffActivity,
   WebSearchActivity,
+  SessionMessageContentBlock,
 } from "./types.js";
 
 export interface AgentProviderEvents {
@@ -42,6 +43,7 @@ export type AgentSessionActivityDraft =
 export interface AgentMessageDraft {
   id: string;
   text: string;
+  content?: SessionMessageContentBlock[];
   phase?: SessionMessage["phase"];
 }
 

@@ -50,7 +50,10 @@ import type {
   ToolActivitySemantic,
   ToolActivitySemanticTarget,
   TurnRecord,
+  SessionMessageContentBlock,
+  SessionMessageContentBlockText,
 } from "./types.js";
+import { textToBlocks } from "./types.js";
 
 type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -1025,11 +1028,16 @@ export class PiAgentProvider
     if (role === "assistant") {
       const createdAt = numberValue(message.timestamp) ?? Date.now();
       const text = extractPiMessageText(message);
+      const content = extractPiMessageContentBlocks(message);
       const errorMessage = stringValue(message.errorMessage);
       const phase = detectPiAssistantPhase(message);
-      if (text || errorMessage) {
+      if (text || errorMessage || content.length > 0) {
+        const blocks = content.length > 0
+          ? content
+          : [{ type: "text" as const, text: text || errorMessage || "" }];
         this.appendAssistantMessage(session, {
           text: text || errorMessage || "",
+          content: blocks,
           phase,
           createdAt,
         });
@@ -1154,6 +1162,7 @@ export class PiAgentProvider
       id: `pi-user:${randomUUID()}`,
       role: "user",
       text: prepared.text,
+      content: [{ type: "text", text: prepared.text }],
       attachments: prepared.attachments,
       createdAt: Date.now(),
       seq: session.nextSeq++,
@@ -1166,14 +1175,19 @@ export class PiAgentProvider
     session: PiSessionState,
     options: {
       text: string;
+      content?: SessionMessageContentBlock[];
       phase?: SessionMessage["phase"];
       createdAt: number;
     },
   ): void {
+    const blocks = options.content && options.content.length > 0
+      ? options.content
+      : [{ type: "text", text: options.text }] as SessionMessageContentBlock[];
     const message: SessionMessage = {
       id: `pi-assistant:${randomUUID()}`,
       role: "assistant",
       text: options.text,
+      content: blocks,
       attachments: [],
       createdAt: options.createdAt,
       seq: session.nextSeq++,
@@ -1208,6 +1222,7 @@ export class PiAgentProvider
       id: `pi-system:${randomUUID()}`,
       role: "system",
       text,
+      content: [{ type: "text", text }],
       attachments: [],
       createdAt,
       seq: session.nextSeq++,
@@ -1731,6 +1746,7 @@ function parsePiSessionHistory(
           id: entry.id,
           role: "system",
           text,
+          content: [{ type: "text", text }],
           attachments: [],
           createdAt,
           seq: seq++,
@@ -1742,11 +1758,13 @@ function parsePiSessionHistory(
     if (entry.type === "custom_message") {
       if (entry.display) {
         const text = extractPiContentText(entry.content);
+        const blocks = extractPiContentBlocks(entry.content);
         if (text) {
           messages.push({
             id: entry.id,
             role: "system",
             text,
+            content: blocks.length > 0 ? blocks : [{ type: "text", text }],
             attachments: [],
             createdAt,
             seq: seq++,
@@ -1767,10 +1785,12 @@ function parsePiSessionHistory(
     if (role === "user") {
       toolCalls.clear();
       const text = extractPiMessageText(message);
+      const blocks = extractPiMessageContentBlocks(message);
       messages.push({
         id: entry.id,
         role: "user",
         text,
+        content: blocks.length > 0 ? blocks : [{ type: "text", text }],
         attachments: [],
         createdAt,
         seq: seq++,
@@ -1788,12 +1808,17 @@ function parsePiSessionHistory(
         });
       }
       const text = extractPiMessageText(message);
+      const blocks = extractPiMessageContentBlocks(message);
       const errorMessage = stringValue(message.errorMessage);
-      if (text || errorMessage) {
+      if (text || errorMessage || blocks.length > 0) {
+        const derivedBlocks = blocks.length > 0
+          ? blocks
+          : [{ type: "text" as const, text: text || errorMessage || "" }];
         messages.push({
           id: entry.id,
           role: "assistant",
           text: text || errorMessage || "",
+          content: derivedBlocks,
           attachments: [],
           createdAt,
           seq: seq++,
@@ -1856,6 +1881,7 @@ function parsePiSessionHistory(
           id: entry.id,
           role: "system",
           text,
+          content: textToBlocks(text),
           attachments: [],
           createdAt,
           seq: seq++,
@@ -2456,22 +2482,47 @@ function extractPiMessageText(
   return extractPiContentText(message?.content);
 }
 
-function extractPiContentText(content: unknown): string {
+function extractPiContentBlocks(
+  content: unknown,
+): SessionMessageContentBlock[] {
   if (typeof content === "string") {
-    return content.trim();
+    const text = content.trim();
+    return text ? [{ type: "text", text }] : [];
   }
   if (!Array.isArray(content)) {
-    return "";
+    return [];
   }
-  return content
-    .map((block) => {
-      const typed = asRecord(block);
-      if (!typed || typed.type !== "text") {
-        return "";
+  const blocks: SessionMessageContentBlock[] = [];
+  for (const block of content) {
+    const typed = asRecord(block);
+    if (!typed) continue;
+    const blockType = stringValue(typed.type);
+    if (blockType === "text") {
+      const text = stringValue(typed.text);
+      if (text) {
+        blocks.push({ type: "text", text });
       }
-      return stringValue(typed.text) || "";
-    })
-    .filter(Boolean)
+    } else if (blockType === "thinking") {
+      const thinking = stringValue(typed.thinking);
+      if (thinking) {
+        blocks.push({ type: "thinking", thinking });
+      }
+    }
+  }
+  return blocks;
+}
+
+function extractPiMessageContentBlocks(
+  message: Record<string, unknown> | null | undefined,
+): SessionMessageContentBlock[] {
+  return extractPiContentBlocks(message?.content);
+}
+
+function extractPiContentText(content: unknown): string {
+  const blocks = extractPiContentBlocks(content);
+  return blocks
+    .filter((b): b is SessionMessageContentBlockText => b.type === "text")
+    .map((b) => b.text)
     .join("\n")
     .trim();
 }
@@ -2755,6 +2806,7 @@ function cloneMessage(message: SessionMessage): SessionMessage {
   return {
     ...message,
     attachments: message.attachments.map((attachment) => ({ ...attachment })),
+    content: message.content.map((block) => ({ ...block })),
   };
 }
 
