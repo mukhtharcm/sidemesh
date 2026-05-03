@@ -979,6 +979,63 @@ export class CopilotAgentProvider
       return;
     }
 
+    if (event.type === "subagent.started") {
+      this.upsertAndEmitActivity(session, active?.turnId ?? null, {
+        id: event.data.toolCallId ?? event.id,
+        type: "tool",
+        turnId: active?.turnId ?? null,
+        status: "in_progress",
+        toolName: event.data.agentName ?? "subagent",
+        title: event.data.agentDisplayName ?? event.data.agentName ?? "Subagent",
+        args: null,
+        output: null,
+        result: null,
+        isError: false,
+        semantic: null,
+      });
+      return;
+    }
+
+    if (event.type === "subagent.completed") {
+      const duration = typeof event.data.durationMs === "number"
+        ? ` (${Math.round(event.data.durationMs / 1000)}s)`
+        : "";
+      this.upsertAndEmitActivity(session, active?.turnId ?? null, {
+        id: event.data.toolCallId ?? event.id,
+        type: "tool",
+        turnId: active?.turnId ?? null,
+        status: "completed",
+        toolName: event.data.agentName ?? "subagent",
+        title: `${event.data.agentDisplayName ?? event.data.agentName ?? "Subagent"}${duration}`,
+        args: null,
+        output: null,
+        result: { type: "success", summary: "Subagent completed" },
+        isError: false,
+        semantic: null,
+      });
+      return;
+    }
+
+    if (event.type === "subagent.failed") {
+      this.upsertAndEmitActivity(session, active?.turnId ?? null, {
+        id: event.data.toolCallId ?? event.id,
+        type: "tool",
+        turnId: active?.turnId ?? null,
+        status: "failed",
+        toolName: event.data.agentName ?? "subagent",
+        title: event.data.agentDisplayName ?? event.data.agentName ?? "Subagent",
+        args: null,
+        output: null,
+        result: {
+          type: "error",
+          summary: event.data.error ?? "Subagent failed",
+        },
+        isError: true,
+        semantic: null,
+      });
+      return;
+    }
+
     const warning = buildCopilotProviderWarningEvent(sessionId, event);
     if (warning) {
       this.emit("liveEvent", warning);
@@ -2009,6 +2066,94 @@ function buildCopilotProviderWarningEvent(
       message,
       source: "copilot",
     };
+  }
+  if (event.type === "session.background_tasks_changed") {
+    return {
+      type: "provider_warning",
+      sessionId,
+      level: "info",
+      code: "background_tasks_changed",
+      message: "Background tasks changed",
+      source: "copilot",
+    };
+  }
+  if (event.type === "mcp.oauth_required") {
+    const serverName = typeof event.data.serverName === "string"
+      ? event.data.serverName
+      : "unknown";
+    return {
+      type: "provider_warning",
+      sessionId,
+      level: "info",
+      code: "mcp_oauth_required",
+      message: `MCP server "${serverName}" requires OAuth`,
+      source: "copilot/mcp",
+    };
+  }
+  if (event.type === "mcp.oauth_completed") {
+    const requestId = typeof event.data.requestId === "string"
+      ? event.data.requestId
+      : "unknown";
+    return {
+      type: "provider_warning",
+      sessionId,
+      level: "info",
+      code: "mcp_oauth_completed",
+      message: `MCP OAuth completed (request ${requestId})`,
+      source: "copilot/mcp",
+    };
+  }
+  if (event.type === "session.mcp_servers_loaded") {
+    const servers = Array.isArray(event.data.servers) ? event.data.servers : [];
+    const errors = servers
+      .filter(
+        (s: any): s is { name: string; error: string } =>
+          typeof s?.error === "string" && s.error.trim().length > 0,
+      )
+      .map((s) => `${s.name}: ${s.error}`);
+    if (errors.length === 0) {
+      return null;
+    }
+    return {
+      type: "provider_warning",
+      sessionId,
+      level: "warning",
+      code: "mcp_servers_loaded",
+      message: errors.join("\n"),
+      source: "copilot/mcp",
+    };
+  }
+  if (event.type === "session.mcp_server_status_changed") {
+    const serverName =
+      typeof event.data.serverName === "string" ? event.data.serverName : "unknown";
+    const status =
+      typeof event.data.status === "string" ? event.data.status : "unknown";
+    const level = status === "failed" ? "error" : "info";
+    return {
+      type: "provider_warning",
+      sessionId,
+      level,
+      code: "mcp_server_status_changed",
+      message: `MCP server "${serverName}" status: ${status}`,
+      source: "copilot/mcp",
+    };
+  }
+  if (event.type === "capabilities.changed") {
+    const ui = event.data.ui;
+    if (ui && typeof ui === "object") {
+      const elicitation = (ui as any).elicitation;
+      if (typeof elicitation === "boolean") {
+        return {
+          type: "provider_warning",
+          sessionId,
+          level: "info",
+          code: "capabilities_changed",
+          message: `Elicitation ${elicitation ? "enabled" : "disabled"}`,
+          source: "copilot",
+        };
+      }
+    }
+    return null;
   }
   return null;
 }
