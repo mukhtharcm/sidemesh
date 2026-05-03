@@ -756,7 +756,6 @@ class _HomeSearchField extends StatelessWidget {
             suffixIcon: hasQuery
                 ? IconButton(
                     tooltip: 'Clear',
-                    splashRadius: 16,
                     iconSize: 16,
                     onPressed: controller.clear,
                     icon: Icon(
@@ -1314,7 +1313,7 @@ class _RecentPaneState extends State<RecentPane> {
                     : ListView.separated(
                         padding: basePadding,
                         itemCount: sortedEntries.length + leadingStrips,
-                        separatorBuilder: (_, _) => SizedBox(height: widget.dense ? 2 : 10),
+                        separatorBuilder: (_, _) => SizedBox(height: widget.dense ? 2 : AppSpacing.sm),
                         itemBuilder: (context, index) {
                           var offset = 0;
                           if (isRefreshing) {
@@ -1463,7 +1462,7 @@ class _RecentPaneState extends State<RecentPane> {
           if (index >= entriesStart && index < entriesEnd) {
             final entry = group.entries[index - entriesStart];
             return Padding(
-              padding: EdgeInsets.only(bottom: widget.dense ? 2 : 10),
+              padding: EdgeInsets.only(bottom: widget.dense ? 2 : AppSpacing.sm),
               child: _SessionRowCard(
                 host: entry.host,
                 session: entry.session,
@@ -1535,6 +1534,15 @@ class _HighlightedSnippet extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
     );
   }
+}
+
+String _sessionTimeLabel(DateTime updatedAt) {
+  final elapsed = DateTime.now().difference(updatedAt);
+  if (elapsed.inSeconds < 60) return 'just now';
+  if (elapsed.inMinutes < 60) return '${elapsed.inMinutes}m ago';
+  if (elapsed.inHours < 24) return '${elapsed.inHours}h ago';
+  if (elapsed.inDays < 7) return '${elapsed.inDays}d ago';
+  return '${(elapsed.inDays / 7).floor()}w ago';
 }
 
 class _SessionRowCard extends StatelessWidget {
@@ -1728,9 +1736,11 @@ class _SessionRowCard extends StatelessWidget {
         ),
       );
     }
+    final branch = session.gitInfo?.branch;
+    final hasBranch = branch != null && branch.isNotEmpty;
     return MeshCard(
       onTap: onTap,
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       accentStrip: running ? colors.success : (selected ? colors.accent : null),
       borderColor: selected ? colors.accent : null,
       child: Column(
@@ -1747,7 +1757,7 @@ class _SessionRowCard extends StatelessWidget {
                   session.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: unread ? AppWeights.title : AppWeights.emphasis,
                   ),
                 ),
@@ -1762,14 +1772,12 @@ class _SessionRowCard extends StatelessWidget {
                 tooltip: favorite ? 'Remove favorite' : 'Add favorite',
                 visualDensity: VisualDensity.compact,
                 iconSize: 20,
-                splashRadius: 22,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
                 icon: Icon(
                   favorite ? Icons.star_rounded : Icons.star_outline_rounded,
                   color: favorite ? colors.warning : colors.textTertiary,
                 ),
               ),
-              Icon(Icons.chevron_right_rounded, color: colors.textTertiary),
             ],
           ),
           const SizedBox(height: 6),
@@ -1794,7 +1802,7 @@ class _SessionRowCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 _SubAgentBadge(),
               ],
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   session.cwd,
@@ -1803,17 +1811,53 @@ class _SessionRowCard extends StatelessWidget {
                   style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
                 ),
               ),
+              const SizedBox(width: 8),
+              ListenableBuilder(
+                listenable: RelativeTimeTicker.instance,
+                builder: (_, _) => Text(
+                  _sessionTimeLabel(session.updatedAt),
+                  style: monoStyle(
+                    color: colors.textTertiary,
+                    fontSize: 10.5,
+                  ),
+                ),
+              ),
             ],
           ),
+          if (hasBranch) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(
+                  Icons.account_tree_rounded,
+                  size: 12,
+                  color: colors.textTertiary,
+                ),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    branch,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: monoStyle(
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                      fontWeight: AppWeights.emphasis,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (session.runtime != null) ...[
-            const SizedBox(height: 10),
-            SessionRuntimeWrap(runtime: session.runtime),
+            const SizedBox(height: AppSpacing.sm),
+            SessionRuntimeCardWrap(runtime: session.runtime),
           ],
           if (session.preview.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: AppSpacing.sm),
             Text(
               session.preview,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colors.textSecondary,
@@ -1822,7 +1866,7 @@ class _SessionRowCard extends StatelessWidget {
             ),
           ],
           if (session.matchSnippet != null && session.matchSnippet!.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             _HighlightedSnippet(
               text: session.matchSnippet!,
               query: query,
