@@ -1,19 +1,40 @@
+import 'dart:io';
+
 import 'package:path/path.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 class SidemeshDb {
   SidemeshDb._();
 
   static Database? _db;
+  static Future<Database>? _openingDb;
 
   static Future<Database> get instance async {
-    _db ??= await _open();
-    return _db!;
+    final db = _db;
+    if (db != null) {
+      return db;
+    }
+    final openingDb = _openingDb;
+    if (openingDb != null) {
+      return openingDb;
+    }
+
+    final future = _open();
+    _openingDb = future;
+    try {
+      final openedDb = await future;
+      _db = openedDb;
+      return openedDb;
+    } finally {
+      if (identical(_openingDb, future)) {
+        _openingDb = null;
+      }
+    }
   }
 
   static Future<Database> _open() async {
-    final dir = await getDatabasesPath();
-    final dbPath = join(dir, 'sidemesh_v1.db');
+    final dbPath = await _resolveDbPath();
     return openDatabase(
       dbPath,
       version: 1,
@@ -50,7 +71,55 @@ class SidemeshDb {
     );
   }
 
+  static Future<String> _resolveDbPath() async {
+    final dir = Platform.isMacOS
+        ? (await getApplicationSupportDirectory()).path
+        : await getDatabasesPath();
+    await Directory(dir).create(recursive: true);
+    final dbPath = join(dir, 'sidemesh_v1.db');
+    if (Platform.isMacOS) {
+      await _migrateLegacyMacosDatabaseIfNeeded(dbPath);
+    }
+    return dbPath;
+  }
+
+  static Future<void> _migrateLegacyMacosDatabaseIfNeeded(String dbPath) async {
+    final legacyPath = join(await getDatabasesPath(), 'sidemesh_v1.db');
+    if (legacyPath == dbPath) {
+      return;
+    }
+    if (await File(dbPath).exists()) {
+      return;
+    }
+    if (!await File(legacyPath).exists()) {
+      return;
+    }
+
+    try {
+      await _copyIfExists(legacyPath, dbPath);
+      await _copyIfExists('$legacyPath-wal', '$dbPath-wal');
+      await _copyIfExists('$legacyPath-shm', '$dbPath-shm');
+      await _copyIfExists('$legacyPath-journal', '$dbPath-journal');
+    } catch (_) {
+      // Best-effort migration only. Falling back to a fresh DB is acceptable.
+    }
+  }
+
+  static Future<void> _copyIfExists(
+    String sourcePath,
+    String destinationPath,
+  ) async {
+    final source = File(sourcePath);
+    if (!await source.exists()) {
+      return;
+    }
+    final destination = File(destinationPath);
+    await destination.parent.create(recursive: true);
+    await source.copy(destinationPath);
+  }
+
   static Future<void> close() async {
+    _openingDb = null;
     if (_db != null) {
       await _db!.close();
       _db = null;
