@@ -746,6 +746,7 @@ public async health(): Promise<boolean> {
         : null;
       const turnId = asString(turn?.id);
       if (turnId) {
+        this.turnReasoningBlocks.delete(turnId);
         this.emit("liveEvent", {
           type: "turn_completed",
           sessionId,

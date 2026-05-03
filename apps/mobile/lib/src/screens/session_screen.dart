@@ -3701,6 +3701,7 @@ class _SessionScreenState extends State<SessionScreen>
       id: clientMessageId,
       role: 'user',
       text: text,
+      content: text.trim().isNotEmpty ? [TextBlock(text)] : const [],
       attachments: _buildDraftMessageAttachments(draftAttachments),
       createdAt: DateTime.now(),
       seq: _nextTimelineSeq(),

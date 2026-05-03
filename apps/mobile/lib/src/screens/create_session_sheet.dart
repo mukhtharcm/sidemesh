@@ -1194,6 +1194,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           id: 'local-create-${submittedAt.microsecondsSinceEpoch}',
           role: 'user',
           text: prompt,
+          content: prompt.trim().isNotEmpty ? [TextBlock(prompt)] : const [],
           attachments: const <SessionMessageAttachment>[],
           createdAt: submittedAt,
           seq: 0,
