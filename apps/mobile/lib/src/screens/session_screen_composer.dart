@@ -139,7 +139,7 @@ class _Composer extends StatelessWidget {
               child: Container(
                 decoration: BoxDecoration(
                   color: colors.composerBackground,
-                  borderRadius: AppShapes.card,
+                  borderRadius: AppShapes.input,
                   border: Border.all(color: colors.border),
                 ),
                 padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
@@ -254,21 +254,21 @@ class _ComposerAttachButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: AppShapes.card,
+          borderRadius: BorderRadius.circular(12),
           onTap: enabled ? onPressed : null,
           child: Container(
-            width: 52,
-            height: 52,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: colors.surfaceMuted,
-              borderRadius: AppShapes.card,
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(color: colors.border),
             ),
             alignment: Alignment.center,
             child: Icon(
               Icons.add_photo_alternate_rounded,
               color: enabled ? colors.accent : colors.textTertiary,
-              size: 22,
+              size: 20,
             ),
           ),
         ),
@@ -291,21 +291,21 @@ class _ComposerPasteButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: AppShapes.card,
+          borderRadius: BorderRadius.circular(12),
           onTap: enabled ? onPressed : null,
           child: Container(
-            width: 52,
-            height: 52,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: colors.surfaceMuted,
-              borderRadius: AppShapes.card,
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(color: colors.border),
             ),
             alignment: Alignment.center,
             child: Icon(
               Icons.content_paste_rounded,
               color: enabled ? colors.accent : colors.textTertiary,
-              size: 21,
+              size: 20,
             ),
           ),
         ),
@@ -344,14 +344,14 @@ class _SendButton extends StatelessWidget {
         return Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: AppShapes.card,
+            borderRadius: BorderRadius.circular(12),
             onTap: canSend ? onSend : null,
             child: Container(
-              width: 52,
-              height: 52,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 color: bgColor,
-                borderRadius: AppShapes.card,
+                borderRadius: BorderRadius.circular(12),
                 boxShadow: showActive && canSend
                     ? [
                         BoxShadow(

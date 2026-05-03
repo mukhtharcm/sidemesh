@@ -137,8 +137,13 @@ function makeMultiProviderRuntime(fakeOptions: FakeAgentProviderOptions, seconda
       if (!trimmed) return null;
       return providersByKind.get(trimmed) ?? null;
     },
-    providerForSessionId(_sessionId) {
-      return fakeEntry;
+    providerForSessionId(sessionId) {
+      try {
+        const resolved = multiProvider.resolveSessionProvider(sessionId);
+        return providersByKind.get(resolved.kind) ?? null;
+      } catch {
+        return fakeEntry;
+      }
     },
   };
 }
@@ -468,6 +473,124 @@ describe("GET /api/sessions/:sessionId/status", () => {
       } finally {
         (FakeAgentProvider.prototype as any).readSessionThread = original;
       }
+    });
+  });
+});
+
+describe("GET /api/sessions/search", () => {
+  it("returns created sessions by keyword", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const baseRequest = {
+        hostname: "127.0.0.1",
+        port: server.port,
+        headers: { Authorization: "Bearer " + config.token },
+      };
+
+      const createRes = await request({
+        ...baseRequest,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: { ...baseRequest.headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: "/tmp", input: [{ type: "text", text: "nginx configuration help" }] }),
+      });
+      assert.equal(createRes.statusCode, 201);
+      const sessionId = (createRes.body as any).session.id;
+
+      // Wait for background turn completion and indexing
+      await new Promise((r) => setTimeout(r, 150));
+
+      const searchRes = await request({
+        ...baseRequest,
+        path: `/api/sessions/search?q=${encodeURIComponent("nginx")}`,
+        method: "GET",
+      });
+      assert.equal(searchRes.statusCode, 200);
+      const results = searchRes.body as any[];
+      assert.ok(results.length >= 1, "expected at least one search result");
+      assert.ok(results.some((s) => s.id === sessionId), "expected created session in results");
+    });
+  });
+
+  it("returns namespaced IDs in multi-provider mode", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-multi-test-"));
+    const runtime = makeMultiProviderRuntime(
+      { seedSessions: true, workspaceRoot: stateDir, latencyMs: 0 },
+      { seedSessions: true, workspaceRoot: stateDir, latencyMs: 0 },
+    );
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const baseRequest = {
+        hostname: "127.0.0.1",
+        port: server.port,
+        headers: { Authorization: "Bearer " + config.token },
+      };
+
+      // Wait for background catch-up and indexing
+      await new Promise((r) => setTimeout(r, 300));
+
+      const searchRes = await request({
+        ...baseRequest,
+        path: `/api/sessions/search?q=${encodeURIComponent("seed")}`,
+        method: "GET",
+      });
+      assert.equal(searchRes.statusCode, 200);
+      const results = searchRes.body as any[];
+      assert.ok(results.length >= 1, "expected at least one seeded session");
+      for (const session of results) {
+        assert.ok(session.id.includes(":"), `expected namespaced ID: ${session.id}`);
+      }
+    });
+  });
+
+  it("hides archived sessions from search", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-archive-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const baseRequest = {
+        hostname: "127.0.0.1",
+        port: server.port,
+        headers: { Authorization: "Bearer " + config.token },
+      };
+
+      const createRes = await request({
+        ...baseRequest,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: { ...baseRequest.headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: "/tmp", input: [{ type: "text", text: "archive search test" }] }),
+      });
+      assert.equal(createRes.statusCode, 201);
+      const sessionId = (createRes.body as any).session.id;
+
+      // Wait for turn completion and indexing
+      await new Promise((r) => setTimeout(r, 150));
+
+      let searchRes = await request({
+        ...baseRequest,
+        path: `/api/sessions/search?q=${encodeURIComponent("archive search")}`,
+        method: "GET",
+      });
+      assert.equal(searchRes.statusCode, 200);
+      let results = searchRes.body as any[];
+      assert.ok(results.some((s) => s.id === sessionId), "expected session before archive");
+
+      const archiveRes = await request({
+        ...baseRequest,
+        path: `/api/sessions/${sessionId}/archive`,
+        method: "POST",
+      });
+      assert.equal(archiveRes.statusCode, 200);
+
+      // Wait for removal to propagate
+      await new Promise((r) => setTimeout(r, 150));
+
+      searchRes = await request({
+        ...baseRequest,
+        path: `/api/sessions/search?q=${encodeURIComponent("archive search")}`,
+        method: "GET",
+      });
+      assert.equal(searchRes.statusCode, 200);
+      results = searchRes.body as any[];
+      assert.ok(!results.some((s) => s.id === sessionId), "expected session hidden after archive");
     });
   });
 });

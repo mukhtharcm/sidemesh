@@ -660,8 +660,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                   Expanded(
                     child: Text(
                       'Session controls',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: AppWeights.title,
                       ),
                     ),
                   ),
