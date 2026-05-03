@@ -50,10 +50,10 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       selectedIcon: Icons.schedule_rounded,
     ),
     _TabDef(
-      title: 'Inbox',
-      subtitle: 'Pending approvals from every host',
-      icon: Icons.all_inbox_rounded,
-      selectedIcon: Icons.all_inbox_rounded,
+      title: 'Actions',
+      subtitle: 'Pending approvals and queued sends',
+      icon: Icons.checklist_rounded,
+      selectedIcon: Icons.checklist_rounded,
     ),
     _TabDef(
       title: 'Hosts',
@@ -1912,8 +1912,8 @@ class _InboxPaneState extends State<InboxPane> {
       return MeshEmptyState(
         icon: widget.hasSavedHosts
             ? Icons.notifications_paused_rounded
-            : Icons.all_inbox_rounded,
-        title: widget.hasSavedHosts ? 'No enabled hosts' : 'Inbox is empty',
+            : Icons.checklist_rounded,
+        title: widget.hasSavedHosts ? 'No enabled hosts' : 'Nothing needs attention',
         body: widget.hasSavedHosts
             ? 'Enable a saved host from Hosts to receive pending approvals.'
             : 'Add a host first. Pending approvals from every machine will show up here.',
