@@ -581,6 +581,11 @@ class _SessionScreenState extends State<SessionScreen>
   _ActiveComposerFileQuery? _activeFileQuery;
   SessionLogHistorySummary? _history;
   PendingAction? _pendingAction;
+  LiveEvent? _latestProviderWarning;
+  LiveEvent? _latestThreadStatus;
+  LiveEvent? _latestPlanUpdate;
+  LiveEvent? _latestQueueUpdate;
+  LiveEvent? _latestAutoRetryUpdate;
   _DockedBrowserPreview? _dockedBrowserPreview;
   int _messageLimit = _initialMessageLimit;
   int _activityLimit = _initialActivityLimit;
@@ -2441,6 +2446,59 @@ class _SessionScreenState extends State<SessionScreen>
           _session = (_session ?? widget.session).copyWith(runtime: runtime);
         });
         _persistCurrentSessionLog();
+      case 'provider_warning':
+        final message = event.message;
+        if (message == null || message.isEmpty) {
+          return;
+        }
+        setState(() {
+          _latestProviderWarning = event;
+        });
+      case 'thread_status_changed':
+        final status = event.status;
+        if (status == null || status.isEmpty) {
+          return;
+        }
+        setState(() {
+          _latestThreadStatus = event;
+          switch (status) {
+            case 'running':
+              _running = true;
+              _awaitingAssistantReply =
+                  _liveAssistantText.isEmpty && _pendingAction == null;
+            case 'waiting_for_input':
+            case 'waiting_for_approval':
+              _running = true;
+              _awaitingAssistantReply = false;
+            case 'idle':
+            case 'closed':
+            case 'errored':
+              _running = false;
+              _awaitingAssistantReply = false;
+          }
+        });
+        _refreshThinkingState();
+        _syncSessionLiveActivity();
+      case 'plan_updated':
+        final plan = event.plan;
+        if (plan == null || plan.isEmpty) {
+          return;
+        }
+        setState(() {
+          _latestPlanUpdate = event;
+        });
+      case 'reasoning_delta':
+        // Parsed for compatibility, but intentionally not rendered until a
+        // dedicated thinking UI is product-approved.
+        break;
+      case 'queue_updated':
+        setState(() {
+          _latestQueueUpdate = event;
+        });
+      case 'auto_retry_updated':
+        setState(() {
+          _latestAutoRetryUpdate = event;
+        });
       case 'action_opened':
         setState(() {
           _pendingAction = event.action;
@@ -2463,6 +2521,24 @@ class _SessionScreenState extends State<SessionScreen>
       case 'error':
         break;
     }
+  }
+
+  bool get _showRuntimeSignalStrip {
+    final threadStatus = _latestThreadStatus;
+    final showThreadStatus =
+        threadStatus != null &&
+        (threadStatus.status?.isNotEmpty ?? false) &&
+        ((threadStatus.status ?? '') != 'running' ||
+            (threadStatus.message?.isNotEmpty ?? false) ||
+            (threadStatus.pendingActionKind?.isNotEmpty ?? false));
+    final queueUpdated = _latestQueueUpdate;
+    final showQueue =
+        queueUpdated != null &&
+        ((queueUpdated.steeringCount ?? 0) > 0 ||
+            (queueUpdated.followUpCount ?? 0) > 0 ||
+            (queueUpdated.steeringPreview?.isNotEmpty ?? false) ||
+            (queueUpdated.followUpPreview?.isNotEmpty ?? false));
+    return showThreadStatus || showQueue || _latestAutoRetryUpdate != null;
   }
 
   bool _shouldShowThinking() {
@@ -5167,6 +5243,16 @@ class _SessionScreenState extends State<SessionScreen>
               },
             ),
           ),
+        if (_latestProviderWarning?.message?.isNotEmpty ?? false)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: _ProviderWarningCard(event: _latestProviderWarning!),
+          ),
+        if (_latestPlanUpdate?.plan?.isNotEmpty ?? false)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: _PlanUpdateCard(event: _latestPlanUpdate!),
+          ),
         Expanded(
           child: (_loading && timelineEntries.isEmpty)
               ? const MeshLoader()
@@ -5318,6 +5404,15 @@ class _SessionScreenState extends State<SessionScreen>
             onEditCopy: (pending) =>
                 unawaited(_movePendingSendToComposer(pending)),
             onDiscard: (pending) => unawaited(_discardPendingSend(pending)),
+          ),
+        if (_showRuntimeSignalStrip)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: _RuntimeSignalStrip(
+              threadStatus: _latestThreadStatus,
+              queueUpdated: _latestQueueUpdate,
+              autoRetryUpdated: _latestAutoRetryUpdate,
+            ),
           ),
         _ComposerStatusStrip(thinking: _thinkingNotifier),
         _Composer(
