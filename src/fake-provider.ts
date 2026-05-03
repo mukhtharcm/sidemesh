@@ -60,6 +60,7 @@ import type {
   SkillSummary,
   ThreadRecord,
   TurnRecord,
+  SessionMessageContentBlock,
 } from "./types.js";
 
 export interface FakeAgentProviderOptions {
@@ -1252,6 +1253,7 @@ export class FakeAgentProvider
       id?: string;
       role: SessionMessage["role"];
       text: string;
+      content?: SessionMessageContentBlock[];
       attachments: SessionMessageAttachment[];
       phase?: "commentary" | "final_answer";
     },
@@ -1260,6 +1262,7 @@ export class FakeAgentProvider
       id: message.id ?? `fake-message-${randomUUID()}`,
       role: message.role,
       text: message.text,
+      content: message.content ?? [{ type: "text", text: message.text }],
       attachments: message.attachments,
       createdAt: Date.now(),
       seq: session.nextSeq++,

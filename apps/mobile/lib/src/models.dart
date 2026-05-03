@@ -1372,50 +1372,118 @@ class SessionMessage {
     required this.id,
     required this.role,
     required this.text,
+    this.content = const [],
     required this.attachments,
     required this.createdAt,
     required this.seq,
     this.phase,
-    this.reasoning = '',
   });
 
   final String id;
   final String role;
   final String text;
+  final List<ContentBlock> content;
   final List<SessionMessageAttachment> attachments;
   final DateTime createdAt;
   final int seq;
   final String? phase;
-  final String reasoning;
 
   bool get hasVisibleContent =>
       text.trim().isNotEmpty || attachments.isNotEmpty;
 
-  factory SessionMessage.fromJson(Map<String, dynamic> json) => SessionMessage(
-    id: _stringValue(json['id']),
-    role: _stringValue(json['role']),
-    text: _stringValue(json['text']),
-    attachments: (json['attachments'] as List<dynamic>? ?? [])
-        .map(
-          (item) =>
-              SessionMessageAttachment.fromJson(item as Map<String, dynamic>),
-        )
-        .toList(),
-    createdAt: _dateValue(json['createdAt']),
-    seq: _intOrNull(json['seq']) ?? 0,
-    phase: json['phase'] as String?,
-    reasoning: _stringOrNull(json['reasoning']) ?? '',
-  );
+  factory SessionMessage.fromJson(Map<String, dynamic> json) {
+    final text = _stringValue(json['text']);
+    final rawContent = json['content'] as List<dynamic>?;
+    List<ContentBlock> blocks;
+    if (rawContent != null && rawContent.isNotEmpty) {
+      blocks = rawContent
+          .map((item) => ContentBlock.fromJson(item as Map<String, dynamic>))
+          .whereType<ContentBlock>()
+          .toList(growable: false);
+    } else {
+      blocks = text.trim().isNotEmpty ? [TextBlock(text)] : const [];
+    }
+    return SessionMessage(
+      id: _stringValue(json['id']),
+      role: _stringValue(json['role']),
+      text: text,
+      content: blocks,
+      attachments: (json['attachments'] as List<dynamic>? ?? [])
+          .map(
+            (item) => SessionMessageAttachment.fromJson(
+              item as Map<String, dynamic>,
+            ),
+          )
+          .toList(),
+      createdAt: _dateValue(json['createdAt']),
+      seq: _intOrNull(json['seq']) ?? 0,
+      phase: json['phase'] as String?,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'role': role,
     'text': text,
+    'content': content.map((item) => item.toJson()).toList(),
     'attachments': attachments.map((item) => item.toJson()).toList(),
     'createdAt': createdAt.millisecondsSinceEpoch,
     'seq': seq,
     'phase': phase,
-    if (reasoning.isNotEmpty) 'reasoning': reasoning,
+  };
+}
+
+abstract class ContentBlock {
+  const ContentBlock(this.type);
+
+  final String type;
+
+  factory ContentBlock.fromJson(Map<String, dynamic> json) {
+    final t = _stringValue(json['type']);
+    switch (t) {
+      case 'text':
+        final text = _stringOrNull(json['text']);
+        if (text != null && text.isNotEmpty) return TextBlock(text);
+        break;
+      case 'thinking':
+        final thinking = _stringOrNull(json['thinking']);
+        if (thinking != null && thinking.isNotEmpty) {
+          return ThinkingBlock(
+            thinking,
+            summary: _boolOrNull(json['summary']) ?? false,
+          );
+        }
+        break;
+    }
+    return TextBlock('');
+  }
+
+  Map<String, dynamic> toJson();
+}
+
+class TextBlock extends ContentBlock {
+  const TextBlock(this.text) : super('text');
+
+  final String text;
+
+  @override
+  Map<String, dynamic> toJson() => {'type': type, 'text': text};
+}
+
+class ThinkingBlock extends ContentBlock {
+  const ThinkingBlock(
+    this.thinking, {
+    this.summary = false,
+  }) : super('thinking');
+
+  final String thinking;
+  final bool summary;
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': type,
+    'thinking': thinking,
+    if (summary) 'summary': summary,
   };
 }
 

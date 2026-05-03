@@ -240,10 +240,51 @@ export interface ProviderProfileSummary {
 export type CodexProfileCatalog = ProviderProfileCatalog;
 export type CodexProfileSummary = ProviderProfileSummary;
 
+export interface SessionMessageContentBlockText {
+  type: "text";
+  text: string;
+}
+
+export interface SessionMessageContentBlockThinking {
+  type: "thinking";
+  thinking: string;
+  summary?: boolean;
+  reasoningId?: string;
+}
+
+export type SessionMessageContentBlock =
+  | SessionMessageContentBlockText
+  | SessionMessageContentBlockThinking;
+
+export function blocksToText(
+  blocks: SessionMessageContentBlock[] | undefined,
+): string {
+  if (!blocks || blocks.length === 0) return "";
+  return blocks
+    .filter((b): b is SessionMessageContentBlockText => b.type === "text")
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
+}
+
+export function textToBlocks(text: string): SessionMessageContentBlock[] {
+  if (!text.trim()) return [];
+  return [{ type: "text", text }];
+}
+
+export function normalizeSessionMessageContent(
+  text: string,
+  content?: SessionMessageContentBlock[] | null,
+): SessionMessageContentBlock[] {
+  if (content && content.length > 0) return content;
+  return textToBlocks(text);
+}
+
 export interface SessionMessage {
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
+  content: SessionMessageContentBlock[];
   attachments: SessionMessageAttachment[];
   createdAt: number;
   seq: number;

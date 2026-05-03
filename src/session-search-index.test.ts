@@ -272,8 +272,8 @@ describe("SessionSearchIndex", () => {
       cwd: "/projects/sidemesh",
       fingerprint: "fp-1",
       messages: [
-        { id: "m1", role: "user" as const, text: "how do I configure nginx", attachments: [], createdAt: Date.now(), seq: 1 },
-        { id: "m2", role: "assistant" as const, text: "you can use nginx.conf", attachments: [], createdAt: Date.now(), seq: 2 },
+        { id: "m1", role: "user" as const, text: "how do I configure nginx", content: [], attachments: [], createdAt: Date.now(), seq: 1 },
+        { id: "m2", role: "assistant" as const, text: "you can use nginx.conf", content: [], attachments: [], createdAt: Date.now(), seq: 2 },
       ],
       activities: [
         { id: "a1", type: "command", turnId: null, createdAt: Date.now(), seq: 3, status: "completed", command: "nginx -t", cwd: "/projects/sidemesh", output: null, exitCode: null, durationMs: null, source: null, processId: null, commandActions: [], terminalStatus: null, terminalInput: null },
@@ -297,7 +297,7 @@ describe("SessionSearchIndex", () => {
       preview: "preview",
       cwd: "/tmp",
       fingerprint: "fp-stable",
-      messages: [{ id: "m1", role: "user" as const, text: "hello", attachments: [], createdAt: Date.now(), seq: 1 }],
+      messages: [{ id: "m1", role: "user" as const, text: "hello", content: [], attachments: [], createdAt: Date.now(), seq: 1 }],
       activities: [],
     };
 
@@ -311,7 +311,7 @@ describe("SessionSearchIndex", () => {
     assert.equal(results.length, 1);
 
     // Update content and fingerprint
-    await index.indexDocument({ ...doc, fingerprint: "fp-changed", messages: [{ id: "m1", role: "user" as const, text: "goodbye", attachments: [], createdAt: Date.now(), seq: 1 }] });
+    await index.indexDocument({ ...doc, fingerprint: "fp-changed", messages: [{ id: "m1", role: "user" as const, text: "goodbye", content: [], attachments: [], createdAt: Date.now(), seq: 1 }] });
     results = await index.search("goodbye", 10);
     assert.equal(results.length, 1);
     results = await index.search("hello", 10);
@@ -330,7 +330,7 @@ describe("SessionSearchIndex", () => {
       preview: "pi preview",
       cwd: "/tmp",
       fingerprint: "fp-1",
-      messages: [{ id: "m1", role: "user" as const, text: "pi test content", attachments: [], createdAt: Date.now(), seq: 1 }],
+      messages: [{ id: "m1", role: "user" as const, text: "pi test content", content: [], attachments: [], createdAt: Date.now(), seq: 1 }],
       activities: [],
     });
 
@@ -378,7 +378,7 @@ describe("SessionSearchIndex", () => {
       cwd: "/tmp",
       fingerprint: "fp-multi",
       messages: [
-        { id: "m1", role: "user" as const, text: "how do I configure nginx reverse proxy", attachments: [], createdAt: Date.now(), seq: 1 },
+        { id: "m1", role: "user" as const, text: "how do I configure nginx reverse proxy", content: [], attachments: [], createdAt: Date.now(), seq: 1 },
       ],
       activities: [],
     });
@@ -405,7 +405,7 @@ describe("SessionSearchIndex", () => {
       preview: "preview",
       cwd: "/tmp",
       fingerprint: "fp-empty",
-      messages: [{ id: "m1", role: "user" as const, text: "hello world", attachments: [], createdAt: Date.now(), seq: 1 }],
+      messages: [{ id: "m1", role: "user" as const, text: "hello world", content: [], attachments: [], createdAt: Date.now(), seq: 1 }],
       activities: [],
     });
 
