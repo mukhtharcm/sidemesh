@@ -282,6 +282,114 @@ describe("loadSessionRuntime", () => {
     });
   });
 
+  it("finds active sessions in old date folders when mtime is recent", async () => {
+    const codexHome = nodePath.join(tempDir, "codex-home");
+    const oldDayDir = nodePath.join(codexHome, "sessions", "2026", "04", "22");
+    const todayDayDir = nodePath.join(codexHome, "sessions", "2026", "05", "03");
+    await mkdir(oldDayDir, { recursive: true });
+    await mkdir(todayDayDir, { recursive: true });
+
+    const oldRolloutPath = nodePath.join(
+      oldDayDir,
+      "rollout-2026-04-22T15-36-03-old-thread.jsonl",
+    );
+    const todayRolloutPath = nodePath.join(
+      todayDayDir,
+      "rollout-2026-05-03T10-00-00-today-thread.jsonl",
+    );
+
+    const oldLines = [
+      JSON.stringify({
+        timestamp: "2026-04-22T15:36:03.000Z",
+        type: "session_meta",
+        payload: { id: "old-thread", cwd: "/tmp/project" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-05-03T12:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "hello" },
+      }),
+    ];
+    const todayLines = [
+      JSON.stringify({
+        timestamp: "2026-05-03T10:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "today-thread", cwd: "/tmp/project" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-05-03T10:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "world" },
+      }),
+    ];
+
+    await writeFile(oldRolloutPath, `${oldLines.join("\n")}\n`, "utf8");
+    await writeFile(todayRolloutPath, `${todayLines.join("\n")}\n`, "utf8");
+
+    // Force the old file's mtime to be in the past (older than 3 days) so it is excluded.
+    // This verifies we filter by mtime, not folder date.
+    const threeDaysAgo = Date.now() - 4 * 24 * 60 * 60 * 1000;
+    const fs = await import("node:fs");
+    fs.utimesSync(oldRolloutPath, threeDaysAgo / 1000, threeDaysAgo / 1000);
+
+    const threads = await listRecentRolloutThreads(codexHome, 10);
+
+    assert.equal(threads.length, 1);
+    assert.equal(threads[0]?.id, "today-thread");
+  });
+
+  it("finds old-folder sessions when mtime is recent", async () => {
+    const codexHome = nodePath.join(tempDir, "codex-home");
+    const oldDayDir = nodePath.join(codexHome, "sessions", "2026", "04", "22");
+    const todayDayDir = nodePath.join(codexHome, "sessions", "2026", "05", "03");
+    await mkdir(oldDayDir, { recursive: true });
+    await mkdir(todayDayDir, { recursive: true });
+
+    const oldRolloutPath = nodePath.join(
+      oldDayDir,
+      "rollout-2026-04-22T15-36-03-old-thread.jsonl",
+    );
+    const todayRolloutPath = nodePath.join(
+      todayDayDir,
+      "rollout-2026-05-03T10-00-00-today-thread.jsonl",
+    );
+
+    const oldLines = [
+      JSON.stringify({
+        timestamp: "2026-04-22T15:36:03.000Z",
+        type: "session_meta",
+        payload: { id: "old-thread", cwd: "/tmp/project" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-05-03T12:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "hello" },
+      }),
+    ];
+    const todayLines = [
+      JSON.stringify({
+        timestamp: "2026-05-03T10:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "today-thread", cwd: "/tmp/project" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-05-03T10:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "world" },
+      }),
+    ];
+
+    await writeFile(oldRolloutPath, `${oldLines.join("\n")}\n`, "utf8");
+    await writeFile(todayRolloutPath, `${todayLines.join("\n")}\n`, "utf8");
+
+    // Do NOT backdate mtime — both files are freshly written.
+    const threads = await listRecentRolloutThreads(codexHome, 10);
+
+    assert.equal(threads.length, 2);
+    const ids = threads.map((t) => t.id).sort();
+    assert.deepEqual(ids, ["old-thread", "today-thread"]);
+  });
+
   it("surfaces Codex rollout errors as system messages", async () => {
     const lines = [
       JSON.stringify({
