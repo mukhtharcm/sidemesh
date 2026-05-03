@@ -2386,7 +2386,7 @@ export async function startServer(
           title: thread.name || thread.preview,
           preview: thread.preview,
           cwd: thread.cwd,
-          fingerprint: `${thread.name || ""}|${thread.preview}|${thread.cwd}|${log.nextSeq}`,
+          fingerprint: `${thread.name || ""}|${thread.preview}|${thread.cwd}|${log.nextSeq}|${thread.updatedAt}`,
           messages: log.messages,
           activities: log.activities,
         });
@@ -2898,7 +2898,7 @@ async function indexSessionForSearch(
       title: thread.name || thread.preview,
       preview: thread.preview,
       cwd: thread.cwd,
-      fingerprint: `${thread.name || ""}|${thread.preview}|${thread.cwd}|${log.nextSeq}`,
+      fingerprint: `${thread.name || ""}|${thread.preview}|${thread.cwd}|${log.nextSeq}|${thread.updatedAt}`,
       messages: log.messages,
       activities: log.activities,
     });
