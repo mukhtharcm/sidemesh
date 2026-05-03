@@ -789,12 +789,25 @@ class _CompactMetaChip extends StatelessWidget {
   }
 }
 
+String _formatTokenLimit(int limit) {
+  if (limit >= 1_000_000) {
+    return '${(limit / 1_000_000).toStringAsFixed(0)}M';
+  }
+  if (limit >= 1_000) {
+    return '${(limit / 1_000).toStringAsFixed(0)}k';
+  }
+  return '$limit';
+}
+
 String? _contextUsageLabel(SessionRuntimeSummary? runtime) {
   final context = runtime?.telemetry?.contextWindow;
   if (context == null || context.tokenLimit <= 0) {
     return null;
   }
-  final leftPercent = ((1 - (context.currentTokens / context.tokenLimit)) * 100)
+  if (context.currentTokens == null) {
+    return '?/${_formatTokenLimit(context.tokenLimit)} ctx';
+  }
+  final leftPercent = ((1 - (context.currentTokens! / context.tokenLimit)) * 100)
       .clamp(0, 100)
       .round();
   return '$leftPercent% ctx left';
@@ -805,7 +818,10 @@ String? _contextUsageShortLabel(SessionRuntimeSummary? runtime) {
   if (context == null || context.tokenLimit <= 0) {
     return null;
   }
-  final leftPercent = ((1 - (context.currentTokens / context.tokenLimit)) * 100)
+  if (context.currentTokens == null) {
+    return '?';
+  }
+  final leftPercent = ((1 - (context.currentTokens! / context.tokenLimit)) * 100)
       .clamp(0, 100)
       .round();
   return '$leftPercent%';
@@ -813,10 +829,10 @@ String? _contextUsageShortLabel(SessionRuntimeSummary? runtime) {
 
 MeshPillTone _contextUsageTone(SessionRuntimeSummary? runtime) {
   final context = runtime?.telemetry?.contextWindow;
-  if (context == null || context.tokenLimit <= 0) {
+  if (context == null || context.tokenLimit <= 0 || context.currentTokens == null) {
     return MeshPillTone.neutral;
   }
-  final used = context.currentTokens / context.tokenLimit;
+  final used = context.currentTokens! / context.tokenLimit;
   if (used >= 0.9) {
     return MeshPillTone.danger;
   }
