@@ -348,6 +348,16 @@ describe("PiAgentProvider", () => {
             },
           });
           listener({
+            type: "message_update",
+            message: partialAssistant,
+            assistantMessageEvent: {
+              type: "thinking_delta",
+              contentIndex: 0,
+              delta: "Let me analyze...",
+              partial: partialAssistant,
+            },
+          });
+          listener({
             type: "queue_update",
             steering: ["Focus on README parsing"],
             followUp: [
@@ -481,6 +491,7 @@ describe("PiAgentProvider", () => {
     const eventTypes = liveEvents.map((event) => event.type);
     assert.ok(eventTypes.includes("turn_started"));
     assert.ok(eventTypes.includes("assistant_delta"));
+    assert.ok(eventTypes.includes("reasoning_delta"));
     assert.ok(eventTypes.includes("assistant_message_completed"));
     assert.ok(eventTypes.includes("activity_updated"));
     assert.ok(eventTypes.includes("activity_output_delta"));
@@ -488,6 +499,14 @@ describe("PiAgentProvider", () => {
     assert.ok(eventTypes.includes("queue_updated"));
     assert.ok(eventTypes.includes("auto_retry_updated"));
     assert.ok(eventTypes.includes("turn_completed"));
+
+    const reasoningDelta = liveEvents.find((event) => event.type === "reasoning_delta");
+    assert.ok(reasoningDelta);
+    assert.equal(reasoningDelta?.type, "reasoning_delta");
+    assert.equal(reasoningDelta?.sessionId, "pi-live-1");
+    assert.equal(reasoningDelta?.delta, "Let me analyze...");
+    assert.equal(reasoningDelta?.summary, false);
+    assert.ok(typeof reasoningDelta?.turnId === "string");
 
     const queueUpdated = liveEvents.find((event) => event.type === "queue_updated");
     assert.deepEqual(queueUpdated, {
