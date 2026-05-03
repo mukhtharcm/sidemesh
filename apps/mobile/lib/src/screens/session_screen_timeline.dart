@@ -906,6 +906,7 @@ class _MessageBubble extends StatelessWidget {
     final isUser = message.role == 'user';
     final isAssistant = message.role == 'assistant';
     final hasText = message.text.trim().isNotEmpty;
+    final hasTextBlocks = message.content.any((b) => b is TextBlock);
     final canPin = onTogglePin != null && message.hasVisibleContent;
 
     final bubbleColor = switch (message.role) {
@@ -972,18 +973,46 @@ class _MessageBubble extends StatelessWidget {
                         ),
                       )
                     else if (block is TextBlock)
-                      _MarkdownMessageBody(
-                        text: block.text,
-                        textColor: textColor,
-                        onOpenFile: onOpenFile,
-                      ),
+                      if (isAssistant)
+                        _MarkdownMessageBody(
+                          text: block.text,
+                          textColor: textColor,
+                          onOpenFile: onOpenFile,
+                        )
+                      else
+                        _LinkifiedSelectableText(
+                          text: block.text,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: textColor,
+                            height: 1.45,
+                          ),
+                          linkColor: colors.accent,
+                        ),
                   if (message.attachments.isNotEmpty) ...[
                     _MessageAttachmentsSection(
                       host: host,
                       api: api,
                       attachments: message.attachments,
                     ),
+                    if (!hasTextBlocks && hasText)
+                      const SizedBox(height: 10),
                   ],
+                  if (!hasTextBlocks && hasText)
+                    if (isAssistant)
+                      _MarkdownMessageBody(
+                        text: message.text,
+                        textColor: textColor,
+                        onOpenFile: onOpenFile,
+                      )
+                    else
+                      _LinkifiedSelectableText(
+                        text: message.text,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: textColor,
+                          height: 1.45,
+                        ),
+                        linkColor: colors.accent,
+                      ),
                   if (canPin || (!isUser && hasText) || hasText)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
