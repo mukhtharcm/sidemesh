@@ -59,6 +59,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
+  void _skipIntro() {
+    // Jump to the Connect page rather than exiting — new users still need
+    // to add a host before the app is useful.
+    _pageController.animateToPage(
+      _pageCount - 1,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOutCubic,
+    );
+    HapticFeedback.lightImpact();
+  }
+
   void _skip() {
     _complete();
   }
@@ -116,10 +127,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: _skip,
+                  if (_pageIndex < _pageCount - 1)
+                TextButton(
+                    onPressed: _skipIntro,
                     child: Text(
-                      'Skip',
+                      'Skip intro',
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: colors.textSecondary,
                         fontWeight: FontWeight.w600,
@@ -208,7 +220,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   else
                     FilledButton(
                       onPressed: _skip,
-                      child: const Text('Start'),
+                      child: const Text('Get started'),
                     ),
                 ],
               ),

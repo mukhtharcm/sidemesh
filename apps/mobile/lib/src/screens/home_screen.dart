@@ -456,6 +456,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                           hasSavedHosts: _hosts.isNotEmpty,
                           screenAwakeSourceKey: 'mobile-recent-sessions',
                           onOpenSession: _openSession,
+                          onAddHost: () => _showHostEditor(),
                           onActiveCountChanged: (count) {
                             if (!mounted) return;
                             setState(() => _activeCount = count);
@@ -937,6 +938,7 @@ class RecentPane extends StatefulWidget {
     this.screenAwakeController,
     this.viewMode = SessionViewMode.flat,
     this.onViewModeChanged,
+    this.onAddHost,
   });
 
   final List<HostProfile> hosts;
@@ -952,6 +954,7 @@ class RecentPane extends StatefulWidget {
   final ScreenAwakeController? screenAwakeController;
   final SessionViewMode viewMode;
   final ValueChanged<SessionViewMode>? onViewModeChanged;
+  final VoidCallback? onAddHost;
 
   @override
   State<RecentPane> createState() => _RecentPaneState();
@@ -1204,14 +1207,34 @@ class _RecentPaneState extends State<RecentPane> {
   @override
   Widget build(BuildContext context) {
     if (widget.hosts.isEmpty) {
-      return MeshEmptyState(
-        icon: widget.hasSavedHosts
-            ? Icons.pause_circle_outline_rounded
-            : Icons.schedule_rounded,
-        title: widget.hasSavedHosts ? 'No enabled hosts' : 'No sessions yet',
-        body: widget.hasSavedHosts
-            ? 'Enable a saved host from Hosts to load recent sessions.'
-            : 'Add a host first — your most recent agent sessions will land here.',
+      if (!widget.hasSavedHosts) {
+        // No hosts at all — show a clear call-to-action to add one
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const MeshEmptyState(
+                  icon: Icons.schedule_rounded,
+                  title: 'No sessions yet',
+                  body: 'Add a host to start controlling your coding agents from your phone.',
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                FilledButton.icon(
+                  onPressed: widget.onAddHost,
+                  icon: const Icon(Icons.add_link_rounded),
+                  label: const Text('Add your first host'),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      return const MeshEmptyState(
+        icon: Icons.pause_circle_outline_rounded,
+        title: 'No enabled hosts',
+        body: 'Enable a saved host from Hosts to load recent sessions.',
       );
     }
 
