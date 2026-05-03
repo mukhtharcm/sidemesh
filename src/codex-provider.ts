@@ -45,9 +45,13 @@ import {
   loadSessionRuntime,
 } from "./codex-history.js";
 import type {
+  LivePlanStep,
+  LiveThreadStatus,
   ModelSummary,
+  PendingActionKind,
   ProviderProfileCatalog,
   ProviderProfileSummary,
+  ProviderWarningLevel,
   SessionActivity,
   SessionLogSnapshot,
   SessionRuntimeSummary,
@@ -504,6 +508,19 @@ public async health(): Promise<boolean> {
       return;
     }
 
+    if (
+      method === "warning" ||
+      method === "guardianWarning" ||
+      method === "deprecationNotice" ||
+      method === "configWarning"
+    ) {
+      const warning = buildCodexProviderWarning(method, params);
+      if (warning) {
+        this.emit("liveEvent", warning);
+      }
+      return;
+    }
+
     const sessionId = extractSessionId(method, params);
     if (!sessionId) {
       return;
@@ -521,6 +538,50 @@ public async health(): Promise<boolean> {
       if (turnId) {
         this.emit("liveEvent", { type: "turn_started", sessionId, turnId });
       }
+      return;
+    }
+
+    if (method === "thread/status/changed") {
+      const normalized = normalizeCodexThreadStatus(typed.status);
+      this.emit("liveEvent", {
+        type: "thread_status_changed",
+        sessionId,
+        status: normalized.status,
+        message: normalized.message,
+        pendingActionKind: normalized.pendingActionKind,
+      });
+      return;
+    }
+
+    if (method === "turn/plan/updated") {
+      this.emit("liveEvent", {
+        type: "plan_updated",
+        sessionId,
+        turnId: asString(typed.turnId) || undefined,
+        explanation: asString(typed.explanation) || undefined,
+        plan: buildCodexPlanSteps(typed.plan),
+      });
+      return;
+    }
+
+    if (
+      method === "item/reasoning/summaryTextDelta" ||
+      method === "item/reasoning/textDelta"
+    ) {
+      const delta = asString(typed.delta);
+      const itemId = asString(typed.itemId);
+      if (!delta || !itemId) {
+        return;
+      }
+      this.emit("liveEvent", {
+        type: "reasoning_delta",
+        sessionId,
+        turnId: asString(typed.turnId) || undefined,
+        itemId,
+        reasoningId: itemId,
+        delta,
+        summary: method === "item/reasoning/summaryTextDelta",
+      });
       return;
     }
 
@@ -1692,6 +1753,144 @@ function parseCodexReasoningEffort(value: string | null): CodexReasoningEffortVa
 function toActivityDraft(activity: SessionActivity): AgentSessionActivityDraft {
   const { createdAt: _createdAt, seq: _seq, ...draft } = activity;
   return draft as AgentSessionActivityDraft;
+}
+
+function normalizeCodexThreadStatus(status: unknown): {
+  status: LiveThreadStatus;
+  message?: string;
+  pendingActionKind?: PendingActionKind;
+} {
+  const typed = status && typeof status === "object"
+    ? (status as Record<string, unknown>)
+    : null;
+  const type = asString(typed?.type);
+  if (type === "idle") {
+    return { status: "idle" };
+  }
+  if (type === "notLoaded") {
+    return { status: "closed" };
+  }
+  if (type === "systemError") {
+    return {
+      status: "errored",
+      message: "Codex reported a system error.",
+    };
+  }
+  if (type !== "active") {
+    return { status: "unknown" };
+  }
+  const activeFlags = Array.isArray(typed?.activeFlags)
+    ? typed.activeFlags.map((value) => asString(value)).filter((value): value is string => !!value)
+    : [];
+  if (activeFlags.includes("waitingOnApproval")) {
+    return { status: "waiting_for_approval" };
+  }
+  if (activeFlags.includes("waitingOnUserInput")) {
+    return { status: "waiting_for_input" };
+  }
+  return { status: "running" };
+}
+
+function buildCodexPlanSteps(plan: unknown): LivePlanStep[] {
+  if (!Array.isArray(plan)) {
+    return [];
+  }
+  return plan.flatMap((entry) => {
+    const typed = entry && typeof entry === "object"
+      ? (entry as Record<string, unknown>)
+      : null;
+    const step = asString(typed?.step);
+    if (!step) {
+      return [];
+    }
+    return [{
+      step,
+      status: normalizeCodexPlanStepStatus(typed?.status),
+    } satisfies LivePlanStep];
+  });
+}
+
+function normalizeCodexPlanStepStatus(status: unknown): LivePlanStep["status"] {
+  switch (asString(status)) {
+    case "completed":
+      return "completed";
+    case "inProgress":
+    case "in_progress":
+      return "in_progress";
+    default:
+      return "pending";
+  }
+}
+
+function buildCodexProviderWarning(
+  method: string,
+  params: unknown,
+): {
+  type: "provider_warning";
+  sessionId?: string;
+  level: ProviderWarningLevel;
+  code?: string;
+  message: string;
+  source?: string;
+} | null {
+  const typed = params && typeof params === "object"
+    ? (params as Record<string, unknown>)
+    : null;
+  if (!typed) {
+    return null;
+  }
+
+  if (method === "warning" || method === "guardianWarning") {
+    const message = asString(typed.message);
+    if (!message) {
+      return null;
+    }
+    return {
+      type: "provider_warning",
+      sessionId: asString(typed.threadId) || undefined,
+      level: method === "guardianWarning" ? "error" : "warning",
+      code: method,
+      message,
+      source: "codex",
+    };
+  }
+
+  if (method === "deprecationNotice") {
+    const summary = asString(typed.summary);
+    const details = asString(typed.details);
+    const message = [summary, details].filter(Boolean).join("\n\n");
+    if (!message) {
+      return null;
+    }
+    return {
+      type: "provider_warning",
+      level: "info",
+      code: "deprecationNotice",
+      message,
+      source: "codex/config",
+    };
+  }
+
+  if (method === "configWarning") {
+    const summary = asString(typed.summary);
+    const details = asString(typed.details);
+    const path = asString(typed.path);
+    const message = [summary, details, path ? `Path: ${path}` : null]
+      .filter(Boolean)
+      .join("\n\n");
+    if (!message) {
+      return null;
+    }
+    return {
+      type: "provider_warning",
+      level: "warning",
+      code: "configWarning",
+      message,
+      source: "codex/config",
+    };
+  }
+
+  return null;
 }
 
 function extractSessionId(method: string, params: unknown): string | null {

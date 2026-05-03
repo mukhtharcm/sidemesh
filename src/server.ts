@@ -337,6 +337,36 @@ export async function startServer(
     broadcast(socketsBySession, sessionId, stamped);
   }
 
+  function broadcastProviderWarning(event: {
+    sessionId?: string;
+    level: LiveEvent["level"];
+    code?: string;
+    message: string;
+    source?: string;
+  }): void {
+    if (event.sessionId) {
+      broadcastLive(event.sessionId, {
+        type: "provider_warning",
+        sessionId: event.sessionId,
+        level: event.level,
+        code: event.code,
+        message: event.message,
+        source: event.source,
+      });
+      return;
+    }
+    for (const sessionId of socketsBySession.keys()) {
+      broadcastLive(sessionId, {
+        type: "provider_warning",
+        sessionId,
+        level: event.level,
+        code: event.code,
+        message: event.message,
+        source: event.source,
+      });
+    }
+  }
+
   function broadcastApprovalLive(event: ApprovalLiveEvent): void {
     for (const socket of approvalSockets) {
       sendEvent(socket, event);
@@ -587,17 +617,7 @@ export async function startServer(
         return;
       }
       case "provider_warning": {
-        if (!event.sessionId) {
-          return;
-        }
-        broadcastLive(event.sessionId, {
-          type: "provider_warning",
-          sessionId: event.sessionId,
-          level: event.level,
-          code: event.code,
-          message: event.message,
-          source: event.source,
-        });
+        broadcastProviderWarning(event);
         return;
       }
       case "thread_status_changed": {

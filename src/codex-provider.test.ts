@@ -323,6 +323,105 @@ describe("codex provider resume runtime restore", () => {
   });
 });
 
+describe("codex rich live event mappings", () => {
+  it("normalizes Codex thread status, plan, reasoning, and warning notifications", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const events: unknown[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexNotification("thread/status/changed", {
+      threadId: "thread-1",
+      status: {
+        type: "active",
+        activeFlags: ["waitingOnApproval"],
+      },
+    });
+    provider.emitCodexNotification("turn/plan/updated", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      explanation: "Follow the rollout plan.",
+      plan: [
+        { step: "Read the docs", status: "completed" },
+        { step: "Ship the change", status: "inProgress" },
+      ],
+    });
+    provider.emitCodexNotification("item/reasoning/summaryTextDelta", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "reasoning-item-1",
+      delta: "Summarizing the approach...",
+      summaryIndex: 0,
+    });
+    provider.emitCodexNotification("item/reasoning/textDelta", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "reasoning-item-1",
+      delta: "Inspecting the current state...",
+      contentIndex: 0,
+    });
+    provider.emitCodexNotification("warning", {
+      threadId: "thread-1",
+      message: "Codex warning",
+    });
+    provider.emitCodexNotification("configWarning", {
+      summary: "Config warning",
+      details: "Unsupported key detected.",
+      path: "/tmp/config.toml",
+    });
+
+    assert.deepEqual(events[0], {
+      type: "thread_status_changed",
+      sessionId: "thread-1",
+      status: "waiting_for_approval",
+      message: undefined,
+      pendingActionKind: undefined,
+    });
+    assert.deepEqual(events[1], {
+      type: "plan_updated",
+      sessionId: "thread-1",
+      turnId: "turn-1",
+      explanation: "Follow the rollout plan.",
+      plan: [
+        { step: "Read the docs", status: "completed" },
+        { step: "Ship the change", status: "in_progress" },
+      ],
+    });
+    assert.deepEqual(events[2], {
+      type: "reasoning_delta",
+      sessionId: "thread-1",
+      turnId: "turn-1",
+      itemId: "reasoning-item-1",
+      reasoningId: "reasoning-item-1",
+      delta: "Summarizing the approach...",
+      summary: true,
+    });
+    assert.deepEqual(events[3], {
+      type: "reasoning_delta",
+      sessionId: "thread-1",
+      turnId: "turn-1",
+      itemId: "reasoning-item-1",
+      reasoningId: "reasoning-item-1",
+      delta: "Inspecting the current state...",
+      summary: false,
+    });
+    assert.deepEqual(events[4], {
+      type: "provider_warning",
+      sessionId: "thread-1",
+      level: "warning",
+      code: "warning",
+      message: "Codex warning",
+      source: "codex",
+    });
+    assert.deepEqual(events[5], {
+      type: "provider_warning",
+      level: "warning",
+      code: "configWarning",
+      message: "Config warning\n\nUnsupported key detected.\n\nPath: /tmp/config.toml",
+      source: "codex/config",
+    });
+  });
+});
+
 describe("codex provider restart", () => {
   it("calls bridge.close() then bridge.start() on restart", async () => {
     const provider = new CodexAgentProvider("codex") as any;

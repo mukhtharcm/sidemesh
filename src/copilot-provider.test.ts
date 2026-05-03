@@ -255,6 +255,75 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("emits reasoning deltas and provider warnings from SDK rich events", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-rich-events-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const liveEvents: AgentProviderLiveEvent[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (
+          liveEvent.type === "reasoning_delta" ||
+          liveEvent.type === "provider_warning"
+        ) {
+          liveEvents.push(liveEvent);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [
+          { type: "text", text: "hello reasoning warning", text_elements: [] },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const reasoning = liveEvents.find(
+        (liveEvent) => liveEvent.type === "reasoning_delta",
+      );
+      if (reasoning?.type !== "reasoning_delta") {
+        throw new Error("Expected Copilot reasoning_delta event");
+      }
+      assert.equal(reasoning.reasoningId, "reasoning-1");
+      assert.equal(reasoning.delta, "Thinking through the session state...");
+      assert.equal(reasoning.summary, false);
+
+      const warning = liveEvents.find(
+        (liveEvent) =>
+          liveEvent.type === "provider_warning" && liveEvent.level === "warning",
+      );
+      if (warning?.type !== "provider_warning") {
+        throw new Error("Expected Copilot warning event");
+      }
+      assert.equal(warning.code, "policy");
+      assert.equal(warning.message, "Copilot warning");
+      assert.equal(warning.source, "copilot");
+
+      const info = liveEvents.find(
+        (liveEvent) =>
+          liveEvent.type === "provider_warning" && liveEvent.level === "info",
+      );
+      if (info?.type !== "provider_warning") {
+        throw new Error("Expected Copilot info event");
+      }
+      assert.equal(info.code, "mcp");
+      assert.equal(info.message, "Copilot info");
+      assert.equal(info.source, "copilot");
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runs manual compaction through the Copilot SDK", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-compact-"),
@@ -1520,6 +1589,28 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
             toolCallId: "tool-call-1",
             success: true,
             result: { content: "tool output" },
+          }),
+        );
+      }
+      if (options.prompt.includes("reasoning")) {
+        this.emit(
+          event("assistant.reasoning_delta", {
+            reasoningId: "reasoning-1",
+            deltaContent: "Thinking through the session state...",
+          }),
+        );
+      }
+      if (options.prompt.includes("warning")) {
+        this.emit(
+          event("session.warning", {
+            warningType: "policy",
+            message: "Copilot warning",
+          }),
+        );
+        this.emit(
+          event("session.info", {
+            infoType: "mcp",
+            message: "Copilot info",
           }),
         );
       }

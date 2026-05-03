@@ -348,6 +348,26 @@ describe("PiAgentProvider", () => {
             },
           });
           listener({
+            type: "queue_update",
+            steering: ["Focus on README parsing"],
+            followUp: [
+              "Summarize the result",
+              "Mention the testing outcome",
+            ],
+          });
+          listener({
+            type: "auto_retry_start",
+            attempt: 1,
+            maxAttempts: 3,
+            delayMs: 1200,
+            errorMessage: "Temporary Pi overload",
+          });
+          listener({
+            type: "auto_retry_end",
+            attempt: 1,
+            success: true,
+          });
+          listener({
             type: "message_end",
             message: {
               role: "toolResult",
@@ -465,7 +485,35 @@ describe("PiAgentProvider", () => {
     assert.ok(eventTypes.includes("activity_updated"));
     assert.ok(eventTypes.includes("activity_output_delta"));
     assert.ok(eventTypes.includes("runtime_updated"));
+    assert.ok(eventTypes.includes("queue_updated"));
+    assert.ok(eventTypes.includes("auto_retry_updated"));
     assert.ok(eventTypes.includes("turn_completed"));
+
+    const queueUpdated = liveEvents.find((event) => event.type === "queue_updated");
+    assert.deepEqual(queueUpdated, {
+      type: "queue_updated",
+      sessionId: "pi-live-1",
+      steeringCount: 1,
+      followUpCount: 2,
+      steeringPreview: ["Focus on README parsing"],
+      followUpPreview: [
+        "Summarize the result",
+        "Mention the testing outcome",
+      ],
+    });
+    const autoRetryStarted = liveEvents.find(
+      (event) =>
+        event.type === "auto_retry_updated" && event.phase === "started",
+    );
+    assert.deepEqual(autoRetryStarted, {
+      type: "auto_retry_updated",
+      sessionId: "pi-live-1",
+      phase: "started",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 1200,
+      errorMessage: "Temporary Pi overload",
+    });
 
     const log = await provider.readSessionLog(created.thread);
     assert.equal(log.messages.at(-1)?.text, "Done.");
@@ -474,6 +522,123 @@ describe("PiAgentProvider", () => {
     assert.equal(log.runtime?.telemetry?.contextWindow?.messagesLength, 0);
     const activity = log.activities.find((candidate) => candidate.type === "tool");
     assert.equal(activity?.type, "tool");
+  });
+
+  it("emits provider warnings when Pi auto-retry gives up", async () => {
+    const listeners = new Set<(event: unknown) => void>();
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const fakeSession = {
+      sessionId: "pi-retry-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe(listener: (event: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt() {
+        for (const listener of listeners) {
+          listener({
+            type: "auto_retry_start",
+            attempt: 3,
+            maxAttempts: 3,
+            delayMs: 8000,
+            errorMessage: "Still overloaded",
+          });
+          listener({
+            type: "auto_retry_end",
+            attempt: 3,
+            success: false,
+            finalError: "Retry budget exhausted",
+          });
+          listener({ type: "agent_end", messages: [] });
+        }
+      },
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel(level: string) {
+        this.thinkingLevel = level;
+      },
+      async setModel(model: typeof fakeModel) {
+        this.model = model;
+      },
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+    };
+
+    const liveEvents: Array<{ type: string; [key: string]: unknown }> = [];
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    provider.on("liveEvent", (event) => liveEvents.push(event as never));
+    await provider.start();
+
+    await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "retry please", text_elements: [] }],
+      overrides: {
+        model: null,
+        mode: null,
+        reasoningEffort: null,
+        fastMode: null,
+        approvalPolicy: null,
+        sandboxMode: null,
+        networkAccess: null,
+        webSearch: null,
+        profile: null,
+      },
+    });
+
+    const retryWarning = liveEvents.find(
+      (event) =>
+        event.type === "provider_warning" &&
+        event.code === "pi_auto_retry_failed",
+    );
+    assert.deepEqual(retryWarning, {
+      type: "provider_warning",
+      sessionId: "pi-retry-1",
+      level: "error",
+      code: "pi_auto_retry_failed",
+      message: "Retry budget exhausted",
+      source: "pi/retry",
+    });
   });
 
   it("only exposes authenticated Pi models and rejects unavailable overrides", async () => {

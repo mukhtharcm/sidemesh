@@ -43,7 +43,33 @@ class _LiveAssistantMessageState {
   );
 }
 
-enum _TimelineEntryKind { message, activity, liveAssistant }
+enum _TimelineEntryKind {
+  message,
+  activity,
+  providerWarning,
+  planUpdated,
+  liveAssistant,
+}
+
+enum _TimelineLiveEventKind { providerWarning, planUpdated }
+
+class _TimelineLiveEventRecord {
+  const _TimelineLiveEventRecord({
+    required this.kind,
+    required this.event,
+    required this.createdAt,
+    required this.seq,
+    required this.keyId,
+    this.semanticKey,
+  });
+
+  final _TimelineLiveEventKind kind;
+  final LiveEvent event;
+  final DateTime createdAt;
+  final int seq;
+  final String keyId;
+  final String? semanticKey;
+}
 
 class _TimelineEntry {
   const _TimelineEntry._({
@@ -53,6 +79,7 @@ class _TimelineEntry {
     required this.keyId,
     this.message,
     this.activity,
+    this.runtimeEvent,
   });
 
   factory _TimelineEntry.message(SessionMessage message) => _TimelineEntry._(
@@ -71,6 +98,19 @@ class _TimelineEntry {
     activity: activity,
   );
 
+  factory _TimelineEntry.runtimeEvent(_TimelineLiveEventRecord event) =>
+      _TimelineEntry._(
+        kind: switch (event.kind) {
+          _TimelineLiveEventKind.providerWarning =>
+            _TimelineEntryKind.providerWarning,
+          _TimelineLiveEventKind.planUpdated => _TimelineEntryKind.planUpdated,
+        },
+        createdAt: event.createdAt,
+        seq: event.seq,
+        keyId: event.keyId,
+        runtimeEvent: event,
+      );
+
   factory _TimelineEntry.liveAssistant(_LiveAssistantMessageState message) =>
       _TimelineEntry._(
         kind: _TimelineEntryKind.liveAssistant,
@@ -85,6 +125,7 @@ class _TimelineEntry {
   final String keyId;
   final SessionMessage? message;
   final SessionActivity? activity;
+  final _TimelineLiveEventRecord? runtimeEvent;
 }
 
 class _LiveAssistantBubble extends StatelessWidget {
@@ -177,8 +218,8 @@ class _ComposerStatusStrip extends StatelessWidget {
   }
 }
 
-class _ProviderWarningCard extends StatelessWidget {
-  const _ProviderWarningCard({required this.event});
+class _ProviderWarningRow extends StatelessWidget {
+  const _ProviderWarningRow({required this.event});
 
   final LiveEvent event;
 
@@ -201,46 +242,60 @@ class _ProviderWarningCard extends StatelessWidget {
       'info' => colors.info,
       _ => colors.warning,
     };
-    return MeshCard(
-      padding: const EdgeInsets.all(14),
-      tone: MeshCardTone.muted,
-      accentStrip: accent,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.surfaceMuted,
+          borderRadius: AppShapes.input,
+          border: Border.all(color: accent.withValues(alpha: 0.22)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              MeshPill(
-                label: 'Provider warning',
-                tone: tone,
-                icon: icon,
+              Icon(icon, size: 16, color: accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        MeshPill(label: 'Provider warning', tone: tone, icon: icon),
+                        if ((event.source ?? '').isNotEmpty)
+                          MeshPill(
+                            label: event.source!,
+                            tone: MeshPillTone.neutral,
+                            mono: true,
+                          ),
+                        if ((event.code ?? '').isNotEmpty)
+                          MeshPill(
+                            label: event.code!,
+                            tone: MeshPillTone.neutral,
+                            mono: true,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      event.message ?? '',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              if ((event.source ?? '').isNotEmpty)
-                MeshPill(
-                  label: event.source!,
-                  tone: MeshPillTone.neutral,
-                  mono: true,
-                ),
-              if ((event.code ?? '').isNotEmpty)
-                MeshPill(
-                  label: event.code!,
-                  tone: MeshPillTone.neutral,
-                  mono: true,
-                ),
             ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            event.message ?? '',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: colors.textPrimary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -256,74 +311,91 @@ class _PlanUpdateCard extends StatelessWidget {
     final colors = context.colors;
     final steps = event.plan ?? const <LiveEventPlanStep>[];
     final completedCount = steps.where((step) => step.status == 'completed').length;
-    return MeshCard(
-      padding: const EdgeInsets.all(14),
-      tone: MeshCardTone.muted,
-      accentStrip: colors.accent,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.route_rounded, size: 18, color: colors.accent),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Plan update',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: colors.textPrimary,
-                    fontWeight: AppWeights.title,
-                  ),
-                ),
-              ),
-              MeshPill(
-                label: '$completedCount/${steps.length} complete',
-                tone: MeshPillTone.accent,
-                mono: true,
-              ),
-            ],
-          ),
-          if ((event.explanation ?? '').isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              event.explanation!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-                fontWeight: FontWeight.w600,
-              ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: MeshCard(
+        padding: EdgeInsets.zero,
+        tone: MeshCardTone.muted,
+        accentStrip: colors.accent,
+        child: Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            key: PageStorageKey<String>(
+              'plan:${event.turnId ?? event.itemId ?? event.explanation ?? steps.length}',
             ),
-          ],
-          const SizedBox(height: 10),
-          for (var index = 0; index < steps.length; index += 1) ...[
-            if (index > 0) const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            tilePadding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            iconColor: colors.textSecondary,
+            collapsedIconColor: colors.textSecondary,
+            initiallyExpanded: true,
+            title: Row(
               children: [
-                Icon(
-                  _planStepIcon(steps[index].status),
-                  size: 18,
-                  color: _planStepColor(colors, steps[index].status),
-                ),
-                const SizedBox(width: 10),
+                Icon(Icons.route_rounded, size: 18, color: colors.accent),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    steps[index].step,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    'Plan update',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       color: colors.textPrimary,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: AppWeights.title,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 MeshPill(
-                  label: _planStepLabel(steps[index].status),
-                  tone: _planStepTone(steps[index].status),
+                  label: '$completedCount/${steps.length} complete',
+                  tone: MeshPillTone.accent,
                   mono: true,
                 ),
               ],
             ),
-          ],
-        ],
+            subtitle: (event.explanation ?? '').isEmpty
+                ? null
+                : Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      event.explanation!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+            children: [
+              for (var index = 0; index < steps.length; index += 1) ...[
+                if (index > 0) const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      _planStepIcon(steps[index].status),
+                      size: 18,
+                      color: _planStepColor(colors, steps[index].status),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        steps[index].step,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colors.textPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    MeshPill(
+                      label: _planStepLabel(steps[index].status),
+                      tone: _planStepTone(steps[index].status),
+                      mono: true,
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

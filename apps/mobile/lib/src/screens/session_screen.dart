@@ -581,9 +581,9 @@ class _SessionScreenState extends State<SessionScreen>
   _ActiveComposerFileQuery? _activeFileQuery;
   SessionLogHistorySummary? _history;
   PendingAction? _pendingAction;
-  LiveEvent? _latestProviderWarning;
+  List<_TimelineLiveEventRecord> _timelineLiveEvents =
+      const <_TimelineLiveEventRecord>[];
   LiveEvent? _latestThreadStatus;
-  LiveEvent? _latestPlanUpdate;
   LiveEvent? _latestQueueUpdate;
   LiveEvent? _latestAutoRetryUpdate;
   _DockedBrowserPreview? _dockedBrowserPreview;
@@ -636,6 +636,7 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionMessage>? _entriesMessagesRef;
   List<SessionMessage>? _entriesOptimisticRef;
   List<SessionActivity>? _entriesActivitiesRef;
+  List<_TimelineLiveEventRecord>? _entriesTimelineEventsRef;
   String? _entriesLiveAssistantId;
   List<_TimelineEntry> _cachedEntries = const [];
 
@@ -2452,7 +2453,10 @@ class _SessionScreenState extends State<SessionScreen>
           return;
         }
         setState(() {
-          _latestProviderWarning = event;
+          _appendTimelineRuntimeEvent(
+            _TimelineLiveEventKind.providerWarning,
+            event,
+          );
         });
       case 'thread_status_changed':
         final status = event.status;
@@ -2485,7 +2489,12 @@ class _SessionScreenState extends State<SessionScreen>
           return;
         }
         setState(() {
-          _latestPlanUpdate = event;
+          _appendTimelineRuntimeEvent(
+            _TimelineLiveEventKind.planUpdated,
+            event,
+            replaceSemanticKey:
+                'plan:${event.turnId ?? event.itemId ?? event.sessionId}',
+          );
         });
       case 'reasoning_delta':
         // Parsed for compatibility, but intentionally not rendered until a
@@ -2521,6 +2530,38 @@ class _SessionScreenState extends State<SessionScreen>
       case 'error':
         break;
     }
+  }
+
+  void _appendTimelineRuntimeEvent(
+    _TimelineLiveEventKind kind,
+    LiveEvent event, {
+    String? replaceSemanticKey,
+  }) {
+    final record = _TimelineLiveEventRecord(
+      kind: kind,
+      event: event,
+      createdAt: DateTime.now(),
+      seq: event.seq ?? _nextTimelineSeq(),
+      keyId:
+          replaceSemanticKey == null
+              ? '${kind.name}:${event.seq ?? DateTime.now().microsecondsSinceEpoch}'
+              : '${kind.name}:$replaceSemanticKey',
+      semanticKey: replaceSemanticKey,
+    );
+    final existingIndex = replaceSemanticKey == null
+        ? -1
+        : _timelineLiveEvents.indexWhere(
+            (candidate) => candidate.semanticKey == replaceSemanticKey,
+          );
+    if (existingIndex == -1) {
+      final next = [..._timelineLiveEvents, record];
+      _timelineLiveEvents =
+          next.length > 16 ? next.sublist(next.length - 16) : next;
+      return;
+    }
+    final updated = [..._timelineLiveEvents];
+    updated[existingIndex] = record;
+    _timelineLiveEvents = updated;
   }
 
   bool get _showRuntimeSignalStrip {
@@ -4569,6 +4610,9 @@ class _SessionScreenState extends State<SessionScreen>
     if (liveAssistant != null && liveAssistant.seq > maxSeq) {
       maxSeq = liveAssistant.seq;
     }
+    for (final event in _timelineLiveEvents) {
+      if (event.seq > maxSeq) maxSeq = event.seq;
+    }
     return maxSeq + 1;
   }
 
@@ -4644,6 +4688,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (identical(_entriesMessagesRef, _messages) &&
         identical(_entriesOptimisticRef, _optimisticMessages) &&
         identical(_entriesActivitiesRef, _activities) &&
+        identical(_entriesTimelineEventsRef, _timelineLiveEvents) &&
         _entriesLiveAssistantId == liveAssistant?.id) {
       return _cachedEntries;
     }
@@ -4653,6 +4698,7 @@ class _SessionScreenState extends State<SessionScreen>
           ..._messages.map(_TimelineEntry.message),
           ..._optimisticMessages.map(_TimelineEntry.message),
           ..._activities.map(_TimelineEntry.activity),
+          ..._timelineLiveEvents.map(_TimelineEntry.runtimeEvent),
           if (liveAssistant != null)
             _TimelineEntry.liveAssistant(liveAssistant),
         ]..sort((left, right) {
@@ -4664,6 +4710,7 @@ class _SessionScreenState extends State<SessionScreen>
     _entriesMessagesRef = _messages;
     _entriesOptimisticRef = _optimisticMessages;
     _entriesActivitiesRef = _activities;
+    _entriesTimelineEventsRef = _timelineLiveEvents;
     _entriesLiveAssistantId = liveAssistant?.id;
     _cachedEntries = entries;
     // Notify pane-3 surfaces (search) that records should be rebuilt.
@@ -4680,7 +4727,11 @@ class _SessionScreenState extends State<SessionScreen>
     final records = <SearchRecord>[];
     final session = _session ?? widget.session;
     for (final entry in entries) {
-      if (entry.kind == _TimelineEntryKind.liveAssistant) continue;
+      if (entry.kind == _TimelineEntryKind.liveAssistant ||
+          entry.kind == _TimelineEntryKind.providerWarning ||
+          entry.kind == _TimelineEntryKind.planUpdated) {
+        continue;
+      }
       if (entry.kind == _TimelineEntryKind.message) {
         final message = entry.message!;
         records.add(
@@ -5243,16 +5294,6 @@ class _SessionScreenState extends State<SessionScreen>
               },
             ),
           ),
-        if (_latestProviderWarning?.message?.isNotEmpty ?? false)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: _ProviderWarningCard(event: _latestProviderWarning!),
-          ),
-        if (_latestPlanUpdate?.plan?.isNotEmpty ?? false)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: _PlanUpdateCard(event: _latestPlanUpdate!),
-          ),
         Expanded(
           child: (_loading && timelineEntries.isEmpty)
               ? const MeshLoader()
@@ -5328,6 +5369,14 @@ class _SessionScreenState extends State<SessionScreen>
                                       'image_generation',
                                   onOpenFile: _openWorkspaceFile,
                                 ),
+                                _TimelineEntryKind.providerWarning =>
+                                  _ProviderWarningRow(
+                                    event: entry.runtimeEvent!.event,
+                                  ),
+                                _TimelineEntryKind.planUpdated =>
+                                  _PlanUpdateCard(
+                                    event: entry.runtimeEvent!.event,
+                                  ),
                                 _TimelineEntryKind.liveAssistant =>
                                   _LiveAssistantBubble(
                                     host: widget.host,
