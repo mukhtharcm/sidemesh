@@ -267,7 +267,8 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                   _SectionHeader(
                     icon: Icons.folder_open_rounded,
                     title: 'Quick launch',
-                    subtitle: 'Tap a folder to start a new session there.',
+                    subtitle:
+                        '${data.workspaces.length} ${data.workspaces.length == 1 ? "folder" : "folders"}',
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   _WorkspaceLaunchRow(
@@ -276,6 +277,18 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                         _startSession(prefilledCwd: workspace.cwd),
                   ),
                   ],
+                  const SizedBox(height: AppSpacing.xl),
+                  _SectionHeader(
+                    icon: Icons.medical_services_rounded,
+                    title: 'Host management',
+                    subtitle: 'Diagnostics and provider control.',
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _HostManagementCard(
+                    host: widget.host,
+                    api: widget.api,
+                    node: data.node,
+                  ),
                   const SizedBox(height: AppSpacing.lg),
                   _SectionHeader(
                     icon: Icons.history_rounded,
@@ -309,18 +322,6 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                         ),
                       ),
                     ),
-                  const SizedBox(height: AppSpacing.xl),
-                  _SectionHeader(
-                    icon: Icons.medical_services_rounded,
-                    title: 'Host management',
-                    subtitle: 'Restart the provider or daemon when stuck.',
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _HostManagementCard(
-                    host: widget.host,
-                    api: widget.api,
-                    node: data.node,
-                  ),
                 ],
               ),
             );

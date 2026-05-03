@@ -7,6 +7,7 @@ import '../api_client.dart';
 import '../create_session_defaults_store.dart';
 import '../fs_models.dart';
 import '../models.dart';
+import '../session_local_store.dart';
 import '../session_message_seed_store.dart';
 import '../session_policy_store.dart';
 import '../theme/app_colors.dart';
@@ -688,9 +689,30 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final node = _nodeInfo;
     if (node == null) return;
 
-    final cwdText = _trimmedOrNull(_cwdController.text);
-    final root = cwdText ?? node.homeDirectory ?? '/';
+    // Prefer the current text if it is under a known workspace root,
+    // otherwise the first known root, and finally the server home
+    // directory (or '/' on older daemons).
+    final current = _trimmedOrNull(_cwdController.text);
+    final recent = await SessionLocalStore.instance.getRecentSessions(
+      widget.host,
+      limit: 40,
+    );
+    final roots = recent
+        .map((s) => s.cwd)
+        .where((c) => c.isNotEmpty)
+        .toSet()
+        .toList();
 
+    final String root;
+    if (current != null && roots.any((r) => current.startsWith(r))) {
+      root = current;
+    } else if (roots.isNotEmpty) {
+      root = roots.first;
+    } else {
+      root = node.homeDirectory ?? '/';
+    }
+
+    if (!mounted) return;
     final selected = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -3105,10 +3127,19 @@ class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
       });
     } catch (e) {
       if (!mounted) return;
+      final msg = friendlyError(e);
+      final isWorkspaceError = msg.contains('workspace') || msg.contains('outside');
       setState(() {
         _loading = false;
-        _error = friendlyError(e);
+        _error = isWorkspaceError
+            ? 'This path is outside your configured workspaces. Choose a folder inside a workspace root.'
+            : msg;
       });
+      // Auto-reset to root workspace if we hit a workspace boundary
+      if (isWorkspaceError && _path != '/' && mounted) {
+        setState(() => _path = '/');
+        unawaited(_load());
+      }
     }
   }
 
@@ -3135,71 +3166,150 @@ class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
     final colors = context.colors;
     return SafeArea(
       child: Container(
-        margin: const EdgeInsets.all(12),
+        height: MediaQuery.of(context).size.height * 0.62,
         decoration: BoxDecoration(
           color: colors.surface,
-          borderRadius: AppShapes.card,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
-        child: ClipRRect(
-          borderRadius: AppShapes.card,
-          child: Scaffold(
-            backgroundColor: colors.surface,
-            appBar: AppBar(
-              backgroundColor: colors.surface,
-              foregroundColor: colors.textPrimary,
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              title: Text(
-                _path,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: monoStyle(color: colors.textPrimary, fontSize: 13),
-              ),
-              leading: IconButton(
-                icon: const Icon(Icons.arrow_upward_rounded),
-                tooltip: 'Parent directory',
-                onPressed: _up,
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(_path),
-                  child: const Text('Select'),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Handle bar
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: colors.border,
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                const SizedBox(width: 8),
-              ],
+              ),
             ),
-            body: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                    ? Center(
-                        child: Text(
-                          _error!,
-                          style: TextStyle(color: colors.danger),
-                        ),
-                      )
-                    : _entries.isEmpty
-                        ? Center(
-                            child: Text(
-                              'No sub-directories',
-                              style: TextStyle(color: colors.textSecondary),
-                            ),
-                          )
-                        : ListView.builder(
-                            itemCount: _entries.length,
-                            itemBuilder: (context, i) {
-                              final entry = _entries[i];
-                              return ListTile(
-                                dense: true,
-                                leading: Icon(
-                                  Icons.folder_rounded,
-                                  color: colors.accent,
+            // Header row
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_upward_rounded, size: 20),
+                    tooltip: 'Parent directory',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _up,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      _path,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(
+                        color: colors.textPrimary,
+                        fontSize: 13,
+                        fontWeight: AppWeights.emphasis,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(_path),
+                    child: const Text('Select'),
+                  ),
+                ],
+              ),
+            ),
+            Divider(color: colors.border, height: 1),
+            // Content
+            Expanded(
+              child: _loading
+                  ? Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: colors.accent,
+                      ),
+                    )
+                  : _error != null
+                      ? Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.folder_off_rounded,
+                                size: 32,
+                                color: colors.textTertiary,
+                              ),
+                              const SizedBox(height: AppSpacing.sm),
+                              Text(
+                                _error!,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: colors.danger,
+                                  fontSize: 13,
                                 ),
-                                title: Text(entry.name),
-                                onTap: () => _enter(entry.name),
-                              );
-                            },
+                              ),
+                              if (_path == '/') ...[
+                                const SizedBox(height: AppSpacing.md),
+                                FilledButton.tonal(
+                                  onPressed: _up,
+                                  child: const Text('Try parent'),
+                                ),
+                              ],
+                            ],
                           ),
-          ),
+                        )
+                      : _entries.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No sub-directories',
+                                style: TextStyle(color: colors.textSecondary),
+                              ),
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              itemCount: _entries.length,
+                              itemBuilder: (context, i) {
+                                final entry = _entries[i];
+                                return InkWell(
+                                  borderRadius: AppShapes.input,
+                                  onTap: () => _enter(entry.name),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.folder_rounded,
+                                          size: 18,
+                                          color: colors.accent,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Text(
+                                            entry.name,
+                                            style: TextStyle(
+                                              color: colors.textPrimary,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                        Icon(
+                                          Icons.chevron_right_rounded,
+                                          size: 16,
+                                          color: colors.textTertiary,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+            ),
+          ],
         ),
       ),
     );
