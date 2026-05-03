@@ -4747,8 +4747,30 @@ class _SessionScreenState extends State<SessionScreen>
 
     final entries =
         <_TimelineEntry>[
-          ..._messages.map(_TimelineEntry.message),
-          ..._optimisticMessages.map(_TimelineEntry.message),
+          ..._messages.expand((msg) => <_TimelineEntry>[
+            if (msg.role == 'assistant' && msg.reasoning.isNotEmpty)
+              _TimelineEntry.reasoning(
+                id: msg.id,
+                text: msg.reasoning,
+                createdAt: msg.createdAt.subtract(
+                  const Duration(microseconds: 1),
+                ),
+                seq: msg.seq,
+              ),
+            _TimelineEntry.message(msg),
+          ]),
+          ..._optimisticMessages.expand((msg) => <_TimelineEntry>[
+            if (msg.role == 'assistant' && msg.reasoning.isNotEmpty)
+              _TimelineEntry.reasoning(
+                id: msg.id,
+                text: msg.reasoning,
+                createdAt: msg.createdAt.subtract(
+                  const Duration(microseconds: 1),
+                ),
+                seq: msg.seq,
+              ),
+            _TimelineEntry.message(msg),
+          ]),
           ..._activities.map(_TimelineEntry.activity),
           ..._timelineLiveEvents.map(_TimelineEntry.runtimeEvent),
           if (liveAssistant != null)
@@ -4781,7 +4803,8 @@ class _SessionScreenState extends State<SessionScreen>
     for (final entry in entries) {
       if (entry.kind == _TimelineEntryKind.liveAssistant ||
           entry.kind == _TimelineEntryKind.providerWarning ||
-          entry.kind == _TimelineEntryKind.planUpdated) {
+          entry.kind == _TimelineEntryKind.planUpdated ||
+          entry.kind == _TimelineEntryKind.reasoning) {
         continue;
       }
       if (entry.kind == _TimelineEntryKind.message) {
@@ -5407,7 +5430,6 @@ class _SessionScreenState extends State<SessionScreen>
                                     session.id,
                                     entry.message!.id,
                                   ),
-                                  reasoning: entry.message!.reasoning,
                                   onTogglePin: () =>
                                       _toggleMessagePin(entry.message!),
                                   onOpenFile: _openWorkspaceFile,
@@ -5429,6 +5451,11 @@ class _SessionScreenState extends State<SessionScreen>
                                 _TimelineEntryKind.planUpdated =>
                                   _PlanUpdateCard(
                                     event: entry.runtimeEvent!.event,
+                                  ),
+                                _TimelineEntryKind.reasoning =>
+                                  _ReasoningBlock(
+                                    reasoning: entry.reasoning!,
+                                    onOpenFile: _openWorkspaceFile,
                                   ),
                                 _TimelineEntryKind.liveAssistant =>
                                   _LiveAssistantBubble(
