@@ -3962,7 +3962,7 @@ class _SessionScreenState extends State<SessionScreen>
     }
     showAppSnackBar(
       context,
-      'Marked unread. It will stay unread until you reopen this session.',
+      'Flagged for follow-up — you\'ll see a blue dot in your recents list.',
     );
   }
 
@@ -4990,9 +4990,9 @@ class _SessionScreenState extends State<SessionScreen>
           ),
           const _SessionActionSpec(
             value: 'unread',
-            label: 'Mark unread',
-            detail: 'Return this thread to your attention queue.',
-            icon: Icons.mark_chat_unread_rounded,
+            label: 'Flag for follow-up',
+            detail: 'Adds a blue dot to this session in your recents list.',
+            icon: Icons.flag_rounded,
           ),
           if (gitAvailable)
             _SessionActionSpec(
@@ -5586,9 +5586,9 @@ class _SessionScreenState extends State<SessionScreen>
                     value: 'unread',
                     child: Row(
                       children: [
-                        Icon(Icons.mark_chat_unread_rounded, size: 18),
+                        Icon(Icons.flag_rounded, size: 18),
                         SizedBox(width: 10),
-                        Text('Mark unread'),
+                        Text('Flag for follow-up'),
                       ],
                     ),
                   ),
