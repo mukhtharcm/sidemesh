@@ -13,6 +13,9 @@ class _FakePathProvider extends PathProviderPlatform
   Future<String?> getApplicationDocumentsPath() async => '/tmp/sidemesh_test';
 
   @override
+  Future<String?> getApplicationSupportPath() async => '/tmp/sidemesh_test';
+
+  @override
   Future<String?> getTemporaryPath() async => '/tmp/sidemesh_test';
 }
 
@@ -52,6 +55,22 @@ void main() {
     expect(recents.length, 2);
     expect(recents.first.id, 's2'); // sorted by updated_at DESC
     expect(recents.last.id, 's1');
+  });
+
+  test('first-load database work is safe under concurrent callers', () async {
+    final store = SessionLocalStore.instance;
+    final session = _summary('race-1', updatedAt: DateTime.now(), title: 'Race');
+
+    await Future.wait([
+      store.ensureLoaded(),
+      store.getRecentSessions(host),
+      store.getFavoriteSessions(host),
+      store.upsertSessions(host, [session]),
+    ]);
+
+    final recents = await store.getRecentSessions(host);
+    expect(recents.length, 1);
+    expect(recents.single.id, 'race-1');
   });
 
   test('getRecentSessions respects limit', () async {
