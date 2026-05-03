@@ -3377,6 +3377,9 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
   late final TextEditingController _tokenController;
   late bool _enabled;
   String? _error;
+  bool _testing = false;
+  String? _testResult;
+  bool _testSuccess = false;
 
   @override
   void initState() {
@@ -3413,6 +3416,50 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
       _error = null;
     });
     showAppSnackBar(context, 'QR scanned — ${payload.label}');
+  }
+
+  Future<void> _testConnection() async {
+    final label = _labelController.text.trim();
+    final baseUrl = normalizeBaseUrl(_baseUrlController.text);
+    final token = _tokenController.text.trim();
+    if (baseUrl.isEmpty || token.isEmpty) {
+      setState(() {
+        _testResult = 'Enter a URL and token first.';
+        _testSuccess = false;
+      });
+      return;
+    }
+    setState(() {
+      _testing = true;
+      _testResult = null;
+    });
+    try {
+      final probe = HostProfile(
+        id: 'probe',
+        label: label.isEmpty ? 'probe' : label,
+        baseUrl: baseUrl,
+        token: token,
+      );
+      final node = await ApiClient().fetchNode(probe);
+      if (!mounted) return;
+      // Auto-fill label if empty
+      if (_labelController.text.trim().isEmpty) {
+        _labelController.text = node.hostname;
+      }
+      setState(() {
+        _testing = false;
+        _testSuccess = true;
+        _testResult = 'Connected — ${node.hostname} \u00b7 ${node.platform}';
+      });
+      HapticFeedback.mediumImpact();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _testing = false;
+        _testSuccess = false;
+        _testResult = 'Could not reach host: ${friendlyError(e)}';
+      });
+    }
   }
 
   void _submit() {
@@ -3599,6 +3646,46 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                     if (_error != null) ...[
                       const SizedBox(height: 12),
                       _HostEditorError(message: _error!),
+                    ],
+                    const SizedBox(height: 12),
+                    FilledButton.tonalIcon(
+                      onPressed: _testing ? null : _testConnection,
+                      icon: _testing
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 1.5),
+                            )
+                          : const Icon(Icons.wifi_tethering_rounded, size: 18),
+                      label: const Text('Test connection'),
+                    ),
+                    if (_testResult != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(
+                            _testSuccess
+                                ? Icons.check_circle_rounded
+                                : Icons.error_outline_rounded,
+                            size: 16,
+                            color: _testSuccess
+                                ? context.colors.success
+                                : context.colors.danger,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              _testResult!,
+                              style: monoStyle(
+                                color: _testSuccess
+                                    ? context.colors.success
+                                    : context.colors.danger,
+                                fontSize: 11.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                     const SizedBox(height: 16),
                     _HostEditorFooter(
