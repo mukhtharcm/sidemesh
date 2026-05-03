@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../api_client.dart';
 import '../create_session_defaults_store.dart';
+import '../fs_models.dart';
 import '../models.dart';
 import '../session_message_seed_store.dart';
 import '../session_policy_store.dart';
@@ -683,6 +684,26 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     }
   }
 
+  Future<void> _browseDirectory() async {
+    final node = _nodeInfo;
+    if (node == null) return;
+    final root = _trimmedOrNull(_cwdController.text) ?? '/';
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _DirectoryPickerSheet(
+        host: widget.host,
+        api: widget.api,
+        initialPath: root,
+      ),
+    );
+    if (selected != null && mounted) {
+      _cwdController.text = selected;
+      _handleCwdChanged();
+    }
+  }
+
   void _coerceForProviderCapabilities() {
     if (!_supportsProfiles) {
       _profileController.clear();
@@ -1290,6 +1311,23 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         _LaunchFieldFrame(
           icon: Icons.folder_open_rounded,
           label: 'Working directory',
+          trailing: _nodeInfo != null
+              ? IconButton(
+                  tooltip: 'Browse host filesystem',
+                  onPressed: _submitting ? null : _browseDirectory,
+                  icon: Icon(
+                    Icons.folder_rounded,
+                    size: 18,
+                    color: context.colors.accent,
+                  ),
+                )
+              : _loadingNode
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : null,
           child: TextField(
             controller: _cwdController,
             textInputAction: TextInputAction.next,
@@ -1886,12 +1924,14 @@ class _LaunchFieldFrame extends StatelessWidget {
     required this.label,
     required this.child,
     this.alignTop = false,
+    this.trailing,
   });
 
   final IconData icon;
   final String label;
   final Widget child;
   final bool alignTop;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -1940,6 +1980,10 @@ class _LaunchFieldFrame extends StatelessWidget {
               ],
             ),
           ),
+          if (trailing != null) ...[
+            const SizedBox(width: 8),
+            trailing!,
+          ],
         ],
       ),
     );
@@ -3009,4 +3053,152 @@ String? _trimmedOrNull(String? value) {
   final trimmed = value?.trim();
   if (trimmed == null || trimmed.isEmpty) return null;
   return trimmed;
+}
+
+// ---------------------------------------------------------------------------
+// Simple host directory picker
+// ---------------------------------------------------------------------------
+
+class _DirectoryPickerSheet extends StatefulWidget {
+  const _DirectoryPickerSheet({
+    required this.host,
+    required this.api,
+    required this.initialPath,
+  });
+
+  final HostProfile host;
+  final ApiClient api;
+  final String initialPath;
+
+  @override
+  State<_DirectoryPickerSheet> createState() => _DirectoryPickerSheetState();
+}
+
+class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
+  late String _path;
+  bool _loading = true;
+  String? _error;
+  List<FsEntry> _entries = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _path = widget.initialPath;
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final listing = await widget.api.listDirectory(widget.host, _path);
+      if (!mounted) return;
+      setState(() {
+        _entries = listing.entries.where((e) => e.isDirectory).toList()
+          ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = friendlyError(e);
+      });
+    }
+  }
+
+  void _enter(String name) {
+    setState(() {
+      _path = _path.endsWith('/') ? '$_path$name' : '$_path/$name';
+    });
+    unawaited(_load());
+  }
+
+  void _up() {
+    final parts = _path.split('/');
+    if (parts.length <= 2 && _path.startsWith('/')) {
+      setState(() => _path = '/');
+    } else {
+      parts.removeLast();
+      setState(() => _path = parts.join('/').isEmpty ? '/' : parts.join('/'));
+    }
+    unawaited(_load());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: AppShapes.card,
+        ),
+        child: ClipRRect(
+          borderRadius: AppShapes.card,
+          child: Scaffold(
+            backgroundColor: colors.surface,
+            appBar: AppBar(
+              backgroundColor: colors.surface,
+              foregroundColor: colors.textPrimary,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              title: Text(
+                _path,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: monoStyle(color: colors.textPrimary, fontSize: 13),
+              ),
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_upward_rounded),
+                tooltip: 'Parent directory',
+                onPressed: _up,
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(_path),
+                  child: const Text('Select'),
+                ),
+                const SizedBox(width: 8),
+              ],
+            ),
+            body: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? Center(
+                        child: Text(
+                          _error!,
+                          style: TextStyle(color: colors.danger),
+                        ),
+                      )
+                    : _entries.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No sub-directories',
+                              style: TextStyle(color: colors.textSecondary),
+                            ),
+                          )
+                        : ListView.builder(
+                            itemCount: _entries.length,
+                            itemBuilder: (context, i) {
+                              final entry = _entries[i];
+                              return ListTile(
+                                dense: true,
+                                leading: Icon(
+                                  Icons.folder_rounded,
+                                  color: colors.accent,
+                                ),
+                                title: Text(entry.name),
+                                onTap: () => _enter(entry.name),
+                              );
+                            },
+                          ),
+          ),
+        ),
+      ),
+    );
+  }
 }
