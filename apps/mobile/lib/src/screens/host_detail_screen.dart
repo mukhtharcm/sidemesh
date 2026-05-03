@@ -14,6 +14,7 @@ import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/session_row_card.dart';
 import 'create_session_sheet.dart';
+import 'terminal_screen.dart';
 
 class HostDetailScreen extends StatefulWidget {
   const HostDetailScreen({
@@ -1209,6 +1210,20 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     }
   }
 
+  Future<void> _openTerminal() async {
+    final cwd = widget.node.homeDirectory ?? '/';
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TerminalScreen(
+          host: widget.host,
+          api: widget.api,
+          cwd: cwd,
+          title: 'Terminal · ${widget.host.label}',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -1219,6 +1234,16 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Divider(height: 1, color: colors.border),
+          if (widget.node.supportsHostCapability('workspace', 'terminal'))
+            _ManagementRow(
+              icon: Icons.terminal_rounded,
+              label: 'New terminal',
+              detail: 'Open a shell on ${widget.host.label}.',
+              busy: false,
+              onTap: _openTerminal,
+            ),
+          if (widget.node.supportsHostCapability('workspace', 'terminal'))
+            Divider(height: 1, indent: 46, color: colors.border),
           if (_supportsRestart)
             _ManagementRow(
               icon: Icons.refresh_rounded,
