@@ -1054,7 +1054,7 @@ class _BrowserBottomToolbar extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: InkWell(
-                onTap: () {},
+                onTap: onFocusUrl,
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
                   height: 32,
@@ -1077,7 +1077,13 @@ class _BrowserBottomToolbar extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
+            _ViewportChip(
+              width: preview.width,
+              height: preview.height,
+              onTap: onResize,
+            ),
+            const SizedBox(width: 6),
             _ToolbarButton(
               icon: devToolsOpen
                   ? Icons.construction_rounded
@@ -1582,6 +1588,50 @@ class _KeyButton extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: OutlinedButton(onPressed: onTap, child: Text(label)),
+    );
+  }
+}
+
+class _ViewportChip extends StatelessWidget {
+  const _ViewportChip({
+    required this.width,
+    required this.height,
+    required this.onTap,
+  });
+
+  final int width;
+  final int height;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: colors.accent.withValues(alpha: 0.11),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: colors.accent.withValues(alpha: 0.34)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.aspect_ratio_rounded, size: 14, color: colors.accent),
+            const SizedBox(width: 6),
+            Text(
+              '\$width x \$height',
+              style: monoStyle(
+                color: colors.accent,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
