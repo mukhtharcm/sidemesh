@@ -223,71 +223,78 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final title = widget.live && !_expanded ? 'Thinking…' : 'Thinking';
+    final title = widget.live
+        ? (_expanded ? 'Thinking' : 'Thinking...')
+        : 'Reasoning';
     return AnimatedSize(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeInOut,
       alignment: Alignment.topCenter,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          InkWell(
-            onTap: _toggle,
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                children: [
-                  if (widget.live)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: LivePulse(color: colors.textTertiary),
-                    )
-                  else
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: colors.surfaceMuted,
+          borderRadius: AppShapes.input,
+          border: Border.all(color: colors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              onTap: _toggle,
+              borderRadius: AppShapes.input,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                child: Row(
+                  children: [
+                    if (widget.live)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: LivePulse(color: colors.textSecondary),
+                      )
+                    else ...[
+                      Icon(
+                        Icons.psychology_outlined,
+                        size: 16,
+                        color: colors.textSecondary,
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Expanded(
+                      child: Text(
+                        title,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall
+                            ?.copyWith(
+                              color: colors.textPrimary,
+                              fontWeight: AppWeights.title,
+                            ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
                     Icon(
-                      Icons.psychology_outlined,
+                      _expanded
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
                       size: 16,
-                      color: colors.textTertiary,
+                      color: colors.textSecondary,
                     ),
-                  if (!widget.live) const SizedBox(width: 6),
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: colors.textTertiary,
-                      fontWeight: AppWeights.title,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    _expanded
-                        ? Icons.expand_less_rounded
-                        : Icons.expand_more_rounded,
-                    size: 16,
-                    color: colors.textTertiary,
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          if (_expanded) ...[
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: colors.surfaceMuted,
-                borderRadius: AppShapes.input,
-                border: Border.all(color: colors.border),
+            if (_expanded)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                child: _MarkdownMessageBody(
+                  text: widget.reasoning,
+                  textColor: colors.textPrimary,
+                  onOpenFile: widget.onOpenFile,
+                ),
               ),
-              child: _MarkdownMessageBody(
-                text: widget.reasoning,
-                textColor: colors.textPrimary,
-                onOpenFile: widget.onOpenFile,
-              ),
-            ),
           ],
-        ],
+        ),
       ),
     );
   }
