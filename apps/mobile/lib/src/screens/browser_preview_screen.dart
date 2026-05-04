@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart' hide Uint8List;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -421,6 +422,26 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   Future<void> _stopRemoteBrowser() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Stop remote browser?'),
+        content: const Text(
+          'This shuts down the remote Chromium instance. You can start a new preview from the Ports screen any time.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Stop'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     try {
       final stopped = await widget.api.stopBrowserPreview(
         widget.host,
@@ -597,6 +618,19 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     });
   }
 
+  void _handlePointerSignal(PointerSignalEvent event, Size size) {
+    if (event is! PointerScrollEvent) return;
+    final point = _mapPoint(event.localPosition, size);
+    if (point == null) return;
+    _send({
+      'type': 'scroll',
+      'x': point.dx,
+      'y': point.dy,
+      'deltaY': event.scrollDelta.dy,
+      'deltaX': event.scrollDelta.dx,
+    });
+  }
+
   void _sendNavigate() {
     final url = _urlController.text.trim();
     if (url.isEmpty) return;
@@ -630,33 +664,41 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   Widget build(BuildContext context) {
     final colors = context.colors;
     final desktopLike = MediaQuery.sizeOf(context).shortestSide >= 700;
+    final reconnecting =
+        _frameBytes != null && _status != null && !_clientPaused;
     return Column(
       children: [
-        if (widget.showHeader)
-          _BrowserChromeBar(
-            preview: _preview,
-            urlController: _urlController,
-            urlFocusNode: _urlFocusNode,
-            pageLoading: _pageLoading,
-            desktopLike: desktopLike,
-            onBack: widget.onBack,
-            onMinimize: widget.onMinimize,
-            onNavigate: _sendNavigate,
-            onBackNavigation: () => _sendNavigation('back'),
-            onForwardNavigation: () => _sendNavigation('forward'),
-            onReload: () => _sendNavigation('reload'),
-            onResize: () => unawaited(_showViewportSheet()),
-            onToggleInput: _toggleInputRail,
-            onToggleDevTools: _toggleDevTools,
-            onTogglePause: () => _clientPaused ? _resumeStream() : _pauseStream(manual: true),
-            onStop: () => unawaited(_stopRemoteBrowser()),
-          ),
+        _BrowserChromeBar(
+          preview: _preview,
+          urlController: _urlController,
+          urlFocusNode: _urlFocusNode,
+          pageLoading: _pageLoading,
+          desktopLike: desktopLike,
+          streamPaused: _clientPaused,
+          devToolsOpen: _devToolsOpen,
+          inputRailOpen: _inputRailOpen,
+          onBack: widget.onBack,
+          onMinimize: widget.onMinimize,
+          onNavigate: _sendNavigate,
+          onBackNavigation: () => _sendNavigation('back'),
+          onForwardNavigation: () => _sendNavigation('forward'),
+          onReload: () => _sendNavigation('reload'),
+          onResize: () => unawaited(_showViewportSheet()),
+          onToggleInput: _toggleInputRail,
+          onToggleDevTools: _toggleDevTools,
+          onTogglePause: () => _clientPaused
+              ? _resumeStream()
+              : _pauseStream(manual: true),
+          onStop: widget.showHeader
+              ? () => unawaited(_stopRemoteBrowser())
+              : null,
+        ),
         Expanded(
           child: Stack(
             children: [
               Positioned.fill(
                 child: Container(
-                  color: const Color(0xFF07090D),
+                  color: colors.canvas,
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final size = constraints.biggest;
@@ -669,15 +711,21 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                           onHover: desktopLike
                               ? (event) => _sendHover(event, size)
                               : null,
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTapDown: (details) => _sendTapDown(details, size),
-                            onTapUp: (details) => _sendTapUp(details, size),
-                            onVerticalDragUpdate: (details) =>
-                                _sendScroll(details, size),
-                            onHorizontalDragUpdate: (details) =>
-                                _sendScroll(details, size),
-                            child: _buildPreviewBody(colors),
+                          child: Listener(
+                            onPointerSignal: (event) =>
+                                _handlePointerSignal(event, size),
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTapDown: (details) =>
+                                  _sendTapDown(details, size),
+                              onTapUp: (details) =>
+                                  _sendTapUp(details, size),
+                              onVerticalDragUpdate: (details) =>
+                                  _sendScroll(details, size),
+                              onHorizontalDragUpdate: (details) =>
+                                  _sendScroll(details, size),
+                              child: _buildPreviewBody(colors),
+                            ),
                           ),
                         ),
                       );
@@ -696,6 +744,15 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                     color: colors.accent,
                   ),
                 ),
+              if (reconnecting)
+                Positioned(
+                  top: 8,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: _ReconnectingChip(message: _status!),
+                  ),
+                ),
               if (_clientPaused)
                 Positioned.fill(
                   child: _PausedPreviewOverlay(
@@ -703,11 +760,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                     onResume: _resumeStream,
                   ),
                 ),
-
             ],
           ),
         ),
-        if (widget.showHeader && !desktopLike)
+        if (!desktopLike)
           _BrowserBottomToolbar(
             preview: _preview,
             streamPaused: _clientPaused,
@@ -720,7 +776,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             onResize: () => unawaited(_showViewportSheet()),
             onToggleInput: _toggleInputRail,
             onToggleDevTools: _toggleDevTools,
-            onTogglePause: () => _clientPaused ? _resumeStream() : _pauseStream(manual: true),
+            onTogglePause: () => _clientPaused
+                ? _resumeStream()
+                : _pauseStream(manual: true),
           ),
         if (_inputRailOpen)
           _InputRail(
@@ -801,6 +859,9 @@ class _BrowserChromeBar extends StatelessWidget {
     required this.urlFocusNode,
     required this.pageLoading,
     required this.desktopLike,
+    required this.streamPaused,
+    required this.devToolsOpen,
+    required this.inputRailOpen,
     this.onBack,
     this.onMinimize,
     required this.onNavigate,
@@ -811,7 +872,7 @@ class _BrowserChromeBar extends StatelessWidget {
     required this.onToggleInput,
     required this.onToggleDevTools,
     required this.onTogglePause,
-    required this.onStop,
+    this.onStop,
   });
 
   final HostBrowserPreviewInfo preview;
@@ -819,6 +880,9 @@ class _BrowserChromeBar extends StatelessWidget {
   final FocusNode urlFocusNode;
   final bool pageLoading;
   final bool desktopLike;
+  final bool streamPaused;
+  final bool devToolsOpen;
+  final bool inputRailOpen;
   final VoidCallback? onBack;
   final VoidCallback? onMinimize;
   final VoidCallback onNavigate;
@@ -829,7 +893,14 @@ class _BrowserChromeBar extends StatelessWidget {
   final VoidCallback onToggleInput;
   final VoidCallback onToggleDevTools;
   final VoidCallback onTogglePause;
-  final VoidCallback onStop;
+  final VoidCallback? onStop;
+
+  bool get _isHttps {
+    final url = urlController.text.trim().toLowerCase();
+    if (url.startsWith('https://')) return true;
+    if (url.isEmpty && preview.scheme == 'https') return true;
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -844,40 +915,38 @@ class _BrowserChromeBar extends StatelessWidget {
       ),
       child: SafeArea(
         bottom: false,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              if (onBack != null) ...[
-                _ChromeButton(
-                  icon: Icons.arrow_back_rounded,
-                  tooltip: 'Back to ports',
-                  onTap: onBack!,
-                ),
-                const SizedBox(width: 4),
-              ],
-              if (desktopLike) ...[
-                _ChromeButton(
-                  icon: Icons.arrow_back_rounded,
-                  tooltip: 'Back',
-                  onTap: onBackNavigation,
-                ),
-                const SizedBox(width: 4),
-                _ChromeButton(
-                  icon: Icons.arrow_forward_rounded,
-                  tooltip: 'Forward',
-                  onTap: onForwardNavigation,
-                ),
-                const SizedBox(width: 4),
-                _ChromeButton(
-                  icon: Icons.refresh_rounded,
-                  tooltip: 'Reload',
-                  onTap: onReload,
-                ),
-                const SizedBox(width: 4),
-              ],
-              Container(
-                width: desktopLike ? 380 : 280,
+        child: Row(
+          children: [
+            if (onBack != null) ...[
+              _ChromeButton(
+                icon: Icons.close_rounded,
+                tooltip: 'Close preview',
+                onTap: onBack!,
+              ),
+              const SizedBox(width: 4),
+            ],
+            if (desktopLike) ...[
+              _ChromeButton(
+                icon: Icons.arrow_back_rounded,
+                tooltip: 'Back',
+                onTap: onBackNavigation,
+              ),
+              const SizedBox(width: 2),
+              _ChromeButton(
+                icon: Icons.arrow_forward_rounded,
+                tooltip: 'Forward',
+                onTap: onForwardNavigation,
+              ),
+              const SizedBox(width: 2),
+              _ChromeButton(
+                icon: Icons.refresh_rounded,
+                tooltip: 'Reload',
+                onTap: onReload,
+              ),
+              const SizedBox(width: 6),
+            ],
+            Expanded(
+              child: Container(
                 height: 36,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 decoration: BoxDecoration(
@@ -897,10 +966,19 @@ class _BrowserChromeBar extends StatelessWidget {
                         ),
                       )
                     else
-                      Icon(
-                        Icons.lock_rounded,
-                        size: 14,
-                        color: colors.textTertiary,
+                      Tooltip(
+                        message: _isHttps
+                            ? 'Connection is secure (HTTPS)'
+                            : 'Connection is not secure (HTTP)',
+                        child: Icon(
+                          _isHttps
+                              ? Icons.lock_rounded
+                              : Icons.info_outline_rounded,
+                          size: 14,
+                          color: _isHttps
+                              ? colors.textTertiary
+                              : colors.warning,
+                        ),
                       ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -922,49 +1000,68 @@ class _BrowserChromeBar extends StatelessWidget {
                           contentPadding: EdgeInsets.zero,
                         ),
                         textInputAction: TextInputAction.go,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        keyboardType: TextInputType.url,
                         onSubmitted: (_) => onNavigate(),
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              if (desktopLike) ...[
-                _ViewportChip(
-                  width: preview.width,
-                  height: preview.height,
-                  onTap: onResize,
-                ),
-                const SizedBox(width: 6),
-                _ChromeButton(
-                  icon: Icons.keyboard_alt_rounded,
-                  tooltip: 'Keyboard',
-                  onTap: onToggleInput,
-                ),
-                const SizedBox(width: 4),
-                _ChromeButton(
-                  icon: Icons.construction_outlined,
-                  tooltip: 'DevTools',
-                  onTap: onToggleDevTools,
-                ),
-                const SizedBox(width: 4),
-              ],
-              if (onMinimize != null) ...[
-                _ChromeButton(
-                  icon: Icons.keyboard_arrow_down_rounded,
-                  tooltip: 'Minimize',
-                  onTap: onMinimize!,
-                ),
-                const SizedBox(width: 4),
-              ],
+            ),
+            const SizedBox(width: 8),
+            if (desktopLike) ...[
+              _ViewportChip(
+                width: preview.width,
+                height: preview.height,
+                onTap: onResize,
+              ),
+              const SizedBox(width: 6),
+              _ChromeButton(
+                icon: inputRailOpen
+                    ? Icons.keyboard_hide_rounded
+                    : Icons.keyboard_alt_rounded,
+                tooltip: inputRailOpen ? 'Hide keyboard' : 'Keyboard',
+                color: inputRailOpen ? colors.accent : null,
+                onTap: onToggleInput,
+              ),
+              const SizedBox(width: 2),
+              _ChromeButton(
+                icon: devToolsOpen
+                    ? Icons.construction_rounded
+                    : Icons.construction_outlined,
+                tooltip: devToolsOpen ? 'Hide DevTools' : 'DevTools',
+                color: devToolsOpen ? colors.accent : null,
+                onTap: onToggleDevTools,
+              ),
+              const SizedBox(width: 2),
+              _ChromeButton(
+                icon: streamPaused
+                    ? Icons.play_circle_outline_rounded
+                    : Icons.pause_circle_outline_rounded,
+                tooltip: streamPaused ? 'Resume stream' : 'Pause stream',
+                color: streamPaused ? colors.success : null,
+                onTap: onTogglePause,
+              ),
+              const SizedBox(width: 4),
+            ],
+            if (onMinimize != null) ...[
+              _ChromeButton(
+                icon: Icons.keyboard_arrow_down_rounded,
+                tooltip: 'Minimize',
+                onTap: onMinimize!,
+              ),
+              const SizedBox(width: 2),
+            ],
+            if (onStop != null)
               _ChromeButton(
                 icon: Icons.stop_circle_rounded,
-                tooltip: 'Stop',
+                tooltip: 'Stop remote browser',
                 color: colors.danger,
-                onTap: onStop,
+                onTap: onStop!,
               ),
-            ],
-          ),
+          ],
         ),
       ),
     );
@@ -1162,25 +1259,20 @@ class _DevToolsPanel extends StatelessWidget {
                   active: tabIndex == 0,
                   onTap: () => onTabChanged(0),
                 ),
-                _DevTab(
-                  label: 'Network',
-                  active: tabIndex == 1,
-                  onTap: () => onTabChanged(1),
-                ),
-                _DevTab(
-                  label: 'Storage',
-                  active: tabIndex == 2,
-                  onTap: () => onTabChanged(2),
-                ),
-                _DevTab(
-                  label: 'Inspector',
-                  active: tabIndex == 3,
-                  onTap: () => onTabChanged(3),
-                ),
                 const Spacer(),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Text(
+                    'Network · Storage · Inspector coming soon',
+                    style: TextStyle(
+                      color: colors.textTertiary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
                 IconButton(
                   icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                  tooltip: 'Clear',
+                  tooltip: 'Clear console',
                   onPressed: onClearConsole,
                   visualDensity: VisualDensity.compact,
                 ),
@@ -1189,18 +1281,10 @@ class _DevToolsPanel extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: switch (tabIndex) {
-              0 => _ConsoleTab(
-                entries: consoleEntries,
-                preview: preview,
-              ),
-              _ => Center(
-                child: Text(
-                  'Coming soon',
-                  style: TextStyle(color: colors.textSecondary),
-                ),
-              ),
-            },
+            child: _ConsoleTab(
+              entries: consoleEntries,
+              preview: preview,
+            ),
           ),
         ],
       ),
@@ -1359,6 +1443,52 @@ class _ConsoleEntry {
   final int? lineNumber;
   final int? columnNumber;
   final int timestamp;
+}
+
+class _ReconnectingChip extends StatelessWidget {
+  const _ReconnectingChip({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 360),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: colors.accent,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              message,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _PausedPreviewOverlay extends StatelessWidget {
