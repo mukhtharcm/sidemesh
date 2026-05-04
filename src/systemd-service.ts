@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -273,6 +273,102 @@ export async function isSystemdServiceActive(
   }
 }
 
+export async function isSystemdServiceEnabled(
+  serviceName?: string | null,
+): Promise<boolean> {
+  assertSystemdHost({ requireRoot: false });
+  try {
+    await systemctl(["is-enabled", "--quiet", `${normalizeServiceName(serviceName)}.service`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function resolveInstalledServicePaths(options: {
+  serviceName?: string | null;
+  packageDir: string;
+  nodeBin: string;
+  unitPath?: string | null;
+  envPath?: string | null;
+  launcherPath?: string | null;
+}): Promise<ServicePaths> {
+  const fallbackPaths = resolveServicePaths(options);
+  if (options.unitPath || options.envPath || options.launcherPath) {
+    return fallbackPaths;
+  }
+
+  let unitPath = fallbackPaths.unitPath;
+  try {
+    const { stdout } = await execFileAsync("systemctl", [
+      "show",
+      "--property=FragmentPath",
+      "--value",
+      `${fallbackPaths.serviceName}.service`,
+    ]);
+    const fragmentPath = stdout.trim();
+    if (fragmentPath && fragmentPath !== "/dev/null") {
+      unitPath = fragmentPath;
+    }
+  } catch {
+    return fallbackPaths;
+  }
+
+  try {
+    const unitContent = await readFile(unitPath, "utf8");
+    return {
+      ...fallbackPaths,
+      unitPath,
+      envPath:
+        readSystemdDirective(unitContent, "EnvironmentFile")?.replace(/^-/, "") ??
+        fallbackPaths.envPath,
+      launcherPath:
+        readSystemdDirective(unitContent, "ExecStart") ?? fallbackPaths.launcherPath,
+    };
+  } catch {
+    return {
+      ...fallbackPaths,
+      unitPath,
+    };
+  }
+}
+
+export async function readSystemdUnitLimits(
+  paths: Pick<ServicePaths, "unitPath">,
+): Promise<{ memoryHigh: string | null; memoryMax: string | null }> {
+  try {
+    const unitContent = await readFile(paths.unitPath, "utf8");
+    return {
+      memoryHigh: readSystemdDirective(unitContent, "MemoryHigh"),
+      memoryMax: readSystemdDirective(unitContent, "MemoryMax"),
+    };
+  } catch {
+    return {
+      memoryHigh: null,
+      memoryMax: null,
+    };
+  }
+}
+
+export async function isServiceWrapperStale(
+  paths: ServicePaths,
+  config: Pick<NodeConfig, "configPath">,
+  limits: { memoryHigh?: string | null; memoryMax?: string | null } = {},
+): Promise<boolean> {
+  try {
+    const [existingLauncher, existingUnit] = await Promise.all([
+      readFile(paths.launcherPath, "utf8"),
+      readFile(paths.unitPath, "utf8"),
+    ]);
+    return (
+      existingLauncher !== renderServiceLauncher(paths, config) ||
+      existingUnit !== renderSystemdUnit(paths, limits)
+    );
+  } catch {
+    return true;
+  }
+}
+
 export function assertSystemdHost(options: { requireRoot: boolean }): void {
   if (process.platform !== "linux") {
     throw new Error("Sidemesh service helpers currently support Linux/systemd only.");
@@ -316,6 +412,13 @@ function normalizeSystemdSize(value: string | null | undefined): string | null {
     return normalized;
   }
   throw new Error(`Invalid systemd memory size: ${value}`);
+}
+
+function readSystemdDirective(content: string, name: string): string | null {
+  const match = content.match(
+    new RegExp(`^${name}=(.+)$`, "m"),
+  );
+  return match?.[1]?.trim() ?? null;
 }
 
 function envLine(key: string, value: string): string {
