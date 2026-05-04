@@ -4759,10 +4759,12 @@ class _SessionScreenState extends State<SessionScreen>
       return _cachedEntries;
     }
 
+    final messages = _messages.where((m) => m.isRenderable);
+    final optimistic = _optimisticMessages.where((m) => m.isRenderable);
     final entries =
         <_TimelineEntry>[
-          ..._messages.map(_TimelineEntry.message),
-          ..._optimisticMessages.map(_TimelineEntry.message),
+          ...messages.map(_TimelineEntry.message),
+          ...optimistic.map(_TimelineEntry.message),
           ..._activities.map(_TimelineEntry.activity),
           ..._timelineLiveEvents.map(_TimelineEntry.runtimeEvent),
           if (liveAssistant != null)
