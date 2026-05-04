@@ -2390,18 +2390,19 @@ class _SessionScreenState extends State<SessionScreen>
               (b) => b is ThinkingBlock,
             );
             final liveThinking = committedLive != null &&
-                committedLive.reasoning.isNotEmpty;
+                committedLive.reasoning.trim().isNotEmpty;
             if (!hasThinkingBlocks && liveThinking) {
+              final reasoning = committedLive.reasoning.trimRight();
               _upsertOptimisticMessage(
                 SessionMessage(
                   id: message.id,
                   role: message.role,
                   text: message.text,
                   content: [
-                    ThinkingBlock(committedLive.reasoning),
+                    ThinkingBlock(reasoning),
                     ...message.content.whereType<TextBlock>(),
                     if (!message.content.any((b) => b is TextBlock) &&
-                        message.text.isNotEmpty)
+                        message.text.trim().isNotEmpty)
                       TextBlock(message.text),
                   ],
                   attachments: message.attachments,
@@ -2413,7 +2414,9 @@ class _SessionScreenState extends State<SessionScreen>
             } else {
               _upsertOptimisticMessage(message);
             }
-          } else if (committedLive != null && committedLive.text.isNotEmpty) {
+          } else if (committedLive != null &&
+              (committedLive.text.trim().isNotEmpty ||
+                  committedLive.reasoning.trim().isNotEmpty)) {
             _upsertOptimisticMessage(committedLive.toMessage());
           }
           _clearLiveAssistantMessage();
@@ -2430,7 +2433,9 @@ class _SessionScreenState extends State<SessionScreen>
         setState(() {
           _running = false;
           _awaitingAssistantReply = false;
-          if (committedLive != null && committedLive.text.isNotEmpty) {
+          if (committedLive != null &&
+              (committedLive.text.trim().isNotEmpty ||
+                  committedLive.reasoning.trim().isNotEmpty)) {
             _upsertOptimisticMessage(committedLive.toMessage());
           }
           _clearLiveAssistantMessage();
@@ -2680,7 +2685,7 @@ class _SessionScreenState extends State<SessionScreen>
     final delta = hasDelta ? _assistantDeltaBuffer.toString() : '';
     _assistantDeltaBuffer.clear();
 
-    final hasReasoning = _reasoningDeltaBuffer.isNotEmpty;
+    final hasReasoning = _reasoningDeltaBuffer.toString().trim().isNotEmpty;
     final reasoningDelta = hasReasoning ? _reasoningDeltaBuffer.toString() : '';
     _reasoningDeltaBuffer.clear();
 

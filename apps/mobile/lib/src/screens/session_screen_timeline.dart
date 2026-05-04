@@ -36,21 +36,25 @@ class _LiveAssistantMessageState {
     );
   }
 
-  SessionMessage toMessage() => SessionMessage(
-    id: id,
-    role: 'assistant',
-    text: text,
-    content: <ContentBlock>[
-      if (reasoning.isNotEmpty)
-        ThinkingBlock(reasoning),
-      if (text.isNotEmpty)
-        TextBlock(text),
-    ],
-    attachments: const <SessionMessageAttachment>[],
-    createdAt: createdAt,
-    seq: seq,
-    phase: phase,
-  );
+  SessionMessage toMessage() {
+    final visibleReasoning = reasoning.trimRight();
+    final visibleText = text.trimRight();
+    return SessionMessage(
+      id: id,
+      role: 'assistant',
+      text: text,
+      content: <ContentBlock>[
+        if (visibleReasoning.trim().isNotEmpty)
+          ThinkingBlock(visibleReasoning),
+        if (visibleText.trim().isNotEmpty)
+          TextBlock(visibleText),
+      ],
+      attachments: const <SessionMessageAttachment>[],
+      createdAt: createdAt,
+      seq: seq,
+      phase: phase,
+    );
+  }
 }
 
 enum _TimelineEntryKind {
@@ -226,75 +230,68 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
     final title = widget.live
         ? (_expanded ? 'Thinking' : 'Thinking...')
         : 'Reasoning';
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeInOut,
-      alignment: Alignment.topCenter,
-      child: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: colors.surfaceMuted,
-          borderRadius: AppShapes.input,
-          border: Border.all(color: colors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            InkWell(
-              onTap: _toggle,
-              borderRadius: AppShapes.input,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                child: Row(
-                  children: [
-                    if (widget.live)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: LivePulse(color: colors.textSecondary),
-                      )
-                    else ...[
-                      Icon(
-                        Icons.psychology_outlined,
-                        size: 16,
-                        color: colors.textSecondary,
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    Expanded(
-                      child: Text(
-                        title,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall
-                            ?.copyWith(
-                              color: colors.textPrimary,
-                              fontWeight: AppWeights.title,
-                            ),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: AppShapes.input,
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: _toggle,
+            borderRadius: AppShapes.input,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              child: Row(
+                children: [
+                  if (widget.live)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: LivePulse(color: colors.textSecondary),
+                    )
+                  else ...[
                     Icon(
-                      _expanded
-                          ? Icons.expand_less_rounded
-                          : Icons.expand_more_rounded,
+                      Icons.psychology_outlined,
                       size: 16,
                       color: colors.textSecondary,
                     ),
+                    const SizedBox(width: 6),
                   ],
-                ),
+                  Expanded(
+                    child: Text(
+                      title,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: AppWeights.title,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    _expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 16,
+                    color: colors.textSecondary,
+                  ),
+                ],
               ),
             ),
-            if (_expanded)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                child: _MarkdownMessageBody(
-                  text: widget.reasoning,
-                  textColor: colors.textPrimary,
-                  onOpenFile: widget.onOpenFile,
-                ),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              child: _ReasoningTextBody(
+                text: widget.reasoning.trimRight(),
+                textColor: colors.textPrimary,
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -1595,6 +1592,28 @@ class _MarkdownMessageBody extends StatelessWidget {
       text: text,
       textColor: textColor,
       onOpenFile: onOpenFile,
+    );
+  }
+}
+
+class _ReasoningTextBody extends StatelessWidget {
+  const _ReasoningTextBody({
+    required this.text,
+    required this.textColor,
+  });
+
+  final String text;
+  final Color textColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return _LinkifiedSelectableText(
+      text: text,
+      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+        color: textColor,
+        height: 1.5,
+      ),
+      linkColor: context.colors.accent,
     );
   }
 }
