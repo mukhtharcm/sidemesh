@@ -167,10 +167,27 @@ export interface RunningServer {
   close(): Promise<void>;
 }
 
+interface StartServerDependencies {
+  detectInstallInfo: typeof detectInstallInfo;
+  spawnSelfUpdater: typeof spawnSelfUpdater;
+  exitProcess(code?: number): never;
+}
+
+const DEFAULT_START_SERVER_DEPENDENCIES: StartServerDependencies = {
+  detectInstallInfo,
+  spawnSelfUpdater,
+  exitProcess: (code = 0) => process.exit(code),
+};
+
 export async function startServer(
   config: NodeConfig,
   prebuiltRuntime?: AgentProviderRuntime,
+  dependencyOverrides: Partial<StartServerDependencies> = {},
 ): Promise<RunningServer> {
+  const dependencies = {
+    ...DEFAULT_START_SERVER_DEPENDENCIES,
+    ...dependencyOverrides,
+  } satisfies StartServerDependencies;
   const providerRuntime = prebuiltRuntime ?? createAgentProviderRuntime(config);
   const provider = providerRuntime.provider;
   await provider.start();
@@ -745,7 +762,7 @@ export async function startServer(
     (await provider.getVersion().catch(() => "unknown"));
 
   try {
-    const detected = await detectInstallInfo({ config });
+    const detected = await dependencies.detectInstallInfo({ config });
     installInfo = {
       packageVersion: detected.packageVersion,
       latestVersion: detected.latestVersion,
@@ -943,7 +960,7 @@ export async function startServer(
         try {
           await runningServerRef!.close();
         } finally {
-          process.exit(0);
+          dependencies.exitProcess(0);
         }
       }, 100);
     }),
@@ -965,7 +982,9 @@ export async function startServer(
       const effectiveConfig = requestedChannel
         ? { ...config, updateChannel: requestedChannel }
         : config;
-      const info = await detectInstallInfo({ config: effectiveConfig });
+      const info = await dependencies.detectInstallInfo({
+        config: effectiveConfig,
+      });
       if (!info.updateSupported) {
         response.status(501).json({ error: "update not supported for this install type" });
         return;
@@ -975,14 +994,16 @@ export async function startServer(
 
       setTimeout(async () => {
         try {
-          await spawnSelfUpdater(config, { updateChannel: requestedChannel });
+          await dependencies.spawnSelfUpdater(effectiveConfig, {
+            updateChannel: requestedChannel,
+          });
         } catch (e) {
           console.error("[update] Failed to spawn updater:", e);
         }
         try {
           await runningServerRef!.close();
         } finally {
-          process.exit(0);
+          dependencies.exitProcess(0);
         }
       }, 100);
     }),
@@ -2579,7 +2600,7 @@ export async function startServer(
     if (healthFailures >= HEALTH_MONITOR_MAX_FAILURES) {
       console.error("Health monitor: exiting due to persistent provider failure");
       await runningServerRef!.close();
-      process.exit(1);
+      dependencies.exitProcess(1);
     }
   }, HEALTH_MONITOR_INTERVAL_MS);
 

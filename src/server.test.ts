@@ -7,6 +7,7 @@ import http from "node:http";
 
 import { WebSocket } from "ws";
 
+import type { InstallInfo } from "./install-info.js";
 import { startServer, type RunningServer } from "./server.js";
 import type { FakeCapabilityProfile, NodeConfig } from "./types.js";
 import { FakeAgentProvider, type FakeAgentProviderOptions } from "./fake-provider.js";
@@ -56,6 +57,27 @@ function makeConfig(
     browserPreview: { enabled: false, chromePath: null, maxPreviews: 8, idleTtlMs: 3_600_000, frameIntervalMs: 900, quality: 55 },
     configPath: nodePath.join(stateDir, "config.json"),
     configExists: false,
+  };
+}
+
+function makeInstallInfo(
+  packageRoot: string,
+  updateChannel: NodeConfig["updateChannel"] = "stable",
+): InstallInfo {
+  return {
+    packageVersion: "0.1.0",
+    latestVersion: "0.2.0",
+    currentCommitSha: null,
+    latestCommitSha: null,
+    updateChannel,
+    updateAvailable: true,
+    packageRoot,
+    installType: "git",
+    updateSupported: true,
+    updateCommand: "git pull && npm install && npm run build",
+    restoreCommand: "git checkout HEAD",
+    isManagedService: false,
+    serviceName: null,
   };
 }
 
@@ -409,6 +431,85 @@ describe("POST /api/admin/update", () => {
         "channel must be stable or bleeding-edge",
       );
     });
+  });
+
+  it("passes the requested channel into the spawned updater config", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    const packageDir = nodePath.join(stateDir, "package");
+    const detectedChannels: NodeConfig["updateChannel"][] = [];
+    const spawnedCalls: Array<{
+      config: NodeConfig;
+      options: { updateChannel?: NodeConfig["updateChannel"] | null };
+    }> = [];
+    let exitCode: number | null = null;
+    let resolveExit: (() => void) | null = null;
+    const exited = new Promise<void>((resolve) => {
+      resolveExit = resolve;
+    });
+
+    const server = await startServer(config, undefined, {
+      detectInstallInfo: async (packageRootOrOptions = {}) => {
+        const options =
+          typeof packageRootOrOptions === "string"
+            ? { packageRoot: packageRootOrOptions }
+            : packageRootOrOptions;
+        const updateChannel = options.config?.updateChannel ?? "stable";
+        detectedChannels.push(updateChannel);
+        return makeInstallInfo(
+          options.packageRoot ?? packageDir,
+          updateChannel,
+        );
+      },
+      spawnSelfUpdater: async (spawnConfig, options = {}) => {
+        spawnedCalls.push({ config: spawnConfig, options });
+      },
+      exitProcess: (code = 0) => {
+        exitCode = code;
+        resolveExit?.();
+        return undefined as never;
+      },
+    });
+
+    try {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/admin/update",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ channel: "bleeding-edge" }),
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(res.body, { ok: true, message: "daemon is updating" });
+
+      await Promise.race([
+        exited,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("timed out waiting for updater spawn")),
+            2_000,
+          ),
+        ),
+      ]);
+
+      assert.deepEqual(detectedChannels, ["stable", "bleeding-edge"]);
+      assert.equal(spawnedCalls.length, 1);
+      assert.equal(spawnedCalls[0]?.config.updateChannel, "bleeding-edge");
+      assert.deepEqual(spawnedCalls[0]?.options, {
+        updateChannel: "bleeding-edge",
+      });
+      assert.equal(exitCode, 0);
+    } finally {
+      if (exitCode === null) {
+        await server.close();
+      }
+      await rm(stateDir, { recursive: true, force: true });
+    }
   });
 });
 

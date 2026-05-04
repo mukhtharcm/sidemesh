@@ -5,7 +5,7 @@ import nodePath from "node:path";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 
-import type { NodeConfig } from "./types.js";
+import type { NodeConfig, UpdateChannel } from "./types.js";
 import type { InstallInfo } from "./install-info.js";
 import type { LaunchdPaths } from "./launchd-service.js";
 import type { ServicePaths } from "./systemd-service.js";
@@ -104,6 +104,14 @@ const DEFAULT_SELF_UPDATE_DEPENDENCIES: SelfUpdateDependencies = {
   resolveUpdatedPackageDir: resolveUpdatedPackageDir,
 };
 
+export function applyUpdateChannelOverrideFromEnv(
+  config: NodeConfig,
+  env: { SIDEMESH_UPDATE_CHANNEL?: string } = process.env,
+): NodeConfig {
+  const updateChannel = parseUpdateChannelOverride(env.SIDEMESH_UPDATE_CHANNEL);
+  return updateChannel ? { ...config, updateChannel } : config;
+}
+
 export async function runSelfUpdate(
   options: SelfUpdateOptions,
   dependencyOverrides: Partial<SelfUpdateDependencies> = {},
@@ -112,7 +120,8 @@ export async function runSelfUpdate(
     ...DEFAULT_SELF_UPDATE_DEPENDENCIES,
     ...dependencyOverrides,
   } satisfies SelfUpdateDependencies;
-  const { config, dryRun = false } = options;
+  const config = applyUpdateChannelOverrideFromEnv(options.config);
+  const { dryRun = false } = options;
   const requestedPackageDir = options.packageDir?.trim() || undefined;
   const managedService = options.managedService?.trim() || null;
   const logDir = nodePath.join(config.stateDir, "logs");
@@ -170,6 +179,17 @@ export async function runSelfUpdate(
         )
       : null;
 
+    await appendLog(logPath, `[self-update] Starting from ${oldVersion}`);
+    await appendLog(logPath, `[self-update] Install type: ${info.installType}`);
+    await appendLog(logPath, `[self-update] Update channel: ${info.updateChannel}`);
+    await appendLog(logPath, `[self-update] Package dir: ${packageDir}`);
+    if (info.currentCommitSha) {
+      await appendLog(
+        logPath,
+        `[self-update] Current commit: ${info.currentCommitSha}`,
+      );
+    }
+
     if (dryRun) {
       await appendLog(logPath, `[dry-run] Would run: ${info.updateCommand}`);
       await logManagedServiceReinstallPlan(
@@ -191,17 +211,6 @@ export async function runSelfUpdate(
         logPath,
         error: null,
       };
-    }
-
-    await appendLog(logPath, `[self-update] Starting from ${oldVersion}`);
-    await appendLog(logPath, `[self-update] Install type: ${info.installType}`);
-    await appendLog(logPath, `[self-update] Update channel: ${info.updateChannel}`);
-    await appendLog(logPath, `[self-update] Package dir: ${packageDir}`);
-    if (info.currentCommitSha) {
-      await appendLog(
-        logPath,
-        `[self-update] Current commit: ${info.currentCommitSha}`,
-      );
     }
 
     try {
@@ -754,6 +763,16 @@ async function resolveUpdatedPackageDir(
   } catch {
     return fallbackPackageDir;
   }
+}
+
+function parseUpdateChannelOverride(
+  value: string | undefined,
+): UpdateChannel | null {
+  const channel = value?.trim();
+  if (channel === "stable" || channel === "bleeding-edge") {
+    return channel;
+  }
+  return null;
 }
 
 async function appendLog(path: string, message: string): Promise<void> {
