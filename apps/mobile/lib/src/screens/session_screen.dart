@@ -26,6 +26,7 @@ import 'file_browser_screen.dart';
 import 'file_viewer_screen.dart';
 import 'image_viewer_screen.dart';
 import 'terminal_screen.dart';
+import 'inspector/inspector_browser_preview.dart';
 import 'inspector/inspector_controller.dart';
 import 'inspector/inspector_file_browser.dart';
 import 'inspector/inspector_persistence.dart';
@@ -1154,6 +1155,7 @@ class _SessionScreenState extends State<SessionScreen>
           ),
         );
         break;
+      case InspectorSurfaceKind.browserPreview:
       case InspectorSurfaceKind.debug:
       case InspectorSurfaceKind.gitDetails:
       case InspectorSurfaceKind.sessionDetails:
@@ -4497,6 +4499,18 @@ class _SessionScreenState extends State<SessionScreen>
     required HostBrowserPreviewInfo preview,
   }) {
     if (!mounted || _disposed) return;
+    final scope = InspectorScope.maybeOf(context);
+    if (widget.desktopMode && scope != null) {
+      scope.show(
+        buildInspectorBrowserPreviewSurface(
+          ownerKey: _inspectorOwnerKey(),
+          host: widget.host,
+          api: widget.api,
+          preview: preview,
+        ),
+      );
+      return;
+    }
     setState(() {
       _dockedBrowserPreview = _DockedBrowserPreview(
         forward: forward,

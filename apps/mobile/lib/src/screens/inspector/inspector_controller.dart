@@ -8,6 +8,7 @@ import 'package:flutter/widgets.dart';
 /// (search, fileBrowser, gitDetails, sessionDetails, ...) are added as
 /// surfaces land.
 enum InspectorSurfaceKind {
+  browserPreview,
   debug,
   search,
   resources,
