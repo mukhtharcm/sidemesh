@@ -1473,7 +1473,19 @@ class SessionMessage {
   final String? phase;
 
   bool get hasVisibleContent =>
-      text.trim().isNotEmpty || attachments.isNotEmpty;
+      text.trim().isNotEmpty ||
+      attachments.isNotEmpty ||
+      content.any(
+        (b) =>
+            (b is TextBlock && b.text.trim().isNotEmpty) ||
+            (b is ThinkingBlock && b.thinking.trim().isNotEmpty),
+      );
+
+  /// True if there is any user-visible *body* content (text, attachments,
+  /// or a non-empty thinking block). Distinct from `hasVisibleContent` only
+  /// in semantics: callers asking "should I render this bubble at all?"
+  /// should use this getter.
+  bool get isRenderable => hasVisibleContent;
 
   factory SessionMessage.fromJson(Map<String, dynamic> json) {
     final text = _stringValue(json['text']);
@@ -1483,6 +1495,11 @@ class SessionMessage {
       blocks = rawContent
           .map((item) => ContentBlock.fromJson(item as Map<String, dynamic>))
           .whereType<ContentBlock>()
+          .where(
+            (b) =>
+                (b is TextBlock && b.text.trim().isNotEmpty) ||
+                (b is ThinkingBlock && b.thinking.trim().isNotEmpty),
+          )
           .toList(growable: false);
     } else {
       blocks = text.trim().isNotEmpty ? [TextBlock(text)] : const [];
@@ -1522,24 +1539,24 @@ abstract class ContentBlock {
 
   final String type;
 
-  factory ContentBlock.fromJson(Map<String, dynamic> json) {
+  static ContentBlock? fromJson(Map<String, dynamic> json) {
     final t = _stringValue(json['type']);
     switch (t) {
       case 'text':
         final text = _stringOrNull(json['text']);
-        if (text != null && text.isNotEmpty) return TextBlock(text);
-        break;
+        if (text != null && text.trim().isNotEmpty) return TextBlock(text);
+        return null;
       case 'thinking':
         final thinking = _stringOrNull(json['thinking']);
-        if (thinking != null && thinking.isNotEmpty) {
+        if (thinking != null && thinking.trim().isNotEmpty) {
           return ThinkingBlock(
             thinking,
             summary: _boolOrNull(json['summary']) ?? false,
           );
         }
-        break;
+        return null;
     }
-    return TextBlock('');
+    return null;
   }
 
   Map<String, dynamic> toJson();
