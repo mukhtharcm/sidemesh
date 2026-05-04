@@ -634,8 +634,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             onReload: () => _sendNavigation('reload'),
             onBackNavigation: () => _sendNavigation('back'),
             onForwardNavigation: () => _sendNavigation('forward'),
+            onResize: () => unawaited(_showViewportSheet()),
             onTogglePause: () => _clientPaused ? _resumeStream() : _pauseStream(manual: true),
             onToggleDevTools: _toggleDevTools,
+            onToggleInput: _toggleInputRail,
             onStop: () => unawaited(_stopRemoteBrowser()),
           ),
         Expanded(
@@ -684,23 +686,16 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                     onResume: _resumeStream,
                   ),
                 ),
+              if (widget.showHeader && !_inputRailOpen)
+                Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: _PreviewFloatingControls(
+                    onToggleInput: _toggleInputRail,
+                  ),
+                ),
             ],
           ),
-        ),
-        _BrowserBottomToolbar(
-          preview: _preview,
-          streamPaused: _clientPaused,
-          inputRailOpen: _inputRailOpen,
-          devToolsOpen: _devToolsOpen,
-          onBack: () => _sendNavigation('back'),
-          onForward: () => _sendNavigation('forward'),
-          onReload: () => _sendNavigation('reload'),
-          onResize: () => unawaited(_showViewportSheet()),
-          onHome: () => _send({'type': 'navigate', 'url': _preview.url}),
-          onFocusUrl: () => _urlFocusNode.requestFocus(),
-          onToggleInput: _toggleInputRail,
-          onToggleDevTools: _toggleDevTools,
-          onTogglePause: () => _clientPaused ? _resumeStream() : _pauseStream(manual: true),
         ),
         if (_inputRailOpen)
           _InputRail(
@@ -788,8 +783,10 @@ class _BrowserChromeBar extends StatelessWidget {
     required this.onReload,
     required this.onBackNavigation,
     required this.onForwardNavigation,
+    required this.onResize,
     required this.onTogglePause,
     required this.onToggleDevTools,
+    required this.onToggleInput,
     required this.onStop,
   });
 
@@ -805,8 +802,10 @@ class _BrowserChromeBar extends StatelessWidget {
   final VoidCallback onReload;
   final VoidCallback onBackNavigation;
   final VoidCallback onForwardNavigation;
+  final VoidCallback onResize;
   final VoidCallback onTogglePause;
   final VoidCallback onToggleDevTools;
+  final VoidCallback onToggleInput;
   final VoidCallback onStop;
 
   @override
@@ -827,20 +826,20 @@ class _BrowserChromeBar extends StatelessWidget {
             if (onBack != null) ...[
               _ChromeButton(
                 icon: Icons.arrow_back_rounded,
-                tooltip: 'Back to ports',
+                tooltip: 'Back',
                 onTap: onBack!,
               ),
               const SizedBox(width: 4),
             ],
             _ChromeButton(
               icon: Icons.arrow_back_rounded,
-              tooltip: 'Back',
+              tooltip: 'Browser back',
               onTap: onBackNavigation,
             ),
             const SizedBox(width: 4),
             _ChromeButton(
               icon: Icons.arrow_forward_rounded,
-              tooltip: 'Forward',
+              tooltip: 'Browser forward',
               onTap: onForwardNavigation,
             ),
             const SizedBox(width: 4),
@@ -904,6 +903,18 @@ class _BrowserChromeBar extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
+            _ViewportChip(
+              width: preview.width,
+              height: preview.height,
+              onTap: onResize,
+            ),
+            const SizedBox(width: 6),
+            _ChromeButton(
+              icon: Icons.keyboard_alt_rounded,
+              tooltip: 'Keyboard',
+              onTap: onToggleInput,
+            ),
+            const SizedBox(width: 4),
             _ChromeButton(
               icon: devToolsOpen
                   ? Icons.construction_rounded
@@ -973,180 +984,6 @@ class _ChromeButton extends StatelessWidget {
             child: Icon(
               icon,
               size: 18,
-              color: color ?? colors.textSecondary,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _BrowserBottomToolbar extends StatelessWidget {
-  const _BrowserBottomToolbar({
-    required this.preview,
-    required this.streamPaused,
-    required this.inputRailOpen,
-    required this.devToolsOpen,
-    required this.onBack,
-    required this.onForward,
-    required this.onReload,
-    required this.onResize,
-    required this.onHome,
-    required this.onFocusUrl,
-    required this.onToggleInput,
-    required this.onToggleDevTools,
-    required this.onTogglePause,
-  });
-
-  final HostBrowserPreviewInfo preview;
-  final bool streamPaused;
-  final bool inputRailOpen;
-  final bool devToolsOpen;
-  final VoidCallback onBack;
-  final VoidCallback onForward;
-  final VoidCallback onReload;
-  final VoidCallback onResize;
-  final VoidCallback onHome;
-  final VoidCallback onFocusUrl;
-  final VoidCallback onToggleInput;
-  final VoidCallback onToggleDevTools;
-  final VoidCallback onTogglePause;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        border: Border(
-          top: BorderSide(color: colors.border),
-        ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Row(
-          children: [
-            _ToolbarButton(
-              icon: Icons.arrow_back_rounded,
-              tooltip: 'Back',
-              onTap: onBack,
-            ),
-            const SizedBox(width: 4),
-            _ToolbarButton(
-              icon: Icons.arrow_forward_rounded,
-              tooltip: 'Forward',
-              onTap: onForward,
-            ),
-            const SizedBox(width: 4),
-            _ToolbarButton(
-              icon: Icons.refresh_rounded,
-              tooltip: 'Reload',
-              onTap: onReload,
-            ),
-            const SizedBox(width: 4),
-            _ToolbarButton(
-              icon: Icons.home_rounded,
-              tooltip: 'Home',
-              onTap: onHome,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: InkWell(
-                onTap: onFocusUrl,
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  height: 32,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: colors.canvas,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: colors.border),
-                  ),
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    preview.url,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: monoStyle(
-                      color: colors.textSecondary,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            _ViewportChip(
-              width: preview.width,
-              height: preview.height,
-              onTap: onResize,
-            ),
-            const SizedBox(width: 6),
-            _ToolbarButton(
-              icon: devToolsOpen
-                  ? Icons.construction_rounded
-                  : Icons.construction_outlined,
-              tooltip: 'DevTools',
-              color: devToolsOpen ? colors.accent : null,
-              onTap: onToggleDevTools,
-            ),
-            const SizedBox(width: 4),
-            _ToolbarButton(
-              icon: inputRailOpen
-                  ? Icons.keyboard_hide_rounded
-                  : Icons.keyboard_alt_rounded,
-              tooltip: inputRailOpen ? 'Hide keyboard' : 'Keyboard',
-              color: inputRailOpen ? colors.accent : null,
-              onTap: onToggleInput,
-            ),
-            const SizedBox(width: 4),
-            _ToolbarButton(
-              icon: streamPaused
-                  ? Icons.play_circle_outline_rounded
-                  : Icons.pause_circle_outline_rounded,
-              tooltip: streamPaused ? 'Resume' : 'Pause',
-              color: streamPaused ? colors.success : null,
-              onTap: onTogglePause,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ToolbarButton extends StatelessWidget {
-  const _ToolbarButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-    this.color,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onTap,
-          child: Container(
-            width: 36,
-            height: 36,
-            alignment: Alignment.center,
-            child: Icon(
-              icon,
-              size: 20,
               color: color ?? colors.textSecondary,
             ),
           ),
@@ -1455,6 +1292,51 @@ class _PausedPreviewOverlay extends StatelessWidget {
   }
 }
 
+class _PreviewFloatingControls extends StatelessWidget {
+  const _PreviewFloatingControls({
+    required this.onToggleInput,
+  });
+
+  final VoidCallback onToggleInput;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.canvas.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: colors.border.withValues(alpha: 0.9)),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onToggleInput,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.keyboard_alt_rounded, size: 18, color: colors.textSecondary),
+                const SizedBox(width: 6),
+                Text(
+                  'Keyboard',
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _InputRail extends StatelessWidget {
   const _InputRail({
     required this.controller,
@@ -1612,9 +1494,9 @@ class _ViewportChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: colors.accent.withValues(alpha: 0.11),
+          color: colors.accent.withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: colors.accent.withValues(alpha: 0.34)),
+          border: Border.all(color: colors.accent.withValues(alpha: 0.55)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -1622,7 +1504,7 @@ class _ViewportChip extends StatelessWidget {
             Icon(Icons.aspect_ratio_rounded, size: 14, color: colors.accent),
             const SizedBox(width: 6),
             Text(
-              '\$width x \$height',
+              '$width x $height',
               style: monoStyle(
                 color: colors.accent,
                 fontSize: 11,
