@@ -2,18 +2,18 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:xterm/xterm.dart' as xterm;
 
 import '../api_client.dart';
 import '../models.dart';
 import '../terminal_input_filter.dart';
+import '../terminal_key_models.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/terminal_keybar.dart';
 import '../host_reconnect_scheduler.dart';
 import '../host_status_store.dart';
 import '../relative_time_ticker.dart';
@@ -380,6 +380,20 @@ class _TerminalPaneState extends State<TerminalPane> {
     channel.sink.add(jsonEncode({'type': 'input', 'data': input}));
   }
 
+  void _onKeyBarAction(TerminalKeyAction action) {
+    if (_terminalInfo?.isRunning != true) return;
+    if (action.key != null) {
+      _terminal.keyInput(
+        action.key!,
+        ctrl: action.ctrl,
+        alt: action.alt,
+        shift: action.shift,
+      );
+    } else if (action.rawText != null && action.rawText!.isNotEmpty) {
+      _terminal.textInput(action.rawText!);
+    }
+  }
+
   void _adoptReplacementTerminal(HostTerminalInfo replacement) {
     if (!mounted || replacement.id == _terminalInfo?.id) return;
     unawaited(_subscription?.cancel());
@@ -496,7 +510,10 @@ class _TerminalPaneState extends State<TerminalPane> {
             ),
           ),
         ),
-        _TerminalKeyBar(onInput: _sendInput, compact: widget.compact),
+        TerminalKeyBar(
+          compact: widget.compact,
+          onAction: _onKeyBarAction,
+        ),
       ],
     );
   }
@@ -694,74 +711,6 @@ class _TerminalStatusStrip extends StatelessWidget {
   }
 }
 
-class _TerminalKeyBar extends StatelessWidget {
-  const _TerminalKeyBar({required this.onInput, required this.compact});
-
-  final ValueChanged<String> onInput;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final keys = <_TerminalKey>[
-      const _TerminalKey('Esc', '\x1b'),
-      const _TerminalKey('Tab', '\t'),
-      const _TerminalKey('Ctrl-C', '\x03'),
-      const _TerminalKey('Ctrl-D', '\x04'),
-      const _TerminalKey('↑', '\x1b[A'),
-      const _TerminalKey('↓', '\x1b[B'),
-      const _TerminalKey('←', '\x1b[D'),
-      const _TerminalKey('→', '\x1b[C'),
-    ];
-    return SafeArea(
-      top: false,
-      child: Container(
-        height: compact ? 46 : 52,
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 6 : 8,
-          vertical: compact ? 5 : 6,
-        ),
-        decoration: BoxDecoration(
-          color: colors.surfaceElevated,
-          border: Border(top: BorderSide(color: colors.border)),
-        ),
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemBuilder: (context, index) {
-            final key = keys[index];
-            return InkWell(
-              onTap: () {
-                HapticFeedback.selectionClick();
-                onInput(key.sequence);
-              },
-              borderRadius: AppShapes.input,
-              child: Container(
-                constraints: const BoxConstraints(minWidth: 44),
-                padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14),
-                decoration: BoxDecoration(
-                  border: Border.all(color: colors.border),
-                  borderRadius: AppShapes.input,
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  key.label,
-                  style: monoStyle(
-                    color: colors.textPrimary,
-                    fontSize: compact ? 12 : 13,
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-              ),
-            );
-          },
-          separatorBuilder: (_, _) => SizedBox(width: compact ? 6 : 8),
-          itemCount: keys.length,
-        ),
-      ),
-    );
-  }
-}
-
 String _basename(String path) {
   final trimmed = path.trim();
   if (trimmed.isEmpty) return '';
@@ -770,13 +719,6 @@ String _basename(String path) {
   return index >= 0
       ? withoutTrailingSlash.substring(index + 1)
       : withoutTrailingSlash;
-}
-
-class _TerminalKey {
-  const _TerminalKey(this.label, this.sequence);
-
-  final String label;
-  final String sequence;
 }
 
 int? _intOrNull(Object? value) {
