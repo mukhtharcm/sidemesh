@@ -1001,7 +1001,7 @@ class _MessageBubble extends StatelessWidget {
                         child: _ReasoningBlock(
                           reasoning: block.thinking,
                           live: live && !hasAnswer,
-                          collapsedByDefault: hasAnswer && !live,
+                          collapsedByDefault: false,
                           onOpenFile: onOpenFile,
                         ),
                       )
