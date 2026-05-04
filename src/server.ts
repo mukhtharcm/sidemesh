@@ -2412,6 +2412,7 @@ export async function startServer(
       ) {
         continue;
       }
+      searchIndex.setProviderError(provider.kind, null);
       try {
         const batchSize = 50;
         for (const archived of [false, true]) {

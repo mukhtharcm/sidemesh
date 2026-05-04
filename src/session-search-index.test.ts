@@ -535,4 +535,37 @@ describe("SessionSearchIndex", () => {
 
     await index2.close();
   });
+  it("rollout-indexed sessions support filter queries", async () => {
+    const index = new SessionSearchIndex(dbPath);
+    await index.open();
+
+    const path = rolloutPath("thread-filter");
+    await writeFile(
+      path,
+      JSON.stringify({
+        timestamp: "2026-05-02T00:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "thread-filter", cwd: "/projects/sidemesh" },
+      }) + "\n" +
+      JSON.stringify({
+        timestamp: "2026-05-02T00:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "filter test content" },
+      }) + "\n",
+      "utf8",
+    );
+
+    await index.indexRollout(path);
+
+    const textResults = await index.search("filter", 10, { providerKind: "codex" });
+    assert.equal(textResults.length, 1);
+    assert.equal(textResults[0].sessionId, "thread-filter");
+
+    const browseResults = await index.search("", 10, { cwd: "/projects" });
+    assert.equal(browseResults.length, 1);
+    assert.equal(browseResults[0].sessionId, "thread-filter");
+
+    await index.close();
+  });
+
 });
