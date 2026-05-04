@@ -12,11 +12,6 @@ import {
   type AgentSessionListOptions,
   type AgentSessionResumeOptions,
   type AgentRemoteGitDiff,
-  type AgentFsDirectoryEntry,
-  type AgentFsDirectoryListing,
-  type AgentFsFile,
-  type AgentFsMetadata,
-  type AgentFsWatchResult,
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
   type AgentPendingAction,
@@ -343,78 +338,6 @@ public async health(): Promise<boolean> {
     };
   }
 
-  public async fsReadDirectory(path: string): Promise<AgentFsDirectoryListing> {
-    const result = (await this.bridge.request("fs/readDirectory", { path })) as {
-      entries?: unknown[];
-    };
-    return {
-      entries: Array.isArray(result.entries)
-        ? result.entries
-            .map(normalizeCodexFsDirectoryEntry)
-            .filter((entry): entry is AgentFsDirectoryListing["entries"][number] => entry !== null)
-        : [],
-    };
-  }
-
-  public async fsGetMetadata(path: string): Promise<AgentFsMetadata> {
-    const result = (await this.bridge.request("fs/getMetadata", { path })) as Record<
-      string,
-      unknown
-    >;
-    return {
-      isDirectory: result.isDirectory === true,
-      isFile: result.isFile === true,
-      isSymlink: result.isSymlink === true,
-      createdAtMs: asNumber(result.createdAtMs) ?? 0,
-      modifiedAtMs: asNumber(result.modifiedAtMs) ?? 0,
-    };
-  }
-
-  public async fsReadFile(path: string): Promise<AgentFsFile> {
-    const result = (await this.bridge.request("fs/readFile", { path })) as {
-      dataBase64?: unknown;
-    };
-    return { dataBase64: asString(result.dataBase64) ?? "" };
-  }
-
-  public fsWriteFile(path: string, dataBase64: string): Promise<unknown> {
-    return this.bridge.request("fs/writeFile", { path, dataBase64 });
-  }
-
-  public fsCreateDirectory(path: string, recursive: boolean): Promise<unknown> {
-    return this.bridge.request("fs/createDirectory", { path, recursive });
-  }
-
-  public fsRemove(
-    path: string,
-    options: { recursive: boolean; force: boolean },
-  ): Promise<unknown> {
-    return this.bridge.request("fs/remove", { path, ...options });
-  }
-
-  public fsCopy(params: {
-    sourcePath: string;
-    destinationPath: string;
-    recursive: boolean;
-  }): Promise<unknown> {
-    return this.bridge.request("fs/copy", params);
-  }
-
-  public async fsWatch(path: string): Promise<AgentFsWatchResult> {
-    const result = (await this.bridge.request("fs/watch", { path })) as {
-      watchId?: unknown;
-    };
-    const watchId = asString(result.watchId);
-    if (!watchId) {
-      throw new Error("fs/watch did not return a watchId");
-    }
-    return { watchId };
-  }
-
-  public fsUnwatch(watchId: string): Promise<unknown> {
-    return this.bridge.request("fs/unwatch", { watchId });
-  }
-
   private async isSessionThreadLoaded(sessionId: string): Promise<boolean> {
     const data = await this.listLoadedSessionIds();
     return data.includes(sessionId);
@@ -486,20 +409,6 @@ public async health(): Promise<boolean> {
   }
 
   private emitCodexNotification(method: string, params: unknown): void {
-    if (method === "fs/changed") {
-      const typed = params && typeof params === "object"
-        ? (params as Record<string, unknown>)
-        : {};
-      this.emit("liveEvent", {
-        type: "fs_changed",
-        watchId: asString(typed.watchId) || undefined,
-        changedPaths: Array.isArray(typed.changedPaths)
-          ? typed.changedPaths.map((entry) => String(entry))
-          : undefined,
-      });
-      return;
-    }
-
     if (method === "skills/changed") {
       this.emit("liveEvent", { type: "skills_changed" });
       return;
@@ -903,19 +812,6 @@ function buildCodexAssistantMessageDraft(
         ? phase
         : undefined,
     content: blocks,
-  };
-}
-
-function normalizeCodexFsDirectoryEntry(raw: unknown): AgentFsDirectoryEntry | null {
-  const typed = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-  const fileName = asString(typed?.fileName);
-  if (!fileName) {
-    return null;
-  }
-  return {
-    fileName,
-    isDirectory: typed?.isDirectory === true,
-    isFile: typed?.isFile === true,
   };
 }
 

@@ -106,8 +106,11 @@ Providers should emit `liveEvent` events for streaming UI updates:
 - `activity_terminal_input`
 - `turn_completed`
 - `action_opened`
-- `fs_changed`
 - `skills_changed`
+
+> **Note:** `fs_changed` is no longer emitted by provider adapters. Host-owned
+> filesystem watches in `src/fs-routes.ts` send `fs_changed` directly over the
+> WebSocket. Provider adapters should not implement filesystem operations.
 
 Provider adapters should translate native agent events into Sidemesh activity
 types instead of leaking provider-specific wire payloads to the Flutter app.
@@ -129,10 +132,13 @@ reliable upstream.
 Compatibility endpoints:
 
 - `/api/node` exposes the active provider, provider version,
-  `providerCapabilities`, `defaultProviderCapabilities`, `hostCapabilities`,
-  and supported provider metadata with per-provider capability maps.
+  `defaultProviderCapabilities`, `hostCapabilities`, and supported provider
+  metadata with per-provider capability maps.
 - `/api/providers` exposes daemon-supported provider definitions for future
   provider-selection UI.
+- `providerCapabilities` remains as a compatibility alias in `/api/node` for
+  `defaultProviderCapabilities`. New clients should prefer
+  `defaultProviderCapabilities` or `supportedProviders[].capabilities`.
 - `codexVersion` remains as a compatibility alias in `/api/node`; new code
   should prefer `providerVersion`.
 
