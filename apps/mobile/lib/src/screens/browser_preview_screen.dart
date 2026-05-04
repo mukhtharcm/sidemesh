@@ -42,6 +42,7 @@ class BrowserPreviewScreen extends StatelessWidget {
           api: api,
           preview: preview,
           stopOnDispose: stopOnDispose,
+          onBack: () => Navigator.of(context).pop(),
         ),
       ),
     );
@@ -345,10 +346,21 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _handleConsole(Map<dynamic, dynamic> frame) {
     if (!mounted) return;
+    final args = frame['args'];
+    var text = frame['text']?.toString() ?? '';
+    if (text.isEmpty && args is List) {
+      text = args.map((a) {
+        if (a is Map && a.containsKey('value')) {
+          final v = a['value'];
+          return v?.toString() ?? '';
+        }
+        return a?.toString() ?? '';
+      }).join(' ');
+    }
     final entry = _ConsoleEntry(
       type: frame['type']?.toString() ?? 'log',
       level: frame['level']?.toString() ?? 'log',
-      text: frame['text']?.toString() ?? '',
+      text: text,
       url: frame['url']?.toString(),
       lineNumber: frame['lineNumber'] is int ? frame['lineNumber'] as int : null,
       columnNumber: frame['columnNumber'] is int ? frame['columnNumber'] as int : null,
@@ -685,6 +697,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
           onReload: () => _sendNavigation('reload'),
           onResize: () => unawaited(_showViewportSheet()),
           onHome: () => _send({'type': 'navigate', 'url': _preview.url}),
+          onFocusUrl: () => _urlFocusNode.requestFocus(),
           onToggleInput: _toggleInputRail,
           onToggleDevTools: _toggleDevTools,
           onTogglePause: () => _clientPaused ? _resumeStream() : _pauseStream(manual: true),
@@ -980,6 +993,7 @@ class _BrowserBottomToolbar extends StatelessWidget {
     required this.onReload,
     required this.onResize,
     required this.onHome,
+    required this.onFocusUrl,
     required this.onToggleInput,
     required this.onToggleDevTools,
     required this.onTogglePause,
@@ -994,6 +1008,7 @@ class _BrowserBottomToolbar extends StatelessWidget {
   final VoidCallback onReload;
   final VoidCallback onResize;
   final VoidCallback onHome;
+  final VoidCallback onFocusUrl;
   final VoidCallback onToggleInput;
   final VoidCallback onToggleDevTools;
   final VoidCallback onTogglePause;
