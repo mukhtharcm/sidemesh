@@ -206,6 +206,16 @@ class ApiClient {
     );
   }
 
+  Future<void> setUpdateChannel(HostProfile host, String updateChannel) async {
+    await _post(
+      host,
+      '/api/admin/update-channel',
+      body: {'channel': updateChannel},
+      timeout: const Duration(seconds: 15),
+      operation: 'set update channel',
+    );
+  }
+
   Future<HostTerminalInfo> createTerminal(
     HostProfile host, {
     required String cwd,

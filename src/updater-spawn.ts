@@ -7,11 +7,50 @@ import type { NodeConfig, UpdateChannel } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
+interface UpdaterSpawnDependencies {
+  detectInstallInfo: typeof detectInstallInfo;
+  execFile(
+    file: string,
+    args: string[],
+    options: {
+      encoding: "utf8";
+      timeout: number;
+    },
+  ): Promise<{ stdout: string; stderr: string }>;
+  spawnDetached(
+    file: string,
+    args: string[],
+    env: NodeJS.ProcessEnv,
+  ): void;
+  now(): number;
+  platform: NodeJS.Platform;
+}
+
+const DEFAULT_UPDATER_SPAWN_DEPENDENCIES: UpdaterSpawnDependencies = {
+  detectInstallInfo,
+  execFile: execFileAsync,
+  spawnDetached: (file, args, env) => {
+    const child = spawn(file, args, {
+      detached: true,
+      stdio: ["ignore", "ignore", "ignore"],
+      env,
+    });
+    child.unref();
+  },
+  now: () => Date.now(),
+  platform: process.platform,
+};
+
 export async function spawnSelfUpdater(
   config: NodeConfig,
   options: { updateChannel?: UpdateChannel | null } = {},
+  dependencyOverrides: Partial<UpdaterSpawnDependencies> = {},
 ): Promise<void> {
-  const info = await detectInstallInfo({ config });
+  const dependencies = {
+    ...DEFAULT_UPDATER_SPAWN_DEPENDENCIES,
+    ...dependencyOverrides,
+  } satisfies UpdaterSpawnDependencies;
+  const info = await dependencies.detectInstallInfo({ config });
   const packageDir = info.packageRoot;
   const cliPath = nodePath.join(packageDir, "dist", "cli.js");
   const env = {
@@ -22,10 +61,11 @@ export async function spawnSelfUpdater(
       : {}),
   };
 
-  if (process.platform === "linux" && info.isManagedService) {
+  if (dependencies.platform === "linux" && info.isManagedService) {
+    const unitName = `sidemesh-self-update-${dependencies.now().toString(36)}`;
     const args = [
-      "--unit=sidemesh-self-update",
-      "--remain-after-exit",
+      `--unit=${unitName}`,
+      "--collect",
       "--property=KillMode=process",
       "--setenv=SIDEMESH_CONFIG=" + config.configPath,
       ...(options.updateChannel
@@ -43,17 +83,18 @@ export async function spawnSelfUpdater(
       "--yes",
     ];
     try {
-      await execFileAsync("systemd-run", args, {
+      await dependencies.execFile("systemd-run", args, {
         encoding: "utf8",
         timeout: 5_000,
       });
       return;
-    } catch {
-      console.error("[update] systemd-run failed, falling back to detached spawn");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`[update] systemd-run failed: ${message}`);
     }
   }
 
-  const child = spawn(
+  dependencies.spawnDetached(
     process.execPath,
     [
       cliPath,
@@ -64,11 +105,6 @@ export async function spawnSelfUpdater(
       packageDir,
       "--yes",
     ],
-    {
-      detached: true,
-      stdio: ["ignore", "ignore", "ignore"],
-      env,
-    },
+    env,
   );
-  child.unref();
 }
