@@ -55,12 +55,16 @@ This writes ~/.sidemesh/config.json with:
 
 ## Start the Daemon
 
-### Background mode (recommended)
+### Background mode (manual)
 
 ```bash
-sidemesh start       # detached background daemon
+sidemesh start       # background mode
 sidemesh pair        # print QR code + connection details
 ```
+
+Use this if you want Sidemesh running in the background without setting up a
+service. The app can connect normally, but if you use Restart or Update in the
+app, you may need to start Sidemesh again yourself.
 
 ### Foreground mode (for debugging)
 
@@ -68,7 +72,10 @@ sidemesh pair        # print QR code + connection details
 sidemesh daemon      # runs in terminal, shows live logs
 ```
 
-### As a system service
+Closing the terminal stops the daemon. Use this mode when you want live logs
+and do not mind starting it again yourself.
+
+### As a system service (recommended for day-to-day use)
 
 **Linux (systemd):**
 ```bash
@@ -81,6 +88,9 @@ sudo sidemesh service restart --yes
 sidemesh service install      # no sudo needed
 sidemesh service restart --yes
 ```
+
+Use this if you want the app's Restart and Update buttons to bring the host
+back on their own.
 
 ## Connect the Mobile App
 
@@ -105,6 +115,18 @@ Example URLs:
 - LAN: http://192.168.1.50:8787
 - Localhost: http://localhost:8787
 
+## In-App Restart and Update
+
+From the host details screen, you can choose an update channel, restart the
+daemon, and run self-update.
+
+- **Stable** gets tagged releases.
+- **Bleeding edge** gets the newest commits on `main` for git installs.
+- If you want the app's Restart and Update buttons to work reliably, use
+  `sidemesh service install`.
+- If you run `sidemesh daemon` or `sidemesh start`, update and restart it
+  yourself when needed.
+
 ### Build the app
 
 ```bash
@@ -123,7 +145,8 @@ flutter install --debug -d DEVICE_ID
 
 ## Daily Workflow
 
-1. **Start daemon** on host: sidemesh start (or let the service auto-start)
+1. **Start daemon** on host: sidemesh start for manual runs, or let the OS
+   service auto-start
 2. **Open app** on phone/desktop
 3. **Select host** from the host list
 4. **Create or resume** a session
@@ -138,7 +161,8 @@ flutter install --debug -d DEVICE_ID
 | sidemesh status | Show config, PID, and health |
 | sidemesh pair | Re-print connection QR/code |
 | sidemesh stop | Stop background daemon |
-| sidemesh restart --yes | Restart daemon non-interactively |
+| sidemesh restart --yes | Restart a daemon started with `sidemesh start` |
+| sidemesh service restart --yes | Restart the OS service on macOS/Linux |
 | sidemesh service status | Check OS service state |
 
 ## Troubleshooting
@@ -159,6 +183,12 @@ npm run build && npm link
 - Check sidemesh status shows healthy
 - Verify the token matches exactly
 - Try the raw URL in a browser: http://HOST:PORT/healthz
+
+**App says the daemon is restarting or updating, but the host does not come back**
+- This works best when Sidemesh is installed as a background service on macOS
+  or Linux
+- If you started it with `sidemesh daemon` or `sidemesh start`, start it again
+  yourself or switch to `sidemesh service install`
 
 **Pi model list is empty**
 Pi has no authenticated providers. Run pi /login for your model provider

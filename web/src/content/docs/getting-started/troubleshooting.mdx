@@ -37,6 +37,24 @@ A stale daemon is holding the port:
 sudo sidemesh service restart --yes
 ```
 
+## App says "daemon is restarting" or "daemon is updating" but the host does not come back
+
+This works best when Sidemesh is installed as a background service on macOS or
+Linux.
+
+If you started the daemon with `sidemesh daemon` or `sidemesh start`, start it
+again yourself or switch to the service install path:
+
+```bash
+# macOS
+sidemesh service install
+sidemesh service restart --yes
+
+# Linux
+sudo sidemesh service install
+sudo sidemesh service restart --yes
+```
+
 ## Slow session list with Pi
 
 The first scan after startup walks all `.jsonl` files. Subsequent calls use a stat-based fingerprint cache. Large session files (>10 MB) may still parse slowly on cache misses.

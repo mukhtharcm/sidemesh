@@ -10,6 +10,20 @@ sidemesh start       # background mode
 sidemesh pair        # show connection details
 ```
 
+That is enough for pairing. If you want the app's Restart and Update buttons to
+bring the host back on their own, install the background service on macOS or
+Linux:
+
+```bash
+# macOS
+sidemesh service install
+sidemesh service restart --yes
+
+# Linux
+sudo sidemesh service install
+sudo sidemesh service restart --yes
+```
+
 The `pair` command prints:
 - A QR code
 - Base URLs (Tailscale, LAN, localhost)
