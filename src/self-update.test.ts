@@ -149,6 +149,52 @@ describe("runSelfUpdate", () => {
     }
   });
 
+  it("prepends the running node directory to PATH for update commands", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-self-update-test-"));
+    const packageDir = nodePath.join(dir, "package");
+    const config = createConfig(dir);
+    const pathCapture = nodePath.join(dir, "path.txt");
+    const originalPath = process.env.PATH;
+
+    await mkdir(nodePath.join(packageDir, "dist"), { recursive: true });
+    await writeFile(nodePath.join(packageDir, "dist", "cli.js"), "#!/usr/bin/env node\n");
+
+    process.env.PATH = "";
+    try {
+      const result = await runSelfUpdate(
+        {
+          config,
+          packageDir,
+        },
+        {
+          detectInstallInfo: async () => ({
+            ...createInstallInfo(packageDir),
+            installType: "git",
+            updateCommand: `node -e 'require("node:fs").writeFileSync(${JSON.stringify(
+              pathCapture,
+            )}, process.env.PATH ?? "")'`,
+          }),
+          stopDaemon: async () => true,
+          startDaemon: async () => undefined,
+          waitForDaemonHealth: async () => true,
+          resolveUpdatedPackageDir: async () => packageDir,
+        },
+      );
+
+      assert.equal(result.success, true);
+      const capturedPath = await readFile(pathCapture, "utf8");
+      assert.ok(
+        capturedPath.split(nodePath.delimiter).includes(nodePath.dirname(process.execPath)),
+      );
+    } finally {
+      if (originalPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = originalPath;
+      }
+    }
+  });
+
   it("reinstalls a stale managed service wrapper after update", async () => {
     const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-self-update-test-"));
     const packageDir = nodePath.join(dir, "package");
