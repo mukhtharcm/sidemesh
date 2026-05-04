@@ -44,6 +44,12 @@ void main() {
           ],
         },
       ],
+      'updateChannel': 'bleeding-edge',
+      'currentCommitSha': 'a1b2c3d4e5f6789012345678901234567890abcd',
+      'latestCommitSha': 'b1c2d3e4f5a6789012345678901234567890abcd',
+      'installType': 'git',
+      'updateAvailable': true,
+      'updateSupported': true,
     });
 
     expect(node.provider, 'codex');
@@ -71,6 +77,12 @@ void main() {
       'SIDEMESH_CODEX_BIN',
       'SIDEMESH_PROVIDER_COMMAND',
     ]);
+    expect(node.updateChannel, 'bleeding-edge');
+    expect(node.shortCurrentCommitSha, 'a1b2c3d');
+    expect(node.shortLatestCommitSha, 'b1c2d3e');
+    expect(node.currentInstallLabel, 'main@a1b2c3d');
+    expect(node.latestInstallLabel, 'main@b1c2d3e');
+    expect(node.updateBadgeLabel, 'New commits on main');
     expect(node.supportedProviders.single.supportedApprovalPolicies, [
       'untrusted',
       'on-failure',
@@ -96,6 +108,8 @@ void main() {
     expect(node.providerVersion, 'codex-cli 0.124.0');
     expect(node.providerDisplayName, 'Codex');
     expect(node.providerDisplayVersion, 'codex-cli 0.124.0');
+    expect(node.updateChannel, 'stable');
+    expect(node.currentCommitSha, isNull);
     expect(node.providerConfig.kind, isEmpty);
     expect(node.providerCapabilities.values, isEmpty);
     expect(node.hostCapabilities.values, isEmpty);

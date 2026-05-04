@@ -65,6 +65,7 @@ function makeMultiProviderConfig(): NodeConfig {
       },
     ],
     defaultProviderKind: "copilot",
+    updateChannel: "stable",
     stateDir: "/tmp/sidemesh-runtime-test",
     terminal: { enabled: false, shell: null, requirePty: false },
     portForwarding: { enabled: false, allowNonLoopbackTargets: false },

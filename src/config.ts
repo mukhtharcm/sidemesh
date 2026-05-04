@@ -10,6 +10,7 @@ import type {
   HostPortForwardingConfig,
   HostTerminalConfig,
   NodeConfig,
+  UpdateChannel,
 } from "./types.js";
 import {
   persistedConfigFromNodeConfig,
@@ -69,6 +70,10 @@ export async function loadConfig(
   const terminal = resolveTerminalConfig(persisted.value, env);
   const portForwarding = resolvePortForwardingConfig(persisted.value, env);
   const browserPreview = resolveBrowserPreviewConfig(persisted.value, env);
+  const updateChannel = parseUpdateChannel(
+    env.SIDEMESH_UPDATE_CHANNEL,
+    persisted.value?.updateChannel ?? "stable",
+  );
   const provider =
     providers.find((candidate) => candidate.kind === defaultProviderKind) ??
     providers[0];
@@ -96,6 +101,7 @@ export async function loadConfig(
     provider,
     providers,
     defaultProviderKind,
+    updateChannel,
     stateDir,
     terminal,
     portForwarding,
@@ -249,6 +255,19 @@ function isProviderEnabled(
     return true;
   }
   return parseOptionalBoolean(env.SIDEMESH_ENABLE_COPILOT) === true;
+}
+
+function parseUpdateChannel(
+  value: string | undefined,
+  fallback: UpdateChannel,
+): UpdateChannel {
+  const channel = value?.trim() || fallback;
+  if (channel === "stable" || channel === "bleeding-edge") {
+    return channel;
+  }
+  throw new Error(
+    `Unsupported SIDEMESH_UPDATE_CHANNEL "${channel}". Supported channels: stable, bleeding-edge`,
+  );
 }
 
 function dedupeProviderKinds(

@@ -19,6 +19,7 @@ describe("launchd service rendering", () => {
       provider: { kind: "codex", bin: "codex" },
       providers: [{ kind: "codex", bin: "codex" }],
       defaultProviderKind: "codex",
+      updateChannel: "stable",
       stateDir: "/Users/example/.sidemesh",
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
       portForwarding: { enabled: true, allowNonLoopbackTargets: false },
