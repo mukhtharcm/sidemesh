@@ -177,10 +177,19 @@ class _LiveAssistantBubble extends StatelessWidget {
 class _ReasoningBlock extends StatefulWidget {
   const _ReasoningBlock({
     required this.reasoning,
+    this.live = false,
+    this.collapsedByDefault = false,
     this.onOpenFile,
   });
 
   final String reasoning;
+  /// True while the assistant is still streaming reasoning. We keep the block
+  /// open while live and never auto-collapse.
+  final bool live;
+  /// Default-collapsed only for messages that already have finalized answer
+  /// text alongside the reasoning. Live or text-less messages stay open so
+  /// users can follow the model's thinking without an extra tap.
+  final bool collapsedByDefault;
   final void Function(String path)? onOpenFile;
 
   @override
@@ -188,66 +197,97 @@ class _ReasoningBlock extends StatefulWidget {
 }
 
 class _ReasoningBlockState extends State<_ReasoningBlock> {
-  bool _expanded = false;
+  late bool _expanded = !widget.collapsedByDefault;
+
+  @override
+  void didUpdateWidget(covariant _ReasoningBlock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If a previously-live block is now finalized and the user hasn't yet
+    // toggled, leave their last state. We don't auto-collapse on transition
+    // — that surprises mid-read users.
+    if (widget.live && !_expanded) {
+      // While streaming, keep it open by default.
+      _expanded = true;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final theme = Theme.of(context);
+    final accent = colors.accent;
+    final headerLabel = widget.live ? 'Thinking' : 'Reasoning';
     return AnimatedSize(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeInOut,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            onTap: () => setState(() => _expanded = !_expanded),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.psychology_outlined,
-                  size: 16,
-                  color: colors.textTertiary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  _expanded ? 'Thinking' : 'Thinking…',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: colors.textTertiary,
-                    fontWeight: AppWeights.title,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  _expanded
-                      ? Icons.expand_less_rounded
-                      : Icons.expand_more_rounded,
-                  size: 16,
-                  color: colors.textTertiary,
-                ),
-              ],
-            ),
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.surfaceMuted,
+          borderRadius: AppShapes.input,
+          border: Border(
+            left: BorderSide(color: accent.withValues(alpha: 0.55), width: 2),
+            top: BorderSide(color: colors.border),
+            right: BorderSide(color: colors.border),
+            bottom: BorderSide(color: colors.border),
           ),
-          if (_expanded) ...[
-            const SizedBox(height: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: SingleChildScrollView(
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: colors.surfaceMuted,
-                    borderRadius: AppShapes.input,
-                  ),
-                  child: _MarkdownMessageBody(
-                    text: widget.reasoning,
-                    textColor: colors.textSecondary,
-                    onOpenFile: widget.onOpenFile,
-                  ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                child: Row(
+                  children: [
+                    if (widget.live)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: LivePulse(color: accent),
+                      )
+                    else
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Icon(
+                          Icons.psychology_alt_outlined,
+                          size: 15,
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    Text(
+                      headerLabel,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: colors.textSecondary,
+                        fontWeight: AppWeights.title,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      _expanded
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      size: 18,
+                      color: colors.textTertiary,
+                    ),
+                  ],
                 ),
               ),
             ),
+            if (_expanded)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: _MarkdownMessageBody(
+                  text: widget.reasoning,
+                  textColor: colors.textSecondary,
+                  onOpenFile: widget.onOpenFile,
+                ),
+              ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -906,7 +946,10 @@ class _MessageBubble extends StatelessWidget {
     final isUser = message.role == 'user';
     final isAssistant = message.role == 'assistant';
     final hasText = message.text.trim().isNotEmpty;
-    final hasTextBlocks = message.content.any((b) => b is TextBlock);
+    final hasTextBlocks = message.content.any(
+      (b) => b is TextBlock && b.text.trim().isNotEmpty,
+    );
+    final hasAnswer = hasTextBlocks || (hasText && !hasTextBlocks);
     final canPin = onTogglePin != null && message.hasVisibleContent;
 
     final bubbleColor = switch (message.role) {
@@ -940,7 +983,7 @@ class _MessageBubble extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (message.phase != null && isAssistant)
+                  if (message.phase != null && isAssistant && hasAnswer)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Row(
@@ -966,9 +1009,11 @@ class _MessageBubble extends StatelessWidget {
                   for (final block in message.content)
                     if (block is ThinkingBlock)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
+                        padding: EdgeInsets.only(bottom: hasAnswer ? 10 : 0),
                         child: _ReasoningBlock(
                           reasoning: block.thinking,
+                          live: live && !hasAnswer,
+                          collapsedByDefault: hasAnswer && !live,
                           onOpenFile: onOpenFile,
                         ),
                       )
@@ -1013,7 +1058,7 @@ class _MessageBubble extends StatelessWidget {
                         ),
                         linkColor: colors.accent,
                       ),
-                  if (canPin || (!isUser && hasText) || hasText)
+                  if (canPin || hasText)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Align(
@@ -1506,7 +1551,7 @@ class _MessagePinButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              pinned ? Icons.push_pin_rounded : Icons.push_pin_rounded,
+              pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
               size: 13,
               color: color,
             ),
