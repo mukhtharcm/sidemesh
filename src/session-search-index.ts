@@ -269,8 +269,7 @@ export class SessionSearchIndex {
         updated_at INTEGER,
         archived INTEGER NOT NULL DEFAULT 0,
         fingerprint TEXT NOT NULL,
-        indexed_at INTEGER NOT NULL,
-        source TEXT
+        indexed_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_search_documents_provider ON session_search_documents(provider_kind);
       CREATE INDEX IF NOT EXISTS idx_search_documents_archived ON session_search_documents(archived);
@@ -368,8 +367,8 @@ export class SessionSearchIndex {
       const insertDoc = this.db.prepare(
         `INSERT INTO session_search_documents (
           session_id, provider_kind, title, preview, cwd,
-          created_at, updated_at, archived, fingerprint, indexed_at, source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          created_at, updated_at, archived, fingerprint, indexed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       insertDoc.run(
         doc.sessionKey,
@@ -382,7 +381,6 @@ export class SessionSearchIndex {
         doc.archived ? 1 : 0,
         doc.fingerprint,
         Date.now(),
-        doc.providerKind,
       );
 
       this.updateSessionManifest(doc.sessionKey, doc.fingerprint);
@@ -404,16 +402,13 @@ export class SessionSearchIndex {
 
     const sessionId =
       namespacedSessionId ?? extractSessionIdFromRolloutPath(rolloutPath);
-    const deleteStmt = this.db.prepare(
-      `DELETE FROM session_fts WHERE session_id = ?`,
-    );
-    deleteStmt.run(sessionId);
-
-    const insert = this.db.prepare(
-      `INSERT INTO session_fts (session_id, content) VALUES (?, ?)`,
-    );
+    let providerKind = "codex";
+    if (namespacedSessionId?.includes(":")) {
+      providerKind = namespacedSessionId.split(":")[0];
+    }
 
     const lines: string[] = [];
+    let cwd = "";
     const stream = createReadStream(rolloutPath, { encoding: "utf8" });
     const rl = readline.createInterface({ input: stream });
     for await (const line of rl) {
@@ -422,18 +417,67 @@ export class SessionSearchIndex {
       if (text) {
         lines.push(text);
       }
-    }
-
-    if (lines.length > 0) {
-      insert.run(sessionId, lines.join("\n"));
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        String((parsed as Record<string, unknown>).type ?? "") === "session_meta"
+      ) {
+        const payload = (parsed as Record<string, unknown>).payload;
+        if (typeof payload === "object" && payload !== null) {
+          const c = (payload as Record<string, unknown>).cwd;
+          if (typeof c === "string") cwd = c;
+        }
+      }
     }
 
     const stats = await stat(rolloutPath);
-    await this.updateRolloutManifest(
-      rolloutPath,
-      stats.size,
-      Math.floor(stats.mtimeMs),
-    );
+    const mtimeMs = Math.floor(stats.mtimeMs);
+
+    this.db.exec("BEGIN");
+    try {
+      const deleteFts = this.db.prepare(
+        `DELETE FROM session_fts WHERE session_id = ?`,
+      );
+      deleteFts.run(sessionId);
+
+      if (lines.length > 0) {
+        const insertFts = this.db.prepare(
+          `INSERT INTO session_fts (session_id, content) VALUES (?, ?)`,
+        );
+        insertFts.run(sessionId, lines.join("\n"));
+      }
+
+      const deleteDoc = this.db.prepare(
+        `DELETE FROM session_search_documents WHERE session_id = ?`,
+      );
+      deleteDoc.run(sessionId);
+
+      const insertDoc = this.db.prepare(
+        `INSERT INTO session_search_documents (
+          session_id, provider_kind, title, preview, cwd,
+          created_at, updated_at, archived, fingerprint, indexed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      insertDoc.run(
+        sessionId,
+        providerKind,
+        "",
+        "",
+        cwd,
+        mtimeMs,
+        mtimeMs,
+        0,
+        `${stats.size}|${mtimeMs}`,
+        Date.now(),
+      );
+
+      await this.updateRolloutManifest(rolloutPath, stats.size, mtimeMs);
+
+      this.db.exec("COMMIT");
+    } catch {
+      this.db.exec("ROLLBACK");
+      throw new Error("Failed to index rollout");
+    }
   }
 
   async search(
