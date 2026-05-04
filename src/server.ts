@@ -495,8 +495,6 @@ export async function startServer(
 
   provider.on("liveEvent", (event) => {
     switch (event.type) {
-      case "fs_changed":
-        return;
       case "skills_changed":
         broadcastSkillsChanged(socketsBySession);
         return;
@@ -802,6 +800,8 @@ export async function startServer(
         defaultProvider.provider.displayName,
       providerVersion,
       providerConfig: defaultProvider.configSummary,
+      // Compatibility alias for defaultProviderCapabilities.
+      // Retained until the minimum supported mobile client version no longer depends on it.
       providerCapabilities: defaultProviderCapabilities,
       defaultProviderCapabilities,
       hostCapabilities,

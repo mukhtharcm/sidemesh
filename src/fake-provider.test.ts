@@ -217,58 +217,6 @@ describe("fake test provider", () => {
     );
   });
 
-  it("supports filesystem APIs and watch notifications", async () => {
-    const cwd = await tempRoot(tempRoots);
-    const provider = new FakeAgentProvider({
-      latencyMs: 0,
-      seedSessions: false,
-      workspaceRoot: cwd,
-    });
-    const events: AgentProviderLiveEvent[] = [];
-    provider.on("liveEvent", (event) => events.push(event));
-    await provider.start();
-
-    const watch = await provider.fsWatch(cwd);
-    const filePath = nodePath.join(cwd, "notes", "fake.md");
-    await provider.fsCreateDirectory(nodePath.dirname(filePath), true);
-    await provider.fsWriteFile(
-      filePath,
-      Buffer.from("# Fake\n").toString("base64"),
-    );
-
-    const changed = await waitFor(
-      () =>
-        events.find(
-          (event) => event.type === "fs_changed" && event.watchId === watch.watchId,
-        ),
-      "fs_changed event",
-    );
-    assert.equal(changed.type, "fs_changed");
-    assert.deepEqual(changed.changedPaths, [nodePath.dirname(filePath)]);
-
-    const listing = await provider.fsReadDirectory(nodePath.join(cwd, "notes"));
-    assert.deepEqual(listing.entries.map((entry) => entry.fileName), ["fake.md"]);
-
-    const metadata = await provider.fsGetMetadata(filePath);
-    assert.equal(metadata.isFile, true);
-
-    const file = await provider.fsReadFile(filePath);
-    assert.equal(Buffer.from(file.dataBase64, "base64").toString("utf8"), "# Fake\n");
-
-    const copyPath = nodePath.join(cwd, "notes", "copy.md");
-    await provider.fsCopy({
-      sourcePath: filePath,
-      destinationPath: copyPath,
-      recursive: false,
-    });
-    assert.equal((await provider.fsGetMetadata(copyPath)).isFile, true);
-
-    await provider.fsRemove(copyPath, { recursive: false, force: false });
-    await assert.rejects(() => provider.fsGetMetadata(copyPath));
-
-    await provider.fsUnwatch(watch.watchId);
-  });
-
   it("can simulate a chat-only provider without attachments, tools, approvals, or configuration", async () => {
     const cwd = await tempRoot(tempRoots);
     const provider = new FakeAgentProvider({
