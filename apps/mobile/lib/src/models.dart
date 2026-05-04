@@ -142,6 +142,9 @@ class NodeInfo {
           _stringValue(json['codexVersion']),
       providerConfig: ProviderConfigSummary.fromJson(json['providerConfig']),
       providerCapabilities: providerCapabilities,
+      // TODO: remove providerCapabilities fallback after the minimum supported
+      // daemon version no longer depends on it. New clients should use
+      // defaultProviderCapabilities or supportedProviders[].capabilities.
       defaultProviderCapabilities: defaultProviderCapabilities.isEmpty
           ? providerCapabilities
           : defaultProviderCapabilities,

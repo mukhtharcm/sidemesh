@@ -356,16 +356,6 @@ export class MultiAgentProvider
         action: this.wrapAction(kind, event.action as AgentPendingAction),
       };
     }
-    if (
-      event.type === "fs_changed" &&
-      typeof event.watchId === "string" &&
-      event.watchId.length > 0
-    ) {
-      return {
-        ...event,
-        watchId: wrapProviderScopedId(kind, event.watchId),
-      };
-    }
     return event;
   }
 
