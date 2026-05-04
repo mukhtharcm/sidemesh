@@ -79,6 +79,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   String _query = '';
   SessionViewMode _recentViewMode = SessionViewMode.flat;
   bool _handlingNotificationIntent = false;
+  final Map<String, NodeInfo> _hostNodeInfo = {};
 
   List<HostProfile> get _enabledHosts =>
       _hosts.where((host) => host.enabled).toList(growable: false);
@@ -156,17 +157,26 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     _heartbeatInFlight = true;
     try {
       final store = HostStatusStore.instance;
+      bool nodesChanged = false;
       await Future.wait(
         hosts.map((host) async {
           try {
-            await _api.fetchNode(host);
+            final node = await _api.fetchNode(host);
             store.markOnline(host.id);
+            if (_hostNodeInfo[host.id]?.updateAvailable != node.updateAvailable) {
+              nodesChanged = true;
+            }
+            _hostNodeInfo[host.id] = node;
           } catch (error) {
             store.markOffline(host.id, error: friendlyError(error));
+            if (_hostNodeInfo.remove(host.id) != null) {
+              nodesChanged = true;
+            }
           }
         }),
         eagerError: false,
       );
+      if (mounted && nodesChanged) setState(() {});
     } finally {
       _heartbeatInFlight = false;
     }
@@ -489,6 +499,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                         ),
                         HostsPane(
                           hosts: _hosts,
+                          hostNodes: _hostNodeInfo,
                           query: _query,
                           onOpenHost: _openHost,
                           onEditHost: (host) =>
@@ -2926,6 +2937,7 @@ class HostsPane extends StatelessWidget {
   const HostsPane({
     super.key,
     required this.hosts,
+    required this.hostNodes,
     required this.onOpenHost,
     required this.onEditHost,
     required this.onRemoveHost,
@@ -2937,6 +2949,7 @@ class HostsPane extends StatelessWidget {
   });
 
   final List<HostProfile> hosts;
+  final Map<String, NodeInfo> hostNodes;
   final ValueChanged<HostProfile> onOpenHost;
   final ValueChanged<HostProfile> onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
@@ -3000,6 +3013,7 @@ class HostsPane extends StatelessWidget {
         final host = visibleHosts[index];
         return _HostRowCard(
           host: host,
+          node: hostNodes[host.id],
           dense: dense,
           selected: dense && selectedHostId == host.id,
           onTap: () => onOpenHost(host),
@@ -3015,6 +3029,7 @@ class HostsPane extends StatelessWidget {
 class _HostRowCard extends StatelessWidget {
   const _HostRowCard({
     required this.host,
+    this.node,
     required this.onTap,
     required this.onEdit,
     required this.onRemove,
@@ -3024,6 +3039,7 @@ class _HostRowCard extends StatelessWidget {
   });
 
   final HostProfile host;
+  final NodeInfo? node;
   final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onRemove;
@@ -3239,6 +3255,14 @@ class _HostRowCard extends StatelessWidget {
                             ),
                           );
                         },
+                      ),
+                    ],
+                    if (node?.updateAvailable == true && !dense) ...[
+                      const SizedBox(height: 6),
+                      MeshPill(
+                        label: 'Update available',
+                        icon: Icons.system_update_alt_rounded,
+                        tone: MeshPillTone.warning,
                       ),
                     ],
                   ],

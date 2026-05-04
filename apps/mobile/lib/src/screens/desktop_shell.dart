@@ -1403,6 +1403,7 @@ class _SidebarPane extends StatelessWidget {
         );
       case _SidebarSection.hosts:
         return HostsPane(
+          hostNodes: {},
           hosts: hosts,
           onOpenHost: onOpenHostDetail,
           onEditHost: onEditHost,
