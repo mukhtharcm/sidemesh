@@ -166,6 +166,53 @@ void main() {
 
     expect(find.text('Step one.'), findsOneWidget);
   });
+
+  testWidgets('persisted assistant reasoning starts collapsed and expands as text', (
+    tester,
+  ) async {
+    final session = _session('persisted-reasoning');
+    final api = _RichEventFakeApi(
+      messages: [
+        _assistantMessage(
+          id: 'answer-with-reasoning',
+          text: 'Visible answer.',
+          content: const [
+            ThinkingBlock(
+              '**Troubleshooting merge issues**\n\n'
+              'New reasoning should render as selectable text.',
+            ),
+            TextBlock('Visible answer.'),
+          ],
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('persisted-reasoning'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Visible answer.'), findsOneWidget);
+    expect(find.text('Reasoning'), findsOneWidget);
+    expect(find.textContaining('Troubleshooting'), findsNothing);
+
+    await tester.tap(find.text('Reasoning'));
+    await _pumpFrames(tester);
+
+    expect(find.textContaining('Troubleshooting'), findsOneWidget);
+    expect(
+      find.textContaining('New reasoning should render as selectable text.'),
+      findsOneWidget,
+    );
+  });
 }
 
 Future<void> _pumpFrames(WidgetTester tester) async {
@@ -219,6 +266,24 @@ SessionSummary _session(String id) {
     status: 'idle',
     runtime: null,
     gitInfo: null,
+  );
+}
+
+SessionMessage _assistantMessage({
+  required String id,
+  required String text,
+  required List<ContentBlock> content,
+}) {
+  final now = DateTime(2026, 1, 1, 12);
+  return SessionMessage(
+    id: id,
+    role: 'assistant',
+    text: text,
+    content: content,
+    attachments: const [],
+    createdAt: now,
+    seq: 1,
+    phase: 'final_answer',
   );
 }
 
@@ -290,7 +355,10 @@ NodeInfo _nodeInfo() => NodeInfo.fromJson({
 });
 
 class _RichEventFakeApi extends ApiClient {
+  _RichEventFakeApi({this.messages = const []});
+
   final _ControllableWebSocketChannel _channel = _ControllableWebSocketChannel();
+  List<SessionMessage> messages;
 
   @override
   Future<NodeInfo> fetchNode(HostProfile host) async => _nodeInfo();
@@ -303,7 +371,7 @@ class _RichEventFakeApi extends ApiClient {
     int? activityLimit,
   }) async => SessionLog(
     session: _session(sessionId),
-    messages: const [],
+    messages: messages,
     activities: const [],
     pendingAction: null,
     history: const SessionLogHistorySummary(
