@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { homedir, hostname, platform } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import nodePath from "node:path";
 
 import compression from "compression";
@@ -94,6 +95,8 @@ import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionReplayIndex } from "./session-replay-index.js";
 import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js";
+import { detectInstallInfo } from "./install-info.js";
+import { spawnSelfUpdater } from "./updater-spawn.js";
 
 const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
@@ -902,6 +905,37 @@ export async function startServer(
     asyncRoute(async (_request, response) => {
       response.json({ ok: true, message: "daemon is restarting" });
       setTimeout(async () => {
+        try {
+          await spawnSelfUpdater(config);
+        } catch (e) {
+          console.error("[update] Failed to spawn updater:", e);
+        }
+        try {
+          await runningServerRef!.close();
+        } finally {
+          process.exit(0);
+        }
+      }, 100);
+    }),
+  );
+
+  app.post(
+    "/api/admin/update",
+    asyncRoute(async (_request, response) => {
+      const info = await detectInstallInfo();
+      if (!info.updateSupported) {
+        response.status(501).json({ error: "update not supported for this install type" });
+        return;
+      }
+
+      response.json({ ok: true, message: "daemon is updating" });
+
+      setTimeout(async () => {
+        try {
+          await spawnSelfUpdater(config);
+        } catch (e) {
+          console.error("[update] Failed to spawn updater:", e);
+        }
         try {
           await runningServerRef!.close();
         } finally {
