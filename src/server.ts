@@ -96,6 +96,7 @@ import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionReplayIndex } from "./session-replay-index.js";
 import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js";
+import { saveConfig } from "./config.js";
 import { detectInstallInfo } from "./install-info.js";
 import { spawnSelfUpdater } from "./updater-spawn.js";
 
@@ -188,6 +189,7 @@ export async function startServer(
     ...DEFAULT_START_SERVER_DEPENDENCIES,
     ...dependencyOverrides,
   } satisfies StartServerDependencies;
+  let runtimeConfig = config;
   const providerRuntime = prebuiltRuntime ?? createAgentProviderRuntime(config);
   const provider = providerRuntime.provider;
   await provider.start();
@@ -247,10 +249,24 @@ export async function startServer(
     latestVersion: null as string | null,
     currentCommitSha: null as string | null,
     latestCommitSha: null as string | null,
-    updateChannel: config.updateChannel,
+    updateChannel: runtimeConfig.updateChannel,
     updateAvailable: false,
     installType: "unknown",
     updateSupported: false,
+  };
+  const setInstallInfo = (
+    detected: Awaited<ReturnType<typeof detectInstallInfo>>,
+  ): void => {
+    installInfo = {
+      packageVersion: detected.packageVersion,
+      latestVersion: detected.latestVersion,
+      currentCommitSha: detected.currentCommitSha,
+      latestCommitSha: detected.latestCommitSha,
+      updateChannel: detected.updateChannel,
+      updateAvailable: detected.updateAvailable,
+      installType: detected.installType,
+      updateSupported: detected.updateSupported,
+    };
   };
   const terminalRegistry = new TerminalRegistry({
     enabled: hostCapabilities.workspace.terminal,
@@ -762,17 +778,8 @@ export async function startServer(
     (await provider.getVersion().catch(() => "unknown"));
 
   try {
-    const detected = await dependencies.detectInstallInfo({ config });
-    installInfo = {
-      packageVersion: detected.packageVersion,
-      latestVersion: detected.latestVersion,
-      currentCommitSha: detected.currentCommitSha,
-      latestCommitSha: detected.latestCommitSha,
-      updateChannel: detected.updateChannel,
-      updateAvailable: detected.updateAvailable,
-      installType: detected.installType,
-      updateSupported: detected.updateSupported,
-    };
+    const detected = await dependencies.detectInstallInfo({ config: runtimeConfig });
+    setInstallInfo(detected);
   } catch {
     // Install detection is best-effort; never block server startup.
   }
@@ -967,6 +974,46 @@ export async function startServer(
   );
 
   app.post(
+    "/api/admin/update-channel",
+    asyncRoute(async (request, response) => {
+      const requestedChannel = parseUpdateChannel(request.body?.channel);
+      if (requestedChannel === null) {
+        response.status(400).json({ error: "channel must be stable or bleeding-edge" });
+        return;
+      }
+
+      const nextConfig: NodeConfig = {
+        ...runtimeConfig,
+        updateChannel: requestedChannel,
+        configExists: true,
+      };
+      await saveConfig(nextConfig, { configPath: nextConfig.configPath });
+      runtimeConfig = nextConfig;
+
+      try {
+        const detected = await dependencies.detectInstallInfo({
+          config: runtimeConfig,
+        });
+        setInstallInfo(detected);
+      } catch {
+        installInfo = {
+          ...installInfo,
+          updateChannel: runtimeConfig.updateChannel,
+        };
+      }
+
+      response.json({
+        ok: true,
+        updateChannel: installInfo.updateChannel,
+        updateAvailable: installInfo.updateAvailable,
+        latestVersion: installInfo.latestVersion,
+        currentCommitSha: installInfo.currentCommitSha,
+        latestCommitSha: installInfo.latestCommitSha,
+      });
+    }),
+  );
+
+  app.post(
     "/api/admin/update",
     asyncRoute(async (request, response) => {
       const requestedChannelRaw = request.body?.channel;
@@ -979,27 +1026,34 @@ export async function startServer(
         return;
       }
 
-      const effectiveConfig = requestedChannel
-        ? { ...config, updateChannel: requestedChannel }
-        : config;
+      const effectiveConfig =
+        requestedChannel && requestedChannel !== runtimeConfig.updateChannel
+          ? {
+              ...runtimeConfig,
+              updateChannel: requestedChannel,
+              configExists: true,
+            }
+          : runtimeConfig;
+      if (effectiveConfig !== runtimeConfig) {
+        await saveConfig(effectiveConfig, { configPath: effectiveConfig.configPath });
+        runtimeConfig = effectiveConfig;
+      }
       const info = await dependencies.detectInstallInfo({
-        config: effectiveConfig,
+        config: runtimeConfig,
       });
+      setInstallInfo(info);
       if (!info.updateSupported) {
         response.status(501).json({ error: "update not supported for this install type" });
         return;
       }
 
+      await dependencies.spawnSelfUpdater(runtimeConfig, {
+        updateChannel: requestedChannel,
+      });
+
       response.json({ ok: true, message: "daemon is updating" });
 
       setTimeout(async () => {
-        try {
-          await dependencies.spawnSelfUpdater(effectiveConfig, {
-            updateChannel: requestedChannel,
-          });
-        } catch (e) {
-          console.error("[update] Failed to spawn updater:", e);
-        }
         try {
           await runningServerRef!.close();
         } finally {
