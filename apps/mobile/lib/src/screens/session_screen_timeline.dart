@@ -209,72 +209,85 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       alignment: Alignment.topCenter,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: colors.surfaceMuted,
-          borderRadius: AppShapes.input,
-          border: Border(
-            left: BorderSide(color: accent.withValues(alpha: 0.55), width: 2),
-            top: BorderSide(color: colors.border),
-            right: BorderSide(color: colors.border),
-            bottom: BorderSide(color: colors.border),
+      child: ClipRRect(
+        borderRadius: AppShapes.input,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.surfaceElevated,
+            borderRadius: AppShapes.input,
+            border: Border.all(color: colors.border),
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            InkWell(
-              onTap: () => setState(() => _expanded = !_expanded),
-              borderRadius: BorderRadius.circular(10),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
-                child: Row(
-                  children: [
-                    if (widget.live)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: LivePulse(color: accent),
-                      )
-                    else
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Icon(
-                          Icons.psychology_alt_outlined,
-                          size: 15,
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                    Text(
-                      headerLabel,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: colors.textSecondary,
-                        fontWeight: AppWeights.title,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                    const Spacer(),
-                    Icon(
-                      _expanded
-                          ? Icons.expand_less_rounded
-                          : Icons.expand_more_rounded,
-                      size: 18,
-                      color: colors.textTertiary,
-                    ),
-                  ],
+          child: Stack(
+            children: [
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                child: ColoredBox(
+                  color: accent.withValues(alpha: 0.55),
+                  child: const SizedBox(width: 2),
                 ),
               ),
-            ),
-            if (_expanded)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: _MarkdownMessageBody(
-                  text: widget.reasoning,
-                  textColor: colors.textSecondary,
-                  onOpenFile: widget.onOpenFile,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  InkWell(
+                    onTap: () => setState(() => _expanded = !_expanded),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                      child: Row(
+                        children: [
+                          if (widget.live)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: LivePulse(color: accent),
+                            )
+                          else
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Icon(
+                                Icons.psychology_alt_outlined,
+                                size: 15,
+                                color: colors.textSecondary,
+                              ),
+                            ),
+                          Text(
+                            headerLabel,
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: colors.textSecondary,
+                              fontWeight: AppWeights.title,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                          const Spacer(),
+                          Icon(
+                            _expanded
+                                ? Icons.expand_less_rounded
+                                : Icons.expand_more_rounded,
+                            size: 18,
+                            color: colors.textSecondary,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (_expanded)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      child: _MarkdownMessageBody(
+                        text: widget.reasoning,
+                        // Long-form reasoning needs full body contrast across every
+                        // built-in palette; secondary text washes out on some light themes.
+                        textColor: colors.textPrimary,
+                        onOpenFile: widget.onOpenFile,
+                      ),
+                    ),
+                ],
               ),
-          ],
+            ],
+          ),
         ),
       ),
     );
