@@ -1179,6 +1179,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       .capabilitiesForProvider(null)
       .supports('lifecycle', 'restart');
 
+  bool get _updateSupported => widget.node.updateSupported;
+
   String get _providerDisplayName => widget.node.providerDisplayName;
 
   Future<void> _restartProvider() async {
@@ -1206,6 +1208,46 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     } catch (e) {
       if (!mounted) return;
       showAppSnackBar(context, 'Restart failed: ${friendlyError(e)}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _updateDaemon() async {
+    if (_busy) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Update Sidemesh?'),
+        content: const Text(
+          'All active terminal sessions, port forwards, and browser previews will be closed. '
+          'The daemon will restart automatically when the update completes.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      await widget.api.updateDaemon(widget.host);
+      if (!mounted) return;
+      showAppSnackBar(context, 'Updating Sidemesh…');
+    } catch (e) {
+      if (!mounted) return;
+      showAppSnackBar(context, 'Update failed: ${friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1254,6 +1296,18 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               onTap: _restartProvider,
             ),
           if (_supportsRestart) Divider(height: 1, indent: 46, color: colors.border),
+          if (_updateSupported)
+            _ManagementRow(
+              icon: Icons.system_update_alt_rounded,
+              label: 'Update Sidemesh',
+              detail: widget.node.updateAvailable
+                  ? 'v${widget.node.packageVersion ?? ''} → v${widget.node.latestVersion ?? ''}'
+                  : 'Current: v${widget.node.packageVersion ?? ''}',
+              busy: _busy,
+              onTap: _updateDaemon,
+            ),
+          if (_updateSupported)
+            Divider(height: 1, indent: 46, color: colors.border),
           _ManagementRow(
             icon: Icons.restart_alt_rounded,
             label: 'Restart Sidemesh daemon',

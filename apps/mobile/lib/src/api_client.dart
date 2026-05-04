@@ -191,6 +191,16 @@ class ApiClient {
     );
   }
 
+  Future<void> updateDaemon(HostProfile host) async {
+    await _post(
+      host,
+      '/api/admin/update',
+      body: const {},
+      timeout: const Duration(seconds: 15),
+      operation: 'update daemon',
+    );
+  }
+
   Future<HostTerminalInfo> createTerminal(
     HostProfile host, {
     required String cwd,
