@@ -914,7 +914,7 @@ class _ConnectPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'On macOS or Linux, install the OS service after setup if you want restart and update actions in the app to bring the host back automatically.',
+                  'On macOS or Linux, install the background service if you want the app\'s Restart and Update buttons to bring the host back on their own.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.4,

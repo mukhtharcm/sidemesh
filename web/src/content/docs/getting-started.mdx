@@ -55,13 +55,13 @@ This writes `~/.sidemesh/config.json` with:
 ### Background mode (manual)
 
 ```bash
-sidemesh start       # detached background daemon
+sidemesh start       # background mode
 sidemesh pair        # print QR code + connection details
 ```
 
-Use this when you want a manual detached daemon without installing an OS
-service. It is fine for local development and ad-hoc use, but the daemon is
-not supervised by `launchd` or `systemd`.
+Use this if you want Sidemesh running in the background without setting up a
+service. The app can connect normally, but if you use Restart or Update in the
+app, you may need to start Sidemesh again yourself.
 
 ### Foreground mode (for debugging)
 
@@ -70,7 +70,7 @@ sidemesh daemon      # runs in terminal, shows live logs
 ```
 
 Closing the terminal stops the daemon. Use this mode when you want live logs
-and expect to restart the process yourself.
+and do not mind starting it again yourself.
 
 ### As a system service (recommended for day-to-day use)
 
@@ -86,9 +86,8 @@ sidemesh service install
 sidemesh service restart --yes
 ```
 
-Use a service-managed install if you want the app's restart and update actions
-to bring the host back automatically. `launchd` and `systemd` supervise the
-daemon and restart it after app-driven lifecycle actions.
+Use this if you want the app's Restart and Update buttons to bring the host
+back on their own.
 
 ## Connect the Mobile App
 
@@ -115,16 +114,15 @@ Example URLs:
 
 ## In-App Restart and Update
 
-The host details screen can persist an update channel, restart the daemon, and
-trigger self-update.
+From the host details screen, you can choose an update channel, restart the
+daemon, and run self-update.
 
-- **Stable** follows tagged releases.
-- **Bleeding edge** follows the latest commits on `main` for git installs.
-- **Recommended**: run Sidemesh as a macOS LaunchAgent or Linux systemd service
-  if you want restart and self-update actions in the app to recover
-  automatically.
-- **Manual modes**: if you run `sidemesh daemon` or `sidemesh start`, prefer
-  manual updates and restart the daemon yourself after changing code.
+- **Stable** gets tagged releases.
+- **Bleeding edge** gets the newest commits on `main` for git installs.
+- If you want the app's Restart and Update buttons to work reliably, use
+  `sidemesh service install`.
+- If you run `sidemesh daemon` or `sidemesh start`, update and restart it
+  yourself when needed.
 
 ## Daily Workflow
 

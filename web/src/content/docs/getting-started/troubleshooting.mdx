@@ -39,11 +39,11 @@ sudo sidemesh service restart --yes
 
 ## App says "daemon is restarting" or "daemon is updating" but the host does not come back
 
-Those app-driven lifecycle actions are most reliable when Sidemesh is
-supervised by macOS `launchd` or Linux `systemd`.
+This works best when Sidemesh is installed as a background service on macOS or
+Linux.
 
-If you launched the daemon with `sidemesh daemon` or `sidemesh start`, restart
-it yourself or switch to the OS service path:
+If you started the daemon with `sidemesh daemon` or `sidemesh start`, start it
+again yourself or switch to the service install path:
 
 ```bash
 # macOS
