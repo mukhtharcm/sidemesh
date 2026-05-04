@@ -200,18 +200,6 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
   late bool _expanded = !widget.collapsedByDefault;
 
   @override
-  void didUpdateWidget(covariant _ReasoningBlock oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // If a previously-live block is now finalized and the user hasn't yet
-    // toggled, leave their last state. We don't auto-collapse on transition
-    // — that surprises mid-read users.
-    if (widget.live && !_expanded) {
-      // While streaming, keep it open by default.
-      _expanded = true;
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final theme = Theme.of(context);
@@ -949,7 +937,7 @@ class _MessageBubble extends StatelessWidget {
     final hasTextBlocks = message.content.any(
       (b) => b is TextBlock && b.text.trim().isNotEmpty,
     );
-    final hasAnswer = hasTextBlocks || (hasText && !hasTextBlocks);
+    final hasAnswer = hasTextBlocks || hasText;
     final canPin = onTogglePin != null && message.hasVisibleContent;
 
     final bubbleColor = switch (message.role) {
