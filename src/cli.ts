@@ -47,7 +47,10 @@ import {
   uninstallSystemdService,
 } from "./systemd-service.js";
 import type { NodeConfig } from "./types.js";
-import { runSelfUpdate } from "./self-update.js";
+import {
+  applyUpdateChannelOverrideFromEnv,
+  runSelfUpdate,
+} from "./self-update.js";
 
 export async function main(argv = process.argv): Promise<void> {
   const program = new Command();
@@ -131,10 +134,11 @@ export async function main(argv = process.argv): Promise<void> {
         dryRun?: boolean;
         yes?: boolean;
       }) => {
-        const config = await loadConfig({
+        let config = await loadConfig({
           configPath: options.config,
           persistGeneratedToken: true,
         });
+        config = applyUpdateChannelOverrideFromEnv(config);
         const result = await runSelfUpdate({
           config,
           packageDir: options.packageDir ?? null,
