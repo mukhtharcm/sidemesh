@@ -495,11 +495,11 @@ class _NodeCard extends StatelessWidget {
                   tone: MeshPillTone.neutral,
                   mono: true,
                 ),
-              if (node.updateAvailable &&
-                  node.latestVersion != null &&
-                  node.latestVersion!.isNotEmpty)
+              if (node.updateAvailable)
                 MeshPill(
-                  label: 'Update: v${node.latestVersion} available',
+                  label: node.usesBleedingEdgeTrack
+                      ? 'New commits on main'
+                      : 'Update: ${node.latestInstallLabel} available',
                   icon: Icons.system_update_alt_rounded,
                   tone: MeshPillTone.warning,
                   mono: true,
@@ -1190,13 +1190,37 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
   DateTime? _updateStartedAt;
   String? _updatePreviousVersion;
-  String? _updateTargetVersion;
+  String? _updatePreviousCommitSha;
+  String? _updateTargetLabel;
+  String? _updateChannelAtStart;
+  late String _selectedUpdateChannel;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedUpdateChannel = widget.node.updateChannel;
+  }
+
+  @override
+  void didUpdateWidget(covariant _HostManagementCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.host.id != widget.host.id ||
+        oldWidget.node.updateChannel != widget.node.updateChannel) {
+      _selectedUpdateChannel = widget.node.updateChannel;
+    }
+  }
 
   bool get _supportsRestart => widget.node
       .capabilitiesForProvider(null)
       .supports('lifecycle', 'restart');
 
   bool get _updateSupported => widget.node.updateSupported;
+
+  bool get _supportsChannelSelection =>
+      _updateSupported && widget.node.installType == 'git';
+
+  bool get _useBleedingEdgeForNextUpdate =>
+      _selectedUpdateChannel == 'bleeding-edge';
 
   String get _providerDisplayName => widget.node.providerDisplayName;
 
@@ -1230,7 +1254,48 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     }
   }
 
+  Future<void> _pickUpdateChannel() async {
+    if (!_supportsChannelSelection) return;
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.verified_rounded),
+                title: const Text('Stable'),
+                subtitle: const Text('Tagged releases'),
+                trailing: _selectedUpdateChannel == 'stable'
+                    ? const Icon(Icons.check_rounded)
+                    : null,
+                onTap: () => Navigator.of(context).pop('stable'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.science_rounded),
+                title: const Text('Bleeding edge'),
+                subtitle: const Text('Latest commits from main'),
+                trailing: _selectedUpdateChannel == 'bleeding-edge'
+                    ? const Icon(Icons.check_rounded)
+                    : null,
+                onTap: () => Navigator.of(context).pop('bleeding-edge'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (!mounted || selected == null || selected == _selectedUpdateChannel) {
+      return;
+    }
+    setState(() => _selectedUpdateChannel = selected);
+  }
+
   String get _updateDialogTitle {
+    if (_useBleedingEdgeForNextUpdate) {
+      return 'Update to latest main?';
+    }
     final current = widget.node.packageVersion;
     final latest = widget.node.latestVersion;
     if (current != null &&
@@ -1248,7 +1313,6 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     final prefs = await SharedPreferences.getInstance();
     final skipConfirm = prefs.getBool('sidemesh_update_skip_confirm') ?? false;
 
-
     if (!mounted) return;
     if (!skipConfirm) {
       bool skipNextTime = false;
@@ -1260,8 +1324,10 @@ class _HostManagementCardState extends State<_HostManagementCard> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'All active terminal sessions, port forwards, and browser previews will be disconnected.',
+              Text(
+                _useBleedingEdgeForNextUpdate
+                    ? 'This will update Sidemesh to the latest commit on main. All active terminal sessions, port forwards, and browser previews will be disconnected.'
+                    : 'All active terminal sessions, port forwards, and browser previews will be disconnected.',
               ),
               const SizedBox(height: 12),
               StatefulBuilder(
@@ -1301,12 +1367,17 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
     setState(() => _updating = true);
     try {
-      await widget.api.updateDaemon(widget.host);
+      await widget.api.updateDaemon(
+        widget.host,
+        updateChannel: _selectedUpdateChannel,
+      );
       if (!mounted) return;
       setState(() {
         _updateStartedAt = DateTime.now();
         _updatePreviousVersion = widget.node.packageVersion;
-        _updateTargetVersion = widget.node.latestVersion;
+        _updatePreviousCommitSha = widget.node.currentCommitSha;
+        _updateTargetLabel = _targetUpdateLabel();
+        _updateChannelAtStart = _selectedUpdateChannel;
       });
       showAppSnackBar(context, 'Updating Sidemesh…');
     } catch (e) {
@@ -1331,18 +1402,52 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     );
   }
 
-  String _updateDetail() {
-    final packageVersion = widget.node.packageVersion;
+  String _targetUpdateLabel() {
+    if (_useBleedingEdgeForNextUpdate) {
+      return widget.node.shortLatestCommitSha == null
+          ? 'latest main'
+          : 'main@${widget.node.shortLatestCommitSha}';
+    }
     final latestVersion = widget.node.latestVersion;
-    final hasCurrent = packageVersion != null && packageVersion.isNotEmpty;
-    final hasLatest = latestVersion != null && latestVersion.isNotEmpty;
+    if (latestVersion != null && latestVersion.isNotEmpty) {
+      return 'v$latestVersion';
+    }
+    return 'latest version';
+  }
 
+  String _updateChannelDetail() {
+    final configured = _selectedUpdateChannel == widget.node.updateChannel;
+    final base = _useBleedingEdgeForNextUpdate
+        ? 'Bleeding edge · latest commits on main'
+        : 'Stable · tagged releases';
+    return configured ? base : '$base · next update only';
+  }
+
+  String _updateDetail() {
     final isOffline =
         HostStatusStore.instance.statusFor(widget.host.id).reachability ==
             HostReachability.offline;
     if (isOffline) {
       return 'Host offline — cannot update';
     }
+
+    if (widget.node.usesBleedingEdgeTrack) {
+      final current = widget.node.currentInstallLabel;
+      final latest = widget.node.latestInstallLabel;
+      if (!widget.node.updateAvailable) {
+        return 'Up to date · $current';
+      }
+      if (widget.node.shortCurrentCommitSha != null &&
+          widget.node.shortLatestCommitSha != null) {
+        return '$current → $latest';
+      }
+      return current;
+    }
+
+    final packageVersion = widget.node.packageVersion;
+    final latestVersion = widget.node.latestVersion;
+    final hasCurrent = packageVersion != null && packageVersion.isNotEmpty;
+    final hasLatest = latestVersion != null && latestVersion.isNotEmpty;
 
     if (!widget.node.updateAvailable) {
       if (hasCurrent) return 'Up to date · v$packageVersion';
@@ -1351,11 +1456,11 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
     if (hasCurrent && hasLatest) {
       return 'v$packageVersion → v$latestVersion';
-    } else if (hasCurrent) {
-      return 'Current: v$packageVersion';
-    } else {
-      return 'Unknown version';
     }
+    if (hasCurrent) {
+      return 'Current: v$packageVersion';
+    }
+    return 'Unknown version';
   }
 
   IconData get _updateIcon {
@@ -1385,8 +1490,10 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 _UpdateProgressBanner(
                   hostId: widget.host.id,
                   startedAt: _updateStartedAt!,
-                  targetVersion: _updateTargetVersion,
+                  targetLabel: _updateTargetLabel,
                   previousVersion: _updatePreviousVersion,
+                  previousCommitSha: _updatePreviousCommitSha,
+                  updateChannel: _updateChannelAtStart ?? widget.node.updateChannel,
                   currentNode: widget.node,
                   onDismiss: () => setState(() => _updateStartedAt = null),
                   onRetry: () {
@@ -1415,6 +1522,16 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                   onTap: _restartProvider,
                 ),
               if (_supportsRestart)
+                Divider(height: 1, indent: 46, color: colors.border),
+              if (_supportsChannelSelection)
+                _ManagementRow(
+                  icon: Icons.alt_route_rounded,
+                  label: 'Update channel',
+                  detail: _updateChannelDetail(),
+                  busy: false,
+                  onTap: _pickUpdateChannel,
+                ),
+              if (_supportsChannelSelection)
                 Divider(height: 1, indent: 46, color: colors.border),
               if (_updateSupported)
                 _ManagementRow(
@@ -1447,8 +1564,10 @@ class _UpdateProgressBanner extends StatelessWidget {
   const _UpdateProgressBanner({
     required this.hostId,
     required this.startedAt,
-    required this.targetVersion,
+    required this.targetLabel,
     required this.previousVersion,
+    required this.previousCommitSha,
+    required this.updateChannel,
     required this.currentNode,
     required this.onDismiss,
     required this.onRetry,
@@ -1456,8 +1575,10 @@ class _UpdateProgressBanner extends StatelessWidget {
 
   final String hostId;
   final DateTime startedAt;
-  final String? targetVersion;
+  final String? targetLabel;
   final String? previousVersion;
+  final String? previousCommitSha;
+  final String updateChannel;
   final NodeInfo currentNode;
   final VoidCallback onDismiss;
   final VoidCallback onRetry;
@@ -1473,12 +1594,14 @@ class _UpdateProgressBanner extends StatelessWidget {
     }
 
     if (status.reachability == HostReachability.online) {
-      final newVersion = currentNode.packageVersion;
-      final changed = newVersion != null &&
-          newVersion.isNotEmpty &&
-          newVersion != previousVersion;
+      final changed = updateChannel == 'bleeding-edge'
+          ? currentNode.currentCommitSha != null &&
+              currentNode.currentCommitSha != previousCommitSha
+          : currentNode.packageVersion != null &&
+              currentNode.packageVersion!.isNotEmpty &&
+              currentNode.packageVersion != previousVersion;
       if (changed) {
-        return _buildSuccess(context, colors, newVersion);
+        return _buildSuccess(context, colors, _successLabel());
       }
       return _buildFailure(context, colors);
     }
@@ -1490,25 +1613,37 @@ class _UpdateProgressBanner extends StatelessWidget {
     return _buildUpdating(context, colors);
   }
 
+  String _successLabel() {
+    if (updateChannel == 'bleeding-edge') {
+      final sha = currentNode.shortCurrentCommitSha;
+      return sha == null ? 'latest main' : 'main@$sha';
+    }
+    final version = currentNode.packageVersion;
+    if (version != null && version.isNotEmpty) {
+      return 'v$version';
+    }
+    return currentNode.currentInstallLabel;
+  }
+
   Widget _buildUpdating(BuildContext context, AppColors colors) {
     return _buildRow(
       context,
       colors: colors,
       icon: Icons.update_rounded,
       iconColor: colors.accent,
-      title: 'Updating to v${targetVersion ?? 'latest'}…',
+      title: 'Updating to ${targetLabel ?? 'latest'}…',
       subtitle: 'This may take 20–45 seconds',
       showSpinner: true,
     );
   }
 
-  Widget _buildSuccess(BuildContext context, AppColors colors, String version) {
+  Widget _buildSuccess(BuildContext context, AppColors colors, String label) {
     return _buildRow(
       context,
       colors: colors,
       icon: Icons.check_circle_rounded,
       iconColor: colors.success,
-      title: 'Updated to v$version',
+      title: 'Updated to $label',
       showDismiss: true,
     );
   }

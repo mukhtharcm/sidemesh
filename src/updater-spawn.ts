@@ -3,14 +3,24 @@ import { promisify } from "node:util";
 import nodePath from "node:path";
 
 import { detectInstallInfo } from "./install-info.js";
-import type { NodeConfig } from "./types.js";
+import type { NodeConfig, UpdateChannel } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
-export async function spawnSelfUpdater(config: NodeConfig): Promise<void> {
-  const info = await detectInstallInfo();
+export async function spawnSelfUpdater(
+  config: NodeConfig,
+  options: { updateChannel?: UpdateChannel | null } = {},
+): Promise<void> {
+  const info = await detectInstallInfo({ config });
   const packageDir = info.packageRoot;
   const cliPath = nodePath.join(packageDir, "dist", "cli.js");
+  const env = {
+    ...process.env,
+    SIDEMESH_CONFIG: config.configPath,
+    ...(options.updateChannel
+      ? { SIDEMESH_UPDATE_CHANNEL: options.updateChannel }
+      : {}),
+  };
 
   if (process.platform === "linux" && info.isManagedService) {
     const args = [
@@ -18,6 +28,9 @@ export async function spawnSelfUpdater(config: NodeConfig): Promise<void> {
       "--remain-after-exit",
       "--property=KillMode=process",
       "--setenv=SIDEMESH_CONFIG=" + config.configPath,
+      ...(options.updateChannel
+        ? [`--setenv=SIDEMESH_UPDATE_CHANNEL=${options.updateChannel}`]
+        : []),
       process.execPath,
       cliPath,
       "self-update",
@@ -40,21 +53,22 @@ export async function spawnSelfUpdater(config: NodeConfig): Promise<void> {
     }
   }
 
-  const child = spawn(process.execPath, [
-    cliPath,
-    "self-update",
-    "--config",
-    config.configPath,
-    "--package-dir",
-    packageDir,
-    "--yes",
-  ], {
-    detached: true,
-    stdio: ["ignore", "ignore", "ignore"],
-    env: {
-      ...process.env,
-      SIDEMESH_CONFIG: config.configPath,
+  const child = spawn(
+    process.execPath,
+    [
+      cliPath,
+      "self-update",
+      "--config",
+      config.configPath,
+      "--package-dir",
+      packageDir,
+      "--yes",
+    ],
+    {
+      detached: true,
+      stdio: ["ignore", "ignore", "ignore"],
+      env,
     },
-  });
+  );
   child.unref();
 }

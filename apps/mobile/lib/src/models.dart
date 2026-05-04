@@ -63,6 +63,9 @@ class NodeInfo {
     required this.supportedProviders,
     this.packageVersion,
     this.latestVersion,
+    this.currentCommitSha,
+    this.latestCommitSha,
+    this.updateChannel = 'stable',
     this.updateAvailable = false,
     this.installType,
     this.updateSupported = false,
@@ -83,6 +86,9 @@ class NodeInfo {
   final List<ProviderDefinitionSummary> supportedProviders;
   final String? packageVersion;
   final String? latestVersion;
+  final String? currentCommitSha;
+  final String? latestCommitSha;
+  final String updateChannel;
   final bool updateAvailable;
   final String? installType;
   final bool updateSupported;
@@ -103,6 +109,40 @@ class NodeInfo {
     if (version.isEmpty) return providerDisplayName;
     return '$providerDisplayName $version';
   }
+
+  bool get usesBleedingEdgeTrack =>
+      installType == 'git' && updateChannel == 'bleeding-edge';
+
+  String? get shortCurrentCommitSha => _shortSha(currentCommitSha);
+
+  String? get shortLatestCommitSha => _shortSha(latestCommitSha);
+
+  String get currentInstallLabel {
+    if (usesBleedingEdgeTrack) {
+      final sha = shortCurrentCommitSha;
+      return sha == null ? 'main' : 'main@$sha';
+    }
+    final version = packageVersion;
+    if (version != null && version.isNotEmpty) {
+      return 'v$version';
+    }
+    return 'Unknown version';
+  }
+
+  String get latestInstallLabel {
+    if (usesBleedingEdgeTrack) {
+      final sha = shortLatestCommitSha;
+      return sha == null ? 'latest main' : 'main@$sha';
+    }
+    final version = latestVersion;
+    if (version != null && version.isNotEmpty) {
+      return 'v$version';
+    }
+    return 'latest version';
+  }
+
+  String get updateBadgeLabel =>
+      usesBleedingEdgeTrack ? 'New commits on main' : 'Update available';
 
   bool supportsHostCapability(String section, String feature) {
     return hostCapabilities.supports(section, feature);
@@ -164,6 +204,9 @@ class NodeInfo {
       ),
       packageVersion: _stringOrNull(json['packageVersion']),
       latestVersion: _stringOrNull(json['latestVersion']),
+      currentCommitSha: _stringOrNull(json['currentCommitSha']),
+      latestCommitSha: _stringOrNull(json['latestCommitSha']),
+      updateChannel: _stringOrNull(json['updateChannel']) ?? 'stable',
       updateAvailable: json['updateAvailable'] == true,
       installType: _stringOrNull(json['installType']),
       updateSupported: json['updateSupported'] == true,
@@ -2771,6 +2814,12 @@ class LiveEvent {
 }
 
 String _stringValue(Object? value) => value is String ? value : '';
+
+String? _shortSha(String? value) {
+  final normalized = value?.trim();
+  if (normalized == null || normalized.isEmpty) return null;
+  return normalized.length <= 7 ? normalized : normalized.substring(0, 7);
+}
 
 String? _stringOrNull(Object? value) {
   final normalized = _stringValue(value);

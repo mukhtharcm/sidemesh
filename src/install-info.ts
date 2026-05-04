@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import nodePath from "node:path";
 import { promisify } from "node:util";
 
+import type { NodeConfig, UpdateChannel } from "./types.js";
+
 const execFileAsync = promisify(execFile);
 
 export type InstallType = "git" | "npm-global" | "npm-local" | "unknown";
@@ -12,23 +14,50 @@ export type InstallType = "git" | "npm-global" | "npm-local" | "unknown";
 export interface InstallInfo {
   packageVersion: string;
   latestVersion: string | null;
+  currentCommitSha: string | null;
+  latestCommitSha: string | null;
+  updateChannel: UpdateChannel;
   updateAvailable: boolean;
   packageRoot: string;
   installType: InstallType;
   updateSupported: boolean;
   updateCommand: string | null;
+  restoreCommand: string | null;
   isManagedService: boolean;
   serviceName: string | null;
 }
 
+export interface DetectInstallInfoOptions {
+  packageRoot?: string;
+  config?: Pick<NodeConfig, "updateChannel"> | null;
+}
+
+interface LatestVersionInfo {
+  latestVersion: string | null;
+  latestCommitSha: string | null;
+}
+
 export async function detectInstallInfo(
   packageRootOverride?: string,
+): Promise<InstallInfo>;
+export async function detectInstallInfo(
+  options?: DetectInstallInfoOptions,
+): Promise<InstallInfo>;
+export async function detectInstallInfo(
+  packageRootOrOptions: string | DetectInstallInfoOptions = {},
 ): Promise<InstallInfo> {
-  const packageRoot = packageRootOverride ?? resolvePackageRoot();
+  const options =
+    typeof packageRootOrOptions === "string"
+      ? { packageRoot: packageRootOrOptions }
+      : packageRootOrOptions;
+  const packageRoot = options.packageRoot ?? resolvePackageRoot();
+  const updateChannel = options.config?.updateChannel ?? "stable";
   const packageVersion = await readPackageVersion(packageRoot);
   const installType = await detectInstallType(packageRoot);
   const isManagedService = await isSystemdServiceActive().catch(() => false);
   const serviceName = isManagedService ? "sidemesh" : null;
+  const currentCommitSha =
+    installType === "git" ? await readCurrentCommitSha(packageRoot) : null;
 
   let updateSupported = false;
   let updateCommand: string | null = null;
@@ -36,7 +65,10 @@ export async function detectInstallInfo(
   switch (installType) {
     case "git": {
       updateSupported = true;
-      updateCommand = "git pull && npm install && npm run build";
+      updateCommand =
+        updateChannel === "bleeding-edge"
+          ? "(git checkout main || git checkout -b main --track origin/main) && git pull origin main && npm install && npm run build"
+          : "git pull && npm install && npm run build";
       break;
     }
     case "npm-global": {
@@ -54,20 +86,33 @@ export async function detectInstallInfo(
     }
   }
 
-  const latestVersion = updateSupported
-    ? await checkLatestVersion(packageRoot, installType)
-    : null;
-  const updateAvailable =
-    latestVersion !== null && latestVersion !== packageVersion;
+  const { latestVersion, latestCommitSha } = updateSupported
+    ? await checkLatestVersion(packageRoot, installType, updateChannel)
+    : { latestVersion: null, latestCommitSha: null };
+  const updateAvailable = isUpdateAvailable({
+    packageVersion,
+    latestVersion,
+    currentCommitSha,
+    latestCommitSha,
+    installType,
+    updateChannel,
+  });
 
   return {
     packageVersion,
     latestVersion,
+    currentCommitSha,
+    latestCommitSha,
+    updateChannel,
     updateAvailable,
     packageRoot,
     installType,
     updateSupported,
     updateCommand,
+    restoreCommand:
+      installType === "git" && currentCommitSha
+        ? `git checkout ${currentCommitSha}`
+        : null,
     isManagedService,
     serviceName,
   };
@@ -93,67 +138,137 @@ async function readPackageVersion(packageRoot: string): Promise<string> {
   }
 }
 
+async function readCurrentCommitSha(packageRoot: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-parse", "HEAD"],
+      { cwd: packageRoot, encoding: "utf8", timeout: 10_000 },
+    );
+    const sha = stdout.trim();
+    return sha || null;
+  } catch {
+    return null;
+  }
+}
+
 async function checkLatestVersion(
   packageRoot: string,
   installType: InstallType,
-): Promise<string | null> {
+  updateChannel: UpdateChannel,
+): Promise<LatestVersionInfo> {
   switch (installType) {
     case "git": {
+      if (updateChannel === "bleeding-edge") {
+        try {
+          const { stdout } = await execFileAsync(
+            "git",
+            ["ls-remote", "origin", "main"],
+            { cwd: packageRoot, encoding: "utf8", timeout: 10_000 },
+          );
+          const match = /^([0-9a-f]{40})\s+refs\/heads\/main$/m.exec(stdout);
+          return {
+            latestVersion: null,
+            latestCommitSha: match?.[1] ?? null,
+          };
+        } catch {
+          return { latestVersion: null, latestCommitSha: null };
+        }
+      }
       try {
         const { stdout } = await execFileAsync(
           "git",
           ["ls-remote", "--tags", "origin"],
           { cwd: packageRoot, encoding: "utf8", timeout: 10_000 },
         );
-        const tags = stdout
-          .split("\n")
-          .map((line) => {
-            const match = /refs\/tags\/(.+?)\s*$/.exec(line);
-            return match?.[1]?.replace(/\^{}$/, "") ?? null;
-          })
-          .filter((t): t is string => t !== null && t.startsWith("v"));
-        if (tags.length === 0) return null;
+        const tags = [...new Set(
+          stdout
+            .split("\n")
+            .map((line) => {
+              const match = /refs\/tags\/(.+?)\s*$/.exec(line);
+              return match?.[1]?.replace(/\^{}$/, "") ?? null;
+            })
+            .filter((tag): tag is string => tag !== null && tag.startsWith("v")),
+        )];
+        if (tags.length === 0) {
+          return { latestVersion: null, latestCommitSha: null };
+        }
         tags.sort(compareSemverDesc);
-        return tags[0];
+        return {
+          latestVersion: tags[0],
+          latestCommitSha: null,
+        };
       } catch {
-        return null;
+        return { latestVersion: null, latestCommitSha: null };
       }
     }
     case "npm-global": {
       try {
-        const { stdout } = await execFileAsync("npm", ["view", "sidemesh", "version"], {
-          encoding: "utf8",
-          timeout: 10_000,
-        });
-        return stdout.trim() || null;
+        const { stdout } = await execFileAsync(
+          "npm",
+          ["view", "sidemesh", "version"],
+          {
+            encoding: "utf8",
+            timeout: 10_000,
+          },
+        );
+        return {
+          latestVersion: stdout.trim() || null,
+          latestCommitSha: null,
+        };
       } catch {
-        return null;
+        return { latestVersion: null, latestCommitSha: null };
       }
     }
     default:
-      return null;
+      return { latestVersion: null, latestCommitSha: null };
   }
 }
 
+function isUpdateAvailable(options: {
+  packageVersion: string;
+  latestVersion: string | null;
+  currentCommitSha: string | null;
+  latestCommitSha: string | null;
+  installType: InstallType;
+  updateChannel: UpdateChannel;
+}): boolean {
+  if (options.installType === "git" && options.updateChannel === "bleeding-edge") {
+    return (
+      options.currentCommitSha !== null &&
+      options.latestCommitSha !== null &&
+      options.currentCommitSha !== options.latestCommitSha
+    );
+  }
+  return (
+    options.latestVersion !== null &&
+    normalizeVersionLabel(options.latestVersion) !== options.packageVersion
+  );
+}
+
+function normalizeVersionLabel(value: string): string {
+  return value.replace(/^v/, "");
+}
+
 function compareSemverDesc(left: string, right: string): number {
-  // Parse semver: major.minor.patch[-prerelease][+build]
-  const lClean = left.replace(/^v/, "").split("+")[0];
-  const rClean = right.replace(/^v/, "").split("+")[0];
+  const lClean = normalizeVersionLabel(left).split("+")[0];
+  const rClean = normalizeVersionLabel(right).split("+")[0];
   const [lCore, lPre = ""] = lClean.split("-");
   const [rCore, rPre = ""] = rClean.split("-");
   const lParts = lCore.split(".").map(Number);
   const rParts = rCore.split(".").map(Number);
 
-  for (let i = 0; i < Math.max(lParts.length, rParts.length); i++) {
+  for (let i = 0; i < Math.max(lParts.length, rParts.length); i += 1) {
     const l = lParts[i] ?? 0;
     const r = rParts[i] ?? 0;
     if (Number.isNaN(l) || Number.isNaN(r)) {
       return right.localeCompare(left);
     }
-    if (l !== r) return r - l;
+    if (l !== r) {
+      return r - l;
+    }
   }
 
-  // No pre-release > has pre-release (e.g. 1.0.0 > 1.0.0-beta)
   if (lPre === "" && rPre !== "") return -1;
   if (rPre === "" && lPre !== "") return 1;
   if (lPre !== rPre) return rPre.localeCompare(lPre);
