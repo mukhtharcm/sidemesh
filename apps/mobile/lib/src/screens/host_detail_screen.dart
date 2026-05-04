@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../api_client.dart' show ApiClient, friendlyError;
 import '../models.dart';
+import '../host_status_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../session_local_store.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';
@@ -493,6 +495,15 @@ class _NodeCard extends StatelessWidget {
                   tone: MeshPillTone.neutral,
                   mono: true,
                 ),
+              if (node.updateAvailable &&
+                  node.latestVersion != null &&
+                  node.latestVersion!.isNotEmpty)
+                MeshPill(
+                  label: 'Update: v${node.latestVersion} available',
+                  icon: Icons.system_update_alt_rounded,
+                  tone: MeshPillTone.warning,
+                  mono: true,
+                ),
             ],
           ),
         ],
@@ -786,7 +797,7 @@ class _ProviderSelectPill extends StatelessWidget {
   final IconData icon;
   final MeshPillTone tone;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1173,7 +1184,13 @@ class _HostManagementCard extends StatefulWidget {
 }
 
 class _HostManagementCardState extends State<_HostManagementCard> {
-  bool _busy = false;
+  bool _updating = false;
+  bool _restartingDaemon = false;
+  bool _restartingProvider = false;
+
+  DateTime? _updateStartedAt;
+  String? _updatePreviousVersion;
+  String? _updateTargetVersion;
 
   bool get _supportsRestart => widget.node
       .capabilitiesForProvider(null)
@@ -1184,8 +1201,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   String get _providerDisplayName => widget.node.providerDisplayName;
 
   Future<void> _restartProvider() async {
-    if (_busy) return;
-    setState(() => _busy = true);
+    if (_restartingProvider) return;
+    setState(() => _restartingProvider = true);
     try {
       await widget.api.restartProvider(widget.host, widget.node.provider);
       if (!mounted) return;
@@ -1194,13 +1211,13 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       if (!mounted) return;
       showAppSnackBar(context, 'Restart failed: ${friendlyError(e)}');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _restartingProvider = false);
     }
   }
 
   Future<void> _restartDaemon() async {
-    if (_busy) return;
-    setState(() => _busy = true);
+    if (_restartingDaemon) return;
+    setState(() => _restartingDaemon = true);
     try {
       await widget.api.restartDaemon(widget.host);
       if (!mounted) return;
@@ -1209,47 +1226,94 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       if (!mounted) return;
       showAppSnackBar(context, 'Restart failed: ${friendlyError(e)}');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _restartingDaemon = false);
     }
   }
 
+  String get _updateDialogTitle {
+    final current = widget.node.packageVersion;
+    final latest = widget.node.latestVersion;
+    if (current != null &&
+        current.isNotEmpty &&
+        latest != null &&
+        latest.isNotEmpty) {
+      return 'Update from v$current → v$latest?';
+    }
+    return 'Update Sidemesh?';
+  }
+
   Future<void> _updateDaemon() async {
-    if (_busy) return;
+    if (_updating || _updateStartedAt != null) return;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Update Sidemesh?'),
-        content: const Text(
-          'All active terminal sessions, port forwards, and browser previews will be closed. '
-          'The daemon will restart automatically when the update completes.',
+    final prefs = await SharedPreferences.getInstance();
+    final skipConfirm = prefs.getBool('sidemesh_update_skip_confirm') ?? false;
+
+
+    if (!mounted) return;
+    if (!skipConfirm) {
+      bool skipNextTime = false;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(_updateDialogTitle),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'All active terminal sessions, port forwards, and browser previews will be disconnected.',
+              ),
+              const SizedBox(height: 12),
+              StatefulBuilder(
+                builder: (context, setLocalState) {
+                  return CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Don't ask again"),
+                    value: skipNextTime,
+                    onChanged: (v) {
+                      setLocalState(() => skipNextTime = v ?? false);
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Update'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Update'),
-          ),
-        ],
-      ),
-    );
+      );
 
-    if (confirmed != true) return;
+      if (confirmed == true && skipNextTime) {
+        await prefs.setBool('sidemesh_update_skip_confirm', true);
+      }
+      if (confirmed != true) return;
+    }
+
     if (!mounted) return;
 
-    setState(() => _busy = true);
+    setState(() => _updating = true);
     try {
       await widget.api.updateDaemon(widget.host);
       if (!mounted) return;
+      setState(() {
+        _updateStartedAt = DateTime.now();
+        _updatePreviousVersion = widget.node.packageVersion;
+        _updateTargetVersion = widget.node.latestVersion;
+      });
       showAppSnackBar(context, 'Updating Sidemesh…');
     } catch (e) {
       if (!mounted) return;
       showAppSnackBar(context, 'Update failed: ${friendlyError(e)}');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _updating = false);
     }
   }
 
@@ -1267,59 +1331,272 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     );
   }
 
+  String _updateDetail() {
+    final packageVersion = widget.node.packageVersion;
+    final latestVersion = widget.node.latestVersion;
+    final hasCurrent = packageVersion != null && packageVersion.isNotEmpty;
+    final hasLatest = latestVersion != null && latestVersion.isNotEmpty;
+
+    final isOffline =
+        HostStatusStore.instance.statusFor(widget.host.id).reachability ==
+            HostReachability.offline;
+    if (isOffline) {
+      return 'Host offline — cannot update';
+    }
+
+    if (!widget.node.updateAvailable) {
+      if (hasCurrent) return 'Up to date · v$packageVersion';
+      return 'Up to date · Unknown version';
+    }
+
+    if (hasCurrent && hasLatest) {
+      return 'v$packageVersion → v$latestVersion';
+    } else if (hasCurrent) {
+      return 'Current: v$packageVersion';
+    } else {
+      return 'Unknown version';
+    }
+  }
+
+  IconData get _updateIcon {
+    if (!widget.node.updateAvailable) {
+      return Icons.check_circle_rounded;
+    }
+    return Icons.system_update_alt_rounded;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: HostStatusStore.instance,
+      builder: (context, _) {
+        final colors = context.colors;
+        final isOffline =
+            HostStatusStore.instance.statusFor(widget.host.id).reachability ==
+                HostReachability.offline;
+
+        return MeshCard(
+          tone: MeshCardTone.muted,
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_updateStartedAt != null) ...[
+                _UpdateProgressBanner(
+                  hostId: widget.host.id,
+                  startedAt: _updateStartedAt!,
+                  targetVersion: _updateTargetVersion,
+                  previousVersion: _updatePreviousVersion,
+                  currentNode: widget.node,
+                  onDismiss: () => setState(() => _updateStartedAt = null),
+                  onRetry: () {
+                    setState(() => _updateStartedAt = null);
+                    unawaited(_updateDaemon());
+                  },
+                ),
+                Divider(height: 1, color: colors.border),
+              ],
+              if (widget.node.supportsHostCapability('workspace', 'terminal'))
+                _ManagementRow(
+                  icon: Icons.terminal_rounded,
+                  label: 'New terminal',
+                  detail: 'Open a shell on ${widget.host.label}.',
+                  busy: false,
+                  onTap: _openTerminal,
+                ),
+              if (widget.node.supportsHostCapability('workspace', 'terminal'))
+                Divider(height: 1, indent: 46, color: colors.border),
+              if (_supportsRestart)
+                _ManagementRow(
+                  icon: Icons.refresh_rounded,
+                  label: 'Restart $_providerDisplayName provider',
+                  detail: 'Preserves terminals and port forwards.',
+                  busy: _restartingProvider,
+                  onTap: _restartProvider,
+                ),
+              if (_supportsRestart)
+                Divider(height: 1, indent: 46, color: colors.border),
+              if (_updateSupported)
+                _ManagementRow(
+                  icon: _updateIcon,
+                  label: 'Update Sidemesh',
+                  detail: _updateDetail(),
+                  busy: _updating,
+                  onTap: isOffline || _updateStartedAt != null
+                      ? null
+                      : () => unawaited(_updateDaemon()),
+                ),
+              if (_updateSupported)
+                Divider(height: 1, indent: 46, color: colors.border),
+              _ManagementRow(
+                icon: Icons.restart_alt_rounded,
+                label: 'Restart Sidemesh daemon',
+                detail: 'Full process restart — reconnect automatically.',
+                busy: _restartingDaemon,
+                onTap: _restartDaemon,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _UpdateProgressBanner extends StatelessWidget {
+  const _UpdateProgressBanner({
+    required this.hostId,
+    required this.startedAt,
+    required this.targetVersion,
+    required this.previousVersion,
+    required this.currentNode,
+    required this.onDismiss,
+    required this.onRetry,
+  });
+
+  final String hostId;
+  final DateTime startedAt;
+  final String? targetVersion;
+  final String? previousVersion;
+  final NodeInfo currentNode;
+  final VoidCallback onDismiss;
+  final VoidCallback onRetry;
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return MeshCard(
-      tone: MeshCardTone.muted,
-      padding: EdgeInsets.zero,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final status = HostStatusStore.instance.statusFor(hostId);
+    final elapsed = DateTime.now().difference(startedAt);
+
+    if (elapsed < const Duration(seconds: 5)) {
+      return _buildUpdating(context, colors);
+    }
+
+    if (status.reachability == HostReachability.online) {
+      final newVersion = currentNode.packageVersion;
+      final changed = newVersion != null &&
+          newVersion.isNotEmpty &&
+          newVersion != previousVersion;
+      if (changed) {
+        return _buildSuccess(context, colors, newVersion);
+      }
+      return _buildFailure(context, colors);
+    }
+
+    if (elapsed > const Duration(seconds: 60)) {
+      return _buildFailure(context, colors);
+    }
+
+    return _buildUpdating(context, colors);
+  }
+
+  Widget _buildUpdating(BuildContext context, AppColors colors) {
+    return _buildRow(
+      context,
+      colors: colors,
+      icon: Icons.update_rounded,
+      iconColor: colors.accent,
+      title: 'Updating to v${targetVersion ?? 'latest'}…',
+      subtitle: 'This may take 20–45 seconds',
+      showSpinner: true,
+    );
+  }
+
+  Widget _buildSuccess(BuildContext context, AppColors colors, String version) {
+    return _buildRow(
+      context,
+      colors: colors,
+      icon: Icons.check_circle_rounded,
+      iconColor: colors.success,
+      title: 'Updated to v$version',
+      showDismiss: true,
+    );
+  }
+
+  Widget _buildFailure(BuildContext context, AppColors colors) {
+    return InkWell(
+      onTap: onRetry,
+      child: _buildRow(
+        context,
+        colors: colors,
+        icon: Icons.error_outline_rounded,
+        iconColor: colors.danger,
+        title: 'Update failed',
+        subtitle: 'Tap to retry',
+        showDismiss: true,
+      ),
+    );
+  }
+
+  Widget _buildRow(
+    BuildContext context, {
+    required AppColors colors,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    String? subtitle,
+    bool showSpinner = false,
+    bool showDismiss = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+      child: Row(
         children: [
-          Divider(height: 1, color: colors.border),
-          if (widget.node.supportsHostCapability('workspace', 'terminal'))
-            _ManagementRow(
-              icon: Icons.terminal_rounded,
-              label: 'New terminal',
-              detail: 'Open a shell on ${widget.host.label}.',
-              busy: false,
-              onTap: _openTerminal,
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(color: iconColor.withValues(alpha: 0.35)),
             ),
-          if (widget.node.supportsHostCapability('workspace', 'terminal'))
-            Divider(height: 1, indent: 46, color: colors.border),
-          if (_supportsRestart)
-            _ManagementRow(
-              icon: Icons.refresh_rounded,
-              label: 'Restart $_providerDisplayName provider',
-              detail: 'Preserves terminals and port forwards.',
-              busy: _busy,
-              onTap: _restartProvider,
-            ),
-          if (_supportsRestart) Divider(height: 1, indent: 46, color: colors.border),
-          if (_updateSupported)
-            _ManagementRow(
-              icon: Icons.system_update_alt_rounded,
-              label: 'Update Sidemesh',
-              detail: widget.node.updateAvailable
-                  ? 'v${widget.node.packageVersion ?? ''} → v${widget.node.latestVersion ?? ''}'
-                  : 'Current: v${widget.node.packageVersion ?? ''}',
-              busy: _busy,
-              onTap: _updateDaemon,
-            ),
-          if (_updateSupported)
-            Divider(height: 1, indent: 46, color: colors.border),
-          _ManagementRow(
-            icon: Icons.restart_alt_rounded,
-            label: 'Restart Sidemesh daemon',
-            detail: 'Full process restart — reconnect automatically.',
-            busy: _busy,
-            onTap: _restartDaemon,
+            alignment: Alignment.center,
+            child: showSpinner
+                ? SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: iconColor,
+                    ),
+                  )
+                : Icon(icon, size: 16, color: iconColor),
           ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (showDismiss)
+            MeshIconButton(
+              icon: Icons.close_rounded,
+              onTap: onDismiss,
+              color: colors.textSecondary,
+            ),
         ],
       ),
     );
   }
 }
+
 
 class _ManagementRow extends StatelessWidget {
   const _ManagementRow({
@@ -1334,7 +1611,7 @@ class _ManagementRow extends StatelessWidget {
   final String label;
   final String detail;
   final bool busy;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
