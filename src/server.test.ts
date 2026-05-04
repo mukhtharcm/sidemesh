@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import http from "node:http";
@@ -503,11 +503,127 @@ describe("POST /api/admin/update", () => {
       assert.deepEqual(spawnedCalls[0]?.options, {
         updateChannel: "bleeding-edge",
       });
+      const persisted = JSON.parse(
+        await readFile(config.configPath, "utf8"),
+      ) as { updateChannel?: string };
+      assert.equal(persisted.updateChannel, "bleeding-edge");
       assert.equal(exitCode, 0);
     } finally {
       if (exitCode === null) {
         await server.close();
       }
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 500 and keeps the daemon running when updater spawn fails", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    const server = await startServer(config, undefined, {
+      detectInstallInfo: async (packageRootOrOptions = {}) => {
+        const options =
+          typeof packageRootOrOptions === "string"
+            ? { packageRoot: packageRootOrOptions }
+            : packageRootOrOptions;
+        return makeInstallInfo(
+          options.packageRoot ?? nodePath.join(stateDir, "package"),
+          options.config?.updateChannel ?? "stable",
+        );
+      },
+      spawnSelfUpdater: async () => {
+        throw new Error("systemd-run failed");
+      },
+      exitProcess: () => {
+        throw new Error("exit should not be called");
+      },
+    });
+
+    try {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/admin/update",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ channel: "bleeding-edge" }),
+      });
+
+      assert.equal(res.statusCode, 500);
+
+      const health = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/healthz",
+        method: "GET",
+      });
+      assert.equal(health.statusCode, 200);
+    } finally {
+      await server.close();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("POST /api/admin/update-channel", () => {
+  it("persists the selected channel and refreshes node install info", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    const server = await startServer(config, undefined, {
+      detectInstallInfo: async (packageRootOrOptions = {}) => {
+        const options =
+          typeof packageRootOrOptions === "string"
+            ? { packageRoot: packageRootOrOptions }
+            : packageRootOrOptions;
+        return makeInstallInfo(
+          options.packageRoot ?? nodePath.join(stateDir, "package"),
+          options.config?.updateChannel ?? "stable",
+        );
+      },
+    });
+
+    try {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/admin/update-channel",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ channel: "bleeding-edge" }),
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(res.body, {
+        ok: true,
+        updateChannel: "bleeding-edge",
+        updateAvailable: true,
+        latestVersion: "0.2.0",
+        currentCommitSha: null,
+        latestCommitSha: null,
+      });
+
+      const persisted = JSON.parse(
+        await readFile(config.configPath, "utf8"),
+      ) as { updateChannel?: string };
+      assert.equal(persisted.updateChannel, "bleeding-edge");
+
+      const node = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/node",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+
+      assert.equal(node.statusCode, 200);
+      assert.equal((node.body as any).updateChannel, "bleeding-edge");
+    } finally {
+      await server.close();
       await rm(stateDir, { recursive: true, force: true });
     }
   });
