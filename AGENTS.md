@@ -211,6 +211,9 @@ specific agent provider.
 - **Config persistence**: `sidemesh setup` writes to `~/.sidemesh/config.json`
   (or `SIDEMESH_CONFIG`). Atomic write-then-rename with `0o600` permissions.
   The daemon reads from `SIDEMESH_STATE_DIR` (defaults to `~/.sidemesh`).
+  Runtime `NodeConfig.port` may be `0` in tests or ephemeral dev servers;
+  persisted config only allows `1-65535`, so serialization must omit `0`
+  instead of writing it back to disk.
 - **macOS unsandboxed**: The macOS build runs unsandboxed by design so keychain
   access works without extra signing. `file_picker` 11+ assumes sandboxed apps
   and performs an entitlement check — we explicitly skip it in `main.dart`.

@@ -178,7 +178,12 @@ export function persistedConfigFromNodeConfig(
   return {
     version: CONFIG_VERSION,
     label: config.label,
-    port: config.port,
+    port:
+      Number.isInteger(config.port) &&
+      config.port >= 1 &&
+      config.port <= 65535
+        ? config.port
+        : undefined,
     token: config.token,
     updateChannel: config.updateChannel,
     stateDir: config.stateDir,

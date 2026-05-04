@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import nodePath from "node:path";
 import { promisify } from "node:util";
@@ -65,15 +65,16 @@ export async function detectInstallInfo(
   switch (installType) {
     case "git": {
       updateSupported = true;
+      const npmCommand = shellQuote(resolveNpmExecutable());
       updateCommand =
         updateChannel === "bleeding-edge"
-          ? "(git checkout main || git checkout -b main --track origin/main) && git pull origin main && npm install && npm run build"
-          : "git pull && npm install && npm run build";
+          ? `(git checkout main || git checkout -b main --track origin/main) && git pull origin main && ${npmCommand} install && ${npmCommand} run build`
+          : `git pull && ${npmCommand} install && ${npmCommand} run build`;
       break;
     }
     case "npm-global": {
       updateSupported = true;
-      updateCommand = "npm update -g sidemesh";
+      updateCommand = `${shellQuote(resolveNpmExecutable())} update -g sidemesh`;
       break;
     }
     case "npm-local": {
@@ -205,7 +206,7 @@ async function checkLatestVersion(
     case "npm-global": {
       try {
         const { stdout } = await execFileAsync(
-          "npm",
+          resolveNpmExecutable(),
           ["view", "sidemesh", "version"],
           {
             encoding: "utf8",
@@ -285,7 +286,7 @@ async function detectInstallType(packageRoot: string): Promise<InstallType> {
   } catch {}
 
   try {
-    const { stdout } = await execFileAsync("npm", ["root", "-g"], {
+    const { stdout } = await execFileAsync(resolveNpmExecutable(), ["root", "-g"], {
       encoding: "utf8",
     });
     const globalRoot = stdout.trim();
@@ -316,4 +317,19 @@ async function isSystemdServiceActive(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function resolveNpmExecutable(): string {
+  const npmBin = nodePath.join(
+    nodePath.dirname(process.execPath),
+    process.platform === "win32" ? "npm.cmd" : "npm",
+  );
+  return existsSync(npmBin) ? npmBin : "npm";
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replaceAll("'", `'\\''`)}'`;
 }

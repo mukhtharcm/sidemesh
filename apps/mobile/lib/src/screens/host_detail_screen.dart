@@ -290,6 +290,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                     host: widget.host,
                     api: widget.api,
                     node: data.node,
+                    onRefresh: _refresh,
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   _SectionHeader(
@@ -947,16 +948,32 @@ class _SectionHeader extends StatelessWidget {
         children: [
           Icon(icon, size: 18, color: colors.accent),
           const SizedBox(width: 8),
-          Text(
-            title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.title),
-          ),
-          const Spacer(),
-          Text(
-            subtitle,
-            style: monoStyle(color: colors.textTertiary, fontSize: 11),
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleSmall?.copyWith(
+                          fontWeight: AppWeights.title,
+                        ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: monoStyle(color: colors.textTertiary, fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1173,11 +1190,13 @@ class _HostManagementCard extends StatefulWidget {
     required this.host,
     required this.api,
     required this.node,
+    required this.onRefresh,
   });
 
   final HostProfile host;
   final ApiClient api;
   final NodeInfo node;
+  final Future<void> Function() onRefresh;
 
   @override
   State<_HostManagementCard> createState() => _HostManagementCardState();
@@ -1187,6 +1206,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   bool _updating = false;
   bool _restartingDaemon = false;
   bool _restartingProvider = false;
+  bool _savingUpdateChannel = false;
 
   DateTime? _updateStartedAt;
   String? _updatePreviousVersion;
@@ -1255,7 +1275,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   }
 
   Future<void> _pickUpdateChannel() async {
-    if (!_supportsChannelSelection) return;
+    if (!_supportsChannelSelection || _savingUpdateChannel) return;
     final selected = await showModalBottomSheet<String>(
       context: context,
       builder: (context) {
@@ -1289,7 +1309,35 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     if (!mounted || selected == null || selected == _selectedUpdateChannel) {
       return;
     }
-    setState(() => _selectedUpdateChannel = selected);
+    setState(() => _savingUpdateChannel = true);
+    try {
+      await widget.api.setUpdateChannel(widget.host, selected);
+      if (!mounted) return;
+      setState(() => _selectedUpdateChannel = selected);
+      var refreshFailed = false;
+      try {
+        await widget.onRefresh();
+      } catch (_) {
+        refreshFailed = true;
+      }
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        refreshFailed
+            ? 'Update channel set, but refresh failed.'
+            : selected == 'bleeding-edge'
+                ? 'Update channel set to bleeding edge.'
+                : 'Update channel set to stable.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        'Update channel failed: ${friendlyError(e)}',
+      );
+    } finally {
+      if (mounted) setState(() => _savingUpdateChannel = false);
+    }
   }
 
   String get _updateDialogTitle {
@@ -1528,7 +1576,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                   icon: Icons.alt_route_rounded,
                   label: 'Update channel',
                   detail: _updateChannelDetail(),
-                  busy: false,
+                  busy: _savingUpdateChannel,
                   onTap: _pickUpdateChannel,
                 ),
               if (_supportsChannelSelection)
