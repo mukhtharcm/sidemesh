@@ -566,11 +566,23 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     };
   }
 
-  void _sendTap(TapUpDetails details, Size size) {
+  void _sendTapDown(TapDownDetails details, Size size) {
     _browserFocusNode.requestFocus();
     final point = _mapPoint(details.localPosition, size);
     if (point == null) return;
-    _send({'type': 'tap', 'x': point.dx, 'y': point.dy});
+    _send({'type': 'tapDown', 'x': point.dx, 'y': point.dy});
+  }
+
+  void _sendTapUp(TapUpDetails details, Size size) {
+    final point = _mapPoint(details.localPosition, size);
+    if (point == null) return;
+    _send({'type': 'tapUp', 'x': point.dx, 'y': point.dy});
+  }
+
+  void _sendHover(PointerHoverEvent event, Size size) {
+    final point = _mapPoint(event.localPosition, size);
+    if (point == null) return;
+    _send({'type': 'hover', 'x': point.dx, 'y': point.dy});
   }
 
   void _sendScroll(DragUpdateDetails details, Size size) {
@@ -661,14 +673,20 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                         focusNode: _browserFocusNode,
                         autofocus: desktopLike,
                         onKeyEvent: _handleHardwareKey,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTapUp: (details) => _sendTap(details, size),
-                          onVerticalDragUpdate: (details) =>
-                              _sendScroll(details, size),
-                          onHorizontalDragUpdate: (details) =>
-                              _sendScroll(details, size),
-                          child: _buildPreviewBody(colors),
+                        child: MouseRegion(
+                          onHover: desktopLike
+                              ? (event) => _sendHover(event, size)
+                              : null,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTapDown: (details) => _sendTapDown(details, size),
+                            onTapUp: (details) => _sendTapUp(details, size),
+                            onVerticalDragUpdate: (details) =>
+                                _sendScroll(details, size),
+                            onHorizontalDragUpdate: (details) =>
+                                _sendScroll(details, size),
+                            child: _buildPreviewBody(colors),
+                          ),
                         ),
                       );
                     },
@@ -810,7 +828,7 @@ class _BrowserChromeBar extends StatelessWidget {
               if (onBack != null) ...[
                 _ChromeButton(
                   icon: Icons.arrow_back_rounded,
-                  tooltip: 'Back',
+                  tooltip: 'Back to ports',
                   onTap: onBack!,
                 ),
                 const SizedBox(width: 4),
