@@ -103,6 +103,52 @@ void main() {
     expect(node.supportedProviders, isEmpty);
   });
 
+  test('NodeInfo falls back to providerCapabilities when defaultProviderCapabilities is absent', () {
+    // Regression test for legacy daemon compatibility. Older daemons may
+    // send only providerCapabilities before defaultProviderCapabilities
+    // was introduced. New clients should still work.
+    final node = NodeInfo.fromJson({
+      'label': 'Legacy daemon',
+      'hostname': 'macbook.local',
+      'platform': 'darwin',
+      'codexVersion': 'codex-cli 0.124.0',
+      'provider': 'codex',
+      'providerName': 'Codex',
+      'providerVersion': 'codex-cli 0.124.0',
+      'providerConfig': {'kind': 'codex', 'command': 'codex'},
+      'providerCapabilities': {
+        'sessions': {'create': true, 'searchSessions': true},
+        'workspace': {'remoteGitDiff': true},
+      },
+      'hostCapabilities': {
+        'workspace': {'filesystem': true},
+      },
+      'supportedProviders': [
+        {
+          'kind': 'codex',
+          'displayName': 'Codex',
+          'defaultCommand': 'codex',
+          'capabilities': {
+            'sessions': {'create': true},
+          },
+        },
+      ],
+    });
+
+    expect(node.provider, 'codex');
+    expect(node.providerCapabilities.supports('sessions', 'create'), isTrue);
+    expect(
+      node.defaultProviderCapabilities.supports('sessions', 'searchSessions'),
+      isTrue,
+    );
+    expect(
+      node.defaultProviderCapabilities.supports('workspace', 'remoteGitDiff'),
+      isTrue,
+    );
+    expect(node.supportsHostCapability('workspace', 'filesystem'), isTrue);
+    expect(node.supportedProviders, hasLength(1));
+  });
+
   test('ProviderMetadata drops malformed provider entries', () {
     final metadata = ProviderMetadata.fromJson({
       'currentProvider': 'codex',

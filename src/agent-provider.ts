@@ -140,32 +140,6 @@ export interface AgentRemoteGitDiff {
   sha: string | null;
 }
 
-export interface AgentFsDirectoryEntry {
-  fileName: string;
-  isDirectory: boolean;
-  isFile: boolean;
-}
-
-export interface AgentFsDirectoryListing {
-  entries: AgentFsDirectoryEntry[];
-}
-
-export interface AgentFsMetadata {
-  isDirectory: boolean;
-  isFile: boolean;
-  isSymlink: boolean;
-  createdAtMs: number;
-  modifiedAtMs: number;
-}
-
-export interface AgentFsFile {
-  dataBase64: string;
-}
-
-export interface AgentFsWatchResult {
-  watchId: string;
-}
-
 export interface AgentModelListOptions {
   cwd: string | null;
   profile: string | null;
@@ -243,11 +217,6 @@ export interface AgentProviderCapabilities {
 }
 
 export type AgentProviderLiveEvent =
-  | {
-      type: "fs_changed";
-      watchId?: string;
-      changedPaths?: string[];
-    }
   | {
       type: "skills_changed";
     }
@@ -409,25 +378,6 @@ export interface AgentConfigurationProvider {
   writeSkillConfig(request: AgentSkillConfigWriteRequest): Promise<unknown>;
   listModels(options: AgentModelListOptions): Promise<ModelSummary[]>;
   listProfiles(options: AgentProfileListOptions): Promise<ProviderProfileCatalog>;
-}
-
-// Provider-native remote filesystem APIs are intentionally not part of the
-// shared AgentProvider surface. Local filesystem access is daemon-owned in
-// src/fs-routes.ts and advertised through hostCapabilities.
-export interface AgentFilesystemProvider {
-  fsReadDirectory(path: string): Promise<AgentFsDirectoryListing>;
-  fsGetMetadata(path: string): Promise<AgentFsMetadata>;
-  fsReadFile(path: string): Promise<AgentFsFile>;
-  fsWriteFile(path: string, dataBase64: string): Promise<unknown>;
-  fsCreateDirectory(path: string, recursive: boolean): Promise<unknown>;
-  fsRemove(path: string, options: { recursive: boolean; force: boolean }): Promise<unknown>;
-  fsCopy(params: {
-    sourcePath: string;
-    destinationPath: string;
-    recursive: boolean;
-  }): Promise<unknown>;
-  fsWatch(path: string): Promise<AgentFsWatchResult>;
-  fsUnwatch(watchId: string): Promise<unknown>;
 }
 
 export interface AgentProvider

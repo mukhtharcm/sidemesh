@@ -1,15 +1,6 @@
-import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import {
-  cp,
-  mkdir,
-  readdir,
-  readFile,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { hostname } from "node:os";
 import nodePath from "node:path";
 
@@ -21,10 +12,6 @@ import {
 import {
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
-  type AgentFsDirectoryListing,
-  type AgentFsFile,
-  type AgentFsMetadata,
-  type AgentFsWatchResult,
   type AgentModelListOptions,
   type AgentPendingAction,
   type AgentProfileListOptions,
@@ -83,10 +70,6 @@ interface FakeSessionState {
 interface PendingFakeApproval {
   action: AgentPendingAction;
   resolve(decision: string): void;
-}
-
-interface FakeWatch {
-  path: string;
 }
 
 type FakeApprovalKind = "command" | "tool" | "file_change" | "permissions";
@@ -262,9 +245,7 @@ export class FakeAgentProvider
   private readonly loadedSessionIds = new Set<string>();
   private readonly activeTurnIds = new Map<string, string>();
   private readonly pendingApprovals = new Map<string, PendingFakeApproval>();
-  private readonly watches = new Map<string, FakeWatch>();
   private readonly skillEnabled = new Map<string, boolean>();
-  private watchCounter = 0;
 
   public constructor(options: FakeAgentProviderOptions = {}) {
     super();
@@ -650,80 +631,6 @@ export class FakeAgentProvider
       defaultProfile: "balanced",
       profiles,
     };
-  }
-
-  public async fsReadDirectory(path: string): Promise<AgentFsDirectoryListing> {
-    const entries = await readdir(path, { withFileTypes: true });
-    return {
-      entries: entries.map((entry) => ({
-        fileName: entry.name,
-        isDirectory: entry.isDirectory(),
-        isFile: entry.isFile(),
-      })),
-    };
-  }
-
-  public async fsGetMetadata(path: string): Promise<AgentFsMetadata> {
-    const metadata = await stat(path);
-    return {
-      isDirectory: metadata.isDirectory(),
-      isFile: metadata.isFile(),
-      isSymlink: metadata.isSymbolicLink(),
-      createdAtMs: metadata.birthtimeMs,
-      modifiedAtMs: metadata.mtimeMs,
-    };
-  }
-
-  public async fsReadFile(path: string): Promise<AgentFsFile> {
-    return {
-      dataBase64: (await readFile(path)).toString("base64"),
-    };
-  }
-
-  public async fsWriteFile(path: string, dataBase64: string): Promise<unknown> {
-    await mkdir(nodePath.dirname(path), { recursive: true });
-    await writeFile(path, Buffer.from(dataBase64, "base64"));
-    this.notifyWatch(path);
-    return { path };
-  }
-
-  public async fsCreateDirectory(path: string, recursive: boolean): Promise<unknown> {
-    await mkdir(path, { recursive });
-    this.notifyWatch(path);
-    return { path };
-  }
-
-  public async fsRemove(
-    path: string,
-    options: { recursive: boolean; force: boolean },
-  ): Promise<unknown> {
-    await rm(path, options);
-    this.notifyWatch(path);
-    return { path };
-  }
-
-  public async fsCopy(params: {
-    sourcePath: string;
-    destinationPath: string;
-    recursive: boolean;
-  }): Promise<unknown> {
-    await cp(params.sourcePath, params.destinationPath, {
-      recursive: params.recursive,
-      force: true,
-    });
-    this.notifyWatch(params.destinationPath);
-    return params;
-  }
-
-  public async fsWatch(path: string): Promise<AgentFsWatchResult> {
-    const watchId = `fake-watch-${++this.watchCounter}`;
-    this.watches.set(watchId, { path });
-    return { watchId };
-  }
-
-  public async fsUnwatch(watchId: string): Promise<unknown> {
-    this.watches.delete(watchId);
-    return { watchId };
   }
 
   private seedWelcomeSession(): void {
@@ -1392,18 +1299,6 @@ export class FakeAgentProvider
 
   private isTurnActive(sessionId: string, turnId: string): boolean {
     return this.activeTurnIds.get(sessionId) === turnId;
-  }
-
-  private notifyWatch(changedPath: string): void {
-    for (const [watchId, watch] of this.watches) {
-      if (changedPath === watch.path || changedPath.startsWith(`${watch.path}${nodePath.sep}`)) {
-        this.emit("liveEvent", {
-          type: "fs_changed",
-          watchId,
-          changedPaths: [changedPath],
-        });
-      }
-    }
   }
 
   private requireSession(threadId: string): FakeSessionState {

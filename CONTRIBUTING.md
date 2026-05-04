@@ -56,6 +56,11 @@ flutter analyze
   when the behavior does not require a specific agent provider.
 - Do not add new provider-specific fields to client models unless the provider
   abstraction cannot express the concept.
+- `providerCapabilities` in `/api/node` is a compatibility alias for
+  `defaultProviderCapabilities`. New clients should prefer
+  `defaultProviderCapabilities` or `supportedProviders[].capabilities`.
+- Provider adapters should not implement filesystem operations; local filesystem
+  is daemon-owned in `src/fs-routes.ts` and advertised through `hostCapabilities`.
 - Keep terminal, filesystem, and approval changes conservative; these are
   high-trust host-control surfaces.
 - Never commit real tokens, hostnames that should stay private, generated
