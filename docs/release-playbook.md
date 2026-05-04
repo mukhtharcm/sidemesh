@@ -70,27 +70,47 @@ sidemesh service uninstall --yes
 
 ## Updating Existing Hosts
 
-For a repo clone:
+For a repo clone managed by `launchd` or `systemd`:
 
 ```bash
 git pull --ff-only
 npm install
 npm run build
+
+# macOS
 sidemesh service restart --yes
+
+# Linux
+sudo sidemesh service restart --yes
 ```
 
 For a global GitHub install:
 
 ```bash
 npm install -g github:mukhtharcm/sidemesh
+
+# macOS
 sidemesh service restart --yes
+
+# Linux
+sudo sidemesh service restart --yes
 ```
 
-If the daemon is foreground-managed instead of service-managed:
+For a detached background daemon started with `sidemesh start`:
 
 ```bash
-sidemesh restart --yes
+sidemesh stop --yes
+git pull --ff-only
+npm install
+npm run build
+sidemesh start
 ```
+
+For a foreground daemon started with `sidemesh daemon`, stop the terminal
+process, update the checkout, rebuild, and start it again manually.
+
+App-driven restart and self-update are recommended only on service-managed
+hosts.
 
 ## GitHub Actions Builds
 

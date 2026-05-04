@@ -894,7 +894,7 @@ class _ConnectPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 _CommandLine(
-                  text: 'npm install -g sidemesh',
+                  text: 'npm install -g github:mukhtharcm/sidemesh',
                   colors: colors,
                 ),
                 const SizedBox(height: 6),
@@ -904,8 +904,21 @@ class _ConnectPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 _CommandLine(
+                  text: 'sidemesh start',
+                  colors: colors,
+                ),
+                const SizedBox(height: 6),
+                _CommandLine(
                   text: 'sidemesh pair',
                   colors: colors,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'On macOS or Linux, install the background service if you want the app\'s Restart and Update buttons to bring the host back on their own.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.4,
+                  ),
                 ),
               ],
             ),

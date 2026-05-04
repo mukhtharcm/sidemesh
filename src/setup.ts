@@ -195,7 +195,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     : defaultBrowserPreviewConfig(existing);
 
   note(
-    "Stable follows tagged releases. Bleeding edge follows the latest commits on origin/main for git installs.",
+    "Stable gets tagged releases. Bleeding edge gets the newest commits on origin/main for git installs.",
     "Update channel",
   );
   const updateChannel = await select<UpdateChannel>({
@@ -241,7 +241,15 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     configExists: true,
   };
   await saveConfig(config, { configPath: persisted.path });
-  outro(`Saved ${persisted.path}\n\n  ❯ sidemesh start && sidemesh pair`);
+  const lifecycleNote =
+    process.platform === "darwin"
+      ? "\n\nOn macOS, use `sidemesh service install` if you want the app's Restart and Update buttons to bring the host back on their own."
+      : process.platform === "linux"
+        ? "\n\nOn Linux, use `sudo sidemesh service install` if you want the app's Restart and Update buttons to bring the host back on their own."
+        : "";
+  outro(
+    `Saved ${persisted.path}\n\n  ❯ sidemesh start && sidemesh pair${lifecycleNote}`,
+  );
   return config;
 }
 

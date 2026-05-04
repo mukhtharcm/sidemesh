@@ -77,7 +77,7 @@ export async function runDoctor(config: NodeConfig): Promise<DoctorReport> {
       : `No daemon responded at ${healthUrl}`,
     remedy: daemonReachable
       ? undefined
-      : "Start it with `sidemesh daemon` after setup completes.",
+      : "Start it with `sidemesh start`, or install the macOS/Linux service if you want the app's Restart and Update buttons to bring it back on their own.",
   });
 
   checks.push(await checkStateDir(config.stateDir));
