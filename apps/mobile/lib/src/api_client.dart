@@ -191,11 +191,16 @@ class ApiClient {
     );
   }
 
-  Future<void> updateDaemon(HostProfile host) async {
+  Future<void> updateDaemon(
+    HostProfile host, {
+    String? updateChannel,
+  }) async {
     await _post(
       host,
       '/api/admin/update',
-      body: const {},
+      body: {
+        if ((updateChannel ?? '').isNotEmpty) 'channel': updateChannel,
+      },
       timeout: const Duration(seconds: 15),
       operation: 'update daemon',
     );

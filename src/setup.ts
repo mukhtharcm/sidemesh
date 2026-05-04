@@ -21,6 +21,7 @@ import type {
   HostPortForwardingConfig,
   HostTerminalConfig,
   NodeConfig,
+  UpdateChannel,
 } from "./types.js";
 import { listSetupAgentProviderDefinitionSummaries } from "./provider-registry.js";
 
@@ -193,6 +194,30 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     ? await promptBrowserPreviewDetails(existing)
     : defaultBrowserPreviewConfig(existing);
 
+  note(
+    "Stable follows tagged releases. Bleeding edge follows the latest commits on origin/main for git installs.",
+    "Update channel",
+  );
+  const updateChannel = await select<UpdateChannel>({
+    message: "Update channel",
+    initialValue: existing?.updateChannel ?? "stable",
+    options: [
+      {
+        value: "stable",
+        label: "Stable",
+        hint: "Tagged releases",
+      },
+      {
+        value: "bleeding-edge",
+        label: "Bleeding edge",
+        hint: "Latest commits on main (git installs only)",
+      },
+    ],
+  });
+  if (isCancel(updateChannel)) {
+    throw new Error("Setup cancelled.");
+  }
+
   // Token is auto-generated on first setup and preserved on re-runs.
   // Use `sidemesh pair` to display it for pairing.
   const token = existing?.token || randomBytes(24).toString("hex");
@@ -207,6 +232,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
       resolvedProviders[0]!,
     providers: resolvedProviders,
     defaultProviderKind: defaultProvider as AgentProviderKind,
+    updateChannel,
     stateDir: stateDir.trim(),
     terminal,
     portForwarding,

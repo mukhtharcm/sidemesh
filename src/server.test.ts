@@ -49,6 +49,7 @@ function makeConfig(
     provider,
     providers: [provider],
     defaultProviderKind: "fake",
+    updateChannel: "stable",
     stateDir,
     terminal: { enabled: false, shell: null, requirePty: false },
     portForwarding: { enabled: false, allowNonLoopbackTargets: false },
@@ -339,6 +340,8 @@ describe("GET /api/node", () => {
       assert.equal(body.supportedProviders.length, 1);
       assert.equal(body.supportedProviders[0].kind, "fake");
       assert.equal(body.supportedProviders[0].capabilities.sessions.create, true);
+      assert.equal(body.updateChannel, "stable");
+      assert.equal(body.latestCommitSha, null);
     });
   });
 
@@ -380,6 +383,31 @@ describe("GET /api/node", () => {
       const defaultEntry = body.supportedProviders.find((p: any) => p.isDefault);
       assert.ok(defaultEntry);
       assert.equal(defaultEntry.capabilities.configuration.models, true);
+    });
+  });
+});
+
+describe("POST /api/admin/update", () => {
+  it("rejects unknown channel overrides", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/admin/update",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ channel: "nightly" }),
+      });
+
+      assert.equal(res.statusCode, 400);
+      assert.equal(
+        (res.body as any).error,
+        "channel must be stable or bleeding-edge",
+      );
     });
   });
 });

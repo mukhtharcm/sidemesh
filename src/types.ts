@@ -80,6 +80,8 @@ export interface HostCapabilities {
   };
 }
 
+export type UpdateChannel = "stable" | "bleeding-edge";
+
 export interface NodeConfig {
   label: string;
   port: number;
@@ -88,6 +90,7 @@ export interface NodeConfig {
   provider: AgentProviderConfig;
   providers: AgentProviderConfig[];
   defaultProviderKind: AgentProviderKind;
+  updateChannel: UpdateChannel;
   stateDir: string;
   terminal: HostTerminalConfig;
   portForwarding: HostPortForwardingConfig;

@@ -163,7 +163,9 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           try {
             final node = await _api.fetchNode(host);
             store.markOnline(host.id);
-            if (_hostNodeInfo[host.id]?.updateAvailable != node.updateAvailable) {
+            final previousNode = _hostNodeInfo[host.id];
+            if (previousNode?.updateAvailable != node.updateAvailable ||
+                previousNode?.updateChannel != node.updateChannel) {
               nodesChanged = true;
             }
             _hostNodeInfo[host.id] = node;
@@ -3260,7 +3262,9 @@ class _HostRowCard extends StatelessWidget {
                     if (node?.updateAvailable == true && !dense) ...[
                       const SizedBox(height: 6),
                       MeshPill(
-                        label: 'Update available',
+                        label: node?.usesBleedingEdgeTrack == true
+                            ? 'New commits'
+                            : 'Update available',
                         icon: Icons.system_update_alt_rounded,
                         tone: MeshPillTone.warning,
                       ),

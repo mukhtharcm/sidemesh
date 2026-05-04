@@ -93,6 +93,30 @@ describe("loadConfig", () => {
       frameIntervalMs: 900,
       quality: 55,
     });
+    assert.equal(config.updateChannel, "stable");
+  });
+
+  it("loads update channel from persisted config and env overrides", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        updateChannel: "bleeding-edge",
+        providers: [{ kind: "codex", bin: "codex" }],
+      }),
+    );
+
+    const persisted = await loadConfig({ configPath, env: {} });
+    assert.equal(persisted.updateChannel, "bleeding-edge");
+
+    const overridden = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_UPDATE_CHANNEL: "stable",
+      },
+    });
+    assert.equal(overridden.updateChannel, "stable");
   });
 
   it("loads Pi provider config from env and persisted values", async () => {
