@@ -93,7 +93,7 @@ import {
 import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionReplayIndex } from "./session-replay-index.js";
-import { SessionSearchIndex } from "./session-search-index.js";
+import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js";
 
 const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
@@ -943,16 +943,49 @@ export async function startServer(
         response.status(503).json({ error: "Session search is not available" });
         return;
       }
-      const query = asString((request.query as Record<string, unknown>)?.q);
-      if (!query || query.length < 2) {
-        response.status(400).json({ error: "Query must be at least 2 characters" });
-        return;
-      }
+      const rawQuery = asString((request.query as Record<string, unknown>)?.q);
       const limit = Math.min(
         asInteger((request.query as Record<string, unknown>)?.limit) ?? 20,
         100,
       );
-      const searchResults = await searchIndex.search(query, limit);
+      if (!rawQuery || rawQuery.length < 2) {
+        const hasFilters =
+          asString((request.query as Record<string, unknown>)?.provider) ||
+          asString((request.query as Record<string, unknown>)?.cwd) ||
+          (request.query as Record<string, unknown>)?.archived !== undefined ||
+          asString((request.query as Record<string, unknown>)?.updatedAfter) ||
+          asString((request.query as Record<string, unknown>)?.updatedBefore);
+        if (!hasFilters) {
+          response.status(400).json({ error: "Query must be at least 2 characters" });
+          return;
+        }
+      }
+      const filter: SearchFilter = {};
+      const providerFilter = asString((request.query as Record<string, unknown>)?.provider);
+      if (providerFilter) {
+        filter.providerKind = providerFilter;
+      }
+      const cwdFilter = asString((request.query as Record<string, unknown>)?.cwd);
+      if (cwdFilter) {
+        filter.cwd = cwdFilter;
+      }
+      const archivedFilter = (request.query as Record<string, unknown>)?.archived;
+      if (archivedFilter === "true") {
+        filter.archived = true;
+      } else if (archivedFilter === "false") {
+        filter.archived = false;
+      } else {
+        filter.archived = false;
+      }
+      const updatedAfter = parseTimestamp((request.query as Record<string, unknown>)?.updatedAfter);
+      if (updatedAfter != null) {
+        filter.updatedAfter = updatedAfter;
+      }
+      const updatedBefore = parseTimestamp((request.query as Record<string, unknown>)?.updatedBefore);
+      if (updatedBefore != null) {
+        filter.updatedBefore = updatedBefore;
+      }
+      const searchResults = await searchIndex.search(rawQuery ?? "", limit, filter);
       const sessions: SessionSummary[] = [];
       for (const result of searchResults) {
         const sessionProvider = providerEntryForSessionId(result.sessionId);
@@ -2114,7 +2147,7 @@ export async function startServer(
       sessionSeqCursor.delete(sessionId);
       response.json({ archived: true });
       broadcastRecentSessionRemove(sessionId);
-      void searchIndex.remove(sessionId).catch(() => {});
+      void indexSessionForSearch(searchIndex, provider, sessionId, true).catch(() => {});
     }),
   );
 
@@ -2141,7 +2174,7 @@ export async function startServer(
       await provider.unarchiveSession!(sessionId);
       response.json({ unarchived: true });
       void broadcastRecentSessionUpsert(sessionId);
-      void indexSessionForSearch(searchIndex, provider, sessionId).catch(() => {});
+      void indexSessionForSearch(searchIndex, provider, sessionId, false).catch(() => {});
     }),
   );
 
@@ -2365,40 +2398,66 @@ export async function startServer(
 
   await listen(server, config.port);
 
-  // Open search index and catch up in the background
+  // Open search index and warm all provider indexes in the background
   searchIndex.open().then(async () => {
-    if (
-      !hasProviderMethod(provider, "listSessionThreads") ||
-      !hasProviderMethod(provider, "readSessionLog")
-    ) {
-      return { indexed: 0, removed: 0 };
-    }
-    const threads = await provider.listSessionThreads!({
-      limit: 200,
-      archived: false,
-    });
-    let indexed = 0;
-    for (const thread of threads) {
+    searchIndex.setBackfillRunning(true);
+    let totalIndexed = 0;
+    let totalRemoved = 0;
+
+    for (const entry of providerRuntime.providers) {
+      const provider = entry.provider;
+      if (
+        !hasProviderMethod(provider, "listSessionThreads") ||
+        !hasProviderMethod(provider, "readSessionLog")
+      ) {
+        continue;
+      }
+      searchIndex.setProviderError(provider.kind, null);
       try {
-        const log = await provider.readSessionLog!(thread, {
-          messageLimit: 200,
-          activityLimit: 200,
-        });
-        await searchIndex.indexDocument({
-          sessionKey: thread.id,
-          title: thread.name || thread.preview,
-          preview: thread.preview,
-          cwd: thread.cwd,
-          fingerprint: `${thread.name || ""}|${thread.preview}|${thread.cwd}|${log.nextSeq}|${thread.updatedAt}`,
-          messages: log.messages,
-          activities: log.activities,
-        });
-        indexed++;
-      } catch {
-        // Ignore per-session indexing errors during catch-up
+        const batchSize = 50;
+        for (const archived of [false, true]) {
+          const threads = await provider.listSessionThreads!({
+            limit: 200,
+            archived,
+          });
+          const batches = chunkArray(threads, batchSize);
+          for (const batch of batches) {
+            for (const thread of batch) {
+              try {
+                const log = await provider.readSessionLog!(thread, {
+                  messageLimit: 200,
+                  activityLimit: 200,
+                });
+                await searchIndex.indexDocument({
+                  sessionKey: thread.id,
+                  providerKind: provider.kind,
+                  title: thread.name || thread.preview,
+                  preview: thread.preview,
+                  cwd: thread.cwd,
+                  createdAt: thread.createdAt,
+                  updatedAt: thread.updatedAt,
+                  fingerprint: `${provider.kind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${thread.createdAt}|${thread.updatedAt}|${archived}|${log.nextSeq}`,
+                  messages: log.messages,
+                  activities: log.activities,
+                });
+                totalIndexed++;
+              } catch {
+                // Ignore per-session indexing errors during catch-up
+              }
+            }
+            // yield so startup remains responsive
+            await new Promise((resolve) => setImmediate(resolve));
+          }
+        }
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        searchIndex.setProviderError(provider.kind, message);
       }
     }
-    return { indexed, removed: 0 };
+
+    searchIndex.setBackfillRunning(false);
+    return { indexed: totalIndexed, removed: totalRemoved };
   }).then((result) => {
     if (result.indexed > 0 || result.removed > 0) {
       console.log(`Search index caught up: ${result.indexed} indexed, ${result.removed} removed`);
@@ -2888,6 +2947,7 @@ async function indexSessionForSearch(
   searchIndex: SessionSearchIndex,
   provider: AgentProvider,
   sessionId: string,
+  archived?: boolean,
 ): Promise<void> {
   if (!provider.capabilities.sessions.history) return;
   if (!hasProviderMethod(provider, "readSessionThread") || !hasProviderMethod(provider, "readSessionLog")) {
@@ -2901,10 +2961,14 @@ async function indexSessionForSearch(
     });
     await searchIndex.indexDocument({
       sessionKey: sessionId,
+      providerKind: provider.kind,
       title: thread.name || thread.preview,
       preview: thread.preview,
       cwd: thread.cwd,
-      fingerprint: `${thread.name || ""}|${thread.preview}|${thread.cwd}|${log.nextSeq}|${thread.updatedAt}`,
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      archived: archived ?? false,
+      fingerprint: `${provider.kind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${thread.createdAt}|${thread.updatedAt}|${archived ?? false}|${log.nextSeq}`,
       messages: log.messages,
       activities: log.activities,
     });
@@ -2924,6 +2988,14 @@ async function readSession(
     "session history",
   );
   return readThread.call(provider, sessionId, includeTurns);
+}
+
+function chunkArray<T>(array: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
 }
 
 async function loadRunState(
@@ -3253,6 +3325,16 @@ function asInteger(value: unknown): number | null {
   if (typeof value === "string" && value.trim()) {
     const parsed = Number.parseInt(value, 10);
     return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function parseTimestamp(value: unknown): number | null {
+  const int = asInteger(value);
+  if (int != null) return int;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
   }
   return null;
 }
