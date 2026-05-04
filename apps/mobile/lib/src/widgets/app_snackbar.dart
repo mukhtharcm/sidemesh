@@ -30,8 +30,12 @@ class _ToastQueue {
   _ToastQueue._();
   static final _ToastQueue instance = _ToastQueue._();
 
+  static const int _maxPending = 6;
+
   final Queue<_QueuedToast> _queue = Queue<_QueuedToast>();
   _ActiveToast? _active;
+
+  int get length => _queue.length;
 
   void enqueue({
     required OverlayState overlay,
@@ -40,6 +44,20 @@ class _ToastQueue {
     required Duration duration,
     SnackBarAction? action,
   }) {
+    final actionLabel = action?.label;
+    if (_active != null &&
+        _active!.message == message &&
+        _active!.actionLabel == actionLabel) {
+      return;
+    }
+    if (_queue.any(
+      (t) => t.message == message && t.action?.label == actionLabel,
+    )) {
+      return;
+    }
+    while (_queue.length >= _maxPending) {
+      _queue.removeFirst();
+    }
     _queue.add(
       _QueuedToast(
         overlay: overlay,
@@ -50,6 +68,12 @@ class _ToastQueue {
       ),
     );
     _drain();
+  }
+
+  /// Dismiss the active toast and drop everything still queued.
+  void clear() {
+    _queue.clear();
+    _active?.controller.dismiss();
   }
 
   void _drain() {
@@ -75,7 +99,12 @@ class _ToastQueue {
         },
       ),
     );
-    _active = _ActiveToast(entry: entry, controller: controller);
+    _active = _ActiveToast(
+      entry: entry,
+      controller: controller,
+      message: toast.message,
+      actionLabel: toast.action?.label,
+    );
     toast.overlay.insert(entry);
     // Auto-dismiss.
     Future<void>.delayed(toast.duration, () {
@@ -100,9 +129,16 @@ class _QueuedToast {
 }
 
 class _ActiveToast {
-  _ActiveToast({required this.entry, required this.controller});
+  _ActiveToast({
+    required this.entry,
+    required this.controller,
+    required this.message,
+    required this.actionLabel,
+  });
   final OverlayEntry entry;
   final _ToastController controller;
+  final String message;
+  final String? actionLabel;
 }
 
 class _ToastController extends ChangeNotifier {
@@ -161,9 +197,21 @@ class _ToastOverlayState extends State<_ToastOverlay>
   }
 
   Future<void> _playOut() async {
-    if (!mounted) return;
-    await _anim.reverse();
-    if (!mounted) return;
+    if (!mounted) {
+      widget.onDismiss();
+      return;
+    }
+    // Don't await reverse() directly — if the ticker is canceled (e.g. the
+    // overlay is removed while reversing) the TickerFuture never completes and
+    // the queue stalls forever.
+    unawaited(_anim.reverse().catchError((_) {}));
+    await Future<void>.delayed(
+      _anim.reverseDuration ?? const Duration(milliseconds: 180),
+    );
+    if (!mounted) {
+      widget.onDismiss();
+      return;
+    }
     widget.onDismiss();
   }
 
@@ -182,6 +230,7 @@ class _ToastOverlayState extends State<_ToastOverlay>
     final double left = isWide ? media.size.width - 440 - right : 12;
     final double bottom = isWide ? 20 : 20 + media.padding.bottom;
     final colors = widget.colors;
+    final remaining = _ToastQueue.instance.length;
     return Positioned(
       left: left,
       right: right,
@@ -253,7 +302,9 @@ class _ToastOverlayState extends State<_ToastOverlay>
                         ],
                         const SizedBox(width: 4),
                         IconButton(
-                          tooltip: 'Dismiss',
+                          tooltip: remaining > 0
+                              ? 'Dismiss all ($remaining)'
+                              : 'Dismiss',
                           iconSize: 16,
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
@@ -261,7 +312,9 @@ class _ToastOverlayState extends State<_ToastOverlay>
                             width: 28,
                             height: 28,
                           ),
-                          onPressed: widget.controller.dismiss,
+                          onPressed: remaining > 0
+                              ? _ToastQueue.instance.clear
+                              : widget.controller.dismiss,
                           icon: Icon(
                             Icons.close_rounded,
                             color: colors.textSecondary,
