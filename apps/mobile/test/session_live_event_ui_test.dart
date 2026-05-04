@@ -104,6 +104,49 @@ void main() {
     expect(find.textContaining('Keep it provider-neutral'), findsOneWidget);
     expect(find.textContaining('Overloaded'), findsOneWidget);
   });
+
+  testWidgets('reasoning text stays readable on light palettes', (tester) async {
+    final session = _session('reasoning-contrast');
+    final api = _RichEventFakeApi(
+      messages: [
+        SessionMessage(
+          id: 'msg-reasoning',
+          role: 'assistant',
+          text: '',
+          content: const [ThinkingBlock('Audit the reasoning renderer.')],
+          attachments: const [],
+          createdAt: DateTime(2026, 1, 1, 12, 1),
+          seq: 1,
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('reasoning-contrast'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+      palette: ThemeVariant.tokyoNight,
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Reasoning'), findsOneWidget);
+    expect(find.text('Audit the reasoning renderer.'), findsOneWidget);
+
+    final reasoningText = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .firstWhere(
+          (widget) =>
+              widget.text.toPlainText() == 'Audit the reasoning renderer.',
+        );
+    final color = (reasoningText.text as TextSpan).style?.color;
+    expect(color, ThemeVariant.tokyoNight.light.textPrimary);
+  });
 }
 
 Future<void> _pumpFrames(WidgetTester tester) async {
@@ -117,6 +160,7 @@ Future<void> _pumpApp(
   WidgetTester tester,
   Widget child, {
   required Size size,
+  ThemeVariant palette = ThemeVariant.codexAmber,
 }) async {
   tester.view
     ..devicePixelRatio = 1
@@ -126,7 +170,6 @@ Future<void> _pumpApp(
     tester.view.resetDevicePixelRatio();
   });
 
-  final palette = ThemeVariant.codexAmber;
   await tester.pumpWidget(
     MaterialApp(
       theme: buildLightTheme(palette.light),
@@ -228,7 +271,10 @@ NodeInfo _nodeInfo() => NodeInfo.fromJson({
 });
 
 class _RichEventFakeApi extends ApiClient {
+  _RichEventFakeApi({this.messages = const []});
+
   final _ControllableWebSocketChannel _channel = _ControllableWebSocketChannel();
+  final List<SessionMessage> messages;
 
   @override
   Future<NodeInfo> fetchNode(HostProfile host) async => _nodeInfo();
@@ -241,13 +287,13 @@ class _RichEventFakeApi extends ApiClient {
     int? activityLimit,
   }) async => SessionLog(
     session: _session(sessionId),
-    messages: const [],
+    messages: messages,
     activities: const [],
     pendingAction: null,
-    history: const SessionLogHistorySummary(
+    history: SessionLogHistorySummary(
       isTruncated: false,
-      totalMessages: 0,
-      returnedMessages: 0,
+      totalMessages: messages.length,
+      returnedMessages: messages.length,
       totalActivities: 0,
       returnedActivities: 0,
     ),
