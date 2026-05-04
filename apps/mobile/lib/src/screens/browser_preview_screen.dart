@@ -632,33 +632,25 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     final desktopLike = MediaQuery.sizeOf(context).shortestSide >= 700;
     return Column(
       children: [
-        if (widget.showHeader) ...[
+        if (widget.showHeader)
           _BrowserChromeBar(
             preview: _preview,
             urlController: _urlController,
             urlFocusNode: _urlFocusNode,
             pageLoading: _pageLoading,
+            desktopLike: desktopLike,
             onBack: widget.onBack,
             onMinimize: widget.onMinimize,
             onNavigate: _sendNavigate,
-            onStop: () => unawaited(_stopRemoteBrowser()),
-          ),
-          _BrowserBottomToolbar(
-            preview: _preview,
-            streamPaused: _clientPaused,
-            inputRailOpen: _inputRailOpen,
-            devToolsOpen: _devToolsOpen,
-            onBack: () => _sendNavigation('back'),
-            onForward: () => _sendNavigation('forward'),
+            onBackNavigation: () => _sendNavigation('back'),
+            onForwardNavigation: () => _sendNavigation('forward'),
             onReload: () => _sendNavigation('reload'),
-            onHome: () => _send({'type': 'navigate', 'url': _preview.url}),
             onResize: () => unawaited(_showViewportSheet()),
-            onFocusUrl: () => _urlFocusNode.requestFocus(),
             onToggleInput: _toggleInputRail,
             onToggleDevTools: _toggleDevTools,
             onTogglePause: () => _clientPaused ? _resumeStream() : _pauseStream(manual: true),
+            onStop: () => unawaited(_stopRemoteBrowser()),
           ),
-        ],
         Expanded(
           child: Stack(
             children: [
@@ -715,6 +707,21 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             ],
           ),
         ),
+        if (widget.showHeader && !desktopLike)
+          _BrowserBottomToolbar(
+            preview: _preview,
+            streamPaused: _clientPaused,
+            inputRailOpen: _inputRailOpen,
+            devToolsOpen: _devToolsOpen,
+            onBack: () => _sendNavigation('back'),
+            onForward: () => _sendNavigation('forward'),
+            onReload: () => _sendNavigation('reload'),
+            onHome: () => _send({'type': 'navigate', 'url': _preview.url}),
+            onResize: () => unawaited(_showViewportSheet()),
+            onToggleInput: _toggleInputRail,
+            onToggleDevTools: _toggleDevTools,
+            onTogglePause: () => _clientPaused ? _resumeStream() : _pauseStream(manual: true),
+          ),
         if (_inputRailOpen)
           _InputRail(
             controller: _textController,
@@ -793,9 +800,17 @@ class _BrowserChromeBar extends StatelessWidget {
     required this.urlController,
     required this.urlFocusNode,
     required this.pageLoading,
+    required this.desktopLike,
     this.onBack,
     this.onMinimize,
     required this.onNavigate,
+    required this.onBackNavigation,
+    required this.onForwardNavigation,
+    required this.onReload,
+    required this.onResize,
+    required this.onToggleInput,
+    required this.onToggleDevTools,
+    required this.onTogglePause,
     required this.onStop,
   });
 
@@ -803,16 +818,24 @@ class _BrowserChromeBar extends StatelessWidget {
   final TextEditingController urlController;
   final FocusNode urlFocusNode;
   final bool pageLoading;
+  final bool desktopLike;
   final VoidCallback? onBack;
   final VoidCallback? onMinimize;
   final VoidCallback onNavigate;
+  final VoidCallback onBackNavigation;
+  final VoidCallback onForwardNavigation;
+  final VoidCallback onReload;
+  final VoidCallback onResize;
+  final VoidCallback onToggleInput;
+  final VoidCallback onToggleDevTools;
+  final VoidCallback onTogglePause;
   final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(
@@ -833,8 +856,28 @@ class _BrowserChromeBar extends StatelessWidget {
                 ),
                 const SizedBox(width: 4),
               ],
+              if (desktopLike) ...[
+                _ChromeButton(
+                  icon: Icons.arrow_back_rounded,
+                  tooltip: 'Back',
+                  onTap: onBackNavigation,
+                ),
+                const SizedBox(width: 4),
+                _ChromeButton(
+                  icon: Icons.arrow_forward_rounded,
+                  tooltip: 'Forward',
+                  onTap: onForwardNavigation,
+                ),
+                const SizedBox(width: 4),
+                _ChromeButton(
+                  icon: Icons.refresh_rounded,
+                  tooltip: 'Reload',
+                  onTap: onReload,
+                ),
+                const SizedBox(width: 4),
+              ],
               Container(
-                width: 280,
+                width: desktopLike ? 380 : 280,
                 height: 36,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 decoration: BoxDecoration(
@@ -886,6 +929,26 @@ class _BrowserChromeBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
+              if (desktopLike) ...[
+                _ViewportChip(
+                  width: preview.width,
+                  height: preview.height,
+                  onTap: onResize,
+                ),
+                const SizedBox(width: 6),
+                _ChromeButton(
+                  icon: Icons.keyboard_alt_rounded,
+                  tooltip: 'Keyboard',
+                  onTap: onToggleInput,
+                ),
+                const SizedBox(width: 4),
+                _ChromeButton(
+                  icon: Icons.construction_outlined,
+                  tooltip: 'DevTools',
+                  onTap: onToggleDevTools,
+                ),
+                const SizedBox(width: 4),
+              ],
               if (onMinimize != null) ...[
                 _ChromeButton(
                   icon: Icons.keyboard_arrow_down_rounded,
@@ -958,7 +1021,6 @@ class _BrowserBottomToolbar extends StatelessWidget {
     required this.onReload,
     required this.onHome,
     required this.onResize,
-    required this.onFocusUrl,
     required this.onToggleInput,
     required this.onToggleDevTools,
     required this.onTogglePause,
@@ -973,7 +1035,6 @@ class _BrowserBottomToolbar extends StatelessWidget {
   final VoidCallback onReload;
   final VoidCallback onHome;
   final VoidCallback onResize;
-  final VoidCallback onFocusUrl;
   final VoidCallback onToggleInput;
   final VoidCallback onToggleDevTools;
   final VoidCallback onTogglePause;
@@ -1019,30 +1080,6 @@ class _BrowserBottomToolbar extends StatelessWidget {
                 onTap: onHome,
               ),
               const SizedBox(width: 8),
-              InkWell(
-                onTap: onFocusUrl,
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  height: 32,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: colors.canvas,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: colors.border),
-                  ),
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    preview.url,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: monoStyle(
-                      color: colors.textSecondary,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
               _ViewportChip(
                 width: preview.width,
                 height: preview.height,
@@ -1626,11 +1663,16 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
           'Match this Sidemesh pane',
         ),
     ];
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(18, 0, 18, 18 + keyboardInset),
-        child: Column(
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(18, 12, 18, 18 + keyboardInset),
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1695,7 +1737,8 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 
   void _submitCustom() {
