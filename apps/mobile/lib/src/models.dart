@@ -457,6 +457,29 @@ class HostBrowserPreviewInfo {
 
   bool get isRunning => status == 'running';
 
+  HostBrowserPreviewInfo copyWith({int? width, int? height}) {
+    return HostBrowserPreviewInfo(
+      id: id,
+      label: label,
+      url: url,
+      targetHost: targetHost,
+      targetPort: targetPort,
+      scheme: scheme,
+      cwd: cwd,
+      sessionId: sessionId,
+      profileMode: profileMode,
+      status: status,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      clients: clients,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      lastClientAt: lastClientAt,
+      lastFrameAt: lastFrameAt,
+      lastError: lastError,
+    );
+  }
+
   factory HostBrowserPreviewInfo.fromJson(Map<String, dynamic> json) =>
       HostBrowserPreviewInfo(
         id: _stringValue(json['id']),

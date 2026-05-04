@@ -474,6 +474,17 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       ),
     );
     if (result == null || !mounted) return;
+    // Optimistically update local state so the chip and interaction-rect
+    // snap to the new dimensions immediately, before the server's `preview`
+    // message round-trips back.
+    setState(() {
+      _preview = _preview.copyWith(
+        width: result.width,
+        height: result.height,
+      );
+      _frameWidth = result.width;
+      _frameHeight = result.height;
+    });
     _send({
       'type': 'resize',
       'width': result.width,
