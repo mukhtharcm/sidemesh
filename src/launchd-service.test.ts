@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import nodePath from "node:path";
 import { describe, it } from "node:test";
 
 import {
+  isServiceWrapperStale,
   renderLaunchdEnv,
   renderLaunchdLauncher,
   renderLaunchdPlist,
@@ -89,5 +93,57 @@ describe("launchd service rendering", () => {
     assert.equal(paths.plistPath, "/tmp/dev.sidemesh.custom.plist");
     assert.equal(paths.envPath, "/tmp/dev.sidemesh.custom.env");
     assert.equal(paths.launcherPath, "/tmp/dev.sidemesh.custom.sh");
+  });
+
+  it("detects stale launcher and plist files", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-launchd-service-test-"));
+    const config: NodeConfig = {
+      label: "Mac Dev",
+      port: 8899,
+      token: "test-token",
+      tokenSource: "file",
+      provider: { kind: "codex", bin: "codex" },
+      providers: [{ kind: "codex", bin: "codex" }],
+      defaultProviderKind: "codex",
+      updateChannel: "stable",
+      stateDir: "/Users/example/.sidemesh",
+      terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
+      portForwarding: { enabled: true, allowNonLoopbackTargets: false },
+      browserPreview: {
+        enabled: true,
+        chromePath: "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        maxPreviews: 2,
+        idleTtlMs: 120000,
+        frameIntervalMs: 1000,
+        quality: 60,
+      },
+      configPath: "/Users/example/.sidemesh/config.json",
+      configExists: true,
+    };
+    const paths = resolveLaunchdPaths(config, {
+      label: "dev.sidemesh.test",
+      packageDir: "/Users/example/dev/sidemesh",
+      nodeBin: "/usr/local/bin/node",
+      plistPath: nodePath.join(dir, "dev.sidemesh.test.plist"),
+      envPath: nodePath.join(dir, "dev.sidemesh.test.env"),
+      launcherPath: nodePath.join(dir, "dev.sidemesh.test.sh"),
+    });
+
+    await writeFile(paths.launcherPath, renderLaunchdLauncher(paths, config));
+    await writeFile(paths.plistPath, renderLaunchdPlist(paths));
+    assert.equal(await isServiceWrapperStale(paths, config), false);
+
+    await writeFile(
+      paths.launcherPath,
+      renderLaunchdLauncher({ ...paths, packageDir: "/Users/example/old-sidemesh" }, config),
+    );
+    assert.equal(await isServiceWrapperStale(paths, config), true);
+
+    await writeFile(paths.launcherPath, renderLaunchdLauncher(paths, config));
+    await writeFile(
+      paths.plistPath,
+      renderLaunchdPlist({ ...paths, launcherPath: "/tmp/old-sidemesh.sh" }),
+    );
+    assert.equal(await isServiceWrapperStale(paths, config), true);
   });
 });

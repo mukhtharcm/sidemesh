@@ -6,12 +6,28 @@ import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 
 import type { NodeConfig } from "./types.js";
-import { detectInstallInfo, type InstallInfo } from "./install-info.js";
+import type { InstallInfo } from "./install-info.js";
+import type { LaunchdPaths } from "./launchd-service.js";
+import type { ServicePaths } from "./systemd-service.js";
+import { detectInstallInfo } from "./install-info.js";
 import {
   startDaemon,
   stopDaemon,
   waitForDaemonHealth,
 } from "./daemon-control.js";
+import {
+  installLaunchdService,
+  isLaunchdServiceInstalled,
+  isServiceWrapperStale as isLaunchdServiceWrapperStale,
+  resolveInstalledLaunchdPaths,
+} from "./launchd-service.js";
+import {
+  installSystemdService,
+  isServiceWrapperStale as isSystemdServiceWrapperStale,
+  isSystemdServiceEnabled,
+  readSystemdUnitLimits,
+  resolveInstalledServicePaths,
+} from "./systemd-service.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,11 +47,74 @@ export interface SelfUpdateResult {
   error: string | null;
 }
 
+interface CommandOptions {
+  cwd?: string;
+  encoding?: BufferEncoding;
+  timeout?: number;
+}
+
+interface CommandResult {
+  stdout: string;
+  stderr: string;
+}
+
+export interface SelfUpdateDependencies {
+  detectInstallInfo: typeof detectInstallInfo;
+  stopDaemon: typeof stopDaemon;
+  startDaemon: typeof startDaemon;
+  waitForDaemonHealth: typeof waitForDaemonHealth;
+  installSystemdService: typeof installSystemdService;
+  isSystemdServiceEnabled: typeof isSystemdServiceEnabled;
+  isSystemdServiceWrapperStale: typeof isSystemdServiceWrapperStale;
+  readSystemdUnitLimits: typeof readSystemdUnitLimits;
+  resolveInstalledServicePaths: typeof resolveInstalledServicePaths;
+  installLaunchdService: typeof installLaunchdService;
+  isLaunchdServiceInstalled: typeof isLaunchdServiceInstalled;
+  isLaunchdServiceWrapperStale: typeof isLaunchdServiceWrapperStale;
+  resolveInstalledLaunchdPaths: typeof resolveInstalledLaunchdPaths;
+  runCommand: (
+    file: string,
+    args: string[],
+    options?: CommandOptions,
+  ) => Promise<CommandResult>;
+  resolveUpdatedPackageDir: (
+    info: InstallInfo,
+    fallbackPackageDir: string,
+  ) => Promise<string>;
+}
+
+const DEFAULT_SELF_UPDATE_DEPENDENCIES: SelfUpdateDependencies = {
+  detectInstallInfo,
+  stopDaemon,
+  startDaemon,
+  waitForDaemonHealth,
+  installSystemdService,
+  isSystemdServiceEnabled,
+  isSystemdServiceWrapperStale,
+  readSystemdUnitLimits,
+  resolveInstalledServicePaths,
+  installLaunchdService,
+  isLaunchdServiceInstalled,
+  isLaunchdServiceWrapperStale,
+  resolveInstalledLaunchdPaths,
+  runCommand: async (file, args, options = {}) => {
+    const { stdout = "", stderr = "" } = await execFileAsync(file, args, options);
+    return { stdout, stderr };
+  },
+  resolveUpdatedPackageDir: resolveUpdatedPackageDir,
+};
+
 export async function runSelfUpdate(
   options: SelfUpdateOptions,
+  dependencyOverrides: Partial<SelfUpdateDependencies> = {},
 ): Promise<SelfUpdateResult> {
+  const dependencies = {
+    ...DEFAULT_SELF_UPDATE_DEPENDENCIES,
+    ...dependencyOverrides,
+  } satisfies SelfUpdateDependencies;
   const { config, dryRun = false } = options;
   const requestedPackageDir = options.packageDir?.trim() || undefined;
+  const managedService = options.managedService?.trim() || null;
   const logDir = nodePath.join(config.stateDir, "logs");
   await mkdir(logDir, { recursive: true });
   const logPath = nodePath.join(logDir, `self-update-${Date.now()}.log`);
@@ -62,7 +141,7 @@ export async function runSelfUpdate(
   }
 
   try {
-    const info = await detectInstallInfo({
+    const info = await dependencies.detectInstallInfo({
       packageRoot: requestedPackageDir,
       config,
     });
@@ -80,8 +159,30 @@ export async function runSelfUpdate(
       };
     }
 
+    const managedServiceInstalled = managedService
+      ? await getManagedServiceInstalledState(
+          {
+            config,
+            packageDir,
+            managedService,
+          },
+          dependencies,
+        )
+      : null;
+
     if (dryRun) {
       await appendLog(logPath, `[dry-run] Would run: ${info.updateCommand}`);
+      await logManagedServiceReinstallPlan(
+        {
+          config,
+          info,
+          packageDir,
+          managedService,
+          logPath,
+          installed: managedServiceInstalled,
+        },
+        dependencies,
+      );
       return {
         success: true,
         oldVersion,
@@ -103,23 +204,24 @@ export async function runSelfUpdate(
       );
     }
 
-    const managedService = options.managedService;
-
     try {
       await appendLog(logPath, `[self-update] Stopping daemon...`);
       if (managedService) {
-        await execFileAsync(
-          "systemctl",
-          ["stop", `${managedService}.service`],
-          { encoding: "utf8", timeout: 15_000 },
+        await stopManagedService(
+          {
+            config,
+            managedService,
+            packageDir,
+          },
+          dependencies,
         );
         await appendLog(
           logPath,
-          `[self-update] Stopped systemd service ${managedService}.service`,
+          `[self-update] Stopped managed service ${managedService}`,
         );
         await delay(1000);
       } else {
-        const stopped = await stopDaemon(config, { yes: true });
+        const stopped = await dependencies.stopDaemon(config, { yes: true });
         if (!stopped) {
           await appendLog(
             logPath,
@@ -144,35 +246,61 @@ export async function runSelfUpdate(
       await appendLog(logPath, `[self-update] Running update...`);
       await runUpdateCommand(info, packageDir, logPath);
 
-      const newCliPath = nodePath.join(packageDir, "dist", "cli.js");
+      const updatedPackageDir = await dependencies.resolveUpdatedPackageDir(
+        info,
+        packageDir,
+      );
+      if (updatedPackageDir !== packageDir) {
+        await appendLog(
+          logPath,
+          `[self-update] Updated package dir resolved to ${updatedPackageDir}`,
+        );
+      }
+
+      const newCliPath = nodePath.join(updatedPackageDir, "dist", "cli.js");
       const newCliExists = await pathExists(newCliPath);
       if (!newCliExists) {
         throw new Error(`Compiled CLI not found at ${newCliPath} after update.`);
       }
 
+      await reinstallManagedServiceIfNeeded(
+        {
+          config,
+          info,
+          packageDir: updatedPackageDir,
+          managedService,
+          logPath,
+          installed: managedServiceInstalled,
+        },
+        dependencies,
+      );
+
       await appendLog(logPath, `[self-update] Starting daemon...`);
       if (managedService) {
-        await execFileAsync(
-          "systemctl",
-          ["start", `${managedService}.service`],
-          { encoding: "utf8", timeout: 15_000 },
+        await startManagedService(
+          {
+            config,
+            managedService,
+            packageDir: updatedPackageDir,
+          },
+          dependencies,
         );
         await appendLog(
           logPath,
-          `[self-update] Started systemd service ${managedService}.service`,
+          `[self-update] Started managed service ${managedService}`,
         );
       } else {
-        await startDaemon(config, { configPath: config.configPath });
+        await dependencies.startDaemon(config, { configPath: config.configPath });
       }
 
       await appendLog(logPath, `[self-update] Waiting for healthz...`);
-      const healthy = await waitForDaemonHealth(config.port, 15_000);
+      const healthy = await dependencies.waitForDaemonHealth(config.port, 15_000);
       if (!healthy) {
         throw new Error("Daemon did not become healthy within 15s after update.");
       }
 
-      const newInfo = await detectInstallInfo({
-        packageRoot: packageDir,
+      const newInfo = await dependencies.detectInstallInfo({
+        packageRoot: updatedPackageDir,
         config,
       });
       await appendLog(
@@ -235,15 +363,18 @@ export async function runSelfUpdate(
       try {
         await appendLog(logPath, `[self-update] Starting old daemon...`);
         if (managedService) {
-          await execFileAsync(
-            "systemctl",
-            ["start", `${managedService}.service`],
-            { encoding: "utf8", timeout: 15_000 },
+          await startManagedService(
+            {
+              config,
+              managedService,
+              packageDir,
+            },
+            dependencies,
           );
         } else {
-          await startDaemon(config, { configPath: config.configPath });
+          await dependencies.startDaemon(config, { configPath: config.configPath });
         }
-        const healthy = await waitForDaemonHealth(config.port, 15_000);
+        const healthy = await dependencies.waitForDaemonHealth(config.port, 15_000);
         if (!healthy) {
           await appendLog(
             logPath,
@@ -313,6 +444,318 @@ async function runShellCommand(
   }
 }
 
+async function stopManagedService(
+  options: {
+    config: NodeConfig;
+    managedService: string;
+    packageDir: string;
+  },
+  dependencies: SelfUpdateDependencies,
+): Promise<void> {
+  if (process.platform === "darwin") {
+    const paths = await dependencies.resolveInstalledLaunchdPaths(options.config, {
+      label: options.managedService,
+      packageDir: options.packageDir,
+      nodeBin: process.execPath,
+    });
+    await dependencies.runCommand(
+      "launchctl",
+      ["bootout", launchdTarget(), paths.plistPath],
+      { encoding: "utf8", timeout: 15_000 },
+    );
+    return;
+  }
+
+  await dependencies.runCommand(
+    "systemctl",
+    ["stop", `${options.managedService}.service`],
+    { encoding: "utf8", timeout: 15_000 },
+  );
+}
+
+async function startManagedService(
+  options: {
+    config: NodeConfig;
+    managedService: string;
+    packageDir: string;
+  },
+  dependencies: SelfUpdateDependencies,
+): Promise<void> {
+  if (process.platform === "darwin") {
+    const paths = await dependencies.resolveInstalledLaunchdPaths(options.config, {
+      label: options.managedService,
+      packageDir: options.packageDir,
+      nodeBin: process.execPath,
+    });
+    await dependencies.runCommand(
+      "launchctl",
+      ["bootstrap", launchdTarget(), paths.plistPath],
+      { encoding: "utf8", timeout: 15_000 },
+    );
+    await dependencies.runCommand(
+      "launchctl",
+      ["enable", `${launchdTarget()}/${paths.label}`],
+      { encoding: "utf8", timeout: 15_000 },
+    ).catch(() => undefined);
+    await dependencies.runCommand(
+      "launchctl",
+      ["kickstart", "-k", `${launchdTarget()}/${paths.label}`],
+      { encoding: "utf8", timeout: 15_000 },
+    );
+    return;
+  }
+
+  await dependencies.runCommand(
+    "systemctl",
+    ["start", `${options.managedService}.service`],
+    { encoding: "utf8", timeout: 15_000 },
+  );
+}
+
+async function getManagedServiceInstalledState(
+  options: {
+    config: NodeConfig;
+    packageDir: string;
+    managedService: string;
+  },
+  dependencies: SelfUpdateDependencies,
+): Promise<boolean> {
+  if (process.platform === "darwin") {
+    const paths = await dependencies.resolveInstalledLaunchdPaths(options.config, {
+      label: options.managedService,
+      packageDir: options.packageDir,
+      nodeBin: process.execPath,
+    });
+    return dependencies.isLaunchdServiceInstalled(paths.label);
+  }
+
+  const paths = await dependencies.resolveInstalledServicePaths({
+    serviceName: options.managedService,
+    packageDir: options.packageDir,
+    nodeBin: process.execPath,
+  });
+  return dependencies.isSystemdServiceEnabled(paths.serviceName);
+}
+
+async function logManagedServiceReinstallPlan(
+  options: {
+    config: NodeConfig;
+    info: InstallInfo;
+    packageDir: string;
+    managedService: string | null;
+    logPath: string;
+    installed: boolean | null;
+  },
+  dependencies: SelfUpdateDependencies,
+): Promise<void> {
+  if (!options.managedService) {
+    return;
+  }
+  const staleState = await getManagedServiceReinstallState(
+    {
+      ...options,
+      managedService: options.managedService,
+    },
+    dependencies,
+  );
+  if (!staleState.installed) {
+    await appendLog(
+      options.logPath,
+      `[dry-run] Managed service ${staleState.serviceId} is not installed, skipping wrapper reinstall.`,
+    );
+    return;
+  }
+  if (!staleState.stale) {
+    await appendLog(
+      options.logPath,
+      `[dry-run] Managed service ${staleState.serviceId} wrapper is up to date.`,
+    );
+    return;
+  }
+  await appendLog(
+    options.logPath,
+    `[dry-run] Service wrapper is stale, will reinstall ${staleState.serviceId}.`,
+  );
+}
+
+async function reinstallManagedServiceIfNeeded(
+  options: {
+    config: NodeConfig;
+    info: InstallInfo;
+    packageDir: string;
+    managedService: string | null;
+    logPath: string;
+    installed: boolean | null;
+  },
+  dependencies: SelfUpdateDependencies,
+): Promise<void> {
+  if (!options.managedService) {
+    return;
+  }
+
+  const staleState = await getManagedServiceReinstallState(
+    {
+      ...options,
+      managedService: options.managedService,
+    },
+    dependencies,
+  );
+  if (!staleState.installed) {
+    await appendLog(
+      options.logPath,
+      `[self-update] Managed service ${staleState.serviceId} is not installed, skipping wrapper reinstall.`,
+    );
+    return;
+  }
+  if (!staleState.stale) {
+    await appendLog(
+      options.logPath,
+      `[self-update] Managed service ${staleState.serviceId} wrapper is up to date.`,
+    );
+    return;
+  }
+
+  await appendLog(
+    options.logPath,
+    `[self-update] Service wrapper is stale, will reinstall ${staleState.serviceId}.`,
+  );
+  try {
+    if (staleState.kind === "systemd") {
+      await dependencies.installSystemdService(options.config, {
+        serviceName: staleState.paths.serviceName,
+        packageDir: staleState.paths.packageDir,
+        nodeBin: staleState.paths.nodeBin,
+        unitPath: staleState.paths.unitPath,
+        envPath: staleState.paths.envPath,
+        launcherPath: staleState.paths.launcherPath,
+        memoryHigh: staleState.limits.memoryHigh,
+        memoryMax: staleState.limits.memoryMax,
+        start: false,
+      });
+    } else {
+      await dependencies.installLaunchdService(options.config, {
+        label: staleState.paths.label,
+        packageDir: staleState.paths.packageDir,
+        nodeBin: staleState.paths.nodeBin,
+        plistPath: staleState.paths.plistPath,
+        envPath: staleState.paths.envPath,
+        launcherPath: staleState.paths.launcherPath,
+        start: false,
+      });
+    }
+    await appendLog(
+      options.logPath,
+      `[self-update] Reinstalled managed service wrapper ${staleState.serviceId}.`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await appendLog(
+      options.logPath,
+      `[self-update] WARNING: Failed to reinstall service wrapper ${staleState.serviceId}: ${message}`,
+    );
+  }
+}
+
+type ManagedServiceReinstallState =
+  | {
+      kind: "systemd";
+      installed: boolean;
+      stale: boolean;
+      serviceId: string;
+      paths: ServicePaths;
+      limits: { memoryHigh: string | null; memoryMax: string | null };
+    }
+  | {
+      kind: "launchd";
+      installed: boolean;
+      stale: boolean;
+      serviceId: string;
+      paths: LaunchdPaths;
+    };
+
+async function getManagedServiceReinstallState(
+  options: {
+    config: NodeConfig;
+    info: InstallInfo;
+    packageDir: string;
+    managedService: string;
+    logPath: string;
+    installed: boolean | null;
+  },
+  dependencies: SelfUpdateDependencies,
+): Promise<ManagedServiceReinstallState> {
+  if (process.platform === "darwin") {
+    const paths = await dependencies.resolveInstalledLaunchdPaths(options.config, {
+      label: options.managedService,
+      packageDir: options.packageDir,
+      nodeBin: process.execPath,
+    });
+    const installed =
+      options.installed ??
+      (await dependencies.isLaunchdServiceInstalled(paths.label));
+    const stale =
+      installed &&
+      (await dependencies.isLaunchdServiceWrapperStale(paths, options.config));
+    return {
+      kind: "launchd",
+      installed,
+      stale,
+      serviceId: paths.label,
+      paths,
+    };
+  }
+
+  const paths = await dependencies.resolveInstalledServicePaths({
+    serviceName: options.managedService,
+    packageDir: options.packageDir,
+    nodeBin: process.execPath,
+  });
+  const installed =
+    options.installed ??
+    (await dependencies.isSystemdServiceEnabled(paths.serviceName));
+  const limits = installed
+    ? await dependencies.readSystemdUnitLimits(paths)
+    : { memoryHigh: null, memoryMax: null };
+  const stale =
+    installed &&
+    (await dependencies.isSystemdServiceWrapperStale(
+      paths,
+      options.config,
+      limits,
+    ));
+  return {
+    kind: "systemd",
+    installed,
+    stale,
+    serviceId: `${paths.serviceName}.service`,
+    paths,
+    limits,
+  };
+}
+
+async function resolveUpdatedPackageDir(
+  info: InstallInfo,
+  fallbackPackageDir: string,
+): Promise<string> {
+  if (info.installType !== "npm-global") {
+    return fallbackPackageDir;
+  }
+
+  try {
+    const { stdout } = await execFileAsync("npm", ["root", "-g"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    const globalRoot = stdout.trim();
+    if (!globalRoot) {
+      return fallbackPackageDir;
+    }
+    return nodePath.join(globalRoot, "sidemesh");
+  } catch {
+    return fallbackPackageDir;
+  }
+}
+
 async function appendLog(path: string, message: string): Promise<void> {
   const line = `[${new Date().toISOString()}] ${message}\n`;
   await writeFile(path, line, { flag: "a" });
@@ -325,4 +768,8 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function launchdTarget(): string {
+  return `gui/${process.getuid?.() ?? 501}`;
 }
