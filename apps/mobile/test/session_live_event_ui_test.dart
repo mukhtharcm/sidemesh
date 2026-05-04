@@ -104,6 +104,68 @@ void main() {
     expect(find.textContaining('Keep it provider-neutral'), findsOneWidget);
     expect(find.textContaining('Overloaded'), findsOneWidget);
   });
+
+  testWidgets('completed assistant message keeps collapsed reasoning visible', (
+    tester,
+  ) async {
+    final session = _session('reasoning-collapse');
+    final api = _RichEventFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('reasoning-collapse'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'reasoning_delta',
+      'sessionId': session.id,
+      'delta': 'Step one.',
+      'summary': false,
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Step one.'), findsOneWidget);
+
+    api.emit({
+      'type': 'assistant_message_completed',
+      'sessionId': session.id,
+      'messageItem': {
+        'id': 'msg-1',
+        'role': 'assistant',
+        'text': 'Final answer.',
+        'attachments': [],
+        'createdAt': DateTime(2026, 1, 1, 12, 1).millisecondsSinceEpoch,
+        'seq': 1,
+        'phase': 'answer',
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Step one.'), findsNothing);
+    expect(find.text('Final answer.'), findsOneWidget);
+    expect(find.text('Reasoning'), findsOneWidget);
+
+    final reasoningLabel = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .firstWhere((widget) => widget.text.toPlainText() == 'Reasoning');
+    expect(
+      (reasoningLabel.text as TextSpan).style?.color,
+      ThemeVariant.codexAmber.light.textPrimary,
+    );
+
+    await tester.tap(find.text('Reasoning'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Step one.'), findsOneWidget);
+  });
 }
 
 Future<void> _pumpFrames(WidgetTester tester) async {
