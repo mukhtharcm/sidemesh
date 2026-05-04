@@ -723,12 +723,21 @@ export class BrowserPreviewRegistry {
     height: number,
   ): Promise<void> {
     if (preview.width === width && preview.height === height) return;
+    // Broadcast the intended dimensions immediately so the client chip updates
+    // and interaction mapping is correct before the first frame arrives.
     preview.width = width;
     preview.height = height;
     preview.updatedAt = Date.now();
-    await setViewport(preview);
-    preview.lastFramePayload = null;
     this.broadcast(preview, { type: "preview", preview: this.info(preview) });
+    // Clear the cached last-frame so reconnecting clients wait for a fresh
+    // frame at the new size, not a stale frame from the old viewport.
+    preview.lastFramePayload = null;
+    // Apply the viewport change in Chrome.  Any frame-loop captures that race
+    // in during this await will use the already-updated preview.width/height
+    // for their payload dims — the CDP command ordering (setDeviceMetrics was
+    // sent synchronously inside setViewport before we yield) guarantees those
+    // captures see the new Chrome viewport, so dims and image stay in sync.
+    await setViewport(preview);
   }
 
   private startFrameLoop(preview: BrowserPreviewRecord): void {
@@ -1328,7 +1337,10 @@ async function setViewport(preview: BrowserPreviewRecord): Promise<void> {
       width: preview.width,
       height: preview.height,
       deviceScaleFactor: 1,
-      mobile: preview.width < 700,
+      // Always keep mobile:false.  Toggling this flag changes Chrome's user
+      // agent string which can trigger page reloads / layout recalculations
+      // mid-resize and cause screenshot dimension mismatches.
+      mobile: false,
     },
     preview.sessionIdCdp,
   );
