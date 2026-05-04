@@ -431,6 +431,7 @@ async function runShellCommand(
   timeout: number,
 ): Promise<void> {
   const shell = process.env.SHELL || "/bin/sh";
+  const env = buildSelfUpdateCommandEnv();
   await appendLog(logPath, `[self-update] $ ${command}`);
 
   try {
@@ -438,6 +439,7 @@ async function runShellCommand(
       cwd: packageDir,
       timeout,
       encoding: "utf8",
+      env,
     });
     if (stdout) await appendLog(logPath, stdout);
     if (stderr) await appendLog(logPath, stderr);
@@ -451,6 +453,35 @@ async function runShellCommand(
     if (typed.stderr) await appendLog(logPath, typed.stderr);
     throw new Error(typed.message || "Command failed.");
   }
+}
+
+function buildSelfUpdateCommandEnv(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const pathKey =
+    Object.keys(baseEnv).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  const nodeDir = nodePath.dirname(process.execPath);
+  const currentPath = baseEnv[pathKey];
+  const pathEntries =
+    typeof currentPath === "string" && currentPath.length > 0
+      ? currentPath.split(nodePath.delimiter).filter(Boolean)
+      : [];
+  const normalizedNodeDir = process.platform === "win32"
+    ? nodeDir.toLowerCase()
+    : nodeDir;
+  const hasNodeDir = pathEntries.some((entry) => {
+    if (process.platform === "win32") {
+      return entry.toLowerCase() === normalizedNodeDir;
+    }
+    return entry === nodeDir;
+  });
+
+  return {
+    ...baseEnv,
+    [pathKey]: hasNodeDir
+      ? pathEntries.join(nodePath.delimiter)
+      : [nodeDir, ...pathEntries].join(nodePath.delimiter),
+  };
 }
 
 async function stopManagedService(
