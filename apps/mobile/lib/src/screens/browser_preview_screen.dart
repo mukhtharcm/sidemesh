@@ -15,7 +15,6 @@ import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../host_reconnect_scheduler.dart';
 import '../host_status_store.dart';
-import '../relative_time_ticker.dart';
 
 class BrowserPreviewScreen extends StatelessWidget {
   const BrowserPreviewScreen({
@@ -29,9 +28,6 @@ class BrowserPreviewScreen extends StatelessWidget {
   final HostProfile host;
   final ApiClient api;
   final HostBrowserPreviewInfo preview;
-
-  /// When false, leaving the route only detaches this viewer. The daemon-side
-  /// browser remains alive so the user can return from chat without reloading.
   final bool stopOnDispose;
 
   @override
@@ -39,15 +35,14 @@ class BrowserPreviewScreen extends StatelessWidget {
     final colors = context.colors;
     return Scaffold(
       backgroundColor: colors.canvas,
-      appBar: AppBar(
-        backgroundColor: colors.canvas,
-        title: const Text('Stream pixels'),
-      ),
-      body: BrowserPreviewPane(
-        host: host,
-        api: api,
-        preview: preview,
-        stopOnDispose: stopOnDispose,
+      body: SafeArea(
+        bottom: false,
+        child: BrowserPreviewPane(
+          host: host,
+          api: api,
+          preview: preview,
+          stopOnDispose: stopOnDispose,
+        ),
       ),
     );
   }
@@ -87,6 +82,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   final _textController = TextEditingController();
   final _inputFocusNode = FocusNode();
   final _browserFocusNode = FocusNode(debugLabel: 'browser-preview-input');
+  final _urlFocusNode = FocusNode();
+  final _urlController = TextEditingController();
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   Timer? _firstFrameTimer;
@@ -104,6 +101,11 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   bool _manualPause = false;
   bool _remoteClosed = false;
   int _firstFrameReconnects = 0;
+  bool _devToolsOpen = false;
+  int _devToolsTabIndex = 0;
+  bool _pageLoading = false;
+  final List<_ConsoleEntry> _consoleEntries = [];
+  final int _maxConsoleEntries = 200;
 
   @override
   void initState() {
@@ -119,6 +121,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _preview = widget.preview;
     _frameWidth = _preview.width;
     _frameHeight = _preview.height;
+    _urlController.text = _preview.url;
     _connect();
   }
 
@@ -128,6 +131,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _textController.dispose();
     _inputFocusNode.dispose();
     _browserFocusNode.dispose();
+    _urlFocusNode.dispose();
     _firstFrameTimer?.cancel();
     HostReconnectScheduler.instance.unregisterSlot(
       widget.host.id,
@@ -250,6 +254,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
           _preview = preview;
           _frameWidth = preview.width;
           _frameHeight = preview.height;
+          _urlController.text = preview.url;
         }
         if (type != 'preview') {
           _status = 'Waiting for first frame...';
@@ -294,8 +299,6 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
           _error = message;
           _status = null;
         } else {
-          // Capture errors are often transient. Keep showing the last good
-          // frame instead of blanking the preview while the daemon recovers.
           _error = null;
           _status = message;
         }
@@ -315,7 +318,48 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         _status = 'Remote browser stopped.';
         _error = null;
       });
+      return;
     }
+    if (type == 'console' || type == 'exception' || type == 'log') {
+      _handleConsole(frame);
+      return;
+    }
+    if (type == 'loading') {
+      final state = frame['state'];
+      if (!mounted) return;
+      setState(() {
+        _pageLoading = state == 'started';
+      });
+      return;
+    }
+    if (type == 'navError') {
+      if (!mounted) return;
+      final url = frame['url']?.toString() ?? '';
+      final error = frame['error']?.toString() ?? '';
+      setState(() {
+        _status = 'Failed to load $url: $error';
+      });
+      return;
+    }
+  }
+
+  void _handleConsole(Map<dynamic, dynamic> frame) {
+    if (!mounted) return;
+    final entry = _ConsoleEntry(
+      type: frame['type']?.toString() ?? 'log',
+      level: frame['level']?.toString() ?? 'log',
+      text: frame['text']?.toString() ?? '',
+      url: frame['url']?.toString(),
+      lineNumber: frame['lineNumber'] is int ? frame['lineNumber'] as int : null,
+      columnNumber: frame['columnNumber'] is int ? frame['columnNumber'] as int : null,
+      timestamp: frame['timestamp'] is int ? frame['timestamp'] as int : DateTime.now().millisecondsSinceEpoch,
+    );
+    setState(() {
+      _consoleEntries.add(entry);
+      if (_consoleEntries.length > _maxConsoleEntries) {
+        _consoleEntries.removeAt(0);
+      }
+    });
   }
 
   void _scheduleFirstFrameWatchdog() {
@@ -379,57 +423,58 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       if (!mounted) return;
       showAppSnackBar(
         context,
-        'Could not stop remote browser: ${friendlyError(error)}',
+        'Could not stop browser preview: ${friendlyError(error)}',
       );
     }
   }
 
-  void _send(Map<String, dynamic> payload) {
+  Future<void> _showViewportSheet() async {
+    final size = _lastPreviewBoxSize;
+    final result = await showModalBottomSheet<_ViewportPreset>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ViewportResizeSheet(
+        currentWidth: _preview.width,
+        currentHeight: _preview.height,
+        fitSize: size,
+      ),
+    );
+    if (result == null || !mounted) return;
+    _send({
+      'type': 'resize',
+      'width': result.width,
+      'height': result.height,
+    });
+  }
+
+  void _send(Map<String, dynamic> message) {
+    final channel = _channel;
+    if (channel == null) return;
     try {
-      _channel?.sink.add(jsonEncode(payload));
-    } catch (error) {
-      if (!mounted) return;
-      showAppSnackBar(context, 'Could not send input: ${friendlyError(error)}');
+      channel.sink.add(jsonEncode(message));
+    } catch (_) {
+      // noop
     }
-  }
-
-  void _sendText() {
-    final text = _textController.text;
-    if (text.isEmpty) return;
-    _sendTextPayload(text);
-    _textController.clear();
-  }
-
-  void _sendTextPayload(String text) {
-    _send({'type': 'text', 'text': text});
-  }
-
-  void _sendKey(String key) {
-    _send({'type': 'key', 'key': key});
   }
 
   void _sendNavigation(String action) {
     _send({'type': 'navigation', 'action': action});
   }
 
-  void _sendResize(int width, int height) {
-    _send({'type': 'resize', 'width': width, 'height': height});
+  void _sendKey(String key) {
+    _send({'type': 'key', 'key': key});
   }
 
-  Future<void> _showViewportSheet() async {
-    final selected = await showModalBottomSheet<_ViewportPreset>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      backgroundColor: context.colors.surface,
-      builder: (context) => _ViewportResizeSheet(
-        currentWidth: _frameWidth,
-        currentHeight: _frameHeight,
-        fitSize: _lastPreviewBoxSize,
-      ),
-    );
-    if (selected == null || !mounted) return;
-    _sendResize(selected.width, selected.height);
+  void _sendTextPayload(String text) {
+    _send({'type': 'text', 'text': text});
+  }
+
+  void _sendText() {
+    final text = _textController.text.trim();
+    if (text.isEmpty) return;
+    _sendTextPayload(text);
+    _textController.clear();
   }
 
   void _toggleInputRail() {
@@ -459,6 +504,14 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _inputFocusNode.requestFocus();
     });
+  }
+
+  void _toggleDevTools() {
+    setState(() => _devToolsOpen = !_devToolsOpen);
+  }
+
+  void _setDevToolsTab(int index) {
+    setState(() => _devToolsTabIndex = index);
   }
 
   KeyEventResult _handleHardwareKey(FocusNode node, KeyEvent event) {
@@ -520,6 +573,13 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     });
   }
 
+  void _sendNavigate() {
+    final url = _urlController.text.trim();
+    if (url.isEmpty) return;
+    _send({'type': 'navigate', 'url': url});
+    _urlFocusNode.unfocus();
+  }
+
   Offset? _mapPoint(Offset localPosition, Size size) {
     final imageRect = _containedImageRect(size);
     if (!imageRect.contains(localPosition)) return null;
@@ -549,87 +609,85 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     return Column(
       children: [
         if (widget.showHeader)
-          _PreviewHeader(
-            hostId: widget.host.id,
+          _BrowserChromeBar(
             preview: _preview,
-            connected: _error == null && _status == null,
+            urlController: _urlController,
+            urlFocusNode: _urlFocusNode,
+            pageLoading: _pageLoading,
             streamPaused: _clientPaused,
-            inputRailOpen: _inputRailOpen,
+            devToolsOpen: _devToolsOpen,
             onBack: widget.onBack,
             onMinimize: widget.onMinimize,
-            onToggleInput: _toggleInputRail,
-            onPause: () => _pauseStream(manual: true),
-            onResume: _resumeStream,
+            onNavigate: _sendNavigate,
+            onReload: () => _sendNavigation('reload'),
+            onBackNavigation: () => _sendNavigation('back'),
+            onForwardNavigation: () => _sendNavigation('forward'),
+            onTogglePause: () => _clientPaused ? _resumeStream() : _pauseStream(manual: true),
+            onToggleDevTools: _toggleDevTools,
             onStop: () => unawaited(_stopRemoteBrowser()),
           ),
-        _BrowserControlStrip(
+        Expanded(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Container(
+                  color: const Color(0xFF07090D),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final size = constraints.biggest;
+                      _lastPreviewBoxSize = size;
+                      return Focus(
+                        focusNode: _browserFocusNode,
+                        autofocus: desktopLike,
+                        onKeyEvent: _handleHardwareKey,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTapUp: (details) => _sendTap(details, size),
+                          onVerticalDragUpdate: (details) =>
+                              _sendScroll(details, size),
+                          onHorizontalDragUpdate: (details) =>
+                              _sendScroll(details, size),
+                          child: _buildPreviewBody(colors),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              if (_pageLoading && _frameBytes != null)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: LinearProgressIndicator(
+                    minHeight: 2,
+                    backgroundColor: Colors.transparent,
+                    color: colors.accent,
+                  ),
+                ),
+              if (_clientPaused)
+                Positioned.fill(
+                  child: _PausedPreviewOverlay(
+                    manualPause: _manualPause,
+                    onResume: _resumeStream,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        _BrowserBottomToolbar(
           preview: _preview,
           streamPaused: _clientPaused,
+          inputRailOpen: _inputRailOpen,
+          devToolsOpen: _devToolsOpen,
           onBack: () => _sendNavigation('back'),
           onForward: () => _sendNavigation('forward'),
           onReload: () => _sendNavigation('reload'),
           onResize: () => unawaited(_showViewportSheet()),
-        ),
-        Expanded(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              widget.showHeader ? 10 : 12,
-              widget.showHeader ? 0 : 12,
-              widget.showHeader ? 10 : 12,
-              10,
-            ),
-            child: MeshCard(
-              tone: MeshCardTone.elevated,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final size = constraints.biggest;
-                          _lastPreviewBoxSize = size;
-                          return Focus(
-                            focusNode: _browserFocusNode,
-                            autofocus: desktopLike,
-                            onKeyEvent: _handleHardwareKey,
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTapUp: (details) => _sendTap(details, size),
-                              onVerticalDragUpdate: (details) =>
-                                  _sendScroll(details, size),
-                              onHorizontalDragUpdate: (details) =>
-                                  _sendScroll(details, size),
-                              child: Container(
-                                color: const Color(0xFF07090D),
-                                alignment: Alignment.center,
-                                child: _buildPreviewBody(colors),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  if (_clientPaused)
-                    Positioned.fill(
-                      child: _PausedPreviewOverlay(
-                        manualPause: _manualPause,
-                        onResume: _resumeStream,
-                      ),
-                    ),
-                  Positioned(
-                    right: 12,
-                    bottom: 12,
-                    child: _PreviewFloatingControls(
-                      inputRailOpen: _inputRailOpen,
-                      onToggleInput: _toggleInputRail,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          onHome: () => _send({'type': 'navigate', 'url': _preview.url}),
+          onToggleInput: _toggleInputRail,
+          onToggleDevTools: _toggleDevTools,
+          onTogglePause: () => _clientPaused ? _resumeStream() : _pauseStream(manual: true),
         ),
         if (_inputRailOpen)
           _InputRail(
@@ -640,6 +698,14 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             onFocusInput: _focusInputRail,
             onClose: _closeInputRail,
             showSpecialKeys: !desktopLike,
+          ),
+        if (_devToolsOpen)
+          _DevToolsPanel(
+            tabIndex: _devToolsTabIndex,
+            onTabChanged: _setDevToolsTab,
+            consoleEntries: _consoleEntries,
+            onClearConsole: () => setState(() => _consoleEntries.clear()),
+            preview: _preview,
           ),
       ],
     );
@@ -695,64 +761,792 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 }
 
-class _BrowserControlStrip extends StatelessWidget {
-  const _BrowserControlStrip({
+class _BrowserChromeBar extends StatelessWidget {
+  const _BrowserChromeBar({
     required this.preview,
+    required this.urlController,
+    required this.urlFocusNode,
+    required this.pageLoading,
     required this.streamPaused,
-    required this.onBack,
-    required this.onForward,
+    required this.devToolsOpen,
+    this.onBack,
+    this.onMinimize,
+    required this.onNavigate,
     required this.onReload,
-    required this.onResize,
+    required this.onBackNavigation,
+    required this.onForwardNavigation,
+    required this.onTogglePause,
+    required this.onToggleDevTools,
+    required this.onStop,
   });
 
   final HostBrowserPreviewInfo preview;
+  final TextEditingController urlController;
+  final FocusNode urlFocusNode;
+  final bool pageLoading;
   final bool streamPaused;
-  final VoidCallback onBack;
-  final VoidCallback onForward;
+  final bool devToolsOpen;
+  final VoidCallback? onBack;
+  final VoidCallback? onMinimize;
+  final VoidCallback onNavigate;
   final VoidCallback onReload;
-  final VoidCallback onResize;
+  final VoidCallback onBackNavigation;
+  final VoidCallback onForwardNavigation;
+  final VoidCallback onTogglePause;
+  final VoidCallback onToggleDevTools;
+  final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: colors.surface.withValues(alpha: 0.72),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: colors.border.withValues(alpha: 0.72)),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(
+          bottom: BorderSide(color: colors.border),
         ),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-          child: Row(
-            children: [
-              _BrowserBarButton(
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            if (onBack != null) ...[
+              _ChromeButton(
                 icon: Icons.arrow_back_rounded,
-                label: 'Back',
-                onTap: streamPaused ? null : onBack,
+                tooltip: 'Back to ports',
+                onTap: onBack!,
               ),
-              _BrowserBarButton(
-                icon: Icons.arrow_forward_rounded,
-                label: 'Forward',
-                onTap: streamPaused ? null : onForward,
+              const SizedBox(width: 4),
+            ],
+            _ChromeButton(
+              icon: Icons.arrow_back_rounded,
+              tooltip: 'Back',
+              onTap: onBackNavigation,
+            ),
+            const SizedBox(width: 4),
+            _ChromeButton(
+              icon: Icons.arrow_forward_rounded,
+              tooltip: 'Forward',
+              onTap: onForwardNavigation,
+            ),
+            const SizedBox(width: 4),
+            _ChromeButton(
+              icon: Icons.refresh_rounded,
+              tooltip: 'Reload',
+              onTap: onReload,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: colors.canvas,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: colors.border),
+                ),
+                child: Row(
+                  children: [
+                    if (pageLoading)
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: colors.accent,
+                        ),
+                      )
+                    else
+                      Icon(
+                        Icons.lock_rounded,
+                        size: 14,
+                        color: colors.textTertiary,
+                      ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: urlController,
+                        focusNode: urlFocusNode,
+                        style: TextStyle(
+                          color: colors.textPrimary,
+                          fontSize: 13,
+                        ),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          border: InputBorder.none,
+                          hintText: preview.url,
+                          hintStyle: TextStyle(
+                            color: colors.textSecondary,
+                            fontSize: 13,
+                          ),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        textInputAction: TextInputAction.go,
+                        onSubmitted: (_) => onNavigate(),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              _BrowserBarButton(
-                icon: Icons.refresh_rounded,
-                label: 'Reload',
-                onTap: streamPaused ? null : onReload,
+            ),
+            const SizedBox(width: 8),
+            _ChromeButton(
+              icon: devToolsOpen
+                  ? Icons.construction_rounded
+                  : Icons.construction_outlined,
+              tooltip: 'DevTools',
+              color: devToolsOpen ? colors.accent : colors.textSecondary,
+              onTap: onToggleDevTools,
+            ),
+            const SizedBox(width: 4),
+            _ChromeButton(
+              icon: streamPaused
+                  ? Icons.play_circle_outline_rounded
+                  : Icons.pause_circle_outline_rounded,
+              tooltip: streamPaused ? 'Resume' : 'Pause',
+              color: streamPaused ? colors.success : colors.textSecondary,
+              onTap: onTogglePause,
+            ),
+            const SizedBox(width: 4),
+            if (onMinimize != null) ...[
+              _ChromeButton(
+                icon: Icons.keyboard_arrow_down_rounded,
+                tooltip: 'Minimize',
+                onTap: onMinimize!,
               ),
-              Container(
-                width: 1,
-                height: 24,
-                margin: const EdgeInsets.symmetric(horizontal: 6),
-                color: colors.border.withValues(alpha: 0.72),
+              const SizedBox(width: 4),
+            ],
+            _ChromeButton(
+              icon: Icons.stop_circle_rounded,
+              tooltip: 'Stop',
+              color: colors.danger,
+              onTap: onStop,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChromeButton extends StatelessWidget {
+  const _ChromeButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.color,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            child: Icon(
+              icon,
+              size: 18,
+              color: color ?? colors.textSecondary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BrowserBottomToolbar extends StatelessWidget {
+  const _BrowserBottomToolbar({
+    required this.preview,
+    required this.streamPaused,
+    required this.inputRailOpen,
+    required this.devToolsOpen,
+    required this.onBack,
+    required this.onForward,
+    required this.onReload,
+    required this.onResize,
+    required this.onHome,
+    required this.onToggleInput,
+    required this.onToggleDevTools,
+    required this.onTogglePause,
+  });
+
+  final HostBrowserPreviewInfo preview;
+  final bool streamPaused;
+  final bool inputRailOpen;
+  final bool devToolsOpen;
+  final VoidCallback onBack;
+  final VoidCallback onForward;
+  final VoidCallback onReload;
+  final VoidCallback onResize;
+  final VoidCallback onHome;
+  final VoidCallback onToggleInput;
+  final VoidCallback onToggleDevTools;
+  final VoidCallback onTogglePause;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(
+          top: BorderSide(color: colors.border),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            _ToolbarButton(
+              icon: Icons.arrow_back_rounded,
+              tooltip: 'Back',
+              onTap: onBack,
+            ),
+            const SizedBox(width: 4),
+            _ToolbarButton(
+              icon: Icons.arrow_forward_rounded,
+              tooltip: 'Forward',
+              onTap: onForward,
+            ),
+            const SizedBox(width: 4),
+            _ToolbarButton(
+              icon: Icons.refresh_rounded,
+              tooltip: 'Reload',
+              onTap: onReload,
+            ),
+            const SizedBox(width: 4),
+            _ToolbarButton(
+              icon: Icons.home_rounded,
+              tooltip: 'Home',
+              onTap: onHome,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: InkWell(
+                onTap: () {},
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  height: 32,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    color: colors.canvas,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: colors.border),
+                  ),
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    preview.url,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: monoStyle(
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
               ),
-              _ViewportChip(
-                width: preview.width,
-                height: preview.height,
-                onTap: streamPaused ? null : onResize,
+            ),
+            const SizedBox(width: 8),
+            _ToolbarButton(
+              icon: devToolsOpen
+                  ? Icons.construction_rounded
+                  : Icons.construction_outlined,
+              tooltip: 'DevTools',
+              color: devToolsOpen ? colors.accent : null,
+              onTap: onToggleDevTools,
+            ),
+            const SizedBox(width: 4),
+            _ToolbarButton(
+              icon: inputRailOpen
+                  ? Icons.keyboard_hide_rounded
+                  : Icons.keyboard_alt_rounded,
+              tooltip: inputRailOpen ? 'Hide keyboard' : 'Keyboard',
+              color: inputRailOpen ? colors.accent : null,
+              onTap: onToggleInput,
+            ),
+            const SizedBox(width: 4),
+            _ToolbarButton(
+              icon: streamPaused
+                  ? Icons.play_circle_outline_rounded
+                  : Icons.pause_circle_outline_rounded,
+              tooltip: streamPaused ? 'Resume' : 'Pause',
+              color: streamPaused ? colors.success : null,
+              onTap: onTogglePause,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ToolbarButton extends StatelessWidget {
+  const _ToolbarButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.color,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            child: Icon(
+              icon,
+              size: 20,
+              color: color ?? colors.textSecondary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DevToolsPanel extends StatelessWidget {
+  const _DevToolsPanel({
+    required this.tabIndex,
+    required this.onTabChanged,
+    required this.consoleEntries,
+    required this.onClearConsole,
+    required this.preview,
+  });
+
+  final int tabIndex;
+  final ValueChanged<int> onTabChanged;
+  final List<_ConsoleEntry> consoleEntries;
+  final VoidCallback onClearConsole;
+  final HostBrowserPreviewInfo preview;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      height: 280,
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(
+          top: BorderSide(color: colors.border),
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            height: 40,
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: colors.border),
+              ),
+            ),
+            child: Row(
+              children: [
+                _DevTab(
+                  label: 'Console',
+                  active: tabIndex == 0,
+                  onTap: () => onTabChanged(0),
+                ),
+                _DevTab(
+                  label: 'Network',
+                  active: tabIndex == 1,
+                  onTap: () => onTabChanged(1),
+                ),
+                _DevTab(
+                  label: 'Storage',
+                  active: tabIndex == 2,
+                  onTap: () => onTabChanged(2),
+                ),
+                _DevTab(
+                  label: 'Inspector',
+                  active: tabIndex == 3,
+                  onTap: () => onTabChanged(3),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  tooltip: 'Clear',
+                  onPressed: onClearConsole,
+                  visualDensity: VisualDensity.compact,
+                ),
+                const SizedBox(width: 4),
+              ],
+            ),
+          ),
+          Expanded(
+            child: switch (tabIndex) {
+              0 => _ConsoleTab(
+                entries: consoleEntries,
+                preview: preview,
+              ),
+              _ => Center(
+                child: Text(
+                  'Coming soon',
+                  style: TextStyle(color: colors.textSecondary),
+                ),
+              ),
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DevTab extends StatelessWidget {
+  const _DevTab({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: active ? colors.accent : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? colors.accent : colors.textSecondary,
+            fontSize: 12,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ConsoleTab extends StatelessWidget {
+  const _ConsoleTab({
+    required this.entries,
+    required this.preview,
+  });
+
+  final List<_ConsoleEntry> entries;
+  final HostBrowserPreviewInfo preview;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (entries.isEmpty) {
+      return Center(
+        child: Text(
+          'No console output yet.',
+          style: TextStyle(color: colors.textSecondary),
+        ),
+      );
+    }
+    return ListView.builder(
+      reverse: true,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: entries.length,
+      itemBuilder: (context, index) {
+        final entry = entries[entries.length - 1 - index];
+        return _ConsoleRow(entry: entry, colors: colors);
+      },
+    );
+  }
+}
+
+class _ConsoleRow extends StatelessWidget {
+  const _ConsoleRow({
+    required this.entry,
+    required this.colors,
+  });
+
+  final _ConsoleEntry entry;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final levelColor = switch (entry.level) {
+      'error' => colors.danger,
+      'warning' => Colors.orange,
+      'info' => colors.accent,
+      'debug' => colors.textTertiary,
+      _ => colors.textPrimary,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            margin: const EdgeInsets.only(top: 4, right: 8),
+            decoration: BoxDecoration(
+              color: levelColor,
+              shape: BoxShape.circle,
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.text,
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                if (entry.url != null && entry.url!.isNotEmpty)
+                  Text(
+                    '${entry.url}:${entry.lineNumber ?? 0}',
+                    style: TextStyle(
+                      color: colors.textTertiary,
+                      fontSize: 10,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConsoleEntry {
+  const _ConsoleEntry({
+    required this.type,
+    required this.level,
+    required this.text,
+    this.url,
+    this.lineNumber,
+    this.columnNumber,
+    required this.timestamp,
+  });
+
+  final String type;
+  final String level;
+  final String text;
+  final String? url;
+  final int? lineNumber;
+  final int? columnNumber;
+  final int timestamp;
+}
+
+class _PausedPreviewOverlay extends StatelessWidget {
+  const _PausedPreviewOverlay({
+    required this.manualPause,
+    required this.onResume,
+  });
+
+  final bool manualPause;
+  final VoidCallback onResume;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return DecoratedBox(
+      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.42)),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: MeshCard(
+            tone: MeshCardTone.surface,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.pause_circle_filled_rounded,
+                  size: 34,
+                  color: colors.textSecondary,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  manualPause ? 'Viewer paused' : 'Viewer is sleeping',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  manualPause
+                      ? 'The remote browser is still running. Resume when you want fresh frames again.'
+                      : 'Sidemesh paused the stream while the app was backgrounded. Resume to reconnect.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: colors.textSecondary, height: 1.35),
+                ),
+                const SizedBox(height: 14),
+                FilledButton.icon(
+                  onPressed: onResume,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('Resume stream'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InputRail extends StatelessWidget {
+  const _InputRail({
+    required this.controller,
+    required this.focusNode,
+    required this.onSendText,
+    required this.onKey,
+    required this.onFocusInput,
+    required this.onClose,
+    required this.showSpecialKeys,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final VoidCallback onSendText;
+  final void Function(String key) onKey;
+  final VoidCallback onFocusInput;
+  final VoidCallback onClose;
+  final bool showSpecialKeys;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+        child: MeshCard(
+          tone: MeshCardTone.surface,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.keyboard_alt_rounded,
+                    size: 18,
+                    color: colors.textSecondary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      showSpecialKeys ? 'Page input' : 'Keyboard relay',
+                      style: TextStyle(
+                        color: colors.textSecondary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: onFocusInput,
+                    icon: const Icon(Icons.keyboard_rounded, size: 17),
+                    label: const Text('Focus'),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    tooltip: 'Hide keyboard',
+                    onPressed: onClose,
+                    icon: const Icon(Icons.close_rounded),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              if (showSpecialKeys)
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _KeyButton(label: 'Esc', onTap: () => onKey('Escape')),
+                      _KeyButton(label: 'Tab', onTap: () => onKey('Tab')),
+                      _KeyButton(label: 'Enter', onTap: () => onKey('Enter')),
+                      _KeyButton(label: '⌫', onTap: () => onKey('Backspace')),
+                      _KeyButton(label: '←', onTap: () => onKey('ArrowLeft')),
+                      _KeyButton(label: '↑', onTap: () => onKey('ArrowUp')),
+                      _KeyButton(label: '↓', onTap: () => onKey('ArrowDown')),
+                      _KeyButton(label: '→', onTap: () => onKey('ArrowRight')),
+                    ],
+                  ),
+                )
+              else
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Desktop mode: click the preview and type normally. Use this box for paste-heavy input.',
+                    style: TextStyle(color: colors.textSecondary, height: 1.35),
+                  ),
+                ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: controller,
+                      focusNode: focusNode,
+                      minLines: 1,
+                      maxLines: 3,
+                      textInputAction: TextInputAction.send,
+                      decoration: const InputDecoration(
+                        hintText: 'Type text for the remote page',
+                      ),
+                      onTap: onFocusInput,
+                      onSubmitted: (_) => onSendText(),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton(
+                    onPressed: onSendText,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: colors.accent,
+                    ),
+                    child: const Text('Send'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -762,105 +1556,17 @@ class _BrowserControlStrip extends StatelessWidget {
   }
 }
 
-class _BrowserBarButton extends StatelessWidget {
-  const _BrowserBarButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
+class _KeyButton extends StatelessWidget {
+  const _KeyButton({required this.label, required this.onTap});
 
-  final IconData icon;
   final String label;
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final enabled = onTap != null;
     return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: Tooltip(
-        message: label,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 140),
-            opacity: enabled ? 1 : 0.42,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: enabled
-                    ? colors.canvas.withValues(alpha: 0.74)
-                    : colors.canvas.withValues(alpha: 0.36),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: colors.border.withValues(alpha: enabled ? 0.72 : 0.38),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 17, color: colors.textSecondary),
-                  const SizedBox(width: 6),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: colors.textSecondary,
-                      fontSize: 12,
-                      fontWeight: AppWeights.title,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ViewportChip extends StatelessWidget {
-  const _ViewportChip({
-    required this.width,
-    required this.height,
-    required this.onTap,
-  });
-
-  final int width;
-  final int height;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return InkWell(
-      borderRadius: BorderRadius.circular(999),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: colors.accent.withValues(alpha: 0.11),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: colors.accent.withValues(alpha: 0.34)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.aspect_ratio_rounded, size: 16, color: colors.accent),
-            const SizedBox(width: 7),
-            Text(
-              '$width x $height',
-              style: monoStyle(
-                color: colors.accent,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ),
+      padding: const EdgeInsets.only(right: 8),
+      child: OutlinedButton(onPressed: onTap, child: Text(label)),
     );
   }
 }
@@ -1076,431 +1782,6 @@ class _ViewportPresetButton extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _PreviewHeader extends StatelessWidget {
-  const _PreviewHeader({
-    required this.hostId,
-    required this.preview,
-    required this.connected,
-    required this.streamPaused,
-    required this.inputRailOpen,
-    required this.onToggleInput,
-    required this.onPause,
-    required this.onResume,
-    required this.onStop,
-    this.onBack,
-    this.onMinimize,
-  });
-
-  final String hostId;
-  final HostBrowserPreviewInfo preview;
-  final bool connected;
-  final bool streamPaused;
-  final bool inputRailOpen;
-  final VoidCallback onToggleInput;
-  final VoidCallback onPause;
-  final VoidCallback onResume;
-  final VoidCallback onStop;
-  final VoidCallback? onBack;
-  final VoidCallback? onMinimize;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-      child: MeshCard(
-        tone: MeshCardTone.surface,
-        child: Row(
-          children: [
-            if (onBack != null) ...[
-              MeshIconButton(
-                icon: Icons.arrow_back_rounded,
-                tooltip: 'Back to ports',
-                onTap: onBack!,
-              ),
-              const SizedBox(width: 8),
-            ],
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: colors.accent.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
-              ),
-              child: Icon(
-                Icons.screenshot_monitor_rounded,
-                color: colors.accent,
-                size: 18,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          preview.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                color: colors.textPrimary,
-                                fontWeight: FontWeight.w800,
-                              ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ListenableBuilder(
-                        listenable: Listenable.merge([
-                          HostStatusStore.instance,
-                          RelativeTimeTicker.instance,
-                        ]),
-                        builder: (context, _) {
-                          final status = HostStatusStore.instance.statusFor(
-                            hostId,
-                          );
-                          final pill = _browserPreviewPill(status);
-                          return MeshPill(
-                            label: streamPaused
-                                ? 'paused'
-                                : connected
-                                ? (pill.label ?? 'live')
-                                : preview.status,
-                            tone: streamPaused
-                                ? MeshPillTone.warning
-                                : connected
-                                ? (pill.tone ?? MeshPillTone.success)
-                                : MeshPillTone.neutral,
-                            mono: true,
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    preview.url,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: monoStyle(color: colors.textSecondary, fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            MeshIconButton(
-              icon: streamPaused
-                  ? Icons.play_circle_outline_rounded
-                  : Icons.pause_circle_outline_rounded,
-              tooltip: streamPaused ? 'Resume stream' : 'Pause stream',
-              color: streamPaused ? colors.success : colors.textSecondary,
-              onTap: streamPaused ? onResume : onPause,
-            ),
-            const SizedBox(width: 6),
-            MeshIconButton(
-              icon: inputRailOpen
-                  ? Icons.keyboard_hide_rounded
-                  : Icons.keyboard_alt_rounded,
-              tooltip: inputRailOpen ? 'Hide keyboard' : 'Open keyboard',
-              color: inputRailOpen ? colors.accent : colors.textSecondary,
-              onTap: onToggleInput,
-            ),
-            const SizedBox(width: 6),
-            if (onMinimize != null) ...[
-              MeshIconButton(
-                icon: Icons.keyboard_arrow_down_rounded,
-                tooltip: 'Minimize preview',
-                color: colors.textSecondary,
-                onTap: onMinimize!,
-              ),
-              const SizedBox(width: 6),
-            ],
-            MeshIconButton(
-              icon: Icons.stop_circle_rounded,
-              tooltip: 'Stop remote browser',
-              color: colors.danger,
-              onTap: onStop,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  _BrowserPill _browserPreviewPill(HostStatus status) {
-    if (status.reachability == HostReachability.offline) {
-      final last = status.lastEventAt ?? status.lastOnlineAt;
-      if (last != null) {
-        final elapsed = DateTime.now().difference(last);
-        if (elapsed.inHours >= 1) {
-          return const _BrowserPill(
-            label: 'Reconnecting',
-            tone: MeshPillTone.warning,
-          );
-        }
-        String ago;
-        if (elapsed.inMinutes < 1) {
-          ago = '${elapsed.inSeconds}s ago';
-        } else {
-          ago = '${elapsed.inMinutes}m ago';
-        }
-        return _BrowserPill(
-          label: 'Last frame $ago',
-          tone: MeshPillTone.warning,
-        );
-      }
-      return const _BrowserPill(
-        label: 'Reconnecting',
-        tone: MeshPillTone.warning,
-      );
-    }
-    if (status.reachability == HostReachability.probing) {
-      return const _BrowserPill(
-        label: 'Reconnecting',
-        tone: MeshPillTone.warning,
-      );
-    }
-    return const _BrowserPill();
-  }
-}
-
-@immutable
-class _BrowserPill {
-  const _BrowserPill({this.label, this.tone});
-  final String? label;
-  final MeshPillTone? tone;
-}
-
-class _PausedPreviewOverlay extends StatelessWidget {
-  const _PausedPreviewOverlay({
-    required this.manualPause,
-    required this.onResume,
-  });
-
-  final bool manualPause;
-  final VoidCallback onResume;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return DecoratedBox(
-      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.42)),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: MeshCard(
-            tone: MeshCardTone.surface,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.pause_circle_filled_rounded,
-                  size: 34,
-                  color: colors.textSecondary,
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  manualPause ? 'Viewer paused' : 'Viewer is sleeping',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: colors.textPrimary,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  manualPause
-                      ? 'The remote browser is still running. Resume when you want fresh frames again.'
-                      : 'Sidemesh paused the stream while the app was backgrounded. Resume to reconnect.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: colors.textSecondary, height: 1.35),
-                ),
-                const SizedBox(height: 14),
-                FilledButton.icon(
-                  onPressed: onResume,
-                  icon: const Icon(Icons.play_arrow_rounded),
-                  label: const Text('Resume stream'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PreviewFloatingControls extends StatelessWidget {
-  const _PreviewFloatingControls({
-    required this.inputRailOpen,
-    required this.onToggleInput,
-  });
-
-  final bool inputRailOpen;
-  final VoidCallback onToggleInput;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    if (inputRailOpen) return const SizedBox.shrink();
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.canvas.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: colors.border.withValues(alpha: 0.9)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-        child: TextButton.icon(
-          onPressed: onToggleInput,
-          icon: const Icon(Icons.keyboard_alt_rounded, size: 18),
-          label: const Text('Keyboard'),
-        ),
-      ),
-    );
-  }
-}
-
-class _InputRail extends StatelessWidget {
-  const _InputRail({
-    required this.controller,
-    required this.focusNode,
-    required this.onSendText,
-    required this.onKey,
-    required this.onFocusInput,
-    required this.onClose,
-    required this.showSpecialKeys,
-  });
-
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final VoidCallback onSendText;
-  final void Function(String key) onKey;
-  final VoidCallback onFocusInput;
-  final VoidCallback onClose;
-  final bool showSpecialKeys;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-        child: MeshCard(
-          tone: MeshCardTone.surface,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.keyboard_alt_rounded,
-                    size: 18,
-                    color: colors.textSecondary,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      showSpecialKeys ? 'Page input' : 'Keyboard relay',
-                      style: TextStyle(
-                        color: colors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: onFocusInput,
-                    icon: const Icon(Icons.keyboard_rounded, size: 17),
-                    label: const Text('Focus'),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    tooltip: 'Hide keyboard',
-                    onPressed: onClose,
-                    icon: const Icon(Icons.close_rounded),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              if (showSpecialKeys)
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      _KeyButton(label: 'Esc', onTap: () => onKey('Escape')),
-                      _KeyButton(label: 'Tab', onTap: () => onKey('Tab')),
-                      _KeyButton(label: 'Enter', onTap: () => onKey('Enter')),
-                      _KeyButton(label: '⌫', onTap: () => onKey('Backspace')),
-                      _KeyButton(label: '←', onTap: () => onKey('ArrowLeft')),
-                      _KeyButton(label: '↑', onTap: () => onKey('ArrowUp')),
-                      _KeyButton(label: '↓', onTap: () => onKey('ArrowDown')),
-                      _KeyButton(label: '→', onTap: () => onKey('ArrowRight')),
-                    ],
-                  ),
-                )
-              else
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Desktop mode: click the preview and type normally. Use this box for paste-heavy input.',
-                    style: TextStyle(color: colors.textSecondary, height: 1.35),
-                  ),
-                ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: controller,
-                      focusNode: focusNode,
-                      minLines: 1,
-                      maxLines: 3,
-                      textInputAction: TextInputAction.send,
-                      decoration: const InputDecoration(
-                        hintText: 'Type text for the remote page',
-                      ),
-                      onTap: onFocusInput,
-                      onSubmitted: (_) => onSendText(),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  FilledButton(
-                    onPressed: onSendText,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: colors.accent,
-                    ),
-                    child: const Text('Send'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _KeyButton extends StatelessWidget {
-  const _KeyButton({required this.label, required this.onTap});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: OutlinedButton(onPressed: onTap, child: Text(label)),
     );
   }
 }

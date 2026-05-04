@@ -19,6 +19,10 @@ const CDP_COMMAND_TIMEOUT_MS = 15_000;
 const CHROME_SHUTDOWN_TIMEOUT_MS = 2_000;
 const MAX_TEXT_INPUT_CHARS = 20_000;
 const MAX_CLIENT_BUFFERED_AMOUNT = 8 * 1024 * 1024;
+const MAX_CONSOLE_BUFFER = 256;
+const CONSOLE_FLUSH_INTERVAL_MS = 500;
+const CONSOLE_FLUSH_THRESHOLD = 32;
+
 const SIDEMESH_BROWSER_PROFILE_DIR = "sidemesh";
 
 type BrowserProcess = ChildProcessByStdio<null, Readable, Readable>;
@@ -109,6 +113,9 @@ interface BrowserPreviewRecord {
   frameTimer: NodeJS.Timeout | null;
   starting: Promise<void> | null;
   capturingFrame: boolean;
+  consoleBuffer: Array<Record<string, unknown>>;
+  consoleFlushTimer: NodeJS.Timeout | null;
+  pageLoading: boolean;
   cleanupHandlers: Array<() => void>;
 }
 
@@ -246,6 +253,9 @@ export class BrowserPreviewRegistry {
       frameTimer: null,
       starting: null,
       capturingFrame: false,
+      consoleBuffer: [],
+      consoleFlushTimer: null,
+      pageLoading: false,
       cleanupHandlers: [],
     };
     this.previews.set(preview.id, preview);
@@ -365,6 +375,9 @@ export class BrowserPreviewRegistry {
       await setViewport(preview);
       await cdp.send("Page.enable", {}, sessionId);
       await cdp.send("Runtime.enable", {}, sessionId);
+      await cdp.send("Log.enable", {}, sessionId);
+      this.registerConsoleHandlers(preview, sessionId);
+      this.registerPageLoadHandlers(preview, sessionId);
       this.registerBrowserNavigationHandlers(preview, targetId, sessionId, {
         followUnscopedPopups: preview.profileMode === "temporary",
       });
@@ -590,6 +603,88 @@ export class BrowserPreviewRegistry {
       await this.applyNavigation(preview, stringValue(message.action));
       return;
     }
+    if (type === "tapDown") {
+      const point = normalizedPoint(message, preview);
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        {
+          type: "mousePressed",
+          x: point.x,
+          y: point.y,
+          button: "left",
+          buttons: 1,
+          clickCount: 1,
+        },
+        sessionId,
+      );
+      return;
+    }
+    if (type === "tapUp") {
+      const point = normalizedPoint(message, preview);
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        {
+          type: "mouseReleased",
+          x: point.x,
+          y: point.y,
+          button: "left",
+          buttons: 0,
+          clickCount: 1,
+        },
+        sessionId,
+      );
+      return;
+    }
+    if (type === "touchStart") {
+      const point = normalizedPoint(message, preview);
+      const touchId = numberValue(message.id, 0);
+      await cdp.send(
+        "Input.dispatchTouchEvent",
+        {
+          type: "touchStart",
+          touchPoints: [{ x: point.x, y: point.y, id: touchId }],
+        },
+        sessionId,
+      );
+      return;
+    }
+    if (type === "touchMove") {
+      const point = normalizedPoint(message, preview);
+      const touchId = numberValue(message.id, 0);
+      await cdp.send(
+        "Input.dispatchTouchEvent",
+        {
+          type: "touchMove",
+          touchPoints: [{ x: point.x, y: point.y, id: touchId }],
+        },
+        sessionId,
+      );
+      return;
+    }
+    if (type === "touchEnd") {
+      await cdp.send(
+        "Input.dispatchTouchEvent",
+        { type: "touchEnd", touchPoints: [] },
+        sessionId,
+      );
+      return;
+    }
+    if (type === "hover") {
+      const point = normalizedPoint(message, preview);
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        { type: "mouseMoved", x: point.x, y: point.y },
+        sessionId,
+      );
+      return;
+    }
+    if (type === "navigate") {
+      const url = stringValue(message.url);
+      if (url) {
+        await this.navigatePreviewToUrl(preview, url);
+      }
+      return;
+    }
     if (type === "resize") {
       await this.updatePreviewViewport(
         preview,
@@ -702,6 +797,101 @@ export class BrowserPreviewRegistry {
     });
   }
 
+
+  private registerConsoleHandlers(
+    preview: BrowserPreviewRecord,
+    sessionId: string,
+  ): void {
+    const cdp = preview.cdp;
+    if (!cdp) return;
+
+    const flushConsole = () => {
+      if (preview.consoleBuffer.length === 0) return;
+      const batch = preview.consoleBuffer.splice(0, preview.consoleBuffer.length);
+      for (const message of batch) {
+        this.broadcast(preview, message);
+      }
+    };
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Runtime.consoleAPICalled", (params) => {
+        const args = Array.isArray(params.args) ? params.args : [];
+        preview.consoleBuffer.push({
+          type: "console",
+          level: stringValue(params.type),
+          args: args.slice(0, 20),
+          timestamp: numberValue(params.timestamp, Date.now()),
+        });
+        if (preview.consoleBuffer.length >= CONSOLE_FLUSH_THRESHOLD) {
+          flushConsole();
+        }
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Runtime.exceptionThrown", (params) => {
+        const details = objectValue(params.exceptionDetails);
+        preview.consoleBuffer.push({
+          type: "exception",
+          text: stringValue(details?.text),
+          url: stringValue(details?.url),
+          lineNumber: numberValue(details?.lineNumber, 0),
+          columnNumber: numberValue(details?.columnNumber, 0),
+          timestamp: Date.now(),
+        });
+        if (preview.consoleBuffer.length >= CONSOLE_FLUSH_THRESHOLD) {
+          flushConsole();
+        }
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Log.entryAdded", (params) => {
+        const entry = objectValue(params.entry);
+        preview.consoleBuffer.push({
+          type: "log",
+          level: stringValue(entry?.level),
+          source: stringValue(entry?.source),
+          text: stringValue(entry?.text),
+          url: stringValue(entry?.url),
+          lineNumber: numberValue(entry?.lineNumber, 0),
+          timestamp: numberValue(entry?.timestamp, Date.now()),
+        });
+        if (preview.consoleBuffer.length >= CONSOLE_FLUSH_THRESHOLD) {
+          flushConsole();
+        }
+      }),
+    );
+
+    preview.consoleFlushTimer = setInterval(() => {
+      flushConsole();
+    }, CONSOLE_FLUSH_INTERVAL_MS);
+    preview.consoleFlushTimer.unref?.();
+  }
+
+  private registerPageLoadHandlers(
+    preview: BrowserPreviewRecord,
+    sessionId: string,
+  ): void {
+    const cdp = preview.cdp;
+    if (!cdp) return;
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Page.frameStartedLoading", (params) => {
+        const frameId = stringValue(params.frameId);
+        if (!frameId || frameId !== preview.targetId) return;
+        preview.pageLoading = true;
+        this.broadcast(preview, { type: "loading", state: "started" });
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Page.loadEventFired", () => {
+        preview.pageLoading = false;
+        this.broadcast(preview, { type: "loading", state: "complete" });
+      }),
+    );
+  }
   private registerBrowserNavigationHandlers(
     preview: BrowserPreviewRecord,
     primaryTargetId: string,
@@ -841,6 +1031,10 @@ export class BrowserPreviewRegistry {
       }
     }
     preview.clients.clear();
+    if (preview.consoleFlushTimer) {
+      clearInterval(preview.consoleFlushTimer);
+      preview.consoleFlushTimer = null;
+    }
     for (const cleanup of preview.cleanupHandlers.splice(0)) {
       cleanup();
     }
