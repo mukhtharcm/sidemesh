@@ -47,6 +47,7 @@ import {
   uninstallSystemdService,
 } from "./systemd-service.js";
 import type { NodeConfig } from "./types.js";
+import { runSelfUpdate } from "./self-update.js";
 
 export async function main(argv = process.argv): Promise<void> {
   const program = new Command();
@@ -112,6 +113,48 @@ export async function main(argv = process.argv): Promise<void> {
           configPath: options.config ?? null,
           yes: options.yes === true,
         });
+      }),
+  );
+
+  withConfigOption(
+    program
+      .command("self-update")
+      .description("update the Sidemesh daemon to the latest version")
+      .option("--package-dir <path>", "Sidemesh package directory")
+      .option("--managed-service <name>", "managed service name (e.g. sidemesh)")
+      .option("--dry-run", "show what would be updated without doing it")
+      .option("-y, --yes", "do not prompt before updating")
+      .action(async (options: {
+        config?: string;
+        packageDir?: string;
+        managedService?: string;
+        dryRun?: boolean;
+        yes?: boolean;
+      }) => {
+        const config = await loadConfig({
+          configPath: options.config,
+          persistGeneratedToken: true,
+        });
+        const result = await runSelfUpdate({
+          config,
+          packageDir: options.packageDir ?? null,
+          managedService: options.managedService ?? null,
+          dryRun: options.dryRun === true,
+        });
+        if (result.success) {
+          console.log(
+            `Updated ${result.oldVersion} → ${result.newVersion ?? result.oldVersion}`
+          );
+          console.log(`Log: ${result.logPath}`);
+          process.exit(0);
+        } else {
+          console.error(`Update failed: ${result.error}`);
+          if (result.restored) {
+            console.log("Previous version restored.");
+          }
+          console.log(`Log: ${result.logPath}`);
+          process.exit(1);
+        }
       }),
   );
 

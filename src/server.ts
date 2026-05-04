@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { homedir, hostname, platform } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import nodePath from "node:path";
 
 import compression from "compression";
@@ -94,6 +95,8 @@ import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionReplayIndex } from "./session-replay-index.js";
 import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js";
+import { detectInstallInfo } from "./install-info.js";
+import { spawnSelfUpdater } from "./updater-spawn.js";
 
 const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
@@ -221,6 +224,13 @@ export async function startServer(
   }
   let providerVersion = "unknown";
   const providerVersions = new Map<string, string>();
+  let installInfo = {
+    packageVersion: "unknown",
+    latestVersion: null as string | null,
+    updateAvailable: false,
+    installType: "unknown",
+    updateSupported: false,
+  };
   const terminalRegistry = new TerminalRegistry({
     enabled: hostCapabilities.workspace.terminal,
     shell: normalizeTerminalShell(config.terminal.shell),
@@ -730,6 +740,19 @@ export async function startServer(
     providerVersions.get(providerRuntime.defaultProviderKind) ??
     (await provider.getVersion().catch(() => "unknown"));
 
+  try {
+    const detected = await detectInstallInfo();
+    installInfo = {
+      packageVersion: detected.packageVersion,
+      latestVersion: detected.latestVersion,
+      updateAvailable: detected.updateAvailable,
+      installType: detected.installType,
+      updateSupported: detected.updateSupported,
+    };
+  } catch {
+    // Install detection is best-effort; never block server startup.
+  }
+
   app.use(cors());
   // Compress large JSON responses while skipping already-compressed content
   // types (images, video) and the unauthenticated health-check endpoint.
@@ -810,6 +833,11 @@ export async function startServer(
       supportedProviders,
       startedAt: process.uptime(),
       tokenSource: config.tokenSource,
+      packageVersion: installInfo.packageVersion,
+      latestVersion: installInfo.latestVersion,
+      updateAvailable: installInfo.updateAvailable,
+      installType: installInfo.installType,
+      updateSupported: installInfo.updateSupported,
     });
   });
 
@@ -902,6 +930,32 @@ export async function startServer(
     asyncRoute(async (_request, response) => {
       response.json({ ok: true, message: "daemon is restarting" });
       setTimeout(async () => {
+        try {
+          await runningServerRef!.close();
+        } finally {
+          process.exit(0);
+        }
+      }, 100);
+    }),
+  );
+
+  app.post(
+    "/api/admin/update",
+    asyncRoute(async (_request, response) => {
+      const info = await detectInstallInfo();
+      if (!info.updateSupported) {
+        response.status(501).json({ error: "update not supported for this install type" });
+        return;
+      }
+
+      response.json({ ok: true, message: "daemon is updating" });
+
+      setTimeout(async () => {
+        try {
+          await spawnSelfUpdater(config);
+        } catch (e) {
+          console.error("[update] Failed to spawn updater:", e);
+        }
         try {
           await runningServerRef!.close();
         } finally {

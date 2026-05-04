@@ -61,6 +61,11 @@ class NodeInfo {
     required this.defaultProviderCapabilities,
     required this.hostCapabilities,
     required this.supportedProviders,
+    this.packageVersion,
+    this.latestVersion,
+    this.updateAvailable = false,
+    this.installType,
+    this.updateSupported = false,
   });
 
   final String label;
@@ -76,6 +81,11 @@ class NodeInfo {
   final ProviderCapabilities defaultProviderCapabilities;
   final ProviderCapabilities hostCapabilities;
   final List<ProviderDefinitionSummary> supportedProviders;
+  final String? packageVersion;
+  final String? latestVersion;
+  final bool updateAvailable;
+  final String? installType;
+  final bool updateSupported;
 
   String get providerDisplayName {
     if (providerName.isNotEmpty) return providerName;
@@ -152,6 +162,11 @@ class NodeInfo {
       supportedProviders: ProviderDefinitionSummary.listFromJson(
         json['supportedProviders'],
       ),
+      packageVersion: _stringOrNull(json['packageVersion']),
+      latestVersion: _stringOrNull(json['latestVersion']),
+      updateAvailable: json['updateAvailable'] == true,
+      installType: _stringOrNull(json['installType']),
+      updateSupported: json['updateSupported'] == true,
     );
   }
 }
