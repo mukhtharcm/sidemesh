@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { describe, it } from "node:test";
 
-import type { InstallInfo } from "./install-info.js";
+import { detectInstallInfo, type InstallInfo } from "./install-info.js";
 import { runSelfUpdate } from "./self-update.js";
 import type { NodeConfig } from "./types.js";
 
@@ -48,13 +48,16 @@ function createConfig(dir: string): NodeConfig {
   };
 }
 
-function createInstallInfo(packageRoot: string): InstallInfo {
+function createInstallInfo(
+  packageRoot: string,
+  updateChannel: NodeConfig["updateChannel"] = "stable",
+): InstallInfo {
   return {
     packageVersion: "0.1.0",
     latestVersion: "0.2.0",
     currentCommitSha: null,
     latestCommitSha: null,
-    updateChannel: "stable",
+    updateChannel,
     updateAvailable: true,
     packageRoot,
     installType: "npm-global",
@@ -96,6 +99,54 @@ describe("runSelfUpdate", () => {
 
     assert.equal(result.success, false);
     assert.ok(result.error?.includes("not supported"));
+  });
+
+  it("prefers SIDEMESH_UPDATE_CHANNEL over the persisted config", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-self-update-test-"));
+    const packageDir = nodePath.join(dir, "package");
+    const seenChannels: NodeConfig["updateChannel"][] = [];
+    const originalChannel = process.env.SIDEMESH_UPDATE_CHANNEL;
+    process.env.SIDEMESH_UPDATE_CHANNEL = "bleeding-edge";
+
+    const detectInstallInfoOverride: typeof detectInstallInfo = async (
+      packageRootOrOptions = {},
+    ) => {
+      const options =
+        typeof packageRootOrOptions === "string"
+          ? { packageRoot: packageRootOrOptions }
+          : packageRootOrOptions;
+      const updateChannel = options.config?.updateChannel ?? "stable";
+      seenChannels.push(updateChannel);
+      return {
+        ...createInstallInfo(options.packageRoot ?? packageDir, updateChannel),
+        updateCommand: "npm update -g sidemesh",
+      };
+    };
+
+    try {
+      const result = await runSelfUpdate(
+        {
+          config: createConfig(dir),
+          packageDir,
+          dryRun: true,
+        },
+        {
+          detectInstallInfo: detectInstallInfoOverride,
+        },
+      );
+
+      assert.equal(result.success, true);
+      assert.deepEqual(seenChannels, ["bleeding-edge"]);
+
+      const log = await readFile(result.logPath, "utf8");
+      assert.match(log, /Update channel: bleeding-edge/);
+    } finally {
+      if (originalChannel === undefined) {
+        delete process.env.SIDEMESH_UPDATE_CHANNEL;
+      } else {
+        process.env.SIDEMESH_UPDATE_CHANNEL = originalChannel;
+      }
+    }
   });
 
   it("reinstalls a stale managed service wrapper after update", async () => {
