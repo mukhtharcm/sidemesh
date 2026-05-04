@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import nodePath from "node:path";
 import { describe, it } from "node:test";
 
 import {
+  isServiceWrapperStale,
   renderServiceEnv,
   renderServiceLauncher,
   renderSystemdUnit,
@@ -103,5 +107,57 @@ describe("systemd service rendering", () => {
 
     assert.match(unit, /MemoryHigh=2G/);
     assert.match(unit, /MemoryMax=3G/);
+  });
+
+  it("detects stale launcher and unit files", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-systemd-service-test-"));
+    const config: NodeConfig = {
+      label: "Lab Node",
+      port: 8899,
+      token: "test-token",
+      tokenSource: "file",
+      provider: { kind: "codex", bin: "codex" },
+      providers: [{ kind: "codex", bin: "codex" }],
+      defaultProviderKind: "codex",
+      updateChannel: "stable",
+      stateDir: "/root/.sidemesh",
+      terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
+      portForwarding: { enabled: true, allowNonLoopbackTargets: false },
+      browserPreview: {
+        enabled: true,
+        chromePath: "/usr/bin/chromium",
+        maxPreviews: 2,
+        idleTtlMs: 120000,
+        frameIntervalMs: 1000,
+        quality: 60,
+      },
+      configPath: "/root/.sidemesh/config.json",
+      configExists: true,
+    };
+    const paths = resolveServicePaths({
+      serviceName: "sidemesh-test",
+      packageDir: "/opt/sidemesh",
+      nodeBin: "/usr/bin/node",
+      unitPath: nodePath.join(dir, "sidemesh.service"),
+      envPath: nodePath.join(dir, "sidemesh.env"),
+      launcherPath: nodePath.join(dir, "sidemesh.sh"),
+    });
+
+    await writeFile(paths.launcherPath, renderServiceLauncher(paths, config));
+    await writeFile(paths.unitPath, renderSystemdUnit(paths));
+    assert.equal(await isServiceWrapperStale(paths, config), false);
+
+    await writeFile(
+      paths.launcherPath,
+      renderServiceLauncher({ ...paths, packageDir: "/opt/old-sidemesh" }, config),
+    );
+    assert.equal(await isServiceWrapperStale(paths, config), true);
+
+    await writeFile(paths.launcherPath, renderServiceLauncher(paths, config));
+    await writeFile(
+      paths.unitPath,
+      renderSystemdUnit({ ...paths, launcherPath: "/etc/sidemesh/old.sh" }),
+    );
+    assert.equal(await isServiceWrapperStale(paths, config), true);
   });
 });

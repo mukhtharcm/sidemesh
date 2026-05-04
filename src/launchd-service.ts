@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -264,6 +264,86 @@ export async function isLaunchdServiceLoaded(
   }
 }
 
+export async function isLaunchdServiceInstalled(
+  label?: string | null,
+): Promise<boolean> {
+  assertLaunchdHost();
+  try {
+    await launchctl(["list", normalizeLaunchdLabel(label)]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function resolveInstalledLaunchdPaths(
+  config: Pick<NodeConfig, "stateDir">,
+  options: {
+    label?: string | null;
+    packageDir: string;
+    nodeBin: string;
+    plistPath?: string | null;
+    envPath?: string | null;
+    launcherPath?: string | null;
+  },
+): Promise<LaunchdPaths> {
+  const fallbackPaths = resolveLaunchdPaths(config, options);
+  if (options.plistPath || options.envPath || options.launcherPath) {
+    return fallbackPaths;
+  }
+
+  const plistPath =
+    (await findInstalledLaunchdPlistPath(
+      fallbackPaths.label,
+      fallbackPaths.plistPath,
+    )) ?? fallbackPaths.plistPath;
+
+  try {
+    const plistContent = await readFile(plistPath, "utf8");
+    const launcherPath =
+      readLaunchdProgramArgument(plistContent) ?? fallbackPaths.launcherPath;
+    const launcherContent = await readFile(launcherPath, "utf8").catch(
+      () => null,
+    );
+    return {
+      ...fallbackPaths,
+      plistPath,
+      launcherPath,
+      envPath:
+        readLaunchdLauncherEnvPath(launcherContent) ?? fallbackPaths.envPath,
+      stdoutPath:
+        readLaunchdPlistValue(plistContent, "StandardOutPath") ??
+        fallbackPaths.stdoutPath,
+      stderrPath:
+        readLaunchdPlistValue(plistContent, "StandardErrorPath") ??
+        fallbackPaths.stderrPath,
+    };
+  } catch {
+    return {
+      ...fallbackPaths,
+      plistPath,
+    };
+  }
+}
+
+export async function isServiceWrapperStale(
+  paths: LaunchdPaths,
+  config: Pick<NodeConfig, "configPath">,
+): Promise<boolean> {
+  try {
+    const [existingLauncher, existingPlist] = await Promise.all([
+      readFile(paths.launcherPath, "utf8"),
+      readFile(paths.plistPath, "utf8"),
+    ]);
+    return (
+      existingLauncher !== renderLaunchdLauncher(paths, config) ||
+      existingPlist !== renderLaunchdPlist(paths)
+    );
+  } catch {
+    return true;
+  }
+}
+
 export function assertLaunchdHost(): void {
   if (process.platform !== "darwin") {
     throw new Error("Sidemesh launchd helpers currently support macOS only.");
@@ -301,6 +381,56 @@ function normalizeLaunchdLabel(value: string | null | undefined): string {
   return label;
 }
 
+async function findInstalledLaunchdPlistPath(
+  label: string,
+  defaultPlistPath: string,
+): Promise<string | null> {
+  try {
+    await access(defaultPlistPath);
+    return defaultPlistPath;
+  } catch {}
+
+  const searchDir = dirname(defaultPlistPath);
+  try {
+    const entries = await readdir(searchDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".plist")) {
+        continue;
+      }
+      const candidatePath = join(searchDir, entry.name);
+      const content = await readFile(candidatePath, "utf8").catch(() => null);
+      if (content && readLaunchdPlistValue(content, "Label") === label) {
+        return candidatePath;
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+function readLaunchdPlistValue(content: string, key: string): string | null {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = content.match(
+    new RegExp(`<key>${escapedKey}</key>\\s*<string>([\\s\\S]*?)</string>`),
+  );
+  return match?.[1] ? unescapeXml(match[1].trim()) : null;
+}
+
+function readLaunchdProgramArgument(content: string): string | null {
+  const match = content.match(
+    /<key>ProgramArguments<\/key>\s*<array>\s*<string>([\s\S]*?)<\/string>/,
+  );
+  return match?.[1] ? unescapeXml(match[1].trim()) : null;
+}
+
+function readLaunchdLauncherEnvPath(content: string | null): string | null {
+  if (!content) {
+    return null;
+  }
+  const match = content.match(/\. '([^']+)'/);
+  return match?.[1] ?? null;
+}
+
 function envLine(key: string, value: string): string {
   return `${key}=${environmentValue(value)}`;
 }
@@ -326,4 +456,13 @@ function escapeXml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+function unescapeXml(value: string): string {
+  return value
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
 }
