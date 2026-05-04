@@ -34,6 +34,7 @@ import type {
   SessionActivity,
   NodeConfig,
   PendingAction,
+  UpdateChannel,
   RecentSessionsLiveEvent,
   SessionMessageAttachment,
   SessionMessage,
@@ -227,6 +228,9 @@ export async function startServer(
   let installInfo = {
     packageVersion: "unknown",
     latestVersion: null as string | null,
+    currentCommitSha: null as string | null,
+    latestCommitSha: null as string | null,
+    updateChannel: config.updateChannel,
     updateAvailable: false,
     installType: "unknown",
     updateSupported: false,
@@ -741,10 +745,13 @@ export async function startServer(
     (await provider.getVersion().catch(() => "unknown"));
 
   try {
-    const detected = await detectInstallInfo();
+    const detected = await detectInstallInfo({ config });
     installInfo = {
       packageVersion: detected.packageVersion,
       latestVersion: detected.latestVersion,
+      currentCommitSha: detected.currentCommitSha,
+      latestCommitSha: detected.latestCommitSha,
+      updateChannel: detected.updateChannel,
       updateAvailable: detected.updateAvailable,
       installType: detected.installType,
       updateSupported: detected.updateSupported,
@@ -835,6 +842,9 @@ export async function startServer(
       tokenSource: config.tokenSource,
       packageVersion: installInfo.packageVersion,
       latestVersion: installInfo.latestVersion,
+      currentCommitSha: installInfo.currentCommitSha,
+      latestCommitSha: installInfo.latestCommitSha,
+      updateChannel: installInfo.updateChannel,
       updateAvailable: installInfo.updateAvailable,
       installType: installInfo.installType,
       updateSupported: installInfo.updateSupported,
@@ -941,8 +951,21 @@ export async function startServer(
 
   app.post(
     "/api/admin/update",
-    asyncRoute(async (_request, response) => {
-      const info = await detectInstallInfo();
+    asyncRoute(async (request, response) => {
+      const requestedChannelRaw = request.body?.channel;
+      const requestedChannel =
+        requestedChannelRaw === undefined
+          ? null
+          : parseUpdateChannel(requestedChannelRaw);
+      if (requestedChannelRaw !== undefined && requestedChannel === null) {
+        response.status(400).json({ error: "channel must be stable or bleeding-edge" });
+        return;
+      }
+
+      const effectiveConfig = requestedChannel
+        ? { ...config, updateChannel: requestedChannel }
+        : config;
+      const info = await detectInstallInfo({ config: effectiveConfig });
       if (!info.updateSupported) {
         response.status(501).json({ error: "update not supported for this install type" });
         return;
@@ -952,7 +975,7 @@ export async function startServer(
 
       setTimeout(async () => {
         try {
-          await spawnSelfUpdater(config);
+          await spawnSelfUpdater(config, { updateChannel: requestedChannel });
         } catch (e) {
           console.error("[update] Failed to spawn updater:", e);
         }
@@ -3626,6 +3649,14 @@ function sendEvent(socket: WebSocket, event: unknown): void {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function parseUpdateChannel(value: unknown): UpdateChannel | null {
+  const channel = asString(value);
+  if (channel === "stable" || channel === "bleeding-edge") {
+    return channel;
+  }
+  return null;
 }
 
 function buildLegacyTextInput(text: string | null): AgentSessionInputItem[] {

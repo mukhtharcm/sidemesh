@@ -10,6 +10,7 @@ import type {
   AgentProviderKind,
   FakeCapabilityProfile,
   NodeConfig,
+  UpdateChannel,
 } from "./types.js";
 
 const CONFIG_VERSION = 1;
@@ -84,11 +85,17 @@ const persistedProviderConfigSchema = z.discriminatedUnion("kind", [
   fakeProviderConfigSchema,
 ]);
 
+const updateChannelSchema = z.enum([
+  "stable",
+  "bleeding-edge",
+] satisfies readonly UpdateChannel[]);
+
 const persistedNodeConfigSchema = z.object({
   version: z.literal(CONFIG_VERSION).default(CONFIG_VERSION),
   label: z.string().trim().min(1).optional(),
   port: z.number().int().min(1).max(65535).optional(),
   token: z.string().trim().min(1).optional(),
+  updateChannel: updateChannelSchema.default("stable"),
   stateDir: z.string().trim().min(1).optional(),
   terminal: terminalConfigSchema.optional(),
   portForwarding: portForwardingConfigSchema.optional(),
@@ -173,6 +180,7 @@ export function persistedConfigFromNodeConfig(
     label: config.label,
     port: config.port,
     token: config.token,
+    updateChannel: config.updateChannel,
     stateDir: config.stateDir,
     terminal: config.terminal,
     portForwarding: config.portForwarding,

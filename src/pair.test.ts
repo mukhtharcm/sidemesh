@@ -18,6 +18,7 @@ describe("pairing helpers", () => {
       provider: { kind: "codex", bin: "codex" },
       providers: [{ kind: "codex", bin: "codex" }],
       defaultProviderKind: "codex",
+      updateChannel: "stable",
       stateDir: "/tmp/sidemesh",
       terminal: { enabled: false, shell: null, requirePty: false },
       portForwarding: { enabled: false, allowNonLoopbackTargets: false },
