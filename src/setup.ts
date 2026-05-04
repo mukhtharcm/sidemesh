@@ -241,7 +241,15 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     configExists: true,
   };
   await saveConfig(config, { configPath: persisted.path });
-  outro(`Saved ${persisted.path}\n\n  ❯ sidemesh start && sidemesh pair`);
+  const lifecycleNote =
+    process.platform === "darwin"
+      ? "\n\nOn macOS, prefer `sidemesh service install` if you want app-driven restart and update to recover automatically."
+      : process.platform === "linux"
+        ? "\n\nOn Linux, prefer `sudo sidemesh service install` if you want app-driven restart and update to recover automatically."
+        : "";
+  outro(
+    `Saved ${persisted.path}\n\n  ❯ sidemesh start && sidemesh pair${lifecycleNote}`,
+  );
   return config;
 }
 
