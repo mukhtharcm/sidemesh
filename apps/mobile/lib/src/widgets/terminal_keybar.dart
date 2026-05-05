@@ -48,10 +48,38 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // ── Top row: modifiers (left) + category tabs (right) ──
             SizedBox(
-              height: widget.compact ? 30 : 34,
+              height: widget.compact ? 34 : 38,
               child: Row(
                 children: [
+                  const SizedBox(width: 8),
+                  _ModifierPill(
+                    label: 'Ctrl',
+                    active: _ctrl,
+                    compact: widget.compact,
+                    onTap: () => setState(() => _ctrl = !_ctrl),
+                  ),
+                  const SizedBox(width: 6),
+                  _ModifierPill(
+                    label: 'Alt',
+                    active: _alt,
+                    compact: widget.compact,
+                    onTap: () => setState(() => _alt = !_alt),
+                  ),
+                  const SizedBox(width: 6),
+                  _ModifierPill(
+                    label: 'Shift',
+                    active: _shift,
+                    compact: widget.compact,
+                    onTap: () => setState(() => _shift = !_shift),
+                  ),
+                  VerticalDivider(
+                    width: 1,
+                    indent: 8,
+                    endIndent: 8,
+                    color: colors.border,
+                  ),
                   Expanded(
                     child: ListenableBuilder(
                       listenable: _store,
@@ -63,52 +91,24 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
                           itemBuilder: (context, index) {
                             final selected =
                                 _store.selectedCategoryIndex == index;
-                            return _CategoryChip(
+                            return _CategoryTab(
                               label: _store.categories[index].label,
                               selected: selected,
                               compact: widget.compact,
                               onTap: () => _store.setSelectedCategoryIndex(index),
                             );
                           },
-                          separatorBuilder: (_, _) => const SizedBox(width: 6),
+                          separatorBuilder: (_, _) => const SizedBox(width: 14),
                         );
                       },
                     ),
                   ),
-                  VerticalDivider(
-                    width: 1,
-                    indent: 6,
-                    endIndent: 6,
-                    color: colors.border,
-                  ),
-                  const SizedBox(width: 4),
-                  _ModifierChip(
-                    label: 'Ctrl',
-                    active: _ctrl,
-                    compact: widget.compact,
-                    onTap: () => setState(() => _ctrl = !_ctrl),
-                  ),
-                  const SizedBox(width: 4),
-                  _ModifierChip(
-                    label: 'Alt',
-                    active: _alt,
-                    compact: widget.compact,
-                    onTap: () => setState(() => _alt = !_alt),
-                  ),
-                  const SizedBox(width: 4),
-                  _ModifierChip(
-                    label: 'Shift',
-                    active: _shift,
-                    compact: widget.compact,
-                    onTap: () => setState(() => _shift = !_shift),
-                  ),
-                  const SizedBox(width: 8),
                 ],
               ),
             ),
-            const SizedBox(height: 2),
+            // ── Bottom row: keys for the selected category ──
             SizedBox(
-              height: widget.compact ? 36 : 42,
+              height: widget.compact ? 40 : 46,
               child: ListenableBuilder(
                 listenable: _store,
                 builder: (context, _) {
@@ -155,11 +155,23 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
     }
     HapticFeedback.selectionClick();
     widget.onAction(effective);
+
+    // One-shot modifiers: after a key is sent we automatically clear them so
+    // the user does not accidentally keep Ctrl/Alt/Shift latched.
+    if (_ctrl || _alt || _shift) {
+      setState(() {
+        _ctrl = false;
+        _alt = false;
+        _shift = false;
+      });
+    }
   }
 }
 
-class _CategoryChip extends StatelessWidget {
-  const _CategoryChip({
+// ── Category tabs (text-only, underline when selected) ──
+
+class _CategoryTab extends StatelessWidget {
+  const _CategoryTab({
     required this.label,
     required this.selected,
     required this.compact,
@@ -179,23 +191,22 @@ class _CategoryChip extends StatelessWidget {
       borderRadius: AppShapes.input,
       child: Container(
         padding: EdgeInsets.symmetric(
-          horizontal: compact ? 8 : 12,
-          vertical: compact ? 4 : 5,
-        ),
-        decoration: BoxDecoration(
-          color: selected
-              ? colors.accent.withValues(alpha: 0.15)
-              : null,
-          border: Border.all(
-            color: selected ? colors.accent : colors.border,
-          ),
-          borderRadius: AppShapes.input,
+          horizontal: compact ? 6 : 10,
+          vertical: compact ? 6 : 8,
         ),
         alignment: Alignment.center,
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: selected ? colors.accent : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
         child: Text(
           label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: selected ? colors.accent : colors.textSecondary,
+            color: selected ? colors.textPrimary : colors.textSecondary,
             fontWeight:
                 selected ? AppWeights.emphasis : AppWeights.body,
             fontSize: compact ? 11 : 12,
@@ -206,8 +217,10 @@ class _CategoryChip extends StatelessWidget {
   }
 }
 
-class _ModifierChip extends StatelessWidget {
-  const _ModifierChip({
+// ── Modifier pills (filled accent when active — impossible to miss) ──
+
+class _ModifierPill extends StatelessWidget {
+  const _ModifierPill({
     required this.label,
     required this.active,
     required this.compact,
@@ -224,28 +237,26 @@ class _ModifierChip extends StatelessWidget {
     final colors = context.colors;
     return InkWell(
       onTap: onTap,
-      borderRadius: AppShapes.input,
-      child: Container(
+      borderRadius: AppShapes.pill,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
         padding: EdgeInsets.symmetric(
-          horizontal: compact ? 7 : 10,
-          vertical: compact ? 4 : 5,
+          horizontal: compact ? 9 : 12,
+          vertical: compact ? 5 : 6,
         ),
         decoration: BoxDecoration(
-          color: active
-              ? colors.accent.withValues(alpha: 0.15)
-              : null,
+          color: active ? colors.accent : null,
           border: Border.all(
             color: active ? colors.accent : colors.border,
           ),
-          borderRadius: AppShapes.input,
+          borderRadius: AppShapes.pill,
         ),
         alignment: Alignment.center,
         child: Text(
           label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: active ? colors.accent : colors.textSecondary,
-            fontWeight:
-                active ? AppWeights.emphasis : AppWeights.body,
+            color: active ? Colors.white : colors.textSecondary,
+            fontWeight: active ? AppWeights.emphasis : AppWeights.body,
             fontSize: compact ? 11 : 12,
           ),
         ),
@@ -253,6 +264,8 @@ class _ModifierChip extends StatelessWidget {
     );
   }
 }
+
+// ── Action buttons ──
 
 class _ActionButton extends StatelessWidget {
   const _ActionButton({

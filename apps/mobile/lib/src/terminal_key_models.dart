@@ -115,8 +115,8 @@ List<TerminalKeyCategory> defaultTerminalKeyCategories() => [
     ],
   ),
   const TerminalKeyCategory(
-    id: 'ctrl',
-    label: 'Ctrl',
+    id: 'combo',
+    label: 'Combo',
     actions: [
       TerminalKeyAction(label: 'Ctrl+C', key: xterm.TerminalKey.keyC, ctrl: true),
       TerminalKeyAction(label: 'Ctrl+D', key: xterm.TerminalKey.keyD, ctrl: true),
