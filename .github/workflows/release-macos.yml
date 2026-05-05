@@ -3,14 +3,6 @@ name: Release macOS App
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version to release. Defaults to tag name or pubspec version."
-        required: false
-        type: string
-      build_number:
-        description: "Build number override. Defaults to GitHub run number."
-        required: false
-        type: string
       publish_release:
         description: "Create/update a GitHub Release when run manually."
         required: false
@@ -40,30 +32,19 @@ jobs:
 
       - name: Resolve release metadata
         id: meta
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-          INPUT_BUILD_NUMBER: ${{ inputs.build_number }}
         run: |
-          version="$INPUT_VERSION"
-
-          if [[ -z "$version" && "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#v}"
+          pubspec_version="$(grep '^version:' apps/mobile/pubspec.yaml | sed -E 's/^version:[[:space:]]*//')"
+          if [[ ! "$pubspec_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\+[1-9][0-9]*$ ]]; then
+            echo "apps/mobile/pubspec.yaml version must be X.Y.Z+N for macOS releases, got: $pubspec_version" >&2
+            echo "Run: npm run mobile:version -- <next-version+build>" >&2
+            exit 1
           fi
 
-          if [[ -z "$version" ]]; then
-            version="$(grep '^version:' apps/mobile/pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)"
-          fi
+          version="${pubspec_version%%+*}"
+          build_number="${pubspec_version##*+}"
+          release_tag="macos-v$pubspec_version"
 
-          build_number="$INPUT_BUILD_NUMBER"
-          if [[ -z "$build_number" ]]; then
-            build_number="${GITHUB_RUN_NUMBER}"
-          fi
-
-          release_tag="v$version"
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-            release_tag="$GITHUB_REF_NAME"
-          fi
-
+          echo "pubspec_version=$pubspec_version" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
           echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
@@ -113,8 +94,16 @@ jobs:
           TEAM_ID: ${{ secrets.TEAM_ID }}
         run: ./scripts/notarize-macos-release.sh
 
+      - name: Validate Sparkle appcast version
+        if: env.HAS_SIGNING_SECRETS == 'true' && env.HAS_NOTARY_SECRETS == 'true' && env.HAS_SPARKLE_SECRETS == 'true' && inputs.publish_release == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          BUILD_NUMBER: ${{ steps.meta.outputs.build_number }}
+        run: ./scripts/validate-macos-appcast-version.mjs
+
       - name: Generate Sparkle appcast
-        if: env.HAS_SIGNING_SECRETS == 'true' && env.HAS_NOTARY_SECRETS == 'true' && env.HAS_SPARKLE_SECRETS == 'true' && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        if: env.HAS_SIGNING_SECRETS == 'true' && env.HAS_NOTARY_SECRETS == 'true' && env.HAS_SPARKLE_SECRETS == 'true' && inputs.publish_release == true
         env:
           VERSION: ${{ steps.meta.outputs.version }}
           BUILD_NUMBER: ${{ steps.meta.outputs.build_number }}
@@ -153,17 +142,12 @@ jobs:
           fi
 
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
+        if: inputs.publish_release == true
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.meta.outputs.version }}
           RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
         run: |
-          release_args=()
-          if [[ "$VERSION" == *-* ]]; then
-            release_args+=(--prerelease)
-          fi
-
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" \
               --title "Sidemesh $VERSION" \
@@ -172,8 +156,7 @@ jobs:
             gh release create "$RELEASE_TAG" \
               --target "$GITHUB_SHA" \
               --title "Sidemesh $VERSION" \
-              --notes-file "$RUNNER_TEMP/release-notes.md" \
-              "${release_args[@]}"
+              --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
 
           gh release upload "$RELEASE_TAG" \
@@ -182,7 +165,7 @@ jobs:
             --clobber
 
       - name: Publish Sparkle appcast
-        if: env.HAS_SIGNING_SECRETS == 'true' && env.HAS_NOTARY_SECRETS == 'true' && env.HAS_SPARKLE_SECRETS == 'true' && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        if: env.HAS_SIGNING_SECRETS == 'true' && env.HAS_NOTARY_SECRETS == 'true' && env.HAS_SPARKLE_SECRETS == 'true' && inputs.publish_release == true
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.meta.outputs.version }}
@@ -239,6 +222,7 @@ jobs:
             echo "## Sidemesh macOS release"
             echo
             echo "- Version: $VERSION"
+            echo "- Source: apps/mobile/pubspec.yaml"
             echo "- Bundle identifier: $BUNDLE_IDENTIFIER"
             echo "- Artifact status: $status"
             echo "- Sparkle app updates: $sparkle_status"

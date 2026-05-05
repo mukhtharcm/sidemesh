@@ -58,6 +58,7 @@
     "test:mobile:api-client": "cd apps/mobile && flutter test test/api_client_provider_scoping_test.dart",
     "test:mobile:capability-ui": "cd apps/mobile && flutter test test/capability_ui_gates_test.dart",
     "typecheck": "tsc --noEmit",
+    "mobile:version": "node scripts/bump-mobile-version.mjs",
     "mobile:get": "cd apps/mobile && flutter pub get",
     "mobile:analyze": "cd apps/mobile && flutter analyze",
     "mobile:android:dev": "cd apps/mobile && flutter run --flavor dev -t lib/main.dart",
