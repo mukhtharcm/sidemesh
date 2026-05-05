@@ -200,7 +200,11 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
             store.markOnline(host.id);
             final previousNode = _hostNodeInfo[host.id];
             if (previousNode?.updateAvailable != node.updateAvailable ||
-                previousNode?.updateChannel != node.updateChannel) {
+                previousNode?.updateChannel != node.updateChannel ||
+                previousNode?.recommendedMobileClientVersion !=
+                    node.recommendedMobileClientVersion ||
+                previousNode?.minimumMobileClientVersion !=
+                    node.minimumMobileClientVersion) {
               nodesChanged = true;
             }
             _hostNodeInfo[host.id] = node;
