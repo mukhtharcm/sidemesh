@@ -5,12 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api_client.dart';
+import '../app_version_store.dart';
 import '../approval_inbox_store.dart';
 import '../host_status_store.dart';
 import '../relative_time_ticker.dart';
 import '../host_store.dart';
 import '../live_activity_service.dart';
 import '../local_notification_service.dart';
+import '../mobile_client_version_policy.dart';
 import '../models.dart';
 import '../pending_send_recovery.dart';
 import '../recent_sessions_live_store.dart';
@@ -64,8 +66,12 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     ),
   ];
 
+  static const _dismissedRecommendedMobileClientVersionKey =
+      'sidemesh_dismissed_mobile_client_recommended_version_v1';
+
   final HostStore _store = HostStore();
   final ApiClient _api = ApiClient();
+  final AppVersionStore _appVersionStore = AppVersionStore.instance;
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
   Timer? _heartbeatTimer;
@@ -79,6 +85,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   String _query = '';
   SessionViewMode _recentViewMode = SessionViewMode.flat;
   bool _handlingNotificationIntent = false;
+  String? _dismissedRecommendedMobileClientVersion;
   final Map<String, NodeInfo> _hostNodeInfo = {};
 
   List<HostProfile> get _enabledHosts =>
@@ -91,6 +98,9 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     LocalNotificationService.instance.routeIntent.addListener(
       _onNotificationRouteIntent,
     );
+    _appVersionStore.addListener(_handleAppVersionChanged);
+    unawaited(_appVersionStore.ensureLoaded());
+    unawaited(_loadDismissedMobileClientVersion());
     _refreshHosts();
     _searchController.addListener(() {
       final next = _searchController.text;
@@ -115,10 +125,35 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     LocalNotificationService.instance.routeIntent.removeListener(
       _onNotificationRouteIntent,
     );
+    _appVersionStore.removeListener(_handleAppVersionChanged);
     _searchDebounce?.cancel();
     _stopHeartbeat();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _handleAppVersionChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  Future<void> _loadDismissedMobileClientVersion() async {
+    final prefs = await SharedPreferences.getInstance();
+    final dismissed = prefs.getString(
+      _dismissedRecommendedMobileClientVersionKey,
+    );
+    if (!mounted) return;
+    setState(() => _dismissedRecommendedMobileClientVersion = dismissed);
+  }
+
+  Future<void> _dismissRecommendedMobileClientNotice(String version) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _dismissedRecommendedMobileClientVersionKey,
+      version,
+    );
+    if (!mounted) return;
+    setState(() => _dismissedRecommendedMobileClientVersion = version);
   }
 
   @override
@@ -322,6 +357,18 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     await _refreshHosts();
   }
 
+  Future<void> _openMobileClientCompatibilityNotice(
+    MobileClientCompatibilityNotice notice,
+  ) async {
+    if (notice.affectedHostCount == 1) {
+      final host = notice.primaryHost;
+      await _openHost(host);
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _tabIndex = 2);
+  }
+
   Future<void> _startSessionFromHome() async {
     if (_hosts.isEmpty) {
       await _showHostEditor();
@@ -439,6 +486,13 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     final colors = context.colors;
     final tab = _tabs[_tabIndex];
     final enabledHosts = _enabledHosts;
+    final installedAppVersion = _appVersionStore.info.version;
+    final mobileClientNotice = summarizeMobileClientCompatibility(
+      installedVersion: installedAppVersion,
+      hosts: enabledHosts,
+      hostNodes: _hostNodeInfo,
+      dismissedRecommendedVersion: _dismissedRecommendedMobileClientVersion,
+    );
     return Scaffold(
       backgroundColor: colors.canvas,
       body: SafeArea(
@@ -456,6 +510,22 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               onOpenSettings: _openSettings,
             ),
             const NotificationPermissionBanner(),
+            if (mobileClientNotice != null)
+              _MobileClientUpdateBanner(
+                notice: mobileClientNotice,
+                onReview: () => unawaited(
+                  _openMobileClientCompatibilityNotice(mobileClientNotice),
+                ),
+                onDismiss:
+                    mobileClientNotice.level ==
+                        MobileClientCompatibilityLevel.recommended
+                    ? () => unawaited(
+                        _dismissRecommendedMobileClientNotice(
+                          mobileClientNotice.targetVersion,
+                        ),
+                      )
+                    : null,
+              ),
             Expanded(
               child: _loading
                   ? const MeshLoader()
@@ -502,6 +572,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                         HostsPane(
                           hosts: _hosts,
                           hostNodes: _hostNodeInfo,
+                          installedAppVersion: installedAppVersion,
                           query: _query,
                           onOpenHost: _openHost,
                           onEditHost: (host) =>
@@ -2940,6 +3011,7 @@ class HostsPane extends StatelessWidget {
     super.key,
     required this.hosts,
     required this.hostNodes,
+    required this.installedAppVersion,
     required this.onOpenHost,
     required this.onEditHost,
     required this.onRemoveHost,
@@ -2952,6 +3024,7 @@ class HostsPane extends StatelessWidget {
 
   final List<HostProfile> hosts;
   final Map<String, NodeInfo> hostNodes;
+  final String installedAppVersion;
   final ValueChanged<HostProfile> onOpenHost;
   final ValueChanged<HostProfile> onEditHost;
   final ValueChanged<HostProfile> onRemoveHost;
@@ -3016,6 +3089,7 @@ class HostsPane extends StatelessWidget {
         return _HostRowCard(
           host: host,
           node: hostNodes[host.id],
+          installedAppVersion: installedAppVersion,
           dense: dense,
           selected: dense && selectedHostId == host.id,
           onTap: () => onOpenHost(host),
@@ -3032,6 +3106,7 @@ class _HostRowCard extends StatelessWidget {
   const _HostRowCard({
     required this.host,
     this.node,
+    required this.installedAppVersion,
     required this.onTap,
     required this.onEdit,
     required this.onRemove,
@@ -3042,6 +3117,7 @@ class _HostRowCard extends StatelessWidget {
 
   final HostProfile host;
   final NodeInfo? node;
+  final String installedAppVersion;
   final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onRemove;
@@ -3058,6 +3134,13 @@ class _HostRowCard extends StatelessWidget {
         final status = host.enabled
             ? HostStatusStore.instance.statusFor(host.id)
             : HostStatus.unknown;
+        final compatibility = node == null
+            ? MobileClientCompatibility.none
+            : evaluateMobileClientCompatibility(
+                installedVersion: installedAppVersion,
+                recommendedVersion: node!.recommendedMobileClientVersion,
+                minimumVersion: node!.minimumMobileClientVersion,
+              );
         if (dense) {
           return Material(
             color: Colors.transparent,
@@ -3267,6 +3350,23 @@ class _HostRowCard extends StatelessWidget {
                             : 'Update available',
                         icon: Icons.system_update_alt_rounded,
                         tone: MeshPillTone.warning,
+                      ),
+                    ],
+                    if (compatibility.level ==
+                        MobileClientCompatibilityLevel.required) ...[
+                      const SizedBox(height: 6),
+                      MeshPill(
+                        label: 'Mobile v${compatibility.targetVersion} required',
+                        icon: Icons.phone_android_rounded,
+                        tone: MeshPillTone.danger,
+                      ),
+                    ] else if (compatibility.level ==
+                        MobileClientCompatibilityLevel.recommended) ...[
+                      const SizedBox(height: 6),
+                      MeshPill(
+                        label: 'Mobile v${compatibility.targetVersion} recommended',
+                        icon: Icons.phone_android_rounded,
+                        tone: MeshPillTone.info,
                       ),
                     ],
                   ],
@@ -4181,6 +4281,121 @@ class _RecentErrorBanner extends StatelessWidget {
             ),
             child: const Text('Retry'),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileClientUpdateBanner extends StatelessWidget {
+  const _MobileClientUpdateBanner({
+    required this.notice,
+    required this.onReview,
+    this.onDismiss,
+  });
+
+  final MobileClientCompatibilityNotice notice;
+  final VoidCallback onReview;
+  final VoidCallback? onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final requiresUpdate =
+        notice.level == MobileClientCompatibilityLevel.required;
+    final accent = requiresUpdate ? colors.danger : colors.info;
+    final muted = requiresUpdate ? colors.dangerMuted : colors.infoMuted;
+    final title = requiresUpdate
+        ? 'Update this app to keep using some hosts'
+        : 'A newer Sidemesh mobile build is recommended';
+    final count = notice.affectedHostCount;
+    final hostSummary = count == 1
+        ? notice.primaryHost.label
+        : '$count hosts';
+    final verb = count == 1
+        ? (requiresUpdate ? 'requires' : 'recommends')
+        : (requiresUpdate ? 'require' : 'recommend');
+    final body =
+        '$hostSummary $verb Sidemesh mobile v${notice.targetVersion} or newer. '
+        'You are on v${notice.installedVersion}.';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: muted,
+        borderRadius: AppShapes.input,
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: accent.withValues(alpha: 0.28)),
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.phone_android_rounded, size: 18, color: accent),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  body,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: AppSpacing.sm,
+                    runSpacing: AppSpacing.sm,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: onReview,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: accent,
+                          foregroundColor: Colors.white,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        icon: const Icon(Icons.visibility_rounded, size: 16),
+                        label: Text(count == 1 ? 'Review host' : 'Review hosts'),
+                      ),
+                      if (onDismiss != null)
+                        OutlinedButton(
+                          onPressed: onDismiss,
+                          child: const Text('Later'),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (onDismiss != null)
+            IconButton(
+              tooltip: 'Dismiss',
+              visualDensity: VisualDensity.compact,
+              onPressed: onDismiss,
+              icon: Icon(Icons.close_rounded, color: colors.textSecondary),
+            ),
         ],
       ),
     );

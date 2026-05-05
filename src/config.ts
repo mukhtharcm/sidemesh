@@ -74,6 +74,14 @@ export async function loadConfig(
     env.SIDEMESH_UPDATE_CHANNEL,
     persisted.value?.updateChannel ?? "stable",
   );
+  const recommendedMobileClientVersion = parseOptionalTrimmed(
+    env.SIDEMESH_RECOMMENDED_MOBILE_CLIENT_VERSION,
+    persisted.value?.recommendedMobileClientVersion ?? null,
+  );
+  const minimumMobileClientVersion = parseOptionalTrimmed(
+    env.SIDEMESH_MINIMUM_MOBILE_CLIENT_VERSION,
+    persisted.value?.minimumMobileClientVersion ?? null,
+  );
   const provider =
     providers.find((candidate) => candidate.kind === defaultProviderKind) ??
     providers[0];
@@ -102,6 +110,8 @@ export async function loadConfig(
     providers,
     defaultProviderKind,
     updateChannel,
+    recommendedMobileClientVersion,
+    minimumMobileClientVersion,
     stateDir,
     terminal,
     portForwarding,
@@ -281,6 +291,17 @@ function dedupeProviderKinds(
     seen.add(kind);
     return true;
   });
+}
+
+function parseOptionalTrimmed(
+  value: string | undefined,
+  fallback: string | null,
+): string | null {
+  if (value === undefined) {
+    return fallback;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function resolveTerminalConfig(
