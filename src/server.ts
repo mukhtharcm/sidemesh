@@ -121,6 +121,7 @@ const RECENT_SESSIONS_CACHE_TTL_MS = 1_500;
 const RECENT_SESSION_RUNTIME_CONCURRENCY = 4;
 const SESSION_EVENT_DELTA_MAX_ITEMS = 220;
 const SESSION_EVENT_DELTA_MAX_BYTES = 256 * 1024;
+const INSTALL_INFO_REFRESH_TTL_MS = 60_000;
 type SessionRuntimeListMode = "all" | "active" | "none";
 const HOST_CAPABILITIES: HostCapabilities = {
   workspace: {
@@ -170,6 +171,12 @@ interface SessionInputDedupeEntry {
   createdAt: number;
   promise?: Promise<SessionInputReceipt>;
   receipt?: SessionInputReceipt;
+}
+
+interface InstallInfoRefreshResult {
+  ok: boolean;
+  refreshed: boolean;
+  error: string | null;
 }
 
 export interface RunningServer {
@@ -263,6 +270,8 @@ export async function startServer(
     installType: "unknown",
     updateSupported: false,
   };
+  let installInfoCheckedAt = 0;
+  let installInfoRefreshPromise: Promise<InstallInfoRefreshResult> | null = null;
   const setInstallInfo = (
     detected: Awaited<ReturnType<typeof detectInstallInfo>>,
   ): void => {
@@ -276,6 +285,64 @@ export async function startServer(
       installType: detected.installType,
       updateSupported: detected.updateSupported,
     };
+    installInfoCheckedAt = Date.now();
+  };
+  const updateInfoPayload = (
+    result: InstallInfoRefreshResult = {
+      ok: true,
+      refreshed: false,
+      error: null,
+    },
+  ) => ({
+    ok: result.ok,
+    refreshed: result.refreshed,
+    error: result.error,
+    updateChannel: installInfo.updateChannel,
+    updateAvailable: installInfo.updateAvailable,
+    latestVersion: installInfo.latestVersion,
+    packageVersion: installInfo.packageVersion,
+    currentCommitSha: installInfo.currentCommitSha,
+    latestCommitSha: installInfo.latestCommitSha,
+    installType: installInfo.installType,
+    updateSupported: installInfo.updateSupported,
+  });
+  const refreshInstallInfo = async (
+    options: { force?: boolean } = {},
+  ): Promise<InstallInfoRefreshResult> => {
+    const freshEnough =
+      installInfoCheckedAt > 0 &&
+      Date.now() - installInfoCheckedAt < INSTALL_INFO_REFRESH_TTL_MS;
+    if (!options.force && freshEnough) {
+      return { ok: true, refreshed: false, error: null };
+    }
+    if (installInfoRefreshPromise) {
+      return installInfoRefreshPromise;
+    }
+
+    installInfoRefreshPromise = (async () => {
+      try {
+        const detected = await dependencies.detectInstallInfo({
+          config: runtimeConfig,
+        });
+        setInstallInfo(detected);
+        return { ok: true, refreshed: true, error: null };
+      } catch (error) {
+        installInfo = {
+          ...installInfo,
+          updateChannel: runtimeConfig.updateChannel,
+        };
+        return {
+          ok: false,
+          refreshed: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    })();
+    try {
+      return await installInfoRefreshPromise;
+    } finally {
+      installInfoRefreshPromise = null;
+    }
   };
   const terminalRegistry = new TerminalRegistry({
     enabled: hostCapabilities.workspace.terminal,
@@ -903,6 +970,14 @@ export async function startServer(
     });
   }));
 
+  app.post(
+    "/api/admin/update-check",
+    asyncRoute(async (_request, response) => {
+      const result = await refreshInstallInfo({ force: true });
+      response.json(updateInfoPayload(result));
+    }),
+  );
+
   app.get("/api/providers", jsonRoute((_request, response) => {
     response.json({
       currentProvider: providerRuntime.defaultProviderKind,
@@ -1018,25 +1093,11 @@ export async function startServer(
       await saveConfig(nextConfig, { configPath: nextConfig.configPath });
       runtimeConfig = nextConfig;
 
-      try {
-        const detected = await dependencies.detectInstallInfo({
-          config: runtimeConfig,
-        });
-        setInstallInfo(detected);
-      } catch {
-        installInfo = {
-          ...installInfo,
-          updateChannel: runtimeConfig.updateChannel,
-        };
-      }
+      const result = await refreshInstallInfo({ force: true });
 
       response.json({
+        ...updateInfoPayload(result),
         ok: true,
-        updateChannel: installInfo.updateChannel,
-        updateAvailable: installInfo.updateAvailable,
-        latestVersion: installInfo.latestVersion,
-        currentCommitSha: installInfo.currentCommitSha,
-        latestCommitSha: installInfo.latestCommitSha,
       });
     }),
   );
@@ -1066,10 +1127,8 @@ export async function startServer(
         await saveConfig(effectiveConfig, { configPath: effectiveConfig.configPath });
         runtimeConfig = effectiveConfig;
       }
-      const info = await dependencies.detectInstallInfo({
-        config: runtimeConfig,
-      });
-      setInstallInfo(info);
+      await refreshInstallInfo({ force: true });
+      const info = installInfo;
       if (!info.updateSupported) {
         response.status(501).json({ error: "update not supported for this install type" });
         return;

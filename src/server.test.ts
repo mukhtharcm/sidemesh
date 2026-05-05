@@ -608,14 +608,12 @@ describe("POST /api/admin/update-channel", () => {
       });
 
       assert.equal(res.statusCode, 200);
-      assert.deepEqual(res.body, {
-        ok: true,
-        updateChannel: "bleeding-edge",
-        updateAvailable: true,
-        latestVersion: "0.2.0",
-        currentCommitSha: null,
-        latestCommitSha: null,
-      });
+      assert.equal((res.body as any).ok, true);
+      assert.equal((res.body as any).updateChannel, "bleeding-edge");
+      assert.equal((res.body as any).updateAvailable, true);
+      assert.equal((res.body as any).latestVersion, "0.2.0");
+      assert.equal((res.body as any).currentCommitSha, null);
+      assert.equal((res.body as any).latestCommitSha, null);
 
       const persisted = JSON.parse(
         await readFile(config.configPath, "utf8"),
@@ -632,6 +630,192 @@ describe("POST /api/admin/update-channel", () => {
 
       assert.equal(node.statusCode, 200);
       assert.equal((node.body as any).updateChannel, "bleeding-edge");
+    } finally {
+      await server.close();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("POST /api/admin/update-check", () => {
+  it("refreshes cached update info on demand", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    let detectCalls = 0;
+    const server = await startServer(config, undefined, {
+      detectInstallInfo: async (packageRootOrOptions = {}) => {
+        detectCalls += 1;
+        const options =
+          typeof packageRootOrOptions === "string"
+            ? { packageRoot: packageRootOrOptions }
+            : packageRootOrOptions;
+        return {
+          ...makeInstallInfo(
+            options.packageRoot ?? nodePath.join(stateDir, "package"),
+            options.config?.updateChannel ?? "stable",
+          ),
+          latestVersion: detectCalls === 1 ? "0.2.0" : "0.3.0",
+        };
+      },
+    });
+
+    try {
+      const before = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/node",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(before.statusCode, 200);
+      assert.equal((before.body as any).latestVersion, "0.2.0");
+
+      const refreshed = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/admin/update-check",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+
+      assert.equal(refreshed.statusCode, 200);
+      assert.equal((refreshed.body as any).ok, true);
+      assert.equal((refreshed.body as any).refreshed, true);
+      assert.equal((refreshed.body as any).latestVersion, "0.3.0");
+
+      const after = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/node",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(after.statusCode, 200);
+      assert.equal((after.body as any).latestVersion, "0.3.0");
+    } finally {
+      await server.close();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("deduplicates concurrent refreshes", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    let detectCalls = 0;
+    let releaseRefresh!: () => void;
+    let refreshStarted: (() => void) | null = null;
+    const refreshStartedPromise = new Promise<void>((resolve) => {
+      refreshStarted = resolve;
+    });
+    const releaseRefreshPromise = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+
+    const server = await startServer(config, undefined, {
+      detectInstallInfo: async (packageRootOrOptions = {}) => {
+        detectCalls += 1;
+        if (detectCalls === 2) {
+          refreshStarted?.();
+          await releaseRefreshPromise;
+        }
+        const options =
+          typeof packageRootOrOptions === "string"
+            ? { packageRoot: packageRootOrOptions }
+            : packageRootOrOptions;
+        return {
+          ...makeInstallInfo(
+            options.packageRoot ?? nodePath.join(stateDir, "package"),
+            options.config?.updateChannel ?? "stable",
+          ),
+          latestVersion: detectCalls === 1 ? "0.2.0" : "0.3.0",
+        };
+      },
+    });
+
+    try {
+      const requestRefresh = () =>
+        request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/admin/update-check",
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+        });
+
+      const first = requestRefresh();
+      const second = requestRefresh();
+      await refreshStartedPromise;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      releaseRefresh();
+
+      const [firstResult, secondResult] = await Promise.all([first, second]);
+      assert.equal(firstResult.statusCode, 200);
+      assert.equal(secondResult.statusCode, 200);
+      assert.equal((firstResult.body as any).latestVersion, "0.3.0");
+      assert.equal((secondResult.body as any).latestVersion, "0.3.0");
+      assert.equal(detectCalls, 2);
+    } finally {
+      await server.close();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the last update info when refresh fails", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    let detectCalls = 0;
+    const server = await startServer(config, undefined, {
+      detectInstallInfo: async (packageRootOrOptions = {}) => {
+        detectCalls += 1;
+        if (detectCalls > 1) {
+          throw new Error("remote unavailable");
+        }
+        const options =
+          typeof packageRootOrOptions === "string"
+            ? { packageRoot: packageRootOrOptions }
+            : packageRootOrOptions;
+        return makeInstallInfo(
+          options.packageRoot ?? nodePath.join(stateDir, "package"),
+          options.config?.updateChannel ?? "stable",
+        );
+      },
+    });
+
+    try {
+      const refreshed = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/admin/update-check",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+
+      assert.equal(refreshed.statusCode, 200);
+      assert.equal((refreshed.body as any).ok, false);
+      assert.equal((refreshed.body as any).error, "remote unavailable");
+      assert.equal((refreshed.body as any).latestVersion, "0.2.0");
+
+      const node = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/node",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(node.statusCode, 200);
+      assert.equal((node.body as any).latestVersion, "0.2.0");
     } finally {
       await server.close();
       await rm(stateDir, { recursive: true, force: true });
