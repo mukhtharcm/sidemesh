@@ -8,6 +8,7 @@ const currentVersion = required("VERSION");
 const currentBuildNumber = required("BUILD_NUMBER");
 const appcastUrl = process.env.APPCAST_URL?.trim() || defaultAppcastUrl;
 const appcastPath = process.env.EXISTING_APPCAST_PATH?.trim();
+const githubToken = process.env.GH_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim();
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -49,7 +50,9 @@ async function loadExistingAppcast() {
     return readFile(appcastPath, "utf8");
   }
 
-  const response = await fetch(appcastUrl);
+  const response = await fetch(appcastUrl, {
+    headers: githubToken ? { Authorization: `Bearer ${githubToken}` } : {},
+  });
   if (response.status === 404) {
     return null;
   }

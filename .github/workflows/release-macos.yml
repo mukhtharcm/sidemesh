@@ -97,6 +97,7 @@ jobs:
       - name: Validate Sparkle appcast version
         if: env.HAS_SIGNING_SECRETS == 'true' && env.HAS_NOTARY_SECRETS == 'true' && env.HAS_SPARKLE_SECRETS == 'true' && inputs.publish_release == true
         env:
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.meta.outputs.version }}
           BUILD_NUMBER: ${{ steps.meta.outputs.build_number }}
         run: ./scripts/validate-macos-appcast-version.mjs
