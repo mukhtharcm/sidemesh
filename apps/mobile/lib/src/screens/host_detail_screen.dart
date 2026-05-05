@@ -47,15 +47,20 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   final SessionLocalStore _localStore = SessionLocalStore.instance;
   late Future<_HostOverview> _future;
   Timer? _refreshTimer;
+  Future<void>? _updateInfoRefresh;
+  bool _checkingUpdateInfo = false;
   static const Duration _refreshInterval = Duration(seconds: 20);
 
   @override
   void initState() {
     super.initState();
-    
+
     _localStore.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
     _future = _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_refreshUpdateInfo());
+    });
     _refreshTimer = Timer.periodic(_refreshInterval, (_) => _silentRefresh());
   }
 
@@ -88,13 +93,23 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
     _localStore.getFavoriteSessions(widget.host).then((favorites) async {
       if (!mounted) return;
       final ghosts = await _localStore.ghostsForHost(widget.host);
+      var displayNode = node;
+      try {
+        final latestNode = (await _future).node;
+        displayNode = node.copyWithUpdateInfo(latestNode.updateInfo);
+      } catch (_) {
+        displayNode = node;
+      }
+      if (!mounted) return;
       final merged = _mergeSessions(sessions, [...favorites, ...ghosts]);
       setState(() {
-        _future = Future.value(_HostOverview(
-          node: node,
-          workspaces: _buildWorkspaces(merged),
-          sessions: merged,
-        ));
+        _future = Future.value(
+          _HostOverview(
+            node: displayNode,
+            workspaces: _buildWorkspaces(merged),
+            sessions: merged,
+          ),
+        );
       });
     });
 
@@ -123,6 +138,40 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   Future<void> _refresh() async {
     setState(() => _future = _load());
     await _future;
+    unawaited(_refreshUpdateInfo());
+  }
+
+  Future<void> _refreshUpdateInfo() {
+    final existing = _updateInfoRefresh;
+    if (existing != null) {
+      return existing;
+    }
+    final future = _runUpdateInfoRefresh();
+    _updateInfoRefresh = future;
+    return future;
+  }
+
+  Future<void> _runUpdateInfoRefresh() async {
+    if (mounted) {
+      setState(() => _checkingUpdateInfo = true);
+    }
+    try {
+      final info = await widget.api.refreshUpdateInfo(widget.host);
+      final overview = await _future;
+      if (!mounted) return;
+      setState(() {
+        _future = Future.value(
+          overview.copyWith(node: overview.node.copyWithUpdateInfo(info)),
+        );
+      });
+    } catch (_) {
+      // Keep the existing snapshot if the update check cannot reach the remote.
+    } finally {
+      _updateInfoRefresh = null;
+      if (mounted) {
+        setState(() => _checkingUpdateInfo = false);
+      }
+    }
   }
 
   List<SessionSummary> _sortSessions(List<SessionSummary> sessions) {
@@ -265,19 +314,19 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                   const SizedBox(height: AppSpacing.sm),
                   _ProviderContractCard(node: data.node),
                   if (data.workspaces.length > 1) ...[
-                  const SizedBox(height: AppSpacing.lg),
-                  _SectionHeader(
-                    icon: Icons.folder_open_rounded,
-                    title: 'Quick launch',
-                    subtitle:
-                        '${data.workspaces.length} ${data.workspaces.length == 1 ? "folder" : "folders"}',
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _WorkspaceLaunchRow(
-                    workspaces: data.workspaces,
-                    onTap: (workspace) =>
-                        _startSession(prefilledCwd: workspace.cwd),
-                  ),
+                    const SizedBox(height: AppSpacing.lg),
+                    _SectionHeader(
+                      icon: Icons.folder_open_rounded,
+                      title: 'Quick launch',
+                      subtitle:
+                          '${data.workspaces.length} ${data.workspaces.length == 1 ? "folder" : "folders"}',
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    _WorkspaceLaunchRow(
+                      workspaces: data.workspaces,
+                      onTap: (workspace) =>
+                          _startSession(prefilledCwd: workspace.cwd),
+                    ),
                   ],
                   const SizedBox(height: AppSpacing.xl),
                   _SectionHeader(
@@ -290,6 +339,7 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                     host: widget.host,
                     api: widget.api,
                     node: data.node,
+                    checkingUpdateInfo: _checkingUpdateInfo,
                     onRefresh: _refresh,
                   ),
                   const SizedBox(height: AppSpacing.lg),
@@ -1153,7 +1203,8 @@ class _WorkspaceLaunchRow extends StatelessWidget {
                       fontWeight: AppWeights.emphasis,
                     ),
                   ),
-                  if (ws.sessionCount > 1) ...[                    const SizedBox(width: 6),
+                  if (ws.sessionCount > 1) ...[
+                    const SizedBox(width: 6),
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 5,
@@ -1184,18 +1235,19 @@ class _WorkspaceLaunchRow extends StatelessWidget {
   }
 }
 
-
 class _HostManagementCard extends StatefulWidget {
   const _HostManagementCard({
     required this.host,
     required this.api,
     required this.node,
+    required this.checkingUpdateInfo,
     required this.onRefresh,
   });
 
   final HostProfile host;
   final ApiClient api;
   final NodeInfo node;
+  final bool checkingUpdateInfo;
   final Future<void> Function() onRefresh;
 
   @override
@@ -1478,6 +1530,9 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     if (isOffline) {
       return 'Host offline — cannot update';
     }
+    if (widget.checkingUpdateInfo) {
+      return 'Checking for updates…';
+    }
 
     if (widget.node.usesBleedingEdgeTrack) {
       final current = widget.node.currentInstallLabel;
@@ -1512,6 +1567,9 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   }
 
   IconData get _updateIcon {
+    if (widget.checkingUpdateInfo) {
+      return Icons.sync_rounded;
+    }
     if (!widget.node.updateAvailable) {
       return Icons.check_circle_rounded;
     }
@@ -1586,7 +1644,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                   icon: _updateIcon,
                   label: 'Update Sidemesh',
                   detail: _updateDetail(),
-                  busy: _updating,
+                  busy: _updating || widget.checkingUpdateInfo,
                   onTap: isOffline || _updateStartedAt != null
                       ? null
                       : () => unawaited(_updateDaemon()),
@@ -1780,7 +1838,6 @@ class _UpdateProgressBanner extends StatelessWidget {
   }
 }
 
-
 class _ManagementRow extends StatelessWidget {
   const _ManagementRow({
     required this.icon,
@@ -1856,7 +1913,6 @@ class _ManagementRow extends StatelessWidget {
   }
 }
 
-
 class _HostOverview {
   const _HostOverview({
     required this.node,
@@ -1867,4 +1923,12 @@ class _HostOverview {
   final NodeInfo node;
   final List<WorkspaceSummary> workspaces;
   final List<SessionSummary> sessions;
+
+  _HostOverview copyWith({NodeInfo? node}) {
+    return _HostOverview(
+      node: node ?? this.node,
+      workspaces: workspaces,
+      sessions: sessions,
+    );
+  }
 }
