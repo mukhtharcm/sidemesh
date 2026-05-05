@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:sidemesh_mobile/main.dart';
+import 'package:sidemesh_mobile/src/app_version_store.dart';
 import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
 import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
@@ -29,6 +30,7 @@ void main() {
 
   setUp(() {
     SessionLocalStore.instance.resetMigrationState();
+    AppVersionStore.instance.resetForTest();
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
@@ -37,6 +39,9 @@ void main() {
   });
 
   testWidgets('renders app shell', (tester) async {
+    tester.view
+      ..devicePixelRatio = 1
+      ..physicalSize = const Size(1280, 2200);
     final controller = await ThemeController.load();
     await tester.pumpWidget(
       SidemeshApp(
@@ -51,7 +56,10 @@ void main() {
 
     expect(find.byType(Scaffold), findsOneWidget);
     expect(find.text('Recent'), findsWidgets);
-    expect(find.text('Inbox'), findsWidgets);
+    expect(find.text('Actions'), findsWidgets);
     expect(find.text('Hosts'), findsWidgets);
+
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
   });
 }

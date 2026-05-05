@@ -91,6 +91,8 @@ export interface NodeConfig {
   providers: AgentProviderConfig[];
   defaultProviderKind: AgentProviderKind;
   updateChannel: UpdateChannel;
+  recommendedMobileClientVersion?: string | null;
+  minimumMobileClientVersion?: string | null;
   stateDir: string;
   terminal: HostTerminalConfig;
   portForwarding: HostPortForwardingConfig;

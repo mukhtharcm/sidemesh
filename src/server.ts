@@ -967,6 +967,9 @@ export async function startServer(
       updateAvailable: installInfo.updateAvailable,
       installType: installInfo.installType,
       updateSupported: installInfo.updateSupported,
+      recommendedMobileClientVersion:
+        config.recommendedMobileClientVersion ?? null,
+      minimumMobileClientVersion: config.minimumMobileClientVersion ?? null,
     });
   }));
 

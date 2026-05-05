@@ -69,6 +69,8 @@ class NodeInfo {
     this.updateAvailable = false,
     this.installType,
     this.updateSupported = false,
+    this.recommendedMobileClientVersion,
+    this.minimumMobileClientVersion,
   });
 
   final String label;
@@ -92,6 +94,8 @@ class NodeInfo {
   final bool updateAvailable;
   final String? installType;
   final bool updateSupported;
+  final String? recommendedMobileClientVersion;
+  final String? minimumMobileClientVersion;
 
   UpdateInfo get updateInfo => UpdateInfo(
     ok: true,
@@ -105,6 +109,12 @@ class NodeInfo {
     installType: installType,
     updateSupported: updateSupported,
   );
+
+  bool get advertisesMobileClientVersionHints =>
+      (recommendedMobileClientVersion != null &&
+          recommendedMobileClientVersion!.isNotEmpty) ||
+      (minimumMobileClientVersion != null &&
+          minimumMobileClientVersion!.isNotEmpty);
 
   NodeInfo copyWithUpdateInfo(UpdateInfo info) {
     return NodeInfo(
@@ -129,6 +139,8 @@ class NodeInfo {
       updateAvailable: info.updateAvailable,
       installType: info.installType,
       updateSupported: info.updateSupported,
+      recommendedMobileClientVersion: recommendedMobileClientVersion,
+      minimumMobileClientVersion: minimumMobileClientVersion,
     );
   }
 
@@ -249,6 +261,12 @@ class NodeInfo {
       updateAvailable: json['updateAvailable'] == true,
       installType: _stringOrNull(json['installType']),
       updateSupported: json['updateSupported'] == true,
+      recommendedMobileClientVersion: _stringOrNull(
+        json['recommendedMobileClientVersion'],
+      ),
+      minimumMobileClientVersion: _stringOrNull(
+        json['minimumMobileClientVersion'],
+      ),
     );
   }
 }

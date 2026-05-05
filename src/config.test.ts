@@ -119,6 +119,33 @@ describe("loadConfig", () => {
     assert.equal(overridden.updateChannel, "stable");
   });
 
+  it("loads mobile client version hints from persisted config and env overrides", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        recommendedMobileClientVersion: "1.2.0",
+        minimumMobileClientVersion: "1.0.0",
+        providers: [{ kind: "codex", bin: "codex" }],
+      }),
+    );
+
+    const persisted = await loadConfig({ configPath, env: {} });
+    assert.equal(persisted.recommendedMobileClientVersion, "1.2.0");
+    assert.equal(persisted.minimumMobileClientVersion, "1.0.0");
+
+    const overridden = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_RECOMMENDED_MOBILE_CLIENT_VERSION: "1.3.0",
+        SIDEMESH_MINIMUM_MOBILE_CLIENT_VERSION: "1.1.0",
+      },
+    });
+    assert.equal(overridden.recommendedMobileClientVersion, "1.3.0");
+    assert.equal(overridden.minimumMobileClientVersion, "1.1.0");
+  });
+
   it("loads Pi provider config from env and persisted values", async () => {
     await writeFile(
       configPath,

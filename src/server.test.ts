@@ -32,7 +32,11 @@ const EMPTY_OVERRIDES = {
 
 function makeConfig(
   stateDir: string,
-  options: { capabilityProfile?: FakeCapabilityProfile } = {},
+  options: {
+    capabilityProfile?: FakeCapabilityProfile;
+    recommendedMobileClientVersion?: string | null;
+    minimumMobileClientVersion?: string | null;
+  } = {},
 ): NodeConfig {
   const token = "test-token-" + Math.random().toString(36).slice(2);
   const provider = {
@@ -51,6 +55,9 @@ function makeConfig(
     providers: [provider],
     defaultProviderKind: "fake",
     updateChannel: "stable",
+    recommendedMobileClientVersion:
+      options.recommendedMobileClientVersion ?? null,
+    minimumMobileClientVersion: options.minimumMobileClientVersion ?? null,
     stateDir,
     terminal: { enabled: false, shell: null, requirePty: false },
     portForwarding: { enabled: false, allowNonLoopbackTargets: false },
@@ -375,6 +382,30 @@ describe("GET /api/node", () => {
       assert.equal(body.updateChannel, "stable");
       assert.equal(body.latestCommitSha, null);
     });
+  });
+
+  it("returns mobile client version hints when configured", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(
+      makeConfig(stateDir, {
+        recommendedMobileClientVersion: "1.2.0",
+        minimumMobileClientVersion: "1.0.0",
+      }),
+      async (server, config) => {
+        const res = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/node",
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+
+        assert.equal(res.statusCode, 200);
+        const body = res.body as any;
+        assert.equal(body.recommendedMobileClientVersion, "1.2.0");
+        assert.equal(body.minimumMobileClientVersion, "1.0.0");
+      },
+    );
   });
 
   it("with two providers: providerCapabilities reflects default; per-provider caps are preserved", async () => {

@@ -1405,6 +1405,7 @@ class _SidebarPane extends StatelessWidget {
         return HostsPane(
           hostNodes: {},
           hosts: hosts,
+          installedAppVersion: '',
           onOpenHost: onOpenHostDetail,
           onEditHost: onEditHost,
           onRemoveHost: onRemoveHost,
