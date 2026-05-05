@@ -2,4 +2,4 @@
 
 PRODUCT_NAME = Sidemesh Dev
 PRODUCT_BUNDLE_IDENTIFIER = com.sidemesh.sidemeshMobile.dev
-SPARKLE_FEED_URL = https:/$()/github.com/mukhtharcm/sidemesh/releases/download/macos-appcast-dev/appcast-dev.xml
+SPARKLE_FEED_URL =
