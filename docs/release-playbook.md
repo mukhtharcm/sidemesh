@@ -197,11 +197,28 @@ The macOS workflow uses the same secret names as the other macOS apps in
 - `APPLE_ID`: Apple ID used for notarization.
 - `APP_SPECIFIC_PASSWORD`: app-specific password for the Apple ID.
 - `TEAM_ID`: Apple Developer Team ID.
+- `SPARKLE_PUBLIC_ED_KEY`: Sparkle EdDSA public key embedded into the macOS
+  app. This key is not secret, but the workflow reads it from Actions secrets
+  so app updates stay disabled until update signing is configured.
+- `SPARKLE_PRIVATE_KEY_BASE64`: base64-encoded Sparkle EdDSA private key file
+  used to sign appcast update enclosures. Never commit this value.
 
 Without signing secrets, the workflow still produces unsigned/ad-hoc artifacts
 for internal smoke testing. With signing secrets only, it produces signed
 artifacts. With signing and notary secrets, it notarizes and staples both the
 app and DMG.
+
+With signing secrets and Sparkle secrets, the workflow also generates
+`appcast-prod.xml` from the signed/notarized ZIP and uploads it to the dedicated
+GitHub Release tag `macos-appcast-prod`. Production macOS builds read this
+stable feed URL:
+
+```text
+https://github.com/mukhtharcm/sidemesh/releases/download/macos-appcast-prod/appcast-prod.xml
+```
+
+Each appcast entry points back to the versioned GitHub Release ZIP. The DMG
+remains the manual first-install artifact.
 
 To create a GitHub Release from the macOS workflow, run it manually and enable
 `publish_release`. Generic server tags intentionally do not trigger app builds.
@@ -226,6 +243,12 @@ VERSION=0.1.0 \
 BUILD_NUMBER=1 \
 SIGNING_IDENTITY="Developer ID Application: Example (TEAMID)" \
 npm run macos:release:package
+```
+
+To embed the Sparkle public key in a local release build, add:
+
+```bash
+SIDEMESH_SPARKLE_PUBLIC_ED_KEY="base64-public-ed-key"
 ```
 
 Prerelease versions such as `0.1.0-beta.1` are allowed for artifact names and
