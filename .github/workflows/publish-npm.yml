@@ -9,6 +9,7 @@ on:
 jobs:
   publish:
     name: Publish to npm
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'npm-v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: npm
@@ -29,6 +30,19 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify npm release tag
+        if: github.event_name == 'release'
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          expected_tag="npm-v$package_version"
+          actual_tag="${{ github.event.release.tag_name }}"
+
+          if [[ "$actual_tag" != "$expected_tag" ]]; then
+            echo "Release tag $actual_tag does not match package.json version $package_version." >&2
+            echo "Expected npm release tag: $expected_tag" >&2
+            exit 1
+          fi
 
       - name: Typecheck
         run: npm run typecheck
