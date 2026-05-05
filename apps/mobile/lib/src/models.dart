@@ -93,6 +93,45 @@ class NodeInfo {
   final String? installType;
   final bool updateSupported;
 
+  UpdateInfo get updateInfo => UpdateInfo(
+    ok: true,
+    refreshed: false,
+    packageVersion: packageVersion,
+    latestVersion: latestVersion,
+    currentCommitSha: currentCommitSha,
+    latestCommitSha: latestCommitSha,
+    updateChannel: updateChannel,
+    updateAvailable: updateAvailable,
+    installType: installType,
+    updateSupported: updateSupported,
+  );
+
+  NodeInfo copyWithUpdateInfo(UpdateInfo info) {
+    return NodeInfo(
+      label: label,
+      hostname: hostname,
+      platform: platform,
+      homeDirectory: homeDirectory,
+      codexVersion: codexVersion,
+      provider: provider,
+      providerName: providerName,
+      providerVersion: providerVersion,
+      providerConfig: providerConfig,
+      providerCapabilities: providerCapabilities,
+      defaultProviderCapabilities: defaultProviderCapabilities,
+      hostCapabilities: hostCapabilities,
+      supportedProviders: supportedProviders,
+      packageVersion: info.packageVersion,
+      latestVersion: info.latestVersion,
+      currentCommitSha: info.currentCommitSha,
+      latestCommitSha: info.latestCommitSha,
+      updateChannel: info.updateChannel,
+      updateAvailable: info.updateAvailable,
+      installType: info.installType,
+      updateSupported: info.updateSupported,
+    );
+  }
+
   String get providerDisplayName {
     if (providerName.isNotEmpty) return providerName;
     if (provider.isNotEmpty) return provider;
@@ -212,6 +251,48 @@ class NodeInfo {
       updateSupported: json['updateSupported'] == true,
     );
   }
+}
+
+class UpdateInfo {
+  const UpdateInfo({
+    required this.ok,
+    required this.refreshed,
+    this.error,
+    this.packageVersion,
+    this.latestVersion,
+    this.currentCommitSha,
+    this.latestCommitSha,
+    this.updateChannel = 'stable',
+    this.updateAvailable = false,
+    this.installType,
+    this.updateSupported = false,
+  });
+
+  final bool ok;
+  final bool refreshed;
+  final String? error;
+  final String? packageVersion;
+  final String? latestVersion;
+  final String? currentCommitSha;
+  final String? latestCommitSha;
+  final String updateChannel;
+  final bool updateAvailable;
+  final String? installType;
+  final bool updateSupported;
+
+  factory UpdateInfo.fromJson(Map<String, dynamic> json) => UpdateInfo(
+    ok: json['ok'] != false,
+    refreshed: json['refreshed'] == true,
+    error: _stringOrNull(json['error']),
+    packageVersion: _stringOrNull(json['packageVersion']),
+    latestVersion: _stringOrNull(json['latestVersion']),
+    currentCommitSha: _stringOrNull(json['currentCommitSha']),
+    latestCommitSha: _stringOrNull(json['latestCommitSha']),
+    updateChannel: _stringOrNull(json['updateChannel']) ?? 'stable',
+    updateAvailable: json['updateAvailable'] == true,
+    installType: _stringOrNull(json['installType']),
+    updateSupported: json['updateSupported'] == true,
+  );
 }
 
 class ProviderMetadata {

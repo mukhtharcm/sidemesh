@@ -216,6 +216,17 @@ class ApiClient {
     );
   }
 
+  Future<UpdateInfo> refreshUpdateInfo(HostProfile host) async {
+    final response = await _post(
+      host,
+      '/api/admin/update-check',
+      body: const {},
+      timeout: const Duration(seconds: 20),
+      operation: 'check for updates',
+    );
+    return UpdateInfo.fromJson(_decodeObject(response));
+  }
+
   Future<HostTerminalInfo> createTerminal(
     HostProfile host, {
     required String cwd,
