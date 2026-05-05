@@ -1,13 +1,12 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:xterm/xterm.dart' as xterm;
 
 import '../terminal_key_models.dart';
-import '../terminal_keybar_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import 'terminal_keybar_sheet.dart';
 
 class TerminalKeyBar extends StatefulWidget {
   const TerminalKeyBar({
@@ -24,116 +23,88 @@ class TerminalKeyBar extends StatefulWidget {
 }
 
 class _TerminalKeyBarState extends State<TerminalKeyBar> {
-  late final TerminalKeyBarStore _store = TerminalKeyBarStore.instance;
   bool _ctrl = false;
   bool _alt = false;
   bool _shift = false;
 
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_store.ensureLoaded());
-  }
+  static const _essentials = <TerminalKeyAction>[
+    TerminalKeyAction(label: 'Esc', key: xterm.TerminalKey.escape),
+    TerminalKeyAction(label: 'Tab', key: xterm.TerminalKey.tab),
+    TerminalKeyAction(label: '←', key: xterm.TerminalKey.arrowLeft),
+    TerminalKeyAction(label: '↑', key: xterm.TerminalKey.arrowUp),
+    TerminalKeyAction(label: '↓', key: xterm.TerminalKey.arrowDown),
+    TerminalKeyAction(label: '→', key: xterm.TerminalKey.arrowRight),
+  ];
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final activeModifier = _ctrl || _alt || _shift;
+
     return SafeArea(
       top: false,
       child: Container(
+        height: widget.compact ? 46 : 52,
+        padding: EdgeInsets.symmetric(
+          horizontal: widget.compact ? 6 : 8,
+          vertical: widget.compact ? 5 : 6,
+        ),
         decoration: BoxDecoration(
           color: colors.surfaceElevated,
           border: Border(top: BorderSide(color: colors.border)),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              height: widget.compact ? 30 : 34,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ListenableBuilder(
-                      listenable: _store,
-                      builder: (context, _) {
-                        return ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          itemCount: _store.categories.length,
-                          itemBuilder: (context, index) {
-                            final selected =
-                                _store.selectedCategoryIndex == index;
-                            return _CategoryChip(
-                              label: _store.categories[index].label,
-                              selected: selected,
-                              compact: widget.compact,
-                              onTap: () => _store.setSelectedCategoryIndex(index),
-                            );
-                          },
-                          separatorBuilder: (_, _) => const SizedBox(width: 6),
-                        );
-                      },
-                    ),
-                  ),
-                  VerticalDivider(
-                    width: 1,
-                    indent: 6,
-                    endIndent: 6,
-                    color: colors.border,
-                  ),
-                  const SizedBox(width: 4),
-                  _ModifierChip(
-                    label: 'Ctrl',
-                    active: _ctrl,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: _essentials.length + 4, // + Ctrl + Alt + Shift + More
+          itemBuilder: (context, index) {
+            // Essentials first
+            if (index < _essentials.length) {
+              return _KeyButton(
+                label: _essentials[index].label,
+                onTap: () => _onAction(_essentials[index]),
+                compact: widget.compact,
+                highlighted: activeModifier,
+              );
+            }
+
+            // Then modifiers and More
+            final modIndex = index - _essentials.length;
+            switch (modIndex) {
+              case 0:
+                return _ModifierPill(
+                  label: 'Ctrl',
+                  active: _ctrl,
+                  compact: widget.compact,
+                  onTap: () => setState(() => _ctrl = !_ctrl),
+                );
+              case 1:
+                return _ModifierPill(
+                  label: 'Alt',
+                  active: _alt,
+                  compact: widget.compact,
+                  onTap: () => setState(() => _alt = !_alt),
+                );
+              case 2:
+                return _ModifierPill(
+                  label: 'Shift',
+                  active: _shift,
+                  compact: widget.compact,
+                  onTap: () => setState(() => _shift = !_shift),
+                );
+              case 3:
+                return _MoreButton(
+                  compact: widget.compact,
+                  onTap: () => showTerminalKeyBarSheet(
+                    context: context,
+                    onAction: widget.onAction,
                     compact: widget.compact,
-                    onTap: () => setState(() => _ctrl = !_ctrl),
                   ),
-                  const SizedBox(width: 4),
-                  _ModifierChip(
-                    label: 'Alt',
-                    active: _alt,
-                    compact: widget.compact,
-                    onTap: () => setState(() => _alt = !_alt),
-                  ),
-                  const SizedBox(width: 4),
-                  _ModifierChip(
-                    label: 'Shift',
-                    active: _shift,
-                    compact: widget.compact,
-                    onTap: () => setState(() => _shift = !_shift),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-              ),
-            ),
-            const SizedBox(height: 2),
-            SizedBox(
-              height: widget.compact ? 36 : 42,
-              child: ListenableBuilder(
-                listenable: _store,
-                builder: (context, _) {
-                  final category =
-                      _store.categories[_store.selectedCategoryIndex];
-                  return ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    itemCount: category.actions.length,
-                    itemBuilder: (context, index) {
-                      final action = category.actions[index];
-                      return _ActionButton(
-                        action: action,
-                        compact: widget.compact,
-                        activeModifier: _ctrl || _alt || _shift,
-                        onTap: () => _onAction(action),
-                      );
-                    },
-                    separatorBuilder: (_, _) =>
-                        SizedBox(width: widget.compact ? 5 : 6),
-                  );
-                },
-              ),
-            ),
-          ],
+                );
+            }
+            return const SizedBox.shrink();
+          },
+          separatorBuilder: (_, _) =>
+              SizedBox(width: widget.compact ? 5 : 6),
         ),
       ),
     );
@@ -155,21 +126,30 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
     }
     HapticFeedback.selectionClick();
     widget.onAction(effective);
+
+    // One-shot: auto-clear modifiers after a key is sent.
+    if (_ctrl || _alt || _shift) {
+      setState(() {
+        _ctrl = false;
+        _alt = false;
+        _shift = false;
+      });
+    }
   }
 }
 
-class _CategoryChip extends StatelessWidget {
-  const _CategoryChip({
+class _KeyButton extends StatelessWidget {
+  const _KeyButton({
     required this.label,
-    required this.selected,
-    required this.compact,
     required this.onTap,
+    required this.compact,
+    this.highlighted = false,
   });
 
   final String label;
-  final bool selected;
-  final bool compact;
   final VoidCallback onTap;
+  final bool compact;
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
@@ -178,27 +158,21 @@ class _CategoryChip extends StatelessWidget {
       onTap: onTap,
       borderRadius: AppShapes.input,
       child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 8 : 12,
-          vertical: compact ? 4 : 5,
-        ),
+        constraints: const BoxConstraints(minWidth: 40),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14),
         decoration: BoxDecoration(
-          color: selected
-              ? colors.accent.withValues(alpha: 0.15)
-              : null,
           border: Border.all(
-            color: selected ? colors.accent : colors.border,
+            color: highlighted ? colors.accent : colors.border,
           ),
           borderRadius: AppShapes.input,
         ),
         alignment: Alignment.center,
         child: Text(
           label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: selected ? colors.accent : colors.textSecondary,
-            fontWeight:
-                selected ? AppWeights.emphasis : AppWeights.body,
-            fontSize: compact ? 11 : 12,
+          style: monoStyle(
+            color: colors.textPrimary,
+            fontSize: compact ? 12 : 13,
+            fontWeight: AppWeights.emphasis,
           ),
         ),
       ),
@@ -206,8 +180,8 @@ class _CategoryChip extends StatelessWidget {
   }
 }
 
-class _ModifierChip extends StatelessWidget {
-  const _ModifierChip({
+class _ModifierPill extends StatelessWidget {
+  const _ModifierPill({
     required this.label,
     required this.active,
     required this.compact,
@@ -224,28 +198,26 @@ class _ModifierChip extends StatelessWidget {
     final colors = context.colors;
     return InkWell(
       onTap: onTap,
-      borderRadius: AppShapes.input,
-      child: Container(
+      borderRadius: AppShapes.pill,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
         padding: EdgeInsets.symmetric(
-          horizontal: compact ? 7 : 10,
-          vertical: compact ? 4 : 5,
+          horizontal: compact ? 9 : 12,
+          vertical: compact ? 5 : 6,
         ),
         decoration: BoxDecoration(
-          color: active
-              ? colors.accent.withValues(alpha: 0.15)
-              : null,
+          color: active ? colors.accent : null,
           border: Border.all(
             color: active ? colors.accent : colors.border,
           ),
-          borderRadius: AppShapes.input,
+          borderRadius: AppShapes.pill,
         ),
         alignment: Alignment.center,
         child: Text(
           label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: active ? colors.accent : colors.textSecondary,
-            fontWeight:
-                active ? AppWeights.emphasis : AppWeights.body,
+            color: active ? Colors.white : colors.textSecondary,
+            fontWeight: active ? AppWeights.emphasis : AppWeights.body,
             fontSize: compact ? 11 : 12,
           ),
         ),
@@ -254,17 +226,10 @@ class _ModifierChip extends StatelessWidget {
   }
 }
 
-class _ActionButton extends StatelessWidget {
-  const _ActionButton({
-    required this.action,
-    required this.compact,
-    required this.activeModifier,
-    required this.onTap,
-  });
+class _MoreButton extends StatelessWidget {
+  const _MoreButton({required this.compact, required this.onTap});
 
-  final TerminalKeyAction action;
   final bool compact;
-  final bool activeModifier;
   final VoidCallback onTap;
 
   @override
@@ -272,28 +237,21 @@ class _ActionButton extends StatelessWidget {
     final colors = context.colors;
     return InkWell(
       onTap: onTap,
-      borderRadius: AppShapes.input,
+      borderRadius: AppShapes.pill,
       child: Container(
-        constraints: const BoxConstraints(minWidth: 36),
         padding: EdgeInsets.symmetric(
-          horizontal: compact ? 8 : 12,
+          horizontal: compact ? 9 : 12,
+          vertical: compact ? 5 : 6,
         ),
         decoration: BoxDecoration(
-          border: Border.all(
-            color: activeModifier || action.hasModifiers
-                ? colors.accent
-                : colors.border,
-          ),
-          borderRadius: AppShapes.input,
+          border: Border.all(color: colors.border),
+          borderRadius: AppShapes.pill,
         ),
         alignment: Alignment.center,
-        child: Text(
-          action.label,
-          style: monoStyle(
-            color: colors.textPrimary,
-            fontSize: compact ? 11.5 : 12.5,
-            fontWeight: AppWeights.emphasis,
-          ),
+        child: Icon(
+          Icons.more_horiz_rounded,
+          size: compact ? 16 : 18,
+          color: colors.textSecondary,
         ),
       ),
     );
