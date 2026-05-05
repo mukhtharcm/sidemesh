@@ -208,10 +208,10 @@ for internal smoke testing. With signing secrets only, it produces signed
 artifacts. With signing and notary secrets, it notarizes and staples both the
 app and DMG.
 
-With signing secrets and Sparkle secrets, the workflow also generates
-`appcast-prod.xml` from the signed/notarized ZIP and uploads it to the dedicated
-GitHub Release tag `macos-appcast-prod`. Production macOS builds read this
-stable feed URL:
+With signing secrets, notary secrets, and Sparkle secrets, the workflow also
+generates `appcast-prod.xml` from the signed/notarized ZIP and uploads it to the
+dedicated GitHub Release tag `macos-appcast-prod`. Production macOS builds read
+this stable feed URL:
 
 ```text
 https://github.com/mukhtharcm/sidemesh/releases/download/macos-appcast-prod/appcast-prod.xml

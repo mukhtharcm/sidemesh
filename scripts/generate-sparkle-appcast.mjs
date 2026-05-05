@@ -27,7 +27,7 @@ const distDir = resolve(env.DIST_DIR?.trim() || join(rootDir, "artifacts", "maco
 const zipPath = resolve(env.ZIP_PATH?.trim() || join(distDir, `${appName}-${version}-macos.zip`));
 const appcastName = env.SPARKLE_APPCAST_NAME?.trim() || `appcast-${flavor}.xml`;
 const appcastPath = resolve(env.SPARKLE_APPCAST_PATH?.trim() || join(distDir, appcastName));
-const shortVersion = env.SPARKLE_SHORT_VERSION?.trim() || version;
+const shortVersion = env.SPARKLE_SHORT_VERSION?.trim() || version.split("-")[0];
 const minimumSystemVersion = env.SPARKLE_MINIMUM_SYSTEM_VERSION?.trim() || "10.15.0";
 const releaseUrl = env.SPARKLE_RELEASE_URL?.trim() ||
   `https://github.com/${repository}/releases/tag/${encodeURIComponent(releaseTag)}`;
