@@ -50,6 +50,7 @@ dependencies:
   flutter_local_notifications: ^21.0.0
   background_fetch: ^1.6.2
   wakelock_plus: ^1.5.2
+  package_info_plus: ^9.0.1
   desktop_multi_window: ^0.3.0
   xterm: ^4.0.0
   mobile_scanner: ^7.2.0

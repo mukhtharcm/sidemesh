@@ -1405,6 +1405,7 @@ class _SidebarPane extends StatelessWidget {
         return HostsPane(
           hostNodes: {},
           hosts: hosts,
+          installedAppVersion: '',
           onOpenHost: onOpenHostDetail,
           onEditHost: onEditHost,
           onRemoveHost: onRemoveHost,
@@ -1701,6 +1702,7 @@ class _DetailPaneState extends State<_DetailPane> {
               api: widget.api,
               embedded: true,
               topPadding: widget.titlebarInset + 6,
+              showMobileClientCompatibility: false,
               onOpenSession: (session) => widget.onOpenSession(host, session),
             ),
           ),
