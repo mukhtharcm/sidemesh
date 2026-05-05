@@ -204,6 +204,13 @@ jobs:
               --prerelease
           fi
 
+          appcast_release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$appcast_tag" --jq .id)"
+          gh api \
+            --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/$appcast_release_id" \
+            -f make_latest=false \
+            >/dev/null
+
           gh release upload "$appcast_tag" "$appcast_path" --clobber
 
       - name: Write release summary
