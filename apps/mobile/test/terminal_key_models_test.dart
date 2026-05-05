@@ -83,9 +83,9 @@ void main() {
       expect(labels, contains('→'));
     });
 
-    test('ctrl category includes ctrl combos', () {
-      final ctrl = defaultTerminalKeyCategories().firstWhere((c) => c.id == 'ctrl');
-      final labels = ctrl.actions.map((a) => a.label).toList();
+    test('combo category includes ctrl combos', () {
+      final combo = defaultTerminalKeyCategories().firstWhere((c) => c.id == 'combo');
+      final labels = combo.actions.map((a) => a.label).toList();
       expect(labels, contains('Ctrl+C'));
       expect(labels, contains('Ctrl+D'));
       expect(labels, contains('Ctrl+Z'));
