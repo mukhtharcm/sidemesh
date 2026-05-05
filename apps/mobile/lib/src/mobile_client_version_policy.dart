@@ -16,15 +16,30 @@ int compareReleaseVersions(String left, String right) {
 
   final leftPre = parsedLeft.preRelease;
   final rightPre = parsedRight.preRelease;
-  if (leftPre == null && rightPre == null) return 0;
-  if (leftPre == null) return 1;
-  if (rightPre == null) return -1;
+  if (leftPre == null && rightPre != null) return 1;
+  if (leftPre != null && rightPre == null) return -1;
+  if (leftPre != null && rightPre != null) {
+    final preCompare = _compareIdentifierLists(leftPre, rightPre);
+    if (preCompare != 0) return preCompare;
+  }
 
-  for (var i = 0; i < leftPre.length || i < rightPre.length; i++) {
-    if (i >= leftPre.length) return -1;
-    if (i >= rightPre.length) return 1;
-    final leftPart = leftPre[i];
-    final rightPart = rightPre[i];
+  final leftBuild = parsedLeft.build;
+  final rightBuild = parsedRight.build;
+  if (leftBuild == null && rightBuild != null) return -1;
+  if (leftBuild != null && rightBuild == null) return 1;
+  if (leftBuild != null && rightBuild != null) {
+    return _compareIdentifierLists(leftBuild, rightBuild);
+  }
+
+  return 0;
+}
+
+int _compareIdentifierLists(List<String> left, List<String> right) {
+  for (var i = 0; i < left.length || i < right.length; i++) {
+    if (i >= left.length) return -1;
+    if (i >= right.length) return 1;
+    final leftPart = left[i];
+    final rightPart = right[i];
     final leftNumber = int.tryParse(leftPart);
     final rightNumber = int.tryParse(rightPart);
     if (leftNumber != null && rightNumber != null) {
@@ -38,7 +53,6 @@ int compareReleaseVersions(String left, String right) {
     final compare = leftPart.compareTo(rightPart);
     if (compare != 0) return compare;
   }
-
   return 0;
 }
 
@@ -199,29 +213,59 @@ String _maxVersion(String? current, String candidate) {
 }
 
 class _ParsedReleaseVersion {
-  const _ParsedReleaseVersion({required this.core, required this.preRelease});
+  const _ParsedReleaseVersion({
+    required this.core,
+    required this.preRelease,
+    required this.build,
+  });
 
   final List<int> core;
   final List<String>? preRelease;
+  final List<String>? build;
 
   factory _ParsedReleaseVersion.parse(String raw) {
     final trimmed = raw.trim();
     if (trimmed.isEmpty) {
-      return const _ParsedReleaseVersion(core: <int>[0], preRelease: null);
+      return const _ParsedReleaseVersion(
+        core: <int>[0],
+        preRelease: null,
+        build: null,
+      );
     }
 
-    final buildSplit = trimmed.split('+');
-    final preSplit = buildSplit.first.split('-');
-    final core = preSplit.first
+    final withoutPrefix = trimmed.startsWith(RegExp('[vV]'))
+        ? trimmed.substring(1)
+        : trimmed;
+    final buildSeparator = withoutPrefix.indexOf('+');
+    final releasePart = buildSeparator == -1
+        ? withoutPrefix
+        : withoutPrefix.substring(0, buildSeparator);
+    final build = buildSeparator == -1
+        ? null
+        : withoutPrefix
+              .substring(buildSeparator + 1)
+              .split('.')
+              .where((part) => part.isNotEmpty)
+              .toList(growable: false);
+    final preReleaseSeparator = releasePart.indexOf('-');
+    final corePart = preReleaseSeparator == -1
+        ? releasePart
+        : releasePart.substring(0, preReleaseSeparator);
+    final preRelease = preReleaseSeparator == -1
+        ? null
+        : releasePart
+              .substring(preReleaseSeparator + 1)
+              .split('.')
+              .where((part) => part.isNotEmpty)
+              .toList(growable: false);
+    final core = corePart
         .split('.')
         .map((part) => int.tryParse(part) ?? 0)
         .toList(growable: false);
-    final preRelease = preSplit.length > 1
-        ? preSplit.sublist(1).join('-').split('.')
-        : null;
     return _ParsedReleaseVersion(
       core: core.isEmpty ? const <int>[0] : core,
       preRelease: preRelease,
+      build: build,
     );
   }
 }
