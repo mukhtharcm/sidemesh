@@ -266,6 +266,11 @@ sidemesh pair        # show host URL + token for mobile app
 Do not publish npm, app-store, TestFlight, or GitHub release artifacts without
 following `docs/release-playbook.md`.
 
+macOS app updates are Sparkle-based and separate from daemon self-updates. The
+appcast is published as a GitHub Release asset on `macos-appcast-prod`, while
+the update ZIP stays on the versioned macOS app release. The daemon probing UI
+still only updates connected host daemons.
+
 ### Resilient Daemon Updates
 
 Because systemd kills the entire cgroup on restart, **do not** restart the
