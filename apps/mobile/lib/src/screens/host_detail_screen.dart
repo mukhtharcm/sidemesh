@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api_client.dart' show ApiClient, friendlyError;
+import '../app_version_store.dart';
+import '../mobile_client_version_policy.dart';
 import '../models.dart';
 import '../host_status_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,6 +28,7 @@ class HostDetailScreen extends StatefulWidget {
     required this.onOpenSession,
     this.embedded = false,
     this.topPadding = 0,
+    this.showMobileClientCompatibility = true,
   });
 
   final HostProfile host;
@@ -39,12 +42,16 @@ class HostDetailScreen extends StatefulWidget {
   /// Extra padding reserved at the top (e.g. macOS titlebar inset).
   final double topPadding;
 
+  /// Mobile-client version hints are only actionable in the mobile app shell.
+  final bool showMobileClientCompatibility;
+
   @override
   State<HostDetailScreen> createState() => _HostDetailScreenState();
 }
 
 class _HostDetailScreenState extends State<HostDetailScreen> {
   final SessionLocalStore _localStore = SessionLocalStore.instance;
+  final AppVersionStore _appVersionStore = AppVersionStore.instance;
   late Future<_HostOverview> _future;
   Timer? _refreshTimer;
   Future<void>? _updateInfoRefresh;
@@ -57,6 +64,10 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
 
     _localStore.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
+    if (widget.showMobileClientCompatibility) {
+      _appVersionStore.addListener(_handleAppVersionChanged);
+      unawaited(_appVersionStore.ensureLoaded());
+    }
     _future = _load();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_refreshUpdateInfo());
@@ -67,7 +78,15 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    if (widget.showMobileClientCompatibility) {
+      _appVersionStore.removeListener(_handleAppVersionChanged);
+    }
     super.dispose();
+  }
+
+  void _handleAppVersionChanged() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _silentRefresh() async {
@@ -311,6 +330,14 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                 ),
                 children: [
                   _NodeCard(host: widget.host, node: data.node),
+                  if (widget.showMobileClientCompatibility &&
+                      data.node.advertisesMobileClientVersionHints) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    _MobileClientCompatibilityCard(
+                      node: data.node,
+                      appVersionInfo: _appVersionStore.info,
+                    ),
+                  ],
                   const SizedBox(height: AppSpacing.sm),
                   _ProviderContractCard(node: data.node),
                   if (data.workspaces.length > 1) ...[
@@ -556,6 +583,139 @@ class _NodeCard extends StatelessWidget {
                   mono: true,
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileClientCompatibilityCard extends StatelessWidget {
+  const _MobileClientCompatibilityCard({
+    required this.node,
+    required this.appVersionInfo,
+  });
+
+  final NodeInfo node;
+  final AppVersionInfo appVersionInfo;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final installedVersion = appVersionInfo.comparableVersion;
+    final compatibility = evaluateMobileClientCompatibility(
+      installedVersion: installedVersion,
+      recommendedVersion: node.recommendedMobileClientVersion,
+      minimumVersion: node.minimumMobileClientVersion,
+    );
+    final requiresUpdate =
+        compatibility.level == MobileClientCompatibilityLevel.required;
+    final recommendsUpdate =
+        compatibility.level == MobileClientCompatibilityLevel.recommended;
+    final accent = requiresUpdate ? colors.danger : colors.info;
+    final accentMuted = requiresUpdate ? colors.dangerMuted : colors.infoMuted;
+    final title = requiresUpdate
+        ? 'Mobile client update required'
+        : recommendsUpdate
+        ? 'Mobile client update recommended'
+        : 'Mobile client compatibility';
+    final currentVersion = appVersionInfo.hasVersion
+        ? 'You are on ${appVersionInfo.displayVersion}.'
+        : 'Current mobile app version is unavailable on this device.';
+    final guidance = switch (compatibility.level) {
+      MobileClientCompatibilityLevel.required =>
+        'This host requires Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
+      MobileClientCompatibilityLevel.recommended =>
+        'This host recommends Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
+      MobileClientCompatibilityLevel.none => node.minimumMobileClientVersion != null &&
+              node.minimumMobileClientVersion!.isNotEmpty
+          ? 'This host currently supports Sidemesh mobile ${mobileClientVersionLabel(node.minimumMobileClientVersion!)} or newer.'
+          : node.recommendedMobileClientVersion != null &&
+                node.recommendedMobileClientVersion!.isNotEmpty
+          ? 'This host currently recommends Sidemesh mobile ${mobileClientVersionLabel(node.recommendedMobileClientVersion!)} or newer.'
+          : 'This host did not publish a mobile client policy.',
+    };
+
+    return MeshCard(
+      tone: MeshCardTone.muted,
+      borderColor: accent.withValues(alpha: 0.28),
+      accentStrip: accent,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: accentMuted,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: accent.withValues(alpha: 0.3)),
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.phone_android_rounded, color: accent, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  guidance,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    MeshPill(
+                      label: appVersionInfo.displayVersion,
+                      icon: Icons.smartphone_rounded,
+                      tone: MeshPillTone.neutral,
+                      mono: true,
+                    ),
+                    if ((node.minimumMobileClientVersion ?? '').isNotEmpty)
+                      MeshPill(
+                        label:
+                            'minimum ${mobileClientVersionLabel(node.minimumMobileClientVersion!)}',
+                        icon: Icons.lock_outline_rounded,
+                        tone: requiresUpdate
+                            ? MeshPillTone.danger
+                            : MeshPillTone.neutral,
+                        mono: true,
+                      ),
+                    if ((node.recommendedMobileClientVersion ?? '').isNotEmpty)
+                      MeshPill(
+                        label:
+                            'recommended ${mobileClientVersionLabel(node.recommendedMobileClientVersion!)}',
+                        icon: Icons.system_update_alt_rounded,
+                        tone: recommendsUpdate
+                            ? MeshPillTone.info
+                            : MeshPillTone.neutral,
+                        mono: true,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  currentVersion,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textTertiary,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),

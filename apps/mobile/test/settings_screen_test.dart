@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sidemesh_mobile/src/app_version_store.dart';
 import 'package:sidemesh_mobile/src/create_session_defaults_store.dart';
 import 'package:sidemesh_mobile/src/screen_awake_settings_store.dart';
 import 'package:sidemesh_mobile/src/screens/settings_screen.dart';
@@ -13,6 +14,7 @@ import 'package:sidemesh_mobile/src/widgets/appearance_sheet.dart';
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
+    AppVersionStore.instance.resetForTest();
     CreateSessionDefaultsStore.instance.resetForTest();
     ScreenAwakeSettingsStore.instance.resetForTest();
   });
@@ -52,7 +54,7 @@ void main() {
       expect(find.text('Keep screen awake while agent runs'), findsOneWidget);
       expect(find.text('Notifications'), findsOneWidget);
       expect(find.text('New session defaults'), findsOneWidget);
-      expect(find.text('Storage & recovery'), findsOneWidget);
+      expect(find.text('Data & storage'), findsOneWidget);
       expect(find.text('About'), findsOneWidget);
     } finally {
       debugDefaultTargetPlatformOverride = null;

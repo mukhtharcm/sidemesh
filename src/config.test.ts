@@ -119,6 +119,61 @@ describe("loadConfig", () => {
     assert.equal(overridden.updateChannel, "stable");
   });
 
+  it("loads mobile client version hints from persisted config and env overrides", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        recommendedMobileClientVersion: "1.2.0+2",
+        minimumMobileClientVersion: "v1.0.0",
+        providers: [{ kind: "codex", bin: "codex" }],
+      }),
+    );
+
+    const persisted = await loadConfig({ configPath, env: {} });
+    assert.equal(persisted.recommendedMobileClientVersion, "1.2.0+2");
+    assert.equal(persisted.minimumMobileClientVersion, "v1.0.0");
+
+    const overridden = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_RECOMMENDED_MOBILE_CLIENT_VERSION: "v1.3.0",
+        SIDEMESH_MINIMUM_MOBILE_CLIENT_VERSION: "1.1.0+4",
+      },
+    });
+    assert.equal(overridden.recommendedMobileClientVersion, "v1.3.0");
+    assert.equal(overridden.minimumMobileClientVersion, "1.1.0+4");
+  });
+
+  it("rejects invalid mobile client version hints", async () => {
+    await assert.rejects(
+      () =>
+        loadConfig({
+          configPath,
+          env: {
+            SIDEMESH_MINIMUM_MOBILE_CLIENT_VERSION: "latest",
+          },
+        }),
+      /SIDEMESH_MINIMUM_MOBILE_CLIENT_VERSION must be a mobile client version/,
+    );
+
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        recommendedMobileClientVersion: "latest",
+        providers: [{ kind: "codex", bin: "codex" }],
+      }),
+    );
+
+    await assert.rejects(
+      () => loadConfig({ configPath, env: {} }),
+      /recommendedMobileClientVersion.*must be a mobile client version/s,
+    );
+  });
+
   it("loads Pi provider config from env and persisted values", async () => {
     await writeFile(
       configPath,

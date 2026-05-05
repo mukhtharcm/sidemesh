@@ -50,6 +50,8 @@ void main() {
       'installType': 'git',
       'updateAvailable': true,
       'updateSupported': true,
+      'recommendedMobileClientVersion': '1.2.0',
+      'minimumMobileClientVersion': '1.1.0',
     });
 
     expect(node.provider, 'codex');
@@ -83,6 +85,9 @@ void main() {
     expect(node.currentInstallLabel, 'main@a1b2c3d');
     expect(node.latestInstallLabel, 'main@b1c2d3e');
     expect(node.updateBadgeLabel, 'New commits on main');
+    expect(node.recommendedMobileClientVersion, '1.2.0');
+    expect(node.minimumMobileClientVersion, '1.1.0');
+    expect(node.advertisesMobileClientVersionHints, isTrue);
     expect(node.supportedProviders.single.supportedApprovalPolicies, [
       'untrusted',
       'on-failure',
@@ -115,6 +120,7 @@ void main() {
     expect(node.hostCapabilities.values, isEmpty);
     expect(node.supportsHostCapability('workspace', 'gitStatus'), isFalse);
     expect(node.supportedProviders, isEmpty);
+    expect(node.advertisesMobileClientVersionHints, isFalse);
   });
 
   test('UpdateInfo patches NodeInfo update fields', () {
@@ -152,6 +158,8 @@ void main() {
       'installType': 'git',
       'updateSupported': true,
       'updateAvailable': false,
+      'recommendedMobileClientVersion': '1.2.0',
+      'minimumMobileClientVersion': '1.0.0',
     });
     final updateInfo = UpdateInfo.fromJson({
       'ok': true,
@@ -176,6 +184,8 @@ void main() {
     expect(patched.shortLatestCommitSha, 'b1c2d3e');
     expect(patched.updateAvailable, isTrue);
     expect(patched.updateBadgeLabel, 'New commits on main');
+    expect(patched.recommendedMobileClientVersion, '1.2.0');
+    expect(patched.minimumMobileClientVersion, '1.0.0');
   });
 
   test('NodeInfo falls back to providerCapabilities when defaultProviderCapabilities is absent', () {
