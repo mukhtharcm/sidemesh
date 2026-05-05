@@ -90,14 +90,24 @@ const updateChannelSchema = z.enum([
   "bleeding-edge",
 ] satisfies readonly UpdateChannel[]);
 
+export const MOBILE_CLIENT_VERSION_PATTERN = /^[vV]?\d+(?:\.\d+)*(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const mobileClientVersionSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .regex(
+    MOBILE_CLIENT_VERSION_PATTERN,
+    "must be a mobile client version like 1.2.0, v1.2.0, or 1.2.0+3",
+  );
+
 const persistedNodeConfigSchema = z.object({
   version: z.literal(CONFIG_VERSION).default(CONFIG_VERSION),
   label: z.string().trim().min(1).optional(),
   port: z.number().int().min(1).max(65535).optional(),
   token: z.string().trim().min(1).optional(),
   updateChannel: updateChannelSchema.default("stable"),
-  recommendedMobileClientVersion: z.string().trim().min(1).nullable().optional(),
-  minimumMobileClientVersion: z.string().trim().min(1).nullable().optional(),
+  recommendedMobileClientVersion: mobileClientVersionSchema.nullable().optional(),
+  minimumMobileClientVersion: mobileClientVersionSchema.nullable().optional(),
   stateDir: z.string().trim().min(1).optional(),
   terminal: terminalConfigSchema.optional(),
   portForwarding: portForwardingConfigSchema.optional(),
@@ -153,7 +163,10 @@ export async function readPersistedConfig(
     if (error instanceof z.ZodError) {
       throw new Error(
         `Invalid Sidemesh config at ${configPath}: ${error.issues
-          .map((issue) => issue.message)
+          .map((issue) => {
+            const path = issue.path.join(".");
+            return path ? `${path}: ${issue.message}` : issue.message;
+          })
           .join("; ")}`,
       );
     }

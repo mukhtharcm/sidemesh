@@ -13,6 +13,7 @@ import type {
   UpdateChannel,
 } from "./types.js";
 import {
+  MOBILE_CLIENT_VERSION_PATTERN,
   persistedConfigFromNodeConfig,
   providerConfigByKind,
   readPersistedConfig,
@@ -74,11 +75,13 @@ export async function loadConfig(
     env.SIDEMESH_UPDATE_CHANNEL,
     persisted.value?.updateChannel ?? "stable",
   );
-  const recommendedMobileClientVersion = parseOptionalTrimmed(
+  const recommendedMobileClientVersion = parseOptionalMobileClientVersion(
+    "SIDEMESH_RECOMMENDED_MOBILE_CLIENT_VERSION",
     env.SIDEMESH_RECOMMENDED_MOBILE_CLIENT_VERSION,
     persisted.value?.recommendedMobileClientVersion ?? null,
   );
-  const minimumMobileClientVersion = parseOptionalTrimmed(
+  const minimumMobileClientVersion = parseOptionalMobileClientVersion(
+    "SIDEMESH_MINIMUM_MOBILE_CLIENT_VERSION",
     env.SIDEMESH_MINIMUM_MOBILE_CLIENT_VERSION,
     persisted.value?.minimumMobileClientVersion ?? null,
   );
@@ -293,7 +296,8 @@ function dedupeProviderKinds(
   });
 }
 
-function parseOptionalTrimmed(
+function parseOptionalMobileClientVersion(
+  name: string,
   value: string | undefined,
   fallback: string | null,
 ): string | null {
@@ -301,7 +305,15 @@ function parseOptionalTrimmed(
     return fallback;
   }
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  if (trimmed.length === 0) {
+    return null;
+  }
+  if (!MOBILE_CLIENT_VERSION_PATTERN.test(trimmed)) {
+    throw new Error(
+      `${name} must be a mobile client version like 1.2.0, v1.2.0, or 1.2.0+3`,
+    );
+  }
+  return trimmed;
 }
 
 function resolveTerminalConfig(
