@@ -12,3 +12,7 @@ PRODUCT_BUNDLE_IDENTIFIER = com.sidemesh.sidemeshMobile
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.sidemesh. All rights reserved.
+
+// Sparkle is enabled only when CI or a local release build provides a public
+// EdDSA key. Leave this empty for unsigned/internal builds.
+SPARKLE_PUBLIC_ED_KEY = $(SIDEMESH_SPARKLE_PUBLIC_ED_KEY)
