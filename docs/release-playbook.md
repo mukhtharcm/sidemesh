@@ -123,10 +123,12 @@ Current workflows:
 - `Release macOS App`: manual workflow that builds the Flutter macOS app,
   packages `.zip` and `.dmg` artifacts, optionally signs with Developer ID,
   optionally notarizes/staples with Apple, and can publish a GitHub Release
-  when `publish_release` is enabled.
+  when `publish_release` is enabled. It uses the committed
+  `apps/mobile/pubspec.yaml` version.
 - `Deploy to TestFlight`: manual workflow that builds and uploads the signed iOS
-  prod flavor. It is intentionally not tied to tags so server releases do not
-  spend macOS CI minutes.
+  prod flavor from the committed `apps/mobile/pubspec.yaml` version. It is
+  intentionally not tied to tags so server releases do not spend macOS CI
+  minutes.
 - `Deploy Website`: deploys the static `web/` marketing site and Pages
   Functions to Cloudflare Pages when `web/**` changes on `main`.
 - `Publish npm Package`: publishes the daemon package to npm on manual dispatch
@@ -164,6 +166,33 @@ need a mobile build. Keep product releases separate:
 - npm daemon package: publish manually or with `npm-v<daemon version>`.
 - macOS app: run `Release macOS App` manually and enable `publish_release`.
 - iOS app: run `Deploy to TestFlight` manually.
+
+## Mobile App Versioning
+
+`apps/mobile/pubspec.yaml` is the only source of truth for official iOS and
+macOS app release versions. The value must be stable `X.Y.Z+N`, where `X.Y.Z`
+is the marketing version and `N` is the positive build number.
+
+Before running TestFlight or macOS release workflows, bump and commit the mobile
+version in a PR:
+
+```bash
+npm run mobile:version -- 1.1.1+1
+```
+
+The bump script refuses version downgrades and refuses reused or lower build
+numbers when the marketing version stays the same. Official iOS and macOS
+release workflows do not accept version or build-number inputs, and they do not
+derive app versions from git tags.
+
+The TestFlight workflow also checks App Store Connect before upload. It fails
+if the committed pubspec version is older than an existing App Store Connect
+version, or if the committed build number is not greater than the latest
+uploaded build for the same version.
+
+The macOS workflow checks the existing production Sparkle appcast before
+publishing a new appcast. It refuses to replace the feed with an older version,
+or with a reused/lower build number for the same version.
 
 ## Website Deploy
 
@@ -229,8 +258,11 @@ https://github.com/mukhtharcm/sidemesh/releases/download/macos-appcast-prod/appc
 Each appcast entry points back to the versioned GitHub Release ZIP. The DMG
 remains the manual first-install artifact.
 
-To create a GitHub Release from the macOS workflow, run it manually and enable
-`publish_release`. npm tags intentionally do not trigger app builds.
+To create a GitHub Release from the macOS workflow, bump
+`apps/mobile/pubspec.yaml`, merge that change to `main`, run the workflow
+manually, and enable `publish_release`. The release tag is
+`macos-v<pubspec-version>`, for example `macos-v1.1.1+1`. npm tags
+intentionally do not trigger app builds.
 
 To package locally:
 
@@ -253,9 +285,9 @@ To embed the Sparkle public key in a local release build, add:
 SIDEMESH_SPARKLE_PUBLIC_ED_KEY="base64-public-ed-key"
 ```
 
-Prerelease versions such as `0.1.0-beta.1` are allowed for artifact names and
-GitHub releases. The packaging script automatically uses the base `0.1.0` as
-the macOS bundle short version unless `FLUTTER_BUILD_NAME` is set explicitly.
+Prerelease versions such as `0.1.0-beta.1` are allowed only for local artifact
+names and ad-hoc packaging. Official GitHub Actions app releases require the
+committed pubspec version to be stable `X.Y.Z+N`.
 
 ## Security Caveats For Testers
 

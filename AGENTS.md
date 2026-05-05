@@ -271,6 +271,13 @@ appcast is published as a GitHub Release asset on `macos-appcast-prod`, while
 the update ZIP stays on the versioned macOS app release. The daemon probing UI
 still only updates connected host daemons.
 
+iOS and macOS app release workflows use the committed `apps/mobile/pubspec.yaml`
+version only. Bump it with `npm run mobile:version -- X.Y.Z+N`; do not rely on
+workflow inputs or git tags to change app version/build numbers. macOS app
+release tags use `macos-vX.Y.Z+N`; npm package release tags use
+`npm-v<package.json version>`. TestFlight and Sparkle appcast publishing both
+perform remote monotonic-version checks before uploading release artifacts.
+
 ### Resilient Daemon Updates
 
 Because systemd kills the entire cgroup on restart, **do not** restart the

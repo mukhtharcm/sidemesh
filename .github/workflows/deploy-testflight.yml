@@ -2,11 +2,6 @@ name: Deploy to TestFlight
 
 on:
   workflow_dispatch:
-    inputs:
-      build_number:
-        description: "Build number override. Defaults to the GitHub run number."
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -265,23 +260,21 @@ jobs:
 
       - name: Determine version
         id: version
-        env:
-          INPUT_BUILD_NUMBER: ${{ inputs.build_number }}
         run: |
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#v}"
-          else
-            version="$(grep '^version:' apps/mobile/pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)"
+          pubspec_version="$(grep '^version:' apps/mobile/pubspec.yaml | sed -E 's/^version:[[:space:]]*//')"
+          if [[ ! "$pubspec_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\+[1-9][0-9]*$ ]]; then
+            echo "apps/mobile/pubspec.yaml version must be X.Y.Z+N for TestFlight, got: $pubspec_version" >&2
+            echo "Run: npm run mobile:version -- <next-version+build>" >&2
+            exit 1
           fi
 
-          build_number="$INPUT_BUILD_NUMBER"
-          if [[ -z "$build_number" ]]; then
-            build_number="$GITHUB_RUN_NUMBER"
-          fi
+          version="${pubspec_version%%+*}"
+          build_number="${pubspec_version##*+}"
 
+          echo "pubspec_version=$pubspec_version" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
-          echo "Building Sidemesh iOS $version ($build_number)"
+          echo "Building Sidemesh iOS $version ($build_number) from committed pubspec"
 
       - name: Install Python dependencies for ASC scripts
         run: python3 -m pip install pyjwt --quiet --break-system-packages
@@ -289,7 +282,7 @@ jobs:
       - name: Generate release notes
         run: python3 scripts/generate-release-notes.py
 
-      - name: Resolve build number conflicts
+      - name: Validate TestFlight version/build
         id: resolve_build_number
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -392,7 +385,8 @@ jobs:
             echo "## Sidemesh TestFlight"
             echo
             echo "- Version: ${{ steps.version.outputs.version }}"
-            echo "- Build number: ${{ steps.version.outputs.build_number }}"
+            echo "- Build number: ${{ steps.resolve_build_number.outputs.build_number || steps.version.outputs.build_number }}"
+            echo "- Source: apps/mobile/pubspec.yaml"
             echo "- Flavor: prod"
             echo "- App bundle: dev.sidemesh.mobile"
             echo "- Extension bundle: dev.sidemesh.mobile.LiveActivityExtension"
