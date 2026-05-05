@@ -259,6 +259,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     }
     ApprovalInboxStore.instance.configure(hosts: _enabledHosts, api: _api);
     _startHeartbeat();
+    unawaited(_runHeartbeat());
     unawaited(_handleNotificationRouteIntent());
   }
 
