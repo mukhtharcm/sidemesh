@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 import type { HttpBindings } from "@hono/node-server";
 import type { Context, Handler } from "hono";
 import { HTTPException } from "hono/http-exception";
-import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status";
+import type { StatusCode } from "hono/utils/http-status";
 
 export type HonoServerEnv = {
   Bindings: HttpBindings;
@@ -48,17 +48,14 @@ class JsonRouteResponseRecorder implements JsonRouteResponse {
 
   public toResponse(c: HonoServerContext): Response | Promise<Response> {
     const status = this.statusCode as StatusCode;
+    c.status(status);
     if (!this.hasJsonPayload) {
-      return c.body(null, status);
+      return c.body(null);
     }
     const body = JSON.stringify(this.jsonPayload) ?? "";
-    return new Response(body, {
-      status: status as ContentfulStatusCode,
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Content-Length": String(Buffer.byteLength(body, "utf8")),
-      },
-    });
+    c.header("Content-Type", "application/json; charset=utf-8");
+    c.header("Content-Length", String(Buffer.byteLength(body, "utf8")));
+    return c.body(body);
   }
 }
 

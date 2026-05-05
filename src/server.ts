@@ -14,7 +14,6 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
-import type { MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { WebSocketServer, type WebSocket } from "ws";
 
@@ -811,13 +810,12 @@ export async function startServer(
   // types (images, video) and the unauthenticated health-check endpoint.
   const compressionMiddleware = compress();
   app.use("*", async (c, next) => {
-    if (c.req.path === "/healthz") {
+    if (isHealthCheckPath(c.req.path)) {
       await next();
       return;
     }
     return compressionMiddleware(c, next);
   });
-  app.use("*", createRateLimitMiddleware());
   // Image attachments are sent as data URLs, so message payloads can be
   // materially larger than plain-text turns.
   app.use("*", bodyLimit({
@@ -849,7 +847,7 @@ export async function startServer(
   }));
 
   const authMiddleware = createMiddleware<HonoServerEnv>(async (c, next) => {
-    if (c.req.path === "/healthz") {
+    if (isHealthCheckPath(c.req.path)) {
       await next();
       return;
     }
@@ -2781,38 +2779,8 @@ function pathParam(value: string | string[] | undefined): string {
   return value || "";
 }
 
-function createRateLimitMiddleware(
-  options: { windowMs: number; limit: number } = {
-    windowMs: 15 * 60 * 1000,
-    limit: 100,
-  },
-): MiddlewareHandler<HonoServerEnv> {
-  const hits = new Map<string, { count: number; resetAt: number }>();
-  return async (c, next) => {
-    const now = Date.now();
-    const key = rateLimitKey(c);
-    const existing = hits.get(key);
-    const entry = existing && existing.resetAt > now
-      ? existing
-      : { count: 0, resetAt: now + options.windowMs };
-    entry.count += 1;
-    hits.set(key, entry);
-
-    const remaining = Math.max(0, options.limit - entry.count);
-    c.header("RateLimit-Limit", String(options.limit));
-    c.header("RateLimit-Remaining", String(remaining));
-    c.header("RateLimit-Reset", String(Math.ceil((entry.resetAt - now) / 1000)));
-    if (entry.count > options.limit) {
-      return c.json({ error: "too many requests" }, 429);
-    }
-
-    await next();
-  };
-}
-
-function rateLimitKey(c: Parameters<MiddlewareHandler<HonoServerEnv>>[0]): string {
-  const forwardedFor = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwardedFor || c.env.incoming.socket.remoteAddress || "localhost";
+function isHealthCheckPath(path: string): boolean {
+  return path === "/healthz";
 }
 
 function requireProviderCapability(
