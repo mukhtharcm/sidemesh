@@ -129,7 +129,7 @@ function buildAppcast(signatureFragment) {
       <pubDate>${xmlEscape(pubDate)}</pubDate>
       <link>${xmlEscape(releaseUrl)}</link>
       <sparkle:releaseNotesLink>${xmlEscape(releaseUrl)}</sparkle:releaseNotesLink>
-      <enclosure url="${xmlEscape(downloadUrl)}" ${signatureFragment} type="application/octet-stream" />
+      <enclosure url="${xmlEscape(downloadUrl)}" ${signatureFragment} type="application/zip" />
     </item>
   </channel>
 </rss>
