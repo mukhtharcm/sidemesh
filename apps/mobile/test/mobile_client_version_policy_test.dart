@@ -10,6 +10,11 @@ void main() {
     expect(compareReleaseVersions('1.2', '1.2.0'), 0);
     expect(compareReleaseVersions('1.2.0-beta.1', '1.2.0'), lessThan(0));
     expect(compareReleaseVersions('1.2.0', '1.2.0-beta.1'), greaterThan(0));
+    expect(compareReleaseVersions('v1.2.0', '1.2.0'), 0);
+    expect(compareReleaseVersions('1.2.0+2', '1.2.0+3'), lessThan(0));
+    expect(compareReleaseVersions('1.2.0+10', '1.2.0+3'), greaterThan(0));
+    expect(compareReleaseVersions('1.2.0+2', '1.2.0'), greaterThan(0));
+    expect(compareReleaseVersions('1.2.0', '1.2.0+2'), lessThan(0));
   });
 
   test('evaluateMobileClientCompatibility prefers minimum over recommended', () {
@@ -35,6 +40,14 @@ void main() {
       minimumVersion: '1.0.0',
     );
     expect(none.level, MobileClientCompatibilityLevel.none);
+
+    final buildRecommended = evaluateMobileClientCompatibility(
+      installedVersion: '1.2.0+2',
+      recommendedVersion: '1.2.0+3',
+      minimumVersion: null,
+    );
+    expect(buildRecommended.level, MobileClientCompatibilityLevel.recommended);
+    expect(buildRecommended.targetVersion, '1.2.0+3');
   });
 
   test('summarizeMobileClientCompatibility aggregates across hosts', () {

@@ -252,9 +252,16 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     if (!mounted) {
       return;
     }
+    final hostIds = hosts.map((host) => host.id).toSet();
     setState(() {
       _hosts = hosts;
       _loading = false;
+      _hostNodeInfo.removeWhere((id, _) => !hostIds.contains(id));
+      for (final host in hosts) {
+        if (!host.enabled) {
+          _hostNodeInfo.remove(host.id);
+        }
+      }
     });
     for (final host in hosts) {
       if (!host.enabled) {
@@ -287,6 +294,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     if (previousHost != null &&
         (previousHost.baseUrl != result.baseUrl ||
             previousHost.token != result.token)) {
+      _hostNodeInfo.remove(previousHost.id);
+      HostStatusStore.instance.clear(previousHost.id);
       await SessionLocalStore.instance.clearHost(previousHost);
     }
     await _store.saveHosts(updated);
@@ -296,6 +305,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   Future<void> _removeHost(HostProfile host) async {
     final updated = _hosts.where((item) => item.id != host.id).toList();
     await SessionLocalStore.instance.clearHost(host);
+    _hostNodeInfo.remove(host.id);
+    HostStatusStore.instance.clear(host.id);
     await _store.saveHosts(updated);
     await _refreshHosts();
   }
@@ -310,6 +321,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
         .toList();
     await _store.saveHosts(updated);
     if (disabling) {
+      _hostNodeInfo.remove(host.id);
       HostStatusStore.instance.clear(host.id);
       await LiveActivityService.instance.clearPrimarySessionForHost(host.id);
     }
@@ -491,7 +503,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     final colors = context.colors;
     final tab = _tabs[_tabIndex];
     final enabledHosts = _enabledHosts;
-    final installedAppVersion = _appVersionStore.info.version;
+    final installedAppVersion = _appVersionStore.info.comparableVersion;
     final mobileClientNotice = summarizeMobileClientCompatibility(
       installedVersion: installedAppVersion,
       hosts: enabledHosts,
@@ -3139,7 +3151,7 @@ class _HostRowCard extends StatelessWidget {
         final status = host.enabled
             ? HostStatusStore.instance.statusFor(host.id)
             : HostStatus.unknown;
-        final compatibility = node == null
+        final compatibility = node == null || !host.enabled
             ? MobileClientCompatibility.none
             : evaluateMobileClientCompatibility(
                 installedVersion: installedAppVersion,

@@ -1702,6 +1702,7 @@ class _DetailPaneState extends State<_DetailPane> {
               api: widget.api,
               embedded: true,
               topPadding: widget.titlebarInset + 6,
+              showMobileClientCompatibility: false,
               onOpenSession: (session) => widget.onOpenSession(host, session),
             ),
           ),

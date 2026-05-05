@@ -23,6 +23,12 @@ class AppVersionInfo {
 
   bool get hasVersion => version.isNotEmpty;
 
+  String get comparableVersion {
+    if (version.isEmpty) return '';
+    if (buildNumber.isEmpty) return version;
+    return '$version+$buildNumber';
+  }
+
   String get displayVersion {
     if (version.isEmpty) return 'Unknown version';
     if (buildNumber.isEmpty) return 'v$version';

@@ -28,6 +28,7 @@ class HostDetailScreen extends StatefulWidget {
     required this.onOpenSession,
     this.embedded = false,
     this.topPadding = 0,
+    this.showMobileClientCompatibility = true,
   });
 
   final HostProfile host;
@@ -40,6 +41,9 @@ class HostDetailScreen extends StatefulWidget {
 
   /// Extra padding reserved at the top (e.g. macOS titlebar inset).
   final double topPadding;
+
+  /// Mobile-client version hints are only actionable in the mobile app shell.
+  final bool showMobileClientCompatibility;
 
   @override
   State<HostDetailScreen> createState() => _HostDetailScreenState();
@@ -60,8 +64,10 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
 
     _localStore.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
-    _appVersionStore.addListener(_handleAppVersionChanged);
-    unawaited(_appVersionStore.ensureLoaded());
+    if (widget.showMobileClientCompatibility) {
+      _appVersionStore.addListener(_handleAppVersionChanged);
+      unawaited(_appVersionStore.ensureLoaded());
+    }
     _future = _load();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_refreshUpdateInfo());
@@ -72,7 +78,9 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
-    _appVersionStore.removeListener(_handleAppVersionChanged);
+    if (widget.showMobileClientCompatibility) {
+      _appVersionStore.removeListener(_handleAppVersionChanged);
+    }
     super.dispose();
   }
 
@@ -322,7 +330,8 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                 ),
                 children: [
                   _NodeCard(host: widget.host, node: data.node),
-                  if (data.node.advertisesMobileClientVersionHints) ...[
+                  if (widget.showMobileClientCompatibility &&
+                      data.node.advertisesMobileClientVersionHints) ...[
                     const SizedBox(height: AppSpacing.sm),
                     _MobileClientCompatibilityCard(
                       node: data.node,
@@ -593,7 +602,7 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final installedVersion = appVersionInfo.version;
+    final installedVersion = appVersionInfo.comparableVersion;
     final compatibility = evaluateMobileClientCompatibility(
       installedVersion: installedVersion,
       recommendedVersion: node.recommendedMobileClientVersion,
