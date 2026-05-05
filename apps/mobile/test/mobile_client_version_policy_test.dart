@@ -3,6 +3,13 @@ import 'package:sidemesh_mobile/src/mobile_client_version_policy.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 
 void main() {
+  test('mobileClientVersionLabel avoids duplicate v prefixes', () {
+    expect(mobileClientVersionLabel('1.2.0'), 'v1.2.0');
+    expect(mobileClientVersionLabel('v1.2.0'), 'v1.2.0');
+    expect(mobileClientVersionLabel('V1.2.0'), 'V1.2.0');
+    expect(mobileClientVersionLabel(''), 'unknown version');
+  });
+
   test('compareReleaseVersions handles dotted releases and prereleases', () {
     expect(compareReleaseVersions('1.2.0', '1.2.0'), 0);
     expect(compareReleaseVersions('1.2.1', '1.2.0'), greaterThan(0));

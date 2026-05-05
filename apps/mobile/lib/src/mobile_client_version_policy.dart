@@ -2,6 +2,12 @@ import 'package:flutter/foundation.dart';
 
 import 'models.dart';
 
+String mobileClientVersionLabel(String version) {
+  final trimmed = version.trim();
+  if (trimmed.isEmpty) return 'unknown version';
+  return trimmed.startsWith(RegExp('[vV]')) ? trimmed : 'v$trimmed';
+}
+
 int compareReleaseVersions(String left, String right) {
   final parsedLeft = _ParsedReleaseVersion.parse(left);
   final parsedRight = _ParsedReleaseVersion.parse(right);

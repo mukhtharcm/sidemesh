@@ -624,15 +624,15 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
         : 'Current mobile app version is unavailable on this device.';
     final guidance = switch (compatibility.level) {
       MobileClientCompatibilityLevel.required =>
-        'This host requires Sidemesh mobile v${compatibility.targetVersion} or newer.',
+        'This host requires Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
       MobileClientCompatibilityLevel.recommended =>
-        'This host recommends Sidemesh mobile v${compatibility.targetVersion} or newer.',
+        'This host recommends Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
       MobileClientCompatibilityLevel.none => node.minimumMobileClientVersion != null &&
               node.minimumMobileClientVersion!.isNotEmpty
-          ? 'This host currently supports Sidemesh mobile v${node.minimumMobileClientVersion} or newer.'
+          ? 'This host currently supports Sidemesh mobile ${mobileClientVersionLabel(node.minimumMobileClientVersion!)} or newer.'
           : node.recommendedMobileClientVersion != null &&
                 node.recommendedMobileClientVersion!.isNotEmpty
-          ? 'This host currently recommends Sidemesh mobile v${node.recommendedMobileClientVersion} or newer.'
+          ? 'This host currently recommends Sidemesh mobile ${mobileClientVersionLabel(node.recommendedMobileClientVersion!)} or newer.'
           : 'This host did not publish a mobile client policy.',
     };
 
@@ -687,7 +687,8 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
                     ),
                     if ((node.minimumMobileClientVersion ?? '').isNotEmpty)
                       MeshPill(
-                        label: 'minimum v${node.minimumMobileClientVersion}',
+                        label:
+                            'minimum ${mobileClientVersionLabel(node.minimumMobileClientVersion!)}',
                         icon: Icons.lock_outline_rounded,
                         tone: requiresUpdate
                             ? MeshPillTone.danger
@@ -697,7 +698,7 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
                     if ((node.recommendedMobileClientVersion ?? '').isNotEmpty)
                       MeshPill(
                         label:
-                            'recommended v${node.recommendedMobileClientVersion}',
+                            'recommended ${mobileClientVersionLabel(node.recommendedMobileClientVersion!)}',
                         icon: Icons.system_update_alt_rounded,
                         tone: recommendsUpdate
                             ? MeshPillTone.info

@@ -320,9 +320,9 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
         )
         .toList();
     await _store.saveHosts(updated);
+    _hostNodeInfo.remove(host.id);
+    HostStatusStore.instance.clear(host.id);
     if (disabling) {
-      _hostNodeInfo.remove(host.id);
-      HostStatusStore.instance.clear(host.id);
       await LiveActivityService.instance.clearPrimarySessionForHost(host.id);
     }
     await _refreshHosts();
@@ -3373,7 +3373,8 @@ class _HostRowCard extends StatelessWidget {
                         MobileClientCompatibilityLevel.required) ...[
                       const SizedBox(height: 6),
                       MeshPill(
-                        label: 'Mobile v${compatibility.targetVersion} required',
+                        label:
+                            'Mobile ${mobileClientVersionLabel(compatibility.targetVersion)} required',
                         icon: Icons.phone_android_rounded,
                         tone: MeshPillTone.danger,
                       ),
@@ -3381,7 +3382,8 @@ class _HostRowCard extends StatelessWidget {
                         MobileClientCompatibilityLevel.recommended) ...[
                       const SizedBox(height: 6),
                       MeshPill(
-                        label: 'Mobile v${compatibility.targetVersion} recommended',
+                        label:
+                            'Mobile ${mobileClientVersionLabel(compatibility.targetVersion)} recommended',
                         icon: Icons.phone_android_rounded,
                         tone: MeshPillTone.info,
                       ),
@@ -4332,9 +4334,19 @@ class _MobileClientUpdateBanner extends StatelessWidget {
     final verb = count == 1
         ? (requiresUpdate ? 'requires' : 'recommends')
         : (requiresUpdate ? 'require' : 'recommend');
-    final body =
-        '$hostSummary $verb Sidemesh mobile v${notice.targetVersion} or newer. '
-        'You are on v${notice.installedVersion}.';
+    final targetVersion = mobileClientVersionLabel(notice.targetVersion);
+    final installedVersion = mobileClientVersionLabel(notice.installedVersion);
+    late final String body;
+    if (count == 1) {
+      body = '$hostSummary $verb Sidemesh mobile $targetVersion or newer. '
+          'You are on $installedVersion.';
+    } else if (requiresUpdate) {
+      body = 'Update to Sidemesh mobile $targetVersion or newer to keep using '
+          '$count hosts. You are on $installedVersion.';
+    } else {
+      body = 'Update to Sidemesh mobile $targetVersion or newer to satisfy '
+          'recommendations from $count hosts. You are on $installedVersion.';
+    }
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),

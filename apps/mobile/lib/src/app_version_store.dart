@@ -31,8 +31,11 @@ class AppVersionInfo {
 
   String get displayVersion {
     if (version.isEmpty) return 'Unknown version';
-    if (buildNumber.isEmpty) return 'v$version';
-    return 'v$version ($buildNumber)';
+    final releaseLabel = version.startsWith(RegExp('[vV]'))
+        ? version
+        : 'v$version';
+    if (buildNumber.isEmpty) return releaseLabel;
+    return '$releaseLabel ($buildNumber)';
   }
 }
 
