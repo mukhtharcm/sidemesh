@@ -37,5 +37,11 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Sidemesh talks to Codex daemons on your local network.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>$(SPARKLE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(SPARKLE_PUBLIC_ED_KEY)</string>
 </dict>
 </plist>

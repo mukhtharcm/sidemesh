@@ -106,6 +106,11 @@ Production macOS release packaging builds the `prod` flavor by default.
 The `dev` flavor uses a separate bundle ID and a separate macOS Keychain
 service name so local debug builds do not keep touching production tokens.
 
+Production macOS app updates use Sparkle when the release build embeds
+`SIDEMESH_SPARKLE_PUBLIC_ED_KEY`. Sparkle checks the production appcast hosted
+on the dedicated GitHub Release tag `macos-appcast-prod`; daemon update checks
+remain separate and still happen through each connected Sidemesh host.
+
 ## Local iOS Signing
 
 The committed Xcode project does not store a personal Apple development team
