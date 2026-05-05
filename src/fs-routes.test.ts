@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { after, describe, it } from "node:test";
 
-import express from "express";
+import { getRequestListener } from "@hono/node-server";
+import { Hono } from "hono";
 
 import { registerFsRoutes } from "./fs-routes.js";
+import type { HonoServerEnv } from "./hono-route-adapter.js";
 import type { SessionSummary } from "./types.js";
 
 describe("filesystem routes", () => {
@@ -50,7 +52,7 @@ describe("filesystem routes", () => {
     const root = await tempRoot(tempRoots);
     await writeFile(nodePath.join(root, "a.txt"), "a", "utf8");
     let listCalls = 0;
-    const app = express();
+    const app = new Hono<HonoServerEnv>();
     registerFsRoutes(app, {
       listSessions: async () => {
         listCalls += 1;
@@ -76,7 +78,7 @@ describe("filesystem routes", () => {
     await writeFile(nodePath.join(root, "session.txt"), "a", "utf8");
     let listCalls = 0;
     let cwdCalls = 0;
-    const app = express();
+    const app = new Hono<HonoServerEnv>();
     registerFsRoutes(app, {
       listSessions: async () => {
         listCalls += 1;
@@ -101,8 +103,8 @@ describe("filesystem routes", () => {
   });
 });
 
-function testApp(root: string): express.Express {
-  const app = express();
+function testApp(root: string): Hono<HonoServerEnv> {
+  const app = new Hono<HonoServerEnv>();
   registerFsRoutes(app, {
     listSessions: async () => [sessionForRoot(root)],
   });
@@ -132,8 +134,8 @@ async function tempRoot(tempRoots: string[]): Promise<string> {
   return root;
 }
 
-async function listen(app: express.Express): Promise<Server> {
-  const server = createServer(app);
+async function listen(app: Hono<HonoServerEnv>): Promise<Server> {
+  const server = createServer(getRequestListener(app.fetch));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return server;
 }

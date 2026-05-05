@@ -5798,6 +5798,7 @@ class _SessionScreenState extends State<SessionScreen>
               }
               return PopupMenuButton<String>(
                 tooltip: 'Session actions',
+                constraints: const BoxConstraints(minWidth: 280, maxWidth: 360),
                 icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
                 onSelected: (value) => _handleSessionAction(value, session),
                 itemBuilder: (context) => [

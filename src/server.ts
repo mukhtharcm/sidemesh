@@ -5,13 +5,16 @@ import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import nodePath from "node:path";
 
-import compression from "compression";
-import cors from "cors";
-import express, {
-  type Request,
-  type Response,
-  type NextFunction,
-} from "express";
+import { getRequestListener } from "@hono/node-server";
+import { bodyLimit } from "hono/body-limit";
+import { compress } from "hono/compress";
+import { cors } from "hono/cors";
+import { createMiddleware } from "hono/factory";
+import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { logger } from "hono/logger";
+import { secureHeaders } from "hono/secure-headers";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import {
@@ -99,6 +102,12 @@ import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js
 import { saveConfig } from "./config.js";
 import { detectInstallInfo } from "./install-info.js";
 import { spawnSelfUpdater } from "./updater-spawn.js";
+import {
+  jsonRoute,
+  type HonoServerEnv,
+  type JsonRouteRequest,
+  type JsonRouteResponse,
+} from "./hono-route-adapter.js";
 
 const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
@@ -204,8 +213,8 @@ export async function startServer(
     },
   };
 
-  const app = express();
-  const server = createServer(app);
+  const app = new Hono<HonoServerEnv>();
+  const server = createServer(getRequestListener(app.fetch));
   const socketsBySession = new Map<string, Set<WebSocket>>();
   const approvalSockets = new Set<WebSocket>();
   const recentSessionsSockets = new Set<WebSocket>();
@@ -784,24 +793,37 @@ export async function startServer(
     // Install detection is best-effort; never block server startup.
   }
 
-  app.use(cors());
+  app.use("*", async (c, next) => {
+    c.set("requestId", randomUUID());
+    await next();
+  });
+  app.use("*", logger());
+  app.use("*", secureHeaders({
+    contentSecurityPolicy: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+    xFrameOptions: "DENY",
+  }));
+  app.use("*", cors());
   // Compress large JSON responses while skipping already-compressed content
   // types (images, video) and the unauthenticated health-check endpoint.
-  app.use(
-    compression({
-      filter: (request, response) => {
-        if (request.path === "/healthz") {
-          return false;
-        }
-        return compression.filter(request, response);
-      },
-    }),
-  );
+  const compressionMiddleware = compress();
+  app.use("*", async (c, next) => {
+    if (isHealthCheckPath(c.req.path)) {
+      await next();
+      return;
+    }
+    return compressionMiddleware(c, next);
+  });
   // Image attachments are sent as data URLs, so message payloads can be
   // materially larger than plain-text turns.
-  app.use(express.json({ limit: "16mb" }));
+  app.use("*", bodyLimit({
+    maxSize: 16 * 1024 * 1024,
+    onError: (c) => c.json({ error: "payload too large" }, 413),
+  }));
 
-  app.get("/healthz", async (_request, response) => {
+  app.get("/healthz", jsonRoute(async (_request, response) => {
     const probe = provider.health
       ? provider.health()
       : provider.getVersion().then(() => true).catch(() => false);
@@ -822,17 +844,23 @@ export async function startServer(
       label: config.label,
       error: "provider unreachable",
     });
-  });
+  }));
 
-  app.use((request, response, next) => {
-    if (request.path === "/healthz") {
-      next();
+  const authMiddleware = createMiddleware<HonoServerEnv>(async (c, next) => {
+    if (isHealthCheckPath(c.req.path)) {
+      await next();
       return;
     }
-    authenticate(request, response, next, config.token);
+    const auth = c.req.header("Authorization") ?? "";
+    const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+    if (token !== config.token) {
+      throw new HTTPException(401, { message: "unauthorized" });
+    }
+    await next();
   });
+  app.use("*", authMiddleware);
 
-  app.get("/api/node", (_request, response) => {
+  app.get("/api/node", jsonRoute((_request, response) => {
     const defaultProvider = providerRuntime.defaultProvider;
     const defaultProviderCapabilities = defaultProvider.provider.capabilities;
     const supportedProviders = providerRuntime.providers.map((entry) => ({
@@ -873,9 +901,9 @@ export async function startServer(
       installType: installInfo.installType,
       updateSupported: installInfo.updateSupported,
     });
-  });
+  }));
 
-  app.get("/api/providers", (_request, response) => {
+  app.get("/api/providers", jsonRoute((_request, response) => {
     response.json({
       currentProvider: providerRuntime.defaultProviderKind,
       providers: providerRuntime.providers.map((entry) => ({
@@ -886,9 +914,9 @@ export async function startServer(
         isDefault: entry.kind === providerRuntime.defaultProviderKind,
       })),
     });
-  });
+  }));
 
-  app.get("/api/diagnostics", (_request, response) => {
+  app.get("/api/diagnostics", jsonRoute((_request, response) => {
     let sessionLiveSockets = 0;
     for (const sockets of socketsBySession.values()) {
       sessionLiveSockets += sockets.size;
@@ -931,11 +959,11 @@ export async function startServer(
         browserPreviews: browserPreviewRegistry.list().length,
       },
     });
-  });
+  }));
 
-  app.get("/api/debug/codex-rpc-audit", (_request, response) => {
+  app.get("/api/debug/codex-rpc-audit", jsonRoute((_request, response) => {
     response.json(getCodexRpcAuditSnapshot());
-  });
+  }));
 
   app.post(
     "/api/admin/provider/:kind/restart",
@@ -1176,7 +1204,7 @@ export async function startServer(
     getSessionCwd,
   });
 
-  app.get("/api/terminals", (_request, response) => {
+  app.get("/api/terminals", jsonRoute((_request, response) => {
     if (
       !requireHostCapability(
         response,
@@ -1187,7 +1215,7 @@ export async function startServer(
       return;
     }
     response.json({ terminals: terminalRegistry.list() });
-  });
+  }));
 
   app.post(
     "/api/terminals",
@@ -1257,7 +1285,7 @@ export async function startServer(
     }),
   );
 
-  app.get("/api/ports", (_request, response) => {
+  app.get("/api/ports", jsonRoute((_request, response) => {
     if (
       !requireHostCapability(
         response,
@@ -1268,7 +1296,7 @@ export async function startServer(
       return;
     }
     response.json({ ports: portForwardRegistry.list() });
-  });
+  }));
 
   app.post(
     "/api/ports",
@@ -1312,7 +1340,7 @@ export async function startServer(
     }),
   );
 
-  app.get("/api/browser-previews", (_request, response) => {
+  app.get("/api/browser-previews", jsonRoute((_request, response) => {
     if (
       !requireHostCapability(
         response,
@@ -1323,7 +1351,7 @@ export async function startServer(
       return;
     }
     response.json({ previews: browserPreviewRegistry.list() });
-  });
+  }));
 
   app.post(
     "/api/browser-previews",
@@ -1535,12 +1563,15 @@ export async function startServer(
           ).filter((a) => (a.seq ?? 0) > since);
           nextSeq = delta.nextSeq;
           logRuntime = delta.runtime;
-        } catch (error: any) {
-          if (error.code === "STALE_CURSOR") {
+        } catch (error: unknown) {
+          const staleCursor = error && typeof error === "object"
+            ? (error as Record<string, unknown>)
+            : null;
+          if (staleCursor?.code === "STALE_CURSOR") {
             response.status(410).json({
               error: "stale_cursor",
-              since: error.staleSince,
-              oldestAvailableSeq: error.oldestAvailableSeq,
+              since: staleCursor.staleSince,
+              oldestAvailableSeq: staleCursor.oldestAvailableSeq,
             });
             return;
           }
@@ -2528,25 +2559,23 @@ export async function startServer(
     });
   });
 
-  app.use(
-    (
-      error: unknown,
-      _request: Request,
-      response: Response,
-      _next: NextFunction,
-    ) => {
-      const message =
-        error instanceof Error ? error.message : "Internal server error";
-      const status =
-        error instanceof TerminalError ||
-        error instanceof WorkspaceAccessError ||
-        error instanceof PortForwardError ||
-        error instanceof BrowserPreviewError
-          ? error.status
-          : 500;
-      response.status(status).json({ error: message });
-    },
-  );
+  app.onError((error, c) => {
+    const message =
+      error instanceof Error ? error.message : "Internal server error";
+    if (error instanceof HTTPException) {
+      return c.json({ error: message }, error.status as ContentfulStatusCode);
+    }
+    if (
+      error instanceof TerminalError ||
+      error instanceof WorkspaceAccessError ||
+      error instanceof PortForwardError ||
+      error instanceof BrowserPreviewError
+    ) {
+      return c.json({ error: message }, error.status as ContentfulStatusCode);
+    }
+    console.error("[Error]", error);
+    return c.json({ error: "Internal server error" }, 500);
+  });
 
   await listen(server, config.port);
 
@@ -2736,14 +2765,11 @@ function getCodexHomePath(provider: AgentProvider): string | null {
 }
 function asyncRoute(
   handler: (
-    request: Request,
-    response: Response,
-    next: NextFunction,
+    request: JsonRouteRequest,
+    response: JsonRouteResponse,
   ) => Promise<void>,
-): (request: Request, response: Response, next: NextFunction) => void {
-  return (request, response, next) => {
-    void handler(request, response, next).catch(next);
-  };
+): ReturnType<typeof jsonRoute> {
+  return jsonRoute(handler);
 }
 
 function pathParam(value: string | string[] | undefined): string {
@@ -2753,26 +2779,12 @@ function pathParam(value: string | string[] | undefined): string {
   return value || "";
 }
 
-function authenticate(
-  request: Request,
-  response: Response,
-  next: NextFunction,
-  token: string,
-): void {
-  const auth = request.headers.authorization;
-  if (
-    !auth ||
-    !auth.startsWith("Bearer ") ||
-    auth.slice("Bearer ".length) !== token
-  ) {
-    response.status(401).json({ error: "unauthorized" });
-    return;
-  }
-  next();
+function isHealthCheckPath(path: string): boolean {
+  return path === "/healthz";
 }
 
 function requireProviderCapability(
-  response: Response,
+  response: JsonRouteResponse,
   provider: AgentProvider,
   supported: boolean,
   feature: string,
@@ -2794,7 +2806,7 @@ function requireProviderCapability(
 }
 
 function requireHostCapability(
-  response: Response,
+  response: JsonRouteResponse,
   supported: boolean,
   feature: string,
 ): boolean {

@@ -81,16 +81,25 @@ function makeInstallInfo(
   };
 }
 
-function request(options: http.RequestOptions & { body?: string }): Promise<{ statusCode: number; body: unknown }> {
+function request(options: http.RequestOptions & { body?: string }): Promise<{
+  statusCode: number;
+  body: unknown;
+}> {
   return new Promise((resolve, reject) => {
     const req = http.request(options, (res) => {
       let data = "";
       res.on("data", (chunk) => { data += chunk; });
       res.on("end", () => {
         try {
-          resolve({ statusCode: res.statusCode ?? 0, body: data ? JSON.parse(data) : null });
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            body: data ? JSON.parse(data) : null,
+          });
         } catch {
-          resolve({ statusCode: res.statusCode ?? 0, body: data });
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            body: data,
+          });
         }
       });
     });
@@ -306,6 +315,7 @@ describe("/healthz", () => {
       FakeAgentProvider.prototype.getVersion = original;
     }
   });
+
 });
 
 describe("POST /api/admin/provider/:kind/restart", () => {

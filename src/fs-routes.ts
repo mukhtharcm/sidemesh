@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { createReadStream, watch, type FSWatcher } from "node:fs";
+import type { IncomingMessage } from "node:http";
 import {
   copyFile,
   cp,
@@ -14,9 +15,9 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { pipeline } from "node:stream/promises";
+import { Readable, type Duplex } from "node:stream";
 
-import type { Express, NextFunction, Request, Response } from "express";
+import type { Hono } from "hono";
 import type { WebSocket, WebSocketServer } from "ws";
 
 import {
@@ -26,6 +27,13 @@ import {
 } from "./workspace-scope.js";
 import { searchFiles } from "./fs-search.js";
 import type { SessionSummary } from "./types.js";
+import {
+  buildJsonRouteRequest,
+  jsonRoute,
+  type HonoServerEnv,
+  type JsonRouteRequest,
+  type JsonRouteResponse,
+} from "./hono-route-adapter.js";
 
 const READ_SOFT_CAP_BYTES = 2 * 1024 * 1024; // 2 MiB — UX preview cap.
 const WRITE_SOFT_CAP_BYTES = 4 * 1024 * 1024; // 4 MiB — payload safety cap.
@@ -36,7 +44,7 @@ interface FsRoutesOptions {
   getSessionCwd?: (sessionId: string) => Promise<string | null>;
 }
 
-export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
+export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions): void {
   const fallbackResolveRoots = createWorkspaceRootsResolver(opts.listSessions);
 
   app.get(
@@ -131,29 +139,30 @@ export function registerFsRoutes(app: Express, opts: FsRoutesOptions): void {
     }),
   );
 
-  app.get(
-    "/api/fs/blob",
-    asyncRoute(async (request, response) => {
-      const resolveRoots = createRequestRootsResolver(
-        request,
-        opts,
-        fallbackResolveRoots,
-      );
-      const target = await resolveIncomingBlobPath(
-        request.query.path,
-        resolveRoots,
-      );
-      const info = await stat(target);
-      response.setHeader("Content-Type", guessMime(target));
-      response.setHeader("Content-Length", String(info.size));
-      response.setHeader("Cache-Control", "private, max-age=60");
-      response.setHeader(
-        "Content-Disposition",
-        `inline; filename="${path.basename(target).replaceAll('"', "")}"`,
-      );
-      await pipeline(createReadStream(target), response);
-    }),
-  );
+  app.get("/api/fs/blob", async (c) => {
+    const request = await buildJsonRouteRequest(c);
+    const resolveRoots = createRequestRootsResolver(
+      request,
+      opts,
+      fallbackResolveRoots,
+    );
+    const target = await resolveIncomingBlobPath(
+      request.query.path,
+      resolveRoots,
+    );
+    const info = await stat(target);
+    c.header("Content-Type", guessMime(target));
+    c.header("Content-Length", String(info.size));
+    c.header("Cache-Control", "private, max-age=60");
+    c.header(
+      "Content-Disposition",
+      `inline; filename="${path.basename(target).replaceAll('"', "")}"`,
+    );
+    return c.body(
+      Readable.toWeb(createReadStream(target)) as ReadableStream,
+      200,
+    );
+  });
 
   app.post(
     "/api/fs/write",
@@ -338,20 +347,11 @@ async function resolveIncomingBlobPath(
 
 function asyncRoute(
   handler: (
-    request: Request,
-    response: Response,
-    next: NextFunction,
+    request: JsonRouteRequest,
+    response: JsonRouteResponse,
   ) => Promise<void>,
-): (request: Request, response: Response, next: NextFunction) => void {
-  return (request, response, next) => {
-    void handler(request, response, next).catch((error) => {
-      if (error instanceof WorkspaceAccessError) {
-        response.status(error.status).json({ error: error.message });
-        return;
-      }
-      next(error);
-    });
-  };
+): ReturnType<typeof jsonRoute> {
+  return jsonRoute(handler);
 }
 
 function asString(value: unknown): string | null {
@@ -461,14 +461,17 @@ export function attachFsLiveSocket(
 ): void {
   const resolveRoots = createSocketRootsResolver(opts);
   ws.on("message", async (raw) => {
-    let message: any;
+    let message: Record<string, unknown>;
     try {
-      message = JSON.parse(raw.toString());
+      const parsed = JSON.parse(raw.toString()) as unknown;
+      message = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
     } catch {
       sendJson(ws, { type: "error", message: "invalid json" });
       return;
     }
-    const messageType = message?.type;
+    const messageType = message.type;
     try {
       if (messageType === "subscribe") {
         const { watchId, path: resolved } = await registry.subscribe(ws, {
@@ -518,7 +521,12 @@ export function attachWatchUpgrade(
     getSessionCwd?: (sessionId: string) => Promise<string | null>;
   },
 ) {
-  return (request: any, socket: any, head: Buffer, pathOnly: string) => {
+  return (
+    request: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+    pathOnly: string,
+  ) => {
     if (pathOnly !== "/api/fs/live") return false;
     wsServer.handleUpgrade(request, socket, head, (ws) => {
       sendJson(ws, { type: "hello" });
@@ -573,7 +581,7 @@ function createWorkspaceRootsResolver(
 }
 
 function createRequestRootsResolver(
-  request: Request,
+  request: JsonRouteRequest,
   opts: FsRoutesOptions,
   fallbackResolveRoots: () => Promise<string[]>,
 ): () => Promise<string[]> {
@@ -615,7 +623,7 @@ function createSessionScopedRootsResolver(
   };
 }
 
-function sessionIdFromRequest(request: Request): string | null {
+function sessionIdFromRequest(request: JsonRouteRequest): string | null {
   const query = request.query as Record<string, unknown>;
   const body =
     request.body && typeof request.body === "object"
