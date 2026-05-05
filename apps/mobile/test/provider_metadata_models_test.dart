@@ -117,6 +117,67 @@ void main() {
     expect(node.supportedProviders, isEmpty);
   });
 
+  test('UpdateInfo patches NodeInfo update fields', () {
+    final node = NodeInfo.fromJson({
+      'label': 'Provider stack',
+      'hostname': 'macbook.local',
+      'platform': 'darwin',
+      'codexVersion': 'codex-cli 0.125.0',
+      'provider': 'codex',
+      'providerName': 'Codex',
+      'providerVersion': 'codex-cli 0.125.0',
+      'providerConfig': {'kind': 'codex', 'command': 'codex'},
+      'providerCapabilities': {
+        'sessions': {'create': true},
+      },
+      'defaultProviderCapabilities': {
+        'sessions': {'create': true},
+      },
+      'hostCapabilities': {
+        'workspace': {'filesystem': true},
+      },
+      'supportedProviders': [
+        {
+          'kind': 'codex',
+          'displayName': 'Codex',
+          'defaultCommand': 'codex',
+          'capabilities': {
+            'sessions': {'create': true},
+          },
+        },
+      ],
+      'packageVersion': '0.1.0',
+      'latestVersion': '0.2.0',
+      'updateChannel': 'stable',
+      'installType': 'git',
+      'updateSupported': true,
+      'updateAvailable': false,
+    });
+    final updateInfo = UpdateInfo.fromJson({
+      'ok': true,
+      'refreshed': true,
+      'packageVersion': '0.1.0',
+      'latestVersion': null,
+      'currentCommitSha': 'a1b2c3d4e5f6789012345678901234567890abcd',
+      'latestCommitSha': 'b1c2d3e4f5a6789012345678901234567890abcd',
+      'updateChannel': 'bleeding-edge',
+      'installType': 'git',
+      'updateSupported': true,
+      'updateAvailable': true,
+    });
+
+    final patched = node.copyWithUpdateInfo(updateInfo);
+
+    expect(updateInfo.ok, isTrue);
+    expect(updateInfo.refreshed, isTrue);
+    expect(patched.provider, 'codex');
+    expect(patched.updateChannel, 'bleeding-edge');
+    expect(patched.shortCurrentCommitSha, 'a1b2c3d');
+    expect(patched.shortLatestCommitSha, 'b1c2d3e');
+    expect(patched.updateAvailable, isTrue);
+    expect(patched.updateBadgeLabel, 'New commits on main');
+  });
+
   test('NodeInfo falls back to providerCapabilities when defaultProviderCapabilities is absent', () {
     // Regression test for legacy daemon compatibility. Older daemons may
     // send only providerCapabilities before defaultProviderCapabilities
