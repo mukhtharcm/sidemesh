@@ -29,6 +29,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Security audit
+        run: npm audit --audit-level=moderate
+
       - name: Test server
         run: npm run test:server
 

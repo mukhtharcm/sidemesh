@@ -3,43 +3,43 @@ import { createServer, get, type Server } from "node:http";
 import type { RequestOptions } from "node:http";
 import { afterEach, describe, it } from "node:test";
 
-import compression from "compression";
-import cors from "cors";
-import express from "express";
+import { getRequestListener } from "@hono/node-server";
+import { compress } from "hono/compress";
+import { cors } from "hono/cors";
+import { Hono } from "hono";
 
-function testApp(): express.Express {
-  const app = express();
-  app.use(cors());
-  app.use(
-    compression({
-      filter: (request, response) => {
-        if (request.path === "/healthz") {
-          return false;
-        }
-        return compression.filter(request, response);
-      },
-    }),
-  );
-  app.use(express.json({ limit: "16mb" }));
+import { jsonRoute, type HonoServerEnv } from "./hono-route-adapter.js";
 
-  app.get("/healthz", (_request, response) => {
-    response.json({ ok: true });
+function testApp(): Hono<HonoServerEnv> {
+  const app = new Hono<HonoServerEnv>();
+  app.use("*", cors());
+  const compressionMiddleware = compress();
+  app.use("*", async (c, next) => {
+    if (c.req.path === "/healthz") {
+      await next();
+      return;
+    }
+    return compressionMiddleware(c, next);
   });
 
-  app.get("/api/large", (_request, response) => {
+  app.get("/healthz", jsonRoute((_request, response) => {
+    response.json({ ok: true });
+  }));
+
+  app.get("/api/large", jsonRoute((_request, response) => {
     response.json({ data: "x".repeat(10_000) });
-  });
+  }));
 
-  app.get("/api/small", (_request, response) => {
+  app.get("/api/small", jsonRoute((_request, response) => {
     response.json({ ok: true });
-  });
+  }));
 
   return app;
 }
 
-function listen(app: express.Express): Promise<{ baseUrl: string; server: Server }> {
+function listen(app: Hono<HonoServerEnv>): Promise<{ baseUrl: string; server: Server }> {
   return new Promise((resolve) => {
-    const server = createServer(app);
+    const server = createServer(getRequestListener(app.fetch));
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       if (address && typeof address !== "string") {
@@ -48,7 +48,6 @@ function listen(app: express.Express): Promise<{ baseUrl: string; server: Server
     });
   });
 }
-
 
 function rawGet(url: string, options?: RequestOptions): Promise<{ statusCode: number; headers: import("node:http").IncomingHttpHeaders; body: string }> {
   return new Promise((resolve, reject) => {
