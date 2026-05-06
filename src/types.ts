@@ -46,6 +46,116 @@ export interface AgentProviderConfigSummary {
   command: string | null;
 }
 
+export type UsageSubjectKind =
+  | "account"
+  | "organization"
+  | "workspace"
+  | "apiKey"
+  | "subscription"
+  | "modelProvider"
+  | "localTelemetry"
+  | "unknown";
+
+export type UsageObservationHealth =
+  | "ok"
+  | "stale"
+  | "unsupported"
+  | "unauthorized"
+  | "unavailable"
+  | "error";
+
+export type UsageSourceKind =
+  | "providerApi"
+  | "providerRpc"
+  | "providerCli"
+  | "localLogs"
+  | "localTelemetry"
+  | "unsupported"
+  | "unknown";
+
+export interface UsageProviderRef {
+  kind: AgentProviderKind | string;
+  displayName: string;
+  upstreamKind?: string | null;
+  upstreamDisplayName?: string | null;
+}
+
+export interface UsageAccountRef {
+  displayLabel?: string | null;
+  accountIdHash?: string | null;
+  emailHash?: string | null;
+  organizationIdHash?: string | null;
+  planType?: string | null;
+  loginMethod?: string | null;
+}
+
+export interface UsageSubjectRef {
+  kind: UsageSubjectKind;
+  displayName: string;
+  stableKeyHash?: string | null;
+}
+
+export interface UsageWindow {
+  id: string;
+  label: string;
+  usedPercent?: number | null;
+  remainingPercent?: number | null;
+  windowMinutes?: number | null;
+  resetsAt?: number | null;
+  resetDescription?: string | null;
+}
+
+export interface UsageCredits {
+  balance?: number | null;
+  balanceLabel?: string | null;
+  unlimited?: boolean | null;
+  hasCredits?: boolean | null;
+}
+
+export interface UsageTotals {
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  reasoningTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  totalTokens?: number | null;
+  cost?: number | null;
+}
+
+export interface UsageSourceRef {
+  id: string;
+  label: string;
+  kind: UsageSourceKind;
+  priority?: number | null;
+}
+
+export interface UsageObservation {
+  id: string;
+  hostId?: string | null;
+  hostLabel?: string | null;
+  observedAt: number;
+  expiresAt?: number | null;
+  provider: UsageProviderRef;
+  account?: UsageAccountRef | null;
+  subject: UsageSubjectRef;
+  windows: UsageWindow[];
+  credits?: UsageCredits | null;
+  totals?: UsageTotals | null;
+  health: UsageObservationHealth;
+  source: UsageSourceRef;
+  message?: string | null;
+}
+
+export interface UsageSnapshotResponse {
+  generatedAt: number;
+  host: {
+    label: string;
+    hostname: string;
+    provider: AgentProviderKind | string;
+  };
+  observations: UsageObservation[];
+}
+
 export interface HostTerminalConfig {
   enabled: boolean;
   shell: string | null;

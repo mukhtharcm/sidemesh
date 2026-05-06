@@ -47,6 +47,8 @@ import type {
   SessionSummary,
   ThreadRecord,
   TurnRecord,
+  UsageObservation,
+  UsageSnapshotResponse,
   WorkspaceSummary,
 } from "./types.js";
 import {
@@ -993,6 +995,28 @@ export async function startServer(
       })),
     });
   }));
+
+  app.get(
+    "/api/usage",
+    asyncRoute(async (_request, response) => {
+      const generatedAt = Date.now();
+      const observations = await collectUsageObservations(
+        providerRuntime,
+        config.label,
+        generatedAt,
+      );
+      const payload: UsageSnapshotResponse = {
+        generatedAt,
+        host: {
+          label: config.label,
+          hostname: hostname(),
+          provider: providerRuntime.defaultProviderKind,
+        },
+        observations,
+      };
+      response.json(payload);
+    }),
+  );
 
   app.get("/api/diagnostics", jsonRoute((_request, response) => {
     let sessionLiveSockets = 0;
@@ -3201,6 +3225,132 @@ async function indexSessionForSearch(
   } catch {
     // Ignore indexing errors
   }
+}
+
+async function collectUsageObservations(
+  providerRuntime: AgentProviderRuntime,
+  hostLabel: string,
+  generatedAt: number,
+): Promise<UsageObservation[]> {
+  const groups = await Promise.all(
+    providerRuntime.providers.map(async (entry) => {
+      if (!hasProviderMethod(entry.provider, "readUsageObservations")) {
+        return [
+          buildUnsupportedUsageObservation(
+            entry.kind,
+            entry.provider.displayName,
+            hostLabel,
+            generatedAt,
+          ),
+        ];
+      }
+      try {
+        const observations = await entry.provider.readUsageObservations();
+        if (observations.length === 0) {
+          return [
+            buildUnsupportedUsageObservation(
+              entry.kind,
+              entry.provider.displayName,
+              hostLabel,
+              generatedAt,
+            ),
+          ];
+        }
+        return observations.map((observation) => ({
+          ...observation,
+          hostId: observation.hostId ?? hostLabel,
+          hostLabel: observation.hostLabel ?? hostLabel,
+          provider: {
+            ...observation.provider,
+            kind: observation.provider.kind || entry.kind,
+            displayName:
+              observation.provider.displayName || entry.provider.displayName,
+          },
+        }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return [
+          buildUsageErrorObservation(
+            entry.kind,
+            entry.provider.displayName,
+            hostLabel,
+            generatedAt,
+            message,
+          ),
+        ];
+      }
+    }),
+  );
+  return groups.flat();
+}
+
+function buildUnsupportedUsageObservation(
+  providerKind: string,
+  providerName: string,
+  hostLabel: string,
+  observedAt: number,
+): UsageObservation {
+  return {
+    id: `${providerKind}:usage:unsupported`,
+    hostId: hostLabel,
+    hostLabel,
+    observedAt,
+    expiresAt: observedAt + 60 * 60_000,
+    provider: {
+      kind: providerKind,
+      displayName: providerName,
+    },
+    account: null,
+    subject: {
+      kind: "unknown",
+      displayName: providerName,
+      stableKeyHash: null,
+    },
+    windows: [],
+    health: "unsupported",
+    source: {
+      id: `${providerKind}.usage`,
+      label: "Usage collector",
+      kind: "unsupported",
+      priority: 0,
+    },
+    message: `${providerName} does not expose account usage yet.`,
+  };
+}
+
+function buildUsageErrorObservation(
+  providerKind: string,
+  providerName: string,
+  hostLabel: string,
+  observedAt: number,
+  message: string,
+): UsageObservation {
+  return {
+    id: `${providerKind}:usage:error`,
+    hostId: hostLabel,
+    hostLabel,
+    observedAt,
+    expiresAt: observedAt + 60_000,
+    provider: {
+      kind: providerKind,
+      displayName: providerName,
+    },
+    account: null,
+    subject: {
+      kind: "unknown",
+      displayName: providerName,
+      stableKeyHash: null,
+    },
+    windows: [],
+    health: "error",
+    source: {
+      id: `${providerKind}.usage`,
+      label: "Usage collector",
+      kind: "unknown",
+      priority: 0,
+    },
+    message,
+  };
 }
 
 async function readSession(

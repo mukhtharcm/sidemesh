@@ -184,6 +184,12 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   lifecycle: {
     restart: false,
   },
+  usage: {
+    accountLimits: false,
+    localTelemetry: false,
+    credits: false,
+    resetWindows: false,
+  },
 };
 
 export class PiAgentProvider

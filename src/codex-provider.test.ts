@@ -48,6 +48,101 @@ function createThread(): ThreadRecord {
   };
 }
 
+describe("codex provider usage observations", () => {
+  it("normalizes account rate-limit RPC data", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    provider.bridge = {
+      request: async (method: string) => {
+        if (method === "account/read") {
+          return {
+            account: {
+              type: "chatgpt",
+              email: "mukhtar@example.com",
+              planType: "pro",
+            },
+          };
+        }
+        if (method === "account/rateLimits/read") {
+          return {
+            rateLimits: {
+              primary: {
+                usedPercent: 28,
+                windowDurationMins: 300,
+                resetsAt: 1777991945,
+              },
+              secondary: {
+                usedPercent: 97,
+                windowDurationMins: 10080,
+                resetsAt: 1778542395,
+              },
+              credits: {
+                hasCredits: true,
+                unlimited: false,
+                balance: "12.44",
+              },
+            },
+          };
+        }
+        throw new Error(`unexpected method ${method}`);
+      },
+    };
+
+    const observations = await provider.readUsageObservations();
+
+    assert.equal(observations.length, 1);
+    const observation = observations[0]!;
+    assert.equal(observation.health, "ok");
+    assert.equal(observation.provider.kind, "codex");
+    assert.equal(observation.account?.displayLabel, "mu***@example.com");
+    assert.equal(observation.account?.planType, "pro");
+    assert.equal(observation.subject.kind, "account");
+    assert.equal(observation.subject.stableKeyHash?.length, 32);
+    assert.equal(observation.windows.length, 2);
+    assert.deepEqual(observation.windows[0], {
+      id: "primary",
+      label: "Primary",
+      usedPercent: 28,
+      remainingPercent: 72,
+      windowMinutes: 300,
+      resetsAt: 1777991945000,
+      resetDescription: observation.windows[0]!.resetDescription,
+    });
+    assert.equal(observation.windows[1]?.usedPercent, 97);
+    assert.equal(observation.credits?.balance, 12.44);
+    assert.equal(observation.credits?.balanceLabel, "12.44");
+  });
+
+  it("keeps rate-limit observations when account metadata is unavailable", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    provider.bridge = {
+      request: async (method: string) => {
+        if (method === "account/read") {
+          throw new Error("account unavailable");
+        }
+        if (method === "account/rateLimits/read") {
+          return {
+            rateLimits: {
+              primary: {
+                usedPercent: 10,
+                windowDurationMins: 300,
+                resetsAt: 1777991945,
+              },
+            },
+          };
+        }
+        throw new Error(`unexpected method ${method}`);
+      },
+    };
+
+    const observations = await provider.readUsageObservations();
+
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0]?.health, "ok");
+    assert.equal(observations[0]?.subject.kind, "unknown");
+    assert.equal(observations[0]?.windows[0]?.usedPercent, 10);
+  });
+});
+
 describe("codex provider resume runtime restore", () => {
   it("emits runtime telemetry from Codex token usage notifications", async () => {
     const provider = new CodexAgentProvider("codex") as any;

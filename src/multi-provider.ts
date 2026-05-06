@@ -24,6 +24,7 @@ import type {
   SessionLogSnapshot,
   SessionRuntimeSummary,
   ThreadRecord,
+  UsageObservation,
 } from "./types.js";
 
 interface ProviderEntry {
@@ -77,6 +78,12 @@ export class MultiAgentProvider
         recentFallback: anyProvider((caps) => caps.sessions.recentFallback),
         searchSessions: anyProvider((caps) => caps.sessions.searchSessions),
       },
+      usage: {
+        accountLimits: anyProvider((caps) => caps.usage.accountLimits),
+        localTelemetry: anyProvider((caps) => caps.usage.localTelemetry),
+        credits: anyProvider((caps) => caps.usage.credits),
+        resetWindows: anyProvider((caps) => caps.usage.resetWindows),
+      },
     };
     for (const entry of this.orderedEntries) {
       entry.provider.on("liveEvent", (event) => {
@@ -119,6 +126,23 @@ export class MultiAgentProvider
 
   public async getVersion(): Promise<string> {
     return this.defaultEntry().provider.getVersion();
+  }
+
+  public async readUsageObservations(): Promise<UsageObservation[]> {
+    const observations = await Promise.all(
+      this.orderedEntries
+        .filter((entry) => hasProviderMethod(entry.provider, "readUsageObservations"))
+        .map(async (entry) =>
+          (await entry.provider.readUsageObservations!()).map((observation) => ({
+            ...observation,
+            provider: {
+              ...observation.provider,
+              kind: observation.provider.kind || entry.kind,
+            },
+          })),
+        ),
+    );
+    return observations.flat();
   }
 
   public async listSessionThreads(

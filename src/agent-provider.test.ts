@@ -64,6 +64,12 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
   lifecycle: {
     restart: false,
   },
+  usage: {
+    accountLimits: false,
+    localTelemetry: false,
+    credits: false,
+    resetWindows: false,
+  },
 };
 
 function makeProvider(methods: Partial<AgentProvider> = {}): AgentProvider {
