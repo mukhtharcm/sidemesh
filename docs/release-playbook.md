@@ -8,8 +8,8 @@ and distribution because the product exposes powerful host-control surfaces.
 
 - Repository: public.
 - License: Apache-2.0.
-- npm: not published yet, but the package metadata is publish-ready.
-- Daemon distribution: private GitHub install or local clone.
+- npm: published as the `sidemesh` package.
+- Daemon distribution: npm, private GitHub install, or local clone.
 - App distribution: local Flutter builds and manual GitHub Actions artifacts.
 - Recommended network: Tailscale or trusted private LAN.
 
@@ -145,13 +145,12 @@ The npm workflow assumes:
 - GitHub environment name: `npm`
 - GitHub Actions secret: `NPM_TOKEN`
 
-Before the first publish:
+Before publishing:
 
-1. Create or log into the npm user account that will own `sidemesh`.
-2. Add an npm publish token to the repository Actions secrets as `NPM_TOKEN`.
-3. Create the `npm` GitHub environment in this repository.
-4. Confirm the package version in `package.json` is the version you want to
+1. Confirm the package version in `package.json` is the version you want to
    publish.
+2. Confirm the `npm` GitHub environment exists.
+3. Confirm the repository Actions secret `NPM_TOKEN` is configured.
 
 To publish the daemon package from a GitHub Release, create a release tag that
 matches `package.json` with an `npm-v` prefix, for example `npm-v0.1.2`.
