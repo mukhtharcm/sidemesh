@@ -480,15 +480,20 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Provider contract'), findsOneWidget);
+    expect(find.text('Providers & capabilities'), findsOneWidget);
     expect(
-      find.text('Fake Test Provider - fake-provider 1.0.0'),
+      find.text('Fake Test Provider active - 2 providers supported'),
       findsOneWidget,
     );
 
-    await tester.tap(find.text('Provider contract'));
+    await tester.tap(find.text('Providers & capabilities'));
     await _pumpFrames(tester);
 
+    expect(find.text('Provider contract'), findsNWidgets(2));
+    expect(
+      find.text('Fake Test Provider - fake-provider 1.0.0'),
+      findsNWidgets(2),
+    );
     expect(find.text('active: fake'), findsOneWidget);
     expect(find.text('Fake Test Provider active'), findsOneWidget);
     expect(find.text('Codex'), findsOneWidget);
