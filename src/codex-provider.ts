@@ -145,14 +145,14 @@ public async health(): Promise<boolean> {
     const observedAt = Date.now();
     let accountResult: unknown = null;
     try {
-      accountResult = await this.bridge.request<unknown>("account/read", undefined);
+      accountResult = await this.bridge.request<unknown>("account/read", {});
     } catch {
       // Rate-limit data is still useful without identity metadata.
     }
     try {
       const limitsResult = await this.bridge.request<unknown>(
         "account/rateLimits/read",
-        undefined,
+        {},
       );
       const observation = buildCodexUsageObservation(
         accountResult,
