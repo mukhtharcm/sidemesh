@@ -740,68 +740,670 @@ class HostProviderContractScreen extends StatelessWidget {
       appBar: AppBar(title: Text('Provider contract')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        children: [_ProviderContractDetailPanel(node: node, title: title)],
+      ),
+    );
+  }
+}
+
+class _ProviderContractDetailPanel extends StatefulWidget {
+  const _ProviderContractDetailPanel({required this.node, required this.title});
+
+  final NodeInfo node;
+  final String title;
+
+  @override
+  State<_ProviderContractDetailPanel> createState() =>
+      _ProviderContractDetailPanelState();
+}
+
+class _ProviderContractDetailPanelState
+    extends State<_ProviderContractDetailPanel> {
+  late String _selectedProviderKind = _initialProviderKind(widget.node);
+
+  @override
+  void didUpdateWidget(covariant _ProviderContractDetailPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.node == widget.node) {
+      return;
+    }
+    final supportedKinds = widget.node.supportedProviders
+        .map((provider) => provider.kind)
+        .toSet();
+    if (_selectedProviderKind.isEmpty ||
+        !supportedKinds.contains(_selectedProviderKind)) {
+      _selectedProviderKind = _initialProviderKind(widget.node);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final node = widget.node;
+    final selectedSummary = node.providerSummary(_selectedProviderKind);
+    final selectedDisplayName = _providerDisplayName(node, selectedSummary);
+    final selectedVersion = _providerDisplayVersion(node, selectedSummary);
+    final selectedCommand = _providerCommand(node, selectedSummary);
+    final providerGroups = _capabilityGroups(
+      node.capabilitiesForProvider(_selectedProviderKind),
+    );
+    final hostGroups = _capabilityGroups(node.hostCapabilities);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ProviderContractOverviewCard(
+          title: widget.title,
+          node: node,
+          selectedProviderKind: _selectedProviderKind,
+          selectedDisplayName: selectedDisplayName,
+          selectedVersion: selectedVersion,
+          selectedCommand: selectedCommand,
+        ),
+        if (node.supportedProviders.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.lg),
+          _ProviderDefinitionSection(
+            currentProvider: node.provider,
+            selectedProvider: _selectedProviderKind,
+            providers: node.supportedProviders,
+            onSelect: (provider) {
+              setState(() {
+                _selectedProviderKind = provider.kind;
+              });
+            },
+          ),
+        ],
+        const SizedBox(height: AppSpacing.lg),
+        _CapabilitySummaryMatrix(
+          title: 'Provider-owned capabilities',
+          emptyText:
+              'This provider did not report any provider-owned capabilities.',
+          groups: providerGroups,
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        _CapabilitySummaryMatrix(
+          title: 'Host-owned capabilities',
+          emptyText: 'This daemon did not report host capabilities.',
+          groups: hostGroups,
+        ),
+      ],
+    );
+  }
+}
+
+class _ProviderContractOverviewCard extends StatelessWidget {
+  const _ProviderContractOverviewCard({
+    required this.title,
+    required this.node,
+    required this.selectedProviderKind,
+    required this.selectedDisplayName,
+    required this.selectedVersion,
+    required this.selectedCommand,
+  });
+
+  final String title;
+  final NodeInfo node;
+  final String selectedProviderKind;
+  final String selectedDisplayName;
+  final String selectedVersion;
+  final String? selectedCommand;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final isViewingActiveProvider = selectedProviderKind == node.provider;
+    return MeshCard(
+      tone: MeshCardTone.surface,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _ProviderContractHeader(node: node, title: title),
-          const SizedBox(height: AppSpacing.sm),
-          _ProviderContractCard(node: node, initiallyExpanded: true),
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: colors.infoMuted,
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(
+                    color: colors.info.withValues(alpha: 0.32),
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Icon(Icons.hub_rounded, color: colors.info, size: 19),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: AppWeights.title,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$selectedDisplayName - $selectedVersion',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(
+                        color: colors.textTertiary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              MeshPill(
+                label: 'active: ${node.provider}',
+                icon: Icons.radio_button_checked_rounded,
+                tone: isViewingActiveProvider
+                    ? MeshPillTone.success
+                    : MeshPillTone.neutral,
+                mono: true,
+              ),
+              if (!isViewingActiveProvider)
+                MeshPill(
+                  label: 'viewing: $selectedProviderKind',
+                  icon: Icons.visibility_rounded,
+                  tone: MeshPillTone.accent,
+                  mono: true,
+                ),
+              if (selectedCommand != null)
+                MeshPill(
+                  label: 'command: $selectedCommand',
+                  icon: Icons.terminal_rounded,
+                  tone: MeshPillTone.neutral,
+                  mono: true,
+                ),
+              MeshPill(
+                label: '${node.supportedProviders.length} supported',
+                icon: Icons.extension_rounded,
+                tone: node.supportedProviders.isEmpty
+                    ? MeshPillTone.warning
+                    : MeshPillTone.info,
+                mono: true,
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _ProviderContractHeader extends StatelessWidget {
-  const _ProviderContractHeader({required this.node, required this.title});
+class _ProviderDefinitionSection extends StatelessWidget {
+  const _ProviderDefinitionSection({
+    required this.currentProvider,
+    required this.selectedProvider,
+    required this.providers,
+    required this.onSelect,
+  });
 
-  final NodeInfo node;
-  final String title;
+  final String currentProvider;
+  final String selectedProvider;
+  final List<ProviderDefinitionSummary> providers;
+  final ValueChanged<ProviderDefinitionSummary> onSelect;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      child: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: colors.infoMuted,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: colors.info.withValues(alpha: 0.3)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.hub_rounded, color: colors.info, size: 18),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _ContractSectionLabel(
+          icon: Icons.extension_rounded,
+          title: 'Providers',
+          detail: '${providers.length} available',
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: colors.surface,
+            borderRadius: AppShapes.card,
+            border: Border.all(color: colors.border),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+          child: Column(
+            children: [
+              for (var index = 0; index < providers.length; index++) ...[
+                _ProviderDefinitionRow(
+                  provider: providers[index],
+                  active: providers[index].kind == currentProvider,
+                  selected: providers[index].kind == selectedProvider,
+                  onTap: () => onSelect(providers[index]),
+                ),
+                if (index < providers.length - 1)
+                  Divider(height: 1, indent: 54, color: colors.border),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ProviderDefinitionRow extends StatelessWidget {
+  const _ProviderDefinitionRow({
+    required this.provider,
+    required this.active,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final ProviderDefinitionSummary provider;
+  final bool active;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final command = provider.config.command ?? provider.defaultCommand;
+    final iconTone = selected ? colors.accent : colors.textTertiary;
+    final iconBackground = selected ? colors.accentMuted : colors.surfaceMuted;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: AppShapes.card,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: iconBackground,
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color: selected
+                        ? colors.accent.withValues(alpha: 0.36)
+                        : colors.border,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  selected
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  size: 17,
+                  color: iconTone,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            provider.displayName.isEmpty
+                                ? provider.kind
+                                : provider.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(fontWeight: AppWeights.title),
+                          ),
+                        ),
+                        if (active) ...[
+                          const SizedBox(width: 7),
+                          _TinyStatusPill(
+                            label: 'active',
+                            tone: MeshPillTone.success,
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      [
+                        provider.kind,
+                        if (provider.version.trim().isNotEmpty)
+                          provider.version.trim(),
+                        if (command.trim().isNotEmpty) 'cmd $command',
+                      ].join(' - '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(
+                        color: colors.textTertiary,
+                        fontSize: 10.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (selected)
+                Icon(Icons.check_rounded, color: colors.accent, size: 18),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CapabilitySummaryMatrix extends StatelessWidget {
+  const _CapabilitySummaryMatrix({
+    required this.title,
+    required this.emptyText,
+    required this.groups,
+  });
+
+  final String title;
+  final String emptyText;
+  final List<_CapabilityGroup> groups;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final enabled = groups.fold<int>(
+      0,
+      (count, group) => count + group.enabledCount,
+    );
+    final total = groups.fold<int>(
+      0,
+      (count, group) => count + group.totalCount,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _ContractSectionLabel(
+          icon: title.startsWith('Host')
+              ? Icons.dns_rounded
+              : Icons.verified_user_rounded,
+          title: title,
+          detail: total == 0 ? null : '$enabled/$total enabled',
+        ),
+        const SizedBox(height: 8),
+        if (groups.isEmpty)
+          Text(
+            emptyText,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
+          )
+        else
+          Column(
+            children: groups
+                .map(
+                  (group) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _CapabilitySummaryGroup(group: group),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+      ],
+    );
+  }
+}
+
+class _CapabilitySummaryGroup extends StatelessWidget {
+  const _CapabilitySummaryGroup({required this.group});
+
+  final _CapabilityGroup group;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final allEnabled = group.enabledCount == group.totalCount;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: AppShapes.card,
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: colors.infoMuted,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.center,
+                child: Icon(group.icon, size: 15, color: colors.info),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  group.title,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
                     fontWeight: AppWeights.title,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '${node.providerDisplayName} - ${node.providerDisplayVersion}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textTertiary, fontSize: 11),
-                ),
-              ],
+              ),
+              _TinyStatusPill(
+                label: '${group.enabledCount}/${group.totalCount}',
+                tone: allEnabled ? MeshPillTone.success : MeshPillTone.warning,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: group.features
+                .map((feature) {
+                  return _CapabilityStatusChip(feature: feature);
+                })
+                .toList(growable: false),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CapabilityStatusChip extends StatelessWidget {
+  const _CapabilityStatusChip({required this.feature});
+
+  final _CapabilityFeature feature;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final bg = feature.enabled ? colors.successMuted : colors.surfaceMuted;
+    final fg = feature.enabled ? colors.success : colors.textTertiary;
+    final border = feature.enabled
+        ? colors.success.withValues(alpha: 0.28)
+        : colors.border;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 5, 9, 5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            feature.enabled ? Icons.check_rounded : Icons.remove_rounded,
+            size: 13,
+            color: fg,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            feature.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: monoStyle(
+              color: fg,
+              fontSize: 11,
+              fontWeight: feature.enabled ? AppWeights.title : AppWeights.body,
             ),
           ),
         ],
       ),
     );
   }
+}
+
+class _ContractSectionLabel extends StatelessWidget {
+  const _ContractSectionLabel({
+    required this.icon,
+    required this.title,
+    this.detail,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: colors.accent),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: colors.textSecondary,
+              fontWeight: AppWeights.title,
+            ),
+          ),
+        ),
+        if (detail != null)
+          Text(
+            detail!,
+            style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+          ),
+      ],
+    );
+  }
+}
+
+class _TinyStatusPill extends StatelessWidget {
+  const _TinyStatusPill({required this.label, required this.tone});
+
+  final String label;
+  final MeshPillTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final (bg, fg, border) = switch (tone) {
+      MeshPillTone.neutral => (
+        colors.surfaceMuted,
+        colors.textTertiary,
+        colors.border,
+      ),
+      MeshPillTone.accent => (
+        colors.accentMuted,
+        colors.accent,
+        colors.accent.withValues(alpha: 0.35),
+      ),
+      MeshPillTone.success => (
+        colors.successMuted,
+        colors.success,
+        colors.success.withValues(alpha: 0.35),
+      ),
+      MeshPillTone.danger => (
+        colors.dangerMuted,
+        colors.danger,
+        colors.danger.withValues(alpha: 0.35),
+      ),
+      MeshPillTone.warning => (
+        colors.warningMuted,
+        colors.warning,
+        colors.warning.withValues(alpha: 0.35),
+      ),
+      MeshPillTone.info => (
+        colors.infoMuted,
+        colors.info,
+        colors.info.withValues(alpha: 0.35),
+      ),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: border),
+      ),
+      child: Text(
+        label,
+        style: monoStyle(
+          color: fg,
+          fontSize: 10.5,
+          fontWeight: AppWeights.title,
+        ),
+      ),
+    );
+  }
+}
+
+String _initialProviderKind(NodeInfo node) {
+  if (node.supportedProviders.any(
+    (provider) => provider.kind == node.provider,
+  )) {
+    return node.provider;
+  }
+  if (node.supportedProviders.isNotEmpty) {
+    return node.supportedProviders.first.kind;
+  }
+  return node.provider;
+}
+
+String _providerDisplayName(NodeInfo node, ProviderDefinitionSummary summary) {
+  if (summary.displayName.isNotEmpty) {
+    return summary.displayName;
+  }
+  if (summary.kind == node.provider || summary.kind.isEmpty) {
+    return node.providerDisplayName;
+  }
+  return summary.kind;
+}
+
+String _providerDisplayVersion(
+  NodeInfo node,
+  ProviderDefinitionSummary summary,
+) {
+  if (summary.version.isNotEmpty) {
+    return summary.version;
+  }
+  if (summary.kind == node.provider || summary.kind.isEmpty) {
+    return node.providerDisplayVersion;
+  }
+  return 'version unknown';
+}
+
+String? _providerCommand(NodeInfo node, ProviderDefinitionSummary summary) {
+  if (summary.config.command != null) {
+    return summary.config.command;
+  }
+  if (summary.defaultCommand.isNotEmpty) {
+    return summary.defaultCommand;
+  }
+  if (summary.kind == node.provider || summary.kind.isEmpty) {
+    return node.providerConfig.command;
+  }
+  return null;
 }
 
 class _ProviderContractSummaryCard extends StatelessWidget {
@@ -885,13 +1487,9 @@ class _ProviderContractSummaryCard extends StatelessWidget {
 }
 
 class _ProviderContractCard extends StatefulWidget {
-  const _ProviderContractCard({
-    required this.node,
-    this.initiallyExpanded = false,
-  });
+  const _ProviderContractCard({required this.node});
 
   final NodeInfo node;
-  final bool initiallyExpanded;
 
   @override
   State<_ProviderContractCard> createState() => _ProviderContractCardState();
@@ -939,7 +1537,6 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          initiallyExpanded: widget.initiallyExpanded,
           tilePadding: const EdgeInsets.fromLTRB(14, 8, 12, 8),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           leading: Container(
