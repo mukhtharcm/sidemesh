@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../api_client.dart';
 import '../fs_languages.dart';
 import '../fs_models.dart';
+import '../image_blob_cache_store.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -13,6 +14,7 @@ import '../widgets/app_snackbar.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/syntax_code_block.dart';
+import 'image_viewer_screen.dart';
 
 /// Embeddable read/edit pane for a single workspace file. Does not render a
 /// Scaffold — use [FileViewerScreen] for the mobile-route variant.
@@ -55,6 +57,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
   bool _editing = false;
   bool _saving = false;
   bool _markdownPreview = false;
+  bool _imagePreview = false;
   late final TextEditingController _editController = TextEditingController();
   StreamSubscription<FsChangeEvent>? _liveSub;
 
@@ -76,6 +79,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
     if (oldWidget.path != widget.path) {
       _editing = false;
       _markdownPreview = false;
+      _imagePreview = false;
       _editController.clear();
       _load();
     }
@@ -203,6 +207,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
       _editing = !_editing;
       if (_editing) {
         _markdownPreview = false;
+        _imagePreview = false;
       }
       if (_editing) {
         _editController.text = _file!.contents;
@@ -217,7 +222,25 @@ class FileViewerPaneState extends State<FileViewerPane> {
     if (!supportsMarkdownPreview) {
       return;
     }
-    setState(() => _markdownPreview = !_markdownPreview);
+    setState(() {
+      _markdownPreview = !_markdownPreview;
+      if (_markdownPreview) {
+        _imagePreview = false;
+      }
+    });
+    _bump();
+  }
+
+  void toggleImagePreview() {
+    if (!supportsImagePreview) {
+      return;
+    }
+    setState(() {
+      _imagePreview = !_imagePreview;
+      if (_imagePreview) {
+        _markdownPreview = false;
+      }
+    });
     _bump();
   }
 
@@ -234,9 +257,12 @@ class FileViewerPaneState extends State<FileViewerPane> {
   FsFile? get file => _file;
   VoidCallback? get saveAction => _editing ? _save : null;
   bool get isMarkdownFile => languageForPath(widget.path) == 'markdown';
+  bool get isImageFile => _looksLikeImageFile(widget.path, _file?.mimeHint);
   bool get supportsMarkdownPreview =>
       !_editing && _file != null && isMarkdownFile;
+  bool get supportsImagePreview => !_editing && _file != null && isImageFile;
   bool get markdownPreview => _markdownPreview;
+  bool get imagePreview => _imagePreview;
 
   @override
   Widget build(BuildContext context) {
@@ -263,12 +289,33 @@ class FileViewerPaneState extends State<FileViewerPane> {
         ? const EdgeInsets.fromLTRB(10, 8, 10, 12)
         : const EdgeInsets.fromLTRB(12, 10, 12, 24);
 
+    if (supportsImagePreview && _imagePreview) {
+      return Padding(
+        padding: outerPadding,
+        child: ImageViewerPane(
+          source: ImageViewerSource.loader(
+            title: baseName(widget.path),
+            subtitle:
+                '${formatBytes(file.size)} • ${file.mimeHint.isEmpty ? 'image' : file.mimeHint}',
+            imageProviderLoader: () async {
+              final cached = await ImageBlobCacheStore.instance.load(
+                host: widget.host,
+                path: widget.path,
+                api: widget.api,
+              );
+              return FileImage(cached);
+            },
+          ),
+          dense: widget.dense,
+        ),
+      );
+    }
     if (file.binary) {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: MeshEmptyState(
-          icon: Icons.description_rounded,
-          title: 'Binary file',
+          icon: isImageFile ? Icons.image_rounded : Icons.description_rounded,
+          title: isImageFile ? 'Image file' : 'Binary file',
           body:
               '${formatBytes(file.size)} • ${file.mimeHint.isEmpty ? 'unknown type' : file.mimeHint}',
         ),
@@ -371,8 +418,11 @@ class FileViewerActions extends StatelessWidget {
     final editing = s?.editing ?? false;
     final saving = s?.saving ?? false;
     final hasFile = s?.file != null;
+    final canUseTextContents = hasFile && !(s?.file?.binary ?? false);
     final canPreviewMarkdown = s?.isMarkdownFile ?? false;
+    final canPreviewImage = s?.isImageFile ?? false;
     final markdownPreview = s?.markdownPreview ?? false;
+    final imagePreview = s?.imagePreview ?? false;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -390,7 +440,7 @@ class FileViewerActions extends StatelessWidget {
           ),
         IconButton(
           tooltip: editing ? 'Stop editing' : 'Edit',
-          onPressed: hasFile ? () => s?.toggleEdit() : null,
+          onPressed: canUseTextContents ? () => s?.toggleEdit() : null,
           icon: Icon(
             editing ? Icons.visibility_rounded : Icons.edit_rounded,
             size: 18,
@@ -398,7 +448,7 @@ class FileViewerActions extends StatelessWidget {
         ),
         IconButton(
           tooltip: 'Copy contents',
-          onPressed: hasFile ? () => s?.copyContents() : null,
+          onPressed: canUseTextContents ? () => s?.copyContents() : null,
           icon: const Icon(Icons.content_copy_rounded, size: 18),
         ),
         if (canPreviewMarkdown)
@@ -409,6 +459,15 @@ class FileViewerActions extends StatelessWidget {
                 : null,
             icon: Icon(
               markdownPreview ? Icons.code_rounded : Icons.article_rounded,
+              size: 18,
+            ),
+          ),
+        if (canPreviewImage)
+          IconButton(
+            tooltip: imagePreview ? 'Hide image preview' : 'Preview image',
+            onPressed: hasFile && !editing ? () => s?.toggleImagePreview() : null,
+            icon: Icon(
+              imagePreview ? Icons.description_rounded : Icons.image_rounded,
               size: 18,
             ),
           ),
@@ -437,4 +496,29 @@ String formatBytes(int bytes) {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MiB';
   }
   return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GiB';
+}
+
+bool _looksLikeImageFile(String path, String? mimeHint) {
+  final mime = (mimeHint ?? '').toLowerCase();
+  if (mime == 'image/png' ||
+      mime == 'image/jpeg' ||
+      mime == 'image/gif' ||
+      mime == 'image/webp' ||
+      mime == 'image/bmp' ||
+      mime == 'image/x-icon' ||
+      mime == 'image/vnd.microsoft.icon' ||
+      mime == 'image/heic' ||
+      mime == 'image/heif') {
+    return true;
+  }
+  final lower = path.toLowerCase();
+  return lower.endsWith('.png') ||
+      lower.endsWith('.jpg') ||
+      lower.endsWith('.jpeg') ||
+      lower.endsWith('.gif') ||
+      lower.endsWith('.webp') ||
+      lower.endsWith('.bmp') ||
+      lower.endsWith('.ico') ||
+      lower.endsWith('.heic') ||
+      lower.endsWith('.heif');
 }
