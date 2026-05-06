@@ -314,6 +314,12 @@ class StubProvider
     lifecycle: {
       restart: true,
     },
+    usage: {
+      accountLimits: false,
+      localTelemetry: false,
+      credits: false,
+      resetWindows: false,
+    },
   };
 
   public readonly createdSessions: AgentCreateSessionRequest[] = [];

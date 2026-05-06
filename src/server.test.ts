@@ -450,6 +450,30 @@ describe("GET /api/node", () => {
   });
 });
 
+describe("GET /api/usage", () => {
+  it("returns host usage observations from configured providers", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/usage",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.body as any;
+      assert.equal(body.host.label, "test");
+      assert.equal(body.observations.length, 1);
+      assert.equal(body.observations[0].hostLabel, "test");
+      assert.equal(body.observations[0].provider.kind, "fake");
+      assert.equal(body.observations[0].health, "ok");
+      assert.equal(body.observations[0].windows[0].id, "primary");
+    });
+  });
+});
+
 describe("POST /api/admin/update", () => {
   it("rejects unknown channel overrides", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { access, stat } from "node:fs/promises";
 import nodePath from "node:path";
@@ -59,6 +59,10 @@ import type {
   SessionMessageContentBlock,
   SessionMessageContentBlockThinking,
   PendingActionElicitationField,
+  UsageAccountRef,
+  UsageCredits,
+  UsageObservation,
+  UsageWindow,
 } from "./types.js";
 import type { AgentSessionInputItem } from "./agent-provider.js";
 
@@ -134,6 +138,31 @@ public async health(): Promise<boolean> {
       return execFileSync(this.codexBin, ["--version"], { encoding: "utf8" }).trim();
     } catch {
       return "unknown";
+    }
+  }
+
+  public async readUsageObservations(): Promise<UsageObservation[]> {
+    const observedAt = Date.now();
+    let accountResult: unknown = null;
+    try {
+      accountResult = await this.bridge.request<unknown>("account/read", undefined);
+    } catch {
+      // Rate-limit data is still useful without identity metadata.
+    }
+    try {
+      const limitsResult = await this.bridge.request<unknown>(
+        "account/rateLimits/read",
+        undefined,
+      );
+      const observation = buildCodexUsageObservation(
+        accountResult,
+        limitsResult,
+        observedAt,
+      );
+      return [observation];
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return [buildCodexUsageErrorObservation(observedAt, message)];
     }
   }
 
@@ -735,6 +764,251 @@ public async health(): Promise<boolean> {
       action,
     });
   }
+}
+
+function buildCodexUsageObservation(
+  accountResult: unknown,
+  limitsResult: unknown,
+  observedAt: number,
+): UsageObservation {
+  const account = normalizeCodexUsageAccount(accountResult);
+  const limits = objectRecord(limitsResult);
+  const rateLimits = objectRecord(limits?.rateLimits) ?? limits;
+  const windows = [
+    buildCodexUsageWindow(
+      objectRecord(rateLimits?.primary),
+      "primary",
+      "Primary",
+    ),
+    buildCodexUsageWindow(
+      objectRecord(rateLimits?.secondary),
+      "secondary",
+      "Secondary",
+    ),
+  ].filter((window): window is UsageWindow => window !== null);
+  const credits = buildCodexUsageCredits(objectRecord(rateLimits?.credits));
+  const stableKeyHash =
+    account.accountIdHash ?? account.emailHash ?? null;
+  const displayLabel =
+    account.displayLabel ||
+    (account.planType ? `Codex ${capitalizeLabel(account.planType)}` : "Codex account");
+
+  return {
+    id: stableKeyHash ? `codex:${stableKeyHash}` : "codex:account",
+    observedAt,
+    expiresAt: observedAt + 5 * 60_000,
+    provider: {
+      kind: "codex",
+      displayName: "Codex",
+    },
+    account,
+    subject: {
+      kind: stableKeyHash ? "account" : "unknown",
+      displayName: displayLabel,
+      stableKeyHash,
+    },
+    windows,
+    credits,
+    health: windows.length > 0 || credits ? "ok" : "unavailable",
+    source: {
+      id: "codex.accountRateLimits",
+      label: "Codex account limits",
+      kind: "providerRpc",
+      priority: 100,
+    },
+    message:
+      windows.length > 0 || credits
+        ? undefined
+        : "Codex did not return account usage windows.",
+  };
+}
+
+function buildCodexUsageErrorObservation(
+  observedAt: number,
+  message: string,
+): UsageObservation {
+  return {
+    id: "codex:account:error",
+    observedAt,
+    expiresAt: observedAt + 60_000,
+    provider: {
+      kind: "codex",
+      displayName: "Codex",
+    },
+    account: null,
+    subject: {
+      kind: "unknown",
+      displayName: "Codex account",
+      stableKeyHash: null,
+    },
+    windows: [],
+    health: "error",
+    source: {
+      id: "codex.accountRateLimits",
+      label: "Codex account limits",
+      kind: "providerRpc",
+      priority: 100,
+    },
+    message,
+  };
+}
+
+function normalizeCodexUsageAccount(accountResult: unknown): UsageAccountRef {
+  const root = objectRecord(accountResult);
+  const account = objectRecord(root?.account) ?? root;
+  const email = normalizeOptionalString(
+    account?.email ?? root?.email,
+  );
+  const accountId = normalizeOptionalString(
+    account?.id ?? account?.accountId ?? account?.account_id ?? root?.accountId,
+  );
+  const planType = normalizeOptionalString(
+    account?.planType ?? account?.plan_type ?? root?.planType ?? root?.plan_type,
+  );
+  const type = normalizeOptionalString(account?.type ?? root?.type);
+  const normalizedType = type?.toLowerCase() ?? null;
+  const accountIdHash = accountId ? hashUsageIdentity(`codex:account:${accountId}`) : null;
+  const emailHash = email ? hashUsageIdentity(`codex:email:${email.toLowerCase()}`) : null;
+  return {
+    displayLabel: email ? maskEmail(email) : normalizedType === "apikey" ? "API key" : null,
+    accountIdHash,
+    emailHash,
+    planType,
+    loginMethod: type,
+  };
+}
+
+function buildCodexUsageWindow(
+  raw: Record<string, unknown> | null,
+  id: string,
+  label: string,
+): UsageWindow | null {
+  if (!raw) {
+    return null;
+  }
+  const usedPercent = clampPercent(
+    asNumber(raw.usedPercent) ?? asNumber(raw.used_percent),
+  );
+  const windowMinutes = integerOrNull(
+    asNumber(raw.windowDurationMins) ??
+      asNumber(raw.window_duration_mins) ??
+      asNumber(raw.windowMinutes) ??
+      asNumber(raw.window_minutes) ??
+      secondsToMinutes(asNumber(raw.limitWindowSeconds) ?? asNumber(raw.limit_window_seconds)),
+  );
+  const resetsAt = normalizeEpochMillis(
+    asNumber(raw.resetsAt) ?? asNumber(raw.resets_at) ?? asNumber(raw.resetAt) ?? asNumber(raw.reset_at),
+  );
+  if (usedPercent == null && windowMinutes == null && resetsAt == null) {
+    return null;
+  }
+  return {
+    id,
+    label,
+    usedPercent,
+    remainingPercent: usedPercent == null ? null : clampPercent(100 - usedPercent),
+    windowMinutes,
+    resetsAt,
+    resetDescription: resetsAt == null ? null : resetDescription(resetsAt),
+  };
+}
+
+function buildCodexUsageCredits(raw: Record<string, unknown> | null): UsageCredits | null {
+  if (!raw) {
+    return null;
+  }
+  const balanceValue = raw.balance;
+  const balanceLabel =
+    typeof balanceValue === "string"
+      ? balanceValue
+      : typeof balanceValue === "number" && Number.isFinite(balanceValue)
+        ? String(balanceValue)
+        : null;
+  const balance =
+    typeof balanceValue === "number" && Number.isFinite(balanceValue)
+      ? balanceValue
+      : typeof balanceValue === "string"
+        ? Number.parseFloat(balanceValue)
+        : null;
+  const hasCredits = typeof raw.hasCredits === "boolean" ? raw.hasCredits : null;
+  const unlimited = typeof raw.unlimited === "boolean" ? raw.unlimited : null;
+  if (balance == null && balanceLabel == null && hasCredits == null && unlimited == null) {
+    return null;
+  }
+  return {
+    balance: balance == null || Number.isNaN(balance) ? null : balance,
+    balanceLabel,
+    hasCredits,
+    unlimited,
+  };
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function hashUsageIdentity(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 32);
+}
+
+function maskEmail(email: string): string {
+  const [name, domain] = email.split("@", 2);
+  if (!name || !domain) {
+    return email;
+  }
+  const prefix = name.slice(0, Math.min(2, name.length));
+  return `${prefix}${name.length > 2 ? "***" : "*"}@${domain}`;
+}
+
+function clampPercent(value: number | null): number | null {
+  if (value == null) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, value));
+}
+
+function secondsToMinutes(value: number | null): number | null {
+  return value == null ? null : value / 60;
+}
+
+function integerOrNull(value: number | null): number | null {
+  return value == null ? null : Math.round(value);
+}
+
+function normalizeEpochMillis(value: number | null): number | null {
+  if (value == null || value <= 0) {
+    return null;
+  }
+  return value < 10_000_000_000 ? Math.round(value * 1000) : Math.round(value);
+}
+
+function resetDescription(resetsAt: number): string {
+  const deltaMs = resetsAt - Date.now();
+  if (deltaMs <= 0) {
+    return "now";
+  }
+  const minutes = Math.round(deltaMs / 60_000);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) {
+    return `${hours}h`;
+  }
+  const days = Math.round(hours / 24);
+  return `${days}d`;
+}
+
+function capitalizeLabel(value: string): string {
+  return value.length === 0 ? value : `${value[0]!.toUpperCase()}${value.slice(1)}`;
 }
 
 function buildRuntimeFromCodexTokenUsage(
@@ -2115,6 +2389,12 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   lifecycle: {
     restart: true,
+  },
+  usage: {
+    accountLimits: true,
+    localTelemetry: false,
+    credits: true,
+    resetWindows: true,
   },
 };
 

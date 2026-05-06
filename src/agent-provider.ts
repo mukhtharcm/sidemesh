@@ -21,6 +21,7 @@ import type {
   ThreadRecord,
   ToolActivity,
   TurnDiffActivity,
+  UsageObservation,
   WebSearchActivity,
   SessionMessageContentBlock,
 } from "./types.js";
@@ -214,6 +215,12 @@ export interface AgentProviderCapabilities {
   lifecycle: {
     restart: boolean;
   };
+  usage: {
+    accountLimits: boolean;
+    localTelemetry: boolean;
+    credits: boolean;
+    resetWindows: boolean;
+  };
 }
 
 export type AgentProviderLiveEvent =
@@ -380,13 +387,18 @@ export interface AgentConfigurationProvider {
   listProfiles(options: AgentProfileListOptions): Promise<ProviderProfileCatalog>;
 }
 
+export interface AgentUsageProvider {
+  readUsageObservations(): Promise<UsageObservation[]>;
+}
+
 export interface AgentProvider
   extends AgentProviderCore,
     Partial<AgentSessionHistoryProvider>,
     Partial<AgentSessionLifecycleProvider>,
     Partial<AgentApprovalProvider>,
     Partial<AgentWorkspaceProvider>,
-    Partial<AgentConfigurationProvider> {}
+    Partial<AgentConfigurationProvider>,
+    Partial<AgentUsageProvider> {}
 
 export type AgentProviderMethod<K extends keyof AgentProvider> = Extract<
   NonNullable<AgentProvider[K]>,

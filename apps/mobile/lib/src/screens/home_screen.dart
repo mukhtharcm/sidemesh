@@ -35,6 +35,7 @@ import 'host_detail_screen.dart';
 import 'pair_scanner_sheet.dart';
 import 'settings_screen.dart';
 import 'session_screen.dart';
+import 'usage_pane.dart';
 
 class SidemeshHomeScreen extends StatefulWidget {
   const SidemeshHomeScreen({super.key});
@@ -57,6 +58,12 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       subtitle: 'Pending approvals and queued sends',
       icon: Icons.checklist_rounded,
       selectedIcon: Icons.checklist_rounded,
+    ),
+    _TabDef(
+      title: 'Usage',
+      subtitle: 'Account limits across hosts',
+      icon: Icons.speed_rounded,
+      selectedIcon: Icons.speed_rounded,
     ),
     _TabDef(
       title: 'Hosts',
@@ -90,6 +97,11 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
 
   List<HostProfile> get _enabledHosts =>
       _hosts.where((host) => host.enabled).toList(growable: false);
+
+  bool _searchVisibleForTab(_TabDef tab, int enabledHostCount) {
+    if (tab.title == 'Usage') return false;
+    return tab.title != 'Hosts' || enabledHostCount >= 4;
+  }
 
   @override
   void initState() {
@@ -519,7 +531,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
             _HomeStickyHeader(
               tab: tab,
               searchController: _searchController,
-              searchVisible: tab.title != 'Hosts' || enabledHosts.length >= 4,
+              searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
               viewMode: _tabIndex == 0 ? _recentViewMode : null,
               onViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
               onRefresh: _refreshHosts,
@@ -586,6 +598,11 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                             setState(() => _inboxCount = count);
                           },
                         ),
+                        UsagePane(
+                          hosts: enabledHosts,
+                          api: _api,
+                          active: _tabIndex == 2,
+                        ),
                         HostsPane(
                           hosts: _hosts,
                           hostNodes: _hostNodeInfo,
@@ -604,7 +621,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           ],
         ),
       ),
-      floatingActionButton: _tabIndex == 2 && _hosts.isNotEmpty
+      floatingActionButton: _tabIndex == 3 && _hosts.isNotEmpty
           ? FloatingActionButton.extended(
               onPressed: () => _showHostEditor(),
               icon: const Icon(Icons.add_link_rounded),
@@ -618,14 +635,14 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           setState(() {
             _tabIndex = index;
             final tab = _tabs[index];
-            final showSearch = tab.title != 'Hosts' || _enabledHosts.length >= 4;
+            final showSearch = _searchVisibleForTab(tab, _enabledHosts.length);
             if (!showSearch && (_query.isNotEmpty || _searchController.text.isNotEmpty)) {
               _query = '';
               _searchController.clear();
             }
           });
         },
-        badges: [_activeCount, _inboxCount, 0],
+        badges: [_activeCount, _inboxCount, 0, 0],
       ),
     );
   }
