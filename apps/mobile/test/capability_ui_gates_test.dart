@@ -489,13 +489,14 @@ void main() {
     await tester.tap(find.text('Providers & capabilities'));
     await _pumpFrames(tester);
 
-    expect(find.text('Provider contract'), findsNWidgets(2));
+    expect(find.text('Provider contract'), findsOneWidget);
     expect(
       find.text('Fake Test Provider - fake-provider 1.0.0'),
-      findsNWidgets(2),
+      findsOneWidget,
     );
     expect(find.text('active: fake'), findsOneWidget);
-    expect(find.text('Fake Test Provider active'), findsOneWidget);
+    expect(find.text('Fake Test Provider'), findsOneWidget);
+    expect(find.text('active'), findsOneWidget);
     expect(find.text('Codex'), findsOneWidget);
     expect(find.text('Provider-owned capabilities'), findsOneWidget);
     expect(find.text('Runtime controls'), findsOneWidget);
@@ -509,7 +510,7 @@ void main() {
     expect(find.text('Codex - codex-cli 0.125.0'), findsOneWidget);
     expect(find.text('viewing: codex'), findsOneWidget);
     expect(find.text('command: codex'), findsOneWidget);
-    expect(find.text('Fake Test Provider active'), findsOneWidget);
+    expect(find.text('Fake Test Provider'), findsOneWidget);
     expect(find.text('2/5'), findsOneWidget);
     expect(find.text('1/4'), findsOneWidget);
     expect(find.text('0/3'), findsOneWidget);
