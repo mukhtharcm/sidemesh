@@ -43,7 +43,7 @@ if (!nextArg || process.argv.length > 3) {
 
 async function main() {
   const pubspec = await readFile(pubspecPath, "utf8");
-  const versionLine = pubspec.match(/^version:\s*(\S+)\s*$/m);
+  const versionLine = pubspec.match(/^version:[^\S\r\n]*(\S+)[^\S\r\n]*$/m);
   if (!versionLine) {
     throw new Error(`Could not find a top-level version line in ${pubspecPath}.`);
   }
@@ -63,7 +63,7 @@ async function main() {
     );
   }
 
-  const updated = pubspec.replace(/^version:\s*\S+\s*$/m, `version: ${next.raw}`);
+  const updated = pubspec.replace(/^version:[^\S\r\n]*\S+[^\S\r\n]*$/m, `version: ${next.raw}`);
   await writeFile(pubspecPath, updated);
   console.log(`Updated ${pubspecPath}: ${current.raw} -> ${next.raw}`);
 }
