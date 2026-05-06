@@ -339,7 +339,10 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
                     ),
                   ],
                   const SizedBox(height: AppSpacing.sm),
-                  _ProviderContractCard(node: data.node),
+                  if (widget.embedded)
+                    _ProviderContractCard(node: data.node)
+                  else
+                    _ProviderContractSummaryCard(node: data.node),
                   if (data.workspaces.length > 1) ...[
                     const SizedBox(height: AppSpacing.lg),
                     _SectionHeader(
@@ -723,10 +726,172 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
   }
 }
 
-class _ProviderContractCard extends StatefulWidget {
-  const _ProviderContractCard({required this.node});
+class HostProviderContractScreen extends StatelessWidget {
+  const HostProviderContractScreen({super.key, required this.node});
 
   final NodeInfo node;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final title = node.label.isNotEmpty ? node.label : node.hostname;
+    return Scaffold(
+      backgroundColor: colors.canvas,
+      appBar: AppBar(title: Text('Provider contract')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        children: [
+          _ProviderContractHeader(node: node, title: title),
+          const SizedBox(height: AppSpacing.sm),
+          _ProviderContractCard(node: node, initiallyExpanded: true),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProviderContractHeader extends StatelessWidget {
+  const _ProviderContractHeader({required this.node, required this.title});
+
+  final NodeInfo node;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MeshCard(
+      tone: MeshCardTone.surface,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: colors.infoMuted,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: colors.info.withValues(alpha: 0.3)),
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.hub_rounded, color: colors.info, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${node.providerDisplayName} - ${node.providerDisplayVersion}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(color: colors.textTertiary, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProviderContractSummaryCard extends StatelessWidget {
+  const _ProviderContractSummaryCard({required this.node});
+
+  final NodeInfo node;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final supportedProviders = node.supportedProviders.length;
+    final providerCountLabel =
+        '$supportedProviders ${supportedProviders == 1 ? "provider" : "providers"}';
+    return MeshCard(
+      tone: MeshCardTone.muted,
+      padding: EdgeInsets.zero,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: AppShapes.card,
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => HostProviderContractScreen(node: node),
+              ),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: colors.infoMuted,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: colors.info.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(Icons.hub_rounded, color: colors.info, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Providers & capabilities',
+                        style: Theme.of(context).textTheme.titleSmall
+                            ?.copyWith(fontWeight: AppWeights.title),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${node.providerDisplayName} active - $providerCountLabel supported',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: monoStyle(
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: colors.textTertiary,
+                  size: 22,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProviderContractCard extends StatefulWidget {
+  const _ProviderContractCard({
+    required this.node,
+    this.initiallyExpanded = false,
+  });
+
+  final NodeInfo node;
+  final bool initiallyExpanded;
 
   @override
   State<_ProviderContractCard> createState() => _ProviderContractCardState();
@@ -774,6 +939,7 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
+          initiallyExpanded: widget.initiallyExpanded,
           tilePadding: const EdgeInsets.fromLTRB(14, 8, 12, 8),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           leading: Container(
