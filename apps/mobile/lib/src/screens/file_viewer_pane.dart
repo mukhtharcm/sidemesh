@@ -133,6 +133,8 @@ class FileViewerPaneState extends State<FileViewerPane> {
         _file = file;
         _loading = false;
         _error = null;
+        _imagePreview = !_editing &&
+            _looksLikeImageFile(file.path, file.mimeHint);
         if (!_editing) {
           _editController.text = file.contents;
         }
