@@ -47,6 +47,7 @@ import type {
   SkillSummary,
   ThreadRecord,
   TurnRecord,
+  UsageObservation,
   SessionMessageContentBlock,
 } from "./types.js";
 
@@ -130,6 +131,12 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   lifecycle: {
     restart: false,
   },
+  usage: {
+    accountLimits: true,
+    localTelemetry: true,
+    credits: true,
+    resetWindows: true,
+  },
 };
 
 function capabilitiesForFakeProfile(
@@ -191,6 +198,7 @@ function cloneCapabilities(
     runtimeControls: { ...capabilities.runtimeControls },
     workspace: { ...capabilities.workspace },
     lifecycle: { ...capabilities.lifecycle },
+    usage: { ...capabilities.usage },
   };
 }
 
@@ -267,6 +275,55 @@ export class FakeAgentProvider
 
   public async getVersion(): Promise<string> {
     return `fake-provider 1.0.0 (${this.capabilityProfile})`;
+  }
+
+  public async readUsageObservations(): Promise<UsageObservation[]> {
+    const observedAt = Date.now();
+    return [
+      {
+        id: "fake:demo-account",
+        observedAt,
+        expiresAt: observedAt + 5 * 60_000,
+        provider: {
+          kind: "fake",
+          displayName: this.displayName,
+        },
+        account: {
+          displayLabel: "demo@example.test",
+          emailHash: "fake-demo-account",
+          planType: "demo",
+        },
+        subject: {
+          kind: "account",
+          displayName: "Demo account",
+          stableKeyHash: "fake-demo-account",
+        },
+        windows: [
+          {
+            id: "primary",
+            label: "Primary",
+            usedPercent: 42,
+            remainingPercent: 58,
+            windowMinutes: 300,
+            resetsAt: observedAt + 2 * 60 * 60_000,
+            resetDescription: "2h",
+          },
+        ],
+        credits: {
+          balance: 12.5,
+          balanceLabel: "12.5",
+          hasCredits: true,
+          unlimited: false,
+        },
+        health: "ok",
+        source: {
+          id: "fake.demoUsage",
+          label: "Demo usage",
+          kind: "providerApi",
+          priority: 1,
+        },
+      },
+    ];
   }
 
   public async listSessionThreads(

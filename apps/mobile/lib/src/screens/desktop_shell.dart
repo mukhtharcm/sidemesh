@@ -27,6 +27,7 @@ import 'host_detail_screen.dart';
 import 'inspector/inspector_controller.dart';
 import 'settings_screen.dart';
 import 'session_screen.dart';
+import 'usage_pane.dart';
 
 /// Two-pane macOS shell — sidebar (Recent / Inbox / Hosts) on the left,
 /// active session on the right. Reuses the same panes as the mobile home
@@ -199,6 +200,7 @@ class _DesktopShellState extends State<DesktopShell> {
   _SidebarSection _section = _SidebarSection.recent;
   _ActiveSession? _active;
   HostProfile? _activeHost;
+  bool _showUsage = false;
   int _activeCount = 0;
   int _inboxCount = 0;
   int _sessionOpenSerial = 0;
@@ -561,6 +563,18 @@ class _DesktopShellState extends State<DesktopShell> {
     _bumpRefresh();
   }
 
+  void _openUsage() {
+    final current = _active;
+    if (current != null) {
+      _inspector.closeForOwner('${current.host.id}|${current.session.id}');
+    }
+    setState(() {
+      _showUsage = true;
+      _active = null;
+      _activeHost = null;
+    });
+  }
+
   void _openSession(
     HostProfile host,
     SessionSummary session, {
@@ -583,6 +597,7 @@ class _DesktopShellState extends State<DesktopShell> {
         composerSeed: composerSeed,
       );
       _activeHost = null;
+      _showUsage = false;
     });
   }
 
@@ -651,6 +666,7 @@ class _DesktopShellState extends State<DesktopShell> {
     setState(() {
       _activeHost = host;
       _active = null;
+      _showUsage = false;
     });
   }
 
@@ -659,6 +675,7 @@ class _DesktopShellState extends State<DesktopShell> {
     setState(() {
       _active = null;
       _activeHost = host;
+      _showUsage = false;
     });
     _bumpRefresh();
   }
@@ -943,6 +960,7 @@ class _DesktopShellState extends State<DesktopShell> {
                                 },
                                 onShowShortcuts: _showShortcutsSheet,
                                 onOpenSettings: _openSettings,
+                                onOpenUsage: _openUsage,
                                 recentViewMode: _recentViewMode,
                                 onRecentViewModeChanged: _setRecentViewMode,
                               ),
@@ -959,6 +977,7 @@ class _DesktopShellState extends State<DesktopShell> {
                               titlebarInset: _titlebarInset,
                               active: _active,
                               activeHost: _activeHost,
+                              showUsage: _showUsage,
                               hosts: _hosts,
                               enabledHosts: _enabledHosts,
                               api: _api,
@@ -972,6 +991,7 @@ class _DesktopShellState extends State<DesktopShell> {
                                 setState(() {
                                   _active = null;
                                   _activeHost = null;
+                                  _showUsage = false;
                                 });
                               },
                               onOpenSession: _openSession,
@@ -1073,6 +1093,7 @@ class _Sidebar extends StatelessWidget {
     required this.onInboxCountChanged,
     required this.onShowShortcuts,
     required this.onOpenSettings,
+    required this.onOpenUsage,
     this.recentViewMode,
     this.onRecentViewModeChanged,
   });
@@ -1105,6 +1126,7 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<int> onInboxCountChanged;
   final VoidCallback onShowShortcuts;
   final VoidCallback onOpenSettings;
+  final VoidCallback onOpenUsage;
   final SessionViewMode? recentViewMode;
   final ValueChanged<SessionViewMode>? onRecentViewModeChanged;
 
@@ -1158,6 +1180,12 @@ class _Sidebar extends StatelessWidget {
                     icon: Icons.keyboard_rounded,
                     tooltip: 'Keyboard shortcuts (⌘/)',
                     onTap: onShowShortcuts,
+                  ),
+                  const SizedBox(width: 2),
+                  _SidebarIconAction(
+                    icon: Icons.speed_rounded,
+                    tooltip: 'Usage',
+                    onTap: onOpenUsage,
                   ),
                   const SizedBox(width: 2),
                   _SidebarIconAction(
@@ -1478,6 +1506,7 @@ class _DetailPane extends StatefulWidget {
     required this.titlebarInset,
     required this.active,
     required this.activeHost,
+    required this.showUsage,
     required this.hosts,
     required this.enabledHosts,
     required this.api,
@@ -1490,6 +1519,7 @@ class _DetailPane extends StatefulWidget {
   final double titlebarInset;
   final _ActiveSession? active;
   final HostProfile? activeHost;
+  final bool showUsage;
   final List<HostProfile> hosts;
   final List<HostProfile> enabledHosts;
   final ApiClient api;
@@ -1529,7 +1559,15 @@ class _DetailPaneState extends State<_DetailPane> {
     final active = widget.active;
     final activeHost = widget.activeHost;
     Widget child;
-    if (active != null) {
+    if (widget.showUsage) {
+      child = UsagePane(
+        key: const ValueKey('usage'),
+        hosts: widget.enabledHosts,
+        api: widget.api,
+        topPadding: widget.titlebarInset,
+        dense: true,
+      );
+    } else if (active != null) {
       child = _buildActive(
         context,
         active,

@@ -9,6 +9,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'models.dart';
 import 'fs_models.dart';
+import 'usage_models.dart';
 
 class ApiClient {
   ApiClient({http.Client? client}) : _client = client ?? http.Client();
@@ -41,6 +42,16 @@ class ApiClient {
       operation: 'load providers',
     );
     return ProviderMetadata.fromJson(_decodeObject(response));
+  }
+
+  Future<HostUsageSnapshot> fetchUsage(HostProfile host) async {
+    final response = await _get(
+      host,
+      '/api/usage',
+      timeout: _standardReadTimeout,
+      operation: 'load usage',
+    );
+    return HostUsageSnapshot.fromJson(host, _decodeObject(response));
   }
 
   Future<List<WorkspaceSummary>> fetchWorkspaces(HostProfile host) async {
