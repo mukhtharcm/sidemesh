@@ -51,8 +51,10 @@ function createThread(): ThreadRecord {
 describe("codex provider usage observations", () => {
   it("normalizes account rate-limit RPC data", async () => {
     const provider = new CodexAgentProvider("codex") as any;
+    const requests: Array<{ method: string; params: unknown }> = [];
     provider.bridge = {
-      request: async (method: string) => {
+      request: async (method: string, params: unknown) => {
+        requests.push({ method, params });
         if (method === "account/read") {
           return {
             account: {
@@ -110,6 +112,10 @@ describe("codex provider usage observations", () => {
     assert.equal(observation.windows[1]?.usedPercent, 97);
     assert.equal(observation.credits?.balance, 12.44);
     assert.equal(observation.credits?.balanceLabel, "12.44");
+    assert.deepEqual(requests, [
+      { method: "account/read", params: {} },
+      { method: "account/rateLimits/read", params: {} },
+    ]);
   });
 
   it("keeps rate-limit observations when account metadata is unavailable", async () => {
@@ -986,4 +992,3 @@ describe("codex interaction bridge", () => {
     assert.equal(handled, false);
   });
 });
-
