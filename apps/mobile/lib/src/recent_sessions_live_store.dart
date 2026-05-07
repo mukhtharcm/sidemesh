@@ -39,6 +39,7 @@ class RecentSessionsStore extends ChangeNotifier {
   final Map<String, Map<String, SessionSummary>> _sessionsByHostId = {};
   final Map<String, _RecentHostLiveConnection> _liveConnections = {};
   final Set<String> _confirmedHostIds = <String>{};
+  final Set<String> _liveHostIds = <String>{};
   Set<String> _pendingHostIds = <String>{};
   List<String> _failedHostLabels = const [];
   bool _hasLoadedOnce = false;
@@ -57,16 +58,19 @@ class RecentSessionsStore extends ChangeNotifier {
   void configure({required List<HostProfile> hosts, required ApiClient api}) {
     if (_disposed) return;
     _api = api;
-    final newSignatures = hosts.map(_hostSignature).toSet();
+    final enabledHosts = hosts
+        .where((host) => host.enabled)
+        .toList(growable: false);
+    final newSignatures = enabledHosts.map(_hostSignature).toSet();
     final oldSignatures = _hosts.map(_hostSignature).toSet();
     final hostsChanged =
         newSignatures.length != oldSignatures.length ||
         !newSignatures.containsAll(oldSignatures);
 
-    _hosts = List.unmodifiable(hosts);
+    _hosts = List.unmodifiable(enabledHosts);
     _hostsById
       ..clear()
-      ..addEntries(hosts.map((host) => MapEntry(host.id, host)));
+      ..addEntries(_hosts.map((host) => MapEntry(host.id, host)));
     _removeEntriesForMissingHosts();
     _syncLiveConnections(hosts: _hosts, api: api);
     _syncPollTimer();
@@ -75,6 +79,7 @@ class RecentSessionsStore extends ChangeNotifier {
       _entries = const [];
       _sessionsByHostId.clear();
       _confirmedHostIds.clear();
+      _liveHostIds.clear();
       _pendingHostIds = <String>{};
       _failedHostLabels = const [];
       _hasLoadedOnce = true;
@@ -100,6 +105,7 @@ class RecentSessionsStore extends ChangeNotifier {
       _entries = const [];
       _sessionsByHostId.clear();
       _confirmedHostIds.clear();
+      _liveHostIds.clear();
       _pendingHostIds = <String>{};
       _failedHostLabels = const [];
       _hasLoadedOnce = true;
@@ -161,7 +167,7 @@ class RecentSessionsStore extends ChangeNotifier {
 
   void _scheduleInitialHttpFallback() {
     _initialHttpFallbackTimer?.cancel();
-    if (_hosts.isEmpty || _hosts.every((host) => !host.enabled)) {
+    if (_hosts.isEmpty) {
       return;
     }
     _pendingHostIds = _hosts.map((host) => host.id).toSet();
@@ -205,7 +211,10 @@ class RecentSessionsStore extends ChangeNotifier {
   }
 
   void _syncPollTimer() {
-    if (_hosts.isEmpty) {
+    final needsPolling = _hosts.any(
+      (host) => host.enabled && !_liveHostIds.contains(host.id),
+    );
+    if (!needsPolling) {
       _pollTimer?.cancel();
       _pollTimer = null;
       return;
@@ -219,20 +228,28 @@ class RecentSessionsStore extends ChangeNotifier {
     required List<HostProfile> hosts,
     required ApiClient api,
   }) {
-    final activeIds = hosts.map((host) => host.id).toSet();
+    final activeIds = hosts
+        .where((host) => host.enabled)
+        .map((host) => host.id)
+        .toSet();
     for (final id in _liveConnections.keys.toList(growable: false)) {
       if (activeIds.contains(id)) continue;
       _liveConnections.remove(id)?.dispose();
       _confirmedHostIds.remove(id);
+      _liveHostIds.remove(id);
     }
 
     for (final host in hosts) {
+      if (!host.enabled) {
+        continue;
+      }
       final existing = _liveConnections[host.id];
       if (existing != null && existing.matches(host)) {
         continue;
       }
       existing?.dispose();
       _confirmedHostIds.remove(host.id);
+      _liveHostIds.remove(host.id);
       _liveConnections[host.id] = _RecentHostLiveConnection(
         host: host,
         api: api,
@@ -251,6 +268,8 @@ class RecentSessionsStore extends ChangeNotifier {
 
   void _handleLiveOffline(HostProfile host, Object? error) {
     if (_disposed) return;
+    _liveHostIds.remove(host.id);
+    _syncPollTimer();
     if (_confirmedHostIds.remove(host.id)) {
       notifyListeners();
     }
@@ -299,6 +318,7 @@ class RecentSessionsStore extends ChangeNotifier {
 
   void _markHostFreshFromLive(HostProfile host) {
     _confirmedHostIds.add(host.id);
+    _liveHostIds.add(host.id);
     _pendingHostIds = {..._pendingHostIds}..remove(host.id);
     if (_pendingHostIds.isEmpty) {
       _initialHttpFallbackTimer?.cancel();
@@ -307,6 +327,7 @@ class RecentSessionsStore extends ChangeNotifier {
     _failedHostLabels = _failedHostLabels
         .where((label) => label != host.label)
         .toList(growable: false);
+    _syncPollTimer();
   }
 
   void _replaceHostSessions(HostProfile host, List<SessionSummary> sessions) {
@@ -348,6 +369,7 @@ class RecentSessionsStore extends ChangeNotifier {
       if (activeIds.contains(id)) continue;
       _sessionsByHostId.remove(id);
       _confirmedHostIds.remove(id);
+      _liveHostIds.remove(id);
     }
     _publishEntries();
   }
@@ -367,6 +389,7 @@ class RecentSessionsStore extends ChangeNotifier {
       connection.dispose();
     }
     _liveConnections.clear();
+    _liveHostIds.clear();
     super.dispose();
   }
 }
@@ -476,9 +499,13 @@ class _RecentHostLiveConnection {
 
   void _scheduleReconnect(Object? error) {
     if (_disposed || !host.enabled) return;
-    _subscription?.cancel();
+    final channel = _channel;
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
     _subscription = null;
     _channel = null;
+    if (channel != null) {
+      unawaited(channel.sink.close());
+    }
     onOffline(host, error);
     HostReconnectScheduler.instance.markDisconnected(host.id, _reconnectSlotId);
   }

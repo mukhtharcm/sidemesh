@@ -20,7 +20,10 @@ class ApiClient {
   static const Duration _diffReadTimeout = Duration(seconds: 25);
   static const Duration _turnWriteTimeout = Duration(seconds: 45);
   static const Duration _webSocketConnectTimeout = Duration(seconds: 8);
-  static const Duration _webSocketPingInterval = Duration(seconds: 20);
+  static const Duration _interactiveWebSocketPingInterval = Duration(
+    seconds: 20,
+  );
+  static const Duration _backgroundWebSocketPingInterval = Duration(minutes: 1);
 
   final http.Client _client;
 
@@ -689,7 +692,7 @@ class ApiClient {
       wsUri,
       headers: {'Authorization': 'Bearer ${host.token}'},
       connectTimeout: _webSocketConnectTimeout,
-      pingInterval: _webSocketPingInterval,
+      pingInterval: _interactiveWebSocketPingInterval,
     );
   }
 
@@ -705,7 +708,7 @@ class ApiClient {
       wsUri,
       headers: {'Authorization': 'Bearer ${host.token}'},
       connectTimeout: _webSocketConnectTimeout,
-      pingInterval: _webSocketPingInterval,
+      pingInterval: _backgroundWebSocketPingInterval,
     );
   }
 
@@ -721,7 +724,7 @@ class ApiClient {
       wsUri,
       headers: {'Authorization': 'Bearer ${host.token}'},
       connectTimeout: _webSocketConnectTimeout,
-      pingInterval: _webSocketPingInterval,
+      pingInterval: _backgroundWebSocketPingInterval,
     );
   }
 
@@ -742,7 +745,7 @@ class ApiClient {
       wsUri,
       headers: {'Authorization': 'Bearer ${host.token}'},
       connectTimeout: _webSocketConnectTimeout,
-      pingInterval: _webSocketPingInterval,
+      pingInterval: _interactiveWebSocketPingInterval,
     );
   }
 
@@ -761,7 +764,7 @@ class ApiClient {
       wsUri,
       headers: {'Authorization': 'Bearer ${host.token}'},
       connectTimeout: _webSocketConnectTimeout,
-      pingInterval: _webSocketPingInterval,
+      pingInterval: _interactiveWebSocketPingInterval,
     );
   }
 
@@ -777,7 +780,7 @@ class ApiClient {
       wsUri,
       headers: {'Authorization': 'Bearer ${host.token}'},
       connectTimeout: _webSocketConnectTimeout,
-      pingInterval: _webSocketPingInterval,
+      pingInterval: _interactiveWebSocketPingInterval,
     );
   }
 
@@ -1001,7 +1004,7 @@ class ApiClient {
       wsUri,
       headers: {'Authorization': 'Bearer ${host.token}'},
       connectTimeout: _webSocketConnectTimeout,
-      pingInterval: _webSocketPingInterval,
+      pingInterval: _backgroundWebSocketPingInterval,
     );
   }
 

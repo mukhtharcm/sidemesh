@@ -409,6 +409,13 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _scheduleStreamReconnect(String reason) {
     if (!mounted || _clientPaused || _remoteClosed) return;
+    final channel = _channel;
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
+    _subscription = null;
+    _channel = null;
+    if (channel != null) {
+      unawaited(channel.sink.close());
+    }
     HostReconnectScheduler.instance.markDisconnected(
       widget.host.id,
       _reconnectSlotId,

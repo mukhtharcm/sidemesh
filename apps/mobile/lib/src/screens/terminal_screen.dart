@@ -154,8 +154,8 @@ class _TerminalPaneState extends State<TerminalPane> {
         _connectLive,
       );
     }
-    _subscription?.cancel();
-    _channel?.sink.close();
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
+    unawaited(_channel?.sink.close() ?? Future<void>.value());
     _subscription = null;
     _channel = null;
     _terminalInfo = null;
@@ -170,8 +170,8 @@ class _TerminalPaneState extends State<TerminalPane> {
       widget.host.id,
       _reconnectSlotId,
     );
-    _subscription?.cancel();
-    _channel?.sink.close();
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
+    unawaited(_channel?.sink.close() ?? Future<void>.value());
     _focusNode.dispose();
     super.dispose();
   }
@@ -234,8 +234,8 @@ class _TerminalPaneState extends State<TerminalPane> {
     if (!mounted || terminal == null || !terminal.isRunning || _connecting) {
       return;
     }
-    _subscription?.cancel();
-    _channel?.sink.close();
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
+    unawaited(_channel?.sink.close() ?? Future<void>.value());
     _subscription = null;
     _channel = null;
     setState(() {
@@ -274,9 +274,13 @@ class _TerminalPaneState extends State<TerminalPane> {
 
   void _scheduleReconnect() {
     if (!mounted || _terminalInfo?.isRunning != true) return;
-    _subscription?.cancel();
+    final channel = _channel;
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
     _subscription = null;
     _channel = null;
+    if (channel != null) {
+      unawaited(channel.sink.close());
+    }
     setState(() {
       _connecting = false;
       _error = 'Terminal disconnected. Reconnecting...';
@@ -643,7 +647,7 @@ class _TerminalStatusStrip extends StatelessWidget {
             child: ListenableBuilder(
               listenable: Listenable.merge([
                 HostStatusStore.instance,
-                RelativeTimeTicker.instance,
+                RelativeTimeTicker.seconds,
               ]),
               builder: (context, _) {
                 final status = HostStatusStore.instance.statusFor(hostId);

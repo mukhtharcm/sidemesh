@@ -86,6 +86,7 @@ class _LiveSession {
 
   int _refs = 0;
   WebSocketChannel? _channel;
+  StreamSubscription<dynamic>? _subscription;
   final _controller = StreamController<FsChangeEvent>.broadcast();
   final Map<String, Completer<String>> _pendingSubs = {};
   final Map<String, String> _pathToWatchId = {};
@@ -96,6 +97,10 @@ class _LiveSession {
 
   void _connect() {
     if (_disposed || !host.enabled) return;
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
+    unawaited(_channel?.sink.close() ?? Future<void>.value());
+    _subscription = null;
+    _channel = null;
     try {
       _channel = api.openFsLive(host, sessionId: sessionId);
     } catch (_) {
@@ -103,7 +108,7 @@ class _LiveSession {
       _scheduleReconnect();
       return;
     }
-    _channel!.stream.listen(
+    _subscription = _channel!.stream.listen(
       _handleMessage,
       onError: (_) => _scheduleReconnect(),
       onDone: _scheduleReconnect,
@@ -119,7 +124,13 @@ class _LiveSession {
 
   void _scheduleReconnect() {
     if (_disposed || !host.enabled) return;
+    final channel = _channel;
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
+    _subscription = null;
     _channel = null;
+    if (channel != null) {
+      unawaited(channel.sink.close());
+    }
     HostReconnectScheduler.instance.markDisconnected(host.id, _reconnectSlotId);
   }
 
@@ -194,7 +205,8 @@ class _LiveSession {
   void _dispose() {
     _disposed = true;
     HostReconnectScheduler.instance.unregisterSlot(host.id, _reconnectSlotId);
-    _channel?.sink.close();
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
+    unawaited(_channel?.sink.close() ?? Future<void>.value());
     _controller.close();
   }
 }
