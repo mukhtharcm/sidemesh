@@ -653,6 +653,10 @@ async function runUpCommand(options: {
   });
   const daemon = await inspectDaemon(config);
   if (daemon.healthReachable) {
+    const reachableConflict = explainReachableDaemonConflictForUp(config, daemon);
+    if (reachableConflict) {
+      throw new Error(reachableConflict);
+    }
     console.log(
       `Sidemesh is already reachable on http://127.0.0.1:${config.port}/healthz.`,
     );
@@ -977,6 +981,26 @@ function findBlockingProviderChecks(
       ),
     }))
     .filter((entry) => entry.checks.length > 0);
+}
+
+export function explainReachableDaemonConflictForUp(
+  config: Pick<NodeConfig, "configPath" | "port">,
+  daemon: Awaited<ReturnType<typeof inspectDaemon>>,
+): string | null {
+  if (!daemon.healthReachable) {
+    return null;
+  }
+  const healthUrl = `http://127.0.0.1:${config.port}/healthz`;
+  if (!daemon.state) {
+    return `A daemon is already reachable at ${healthUrl}, but no managed state file exists at ${daemon.statePath}. Refusing to guess its pairing token. Stop that process or start Sidemesh with this config before running \`sidemesh up\`.`;
+  }
+  if (!daemon.pidAlive) {
+    return `A daemon is already reachable at ${healthUrl}, but the managed state file at ${daemon.statePath} is stale. Refusing to guess its pairing token. Run \`sidemesh stop --yes\` or remove the stale state before running \`sidemesh up\`.`;
+  }
+  if (daemon.state.configPath !== config.configPath) {
+    return `A daemon is already reachable at ${healthUrl}, but it is managed by ${daemon.state.configPath}, not ${config.configPath}. Refusing to guess its pairing token.`;
+  }
+  return null;
 }
 
 function registerShutdownHandlers(
