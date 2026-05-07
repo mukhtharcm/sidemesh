@@ -44,6 +44,7 @@ class _ToastQueue {
     required Duration duration,
     SnackBarAction? action,
   }) {
+    _dropStaleQueuedToasts();
     final actionLabel = action?.label;
     if (_active != null &&
         _active!.message == message &&
@@ -78,25 +79,49 @@ class _ToastQueue {
 
   void _drain() {
     if (_active != null) return;
+    _dropStaleQueuedToasts();
     if (_queue.isEmpty) return;
     final next = _queue.removeFirst();
     _show(next);
   }
 
   void _show(_QueuedToast toast) {
+    if (!toast.overlay.mounted) {
+      _drain();
+      return;
+    }
     final controller = _ToastController();
     late final OverlayEntry entry;
+    Timer? autoDismissTimer;
+    var completed = false;
+    void complete({required bool drain}) {
+      if (completed) return;
+      completed = true;
+      autoDismissTimer?.cancel();
+      if (entry.mounted) {
+        entry.remove();
+      }
+      final active = _active;
+      if (active != null && identical(active.controller, controller)) {
+        _active = null;
+      }
+      if (toast.overlay.mounted) {
+        if (drain) {
+          _drain();
+        }
+      } else {
+        _dropStaleQueuedToasts();
+      }
+    }
+
     entry = OverlayEntry(
       builder: (context) => _ToastOverlay(
         controller: controller,
         colors: toast.colors,
         message: toast.message,
         action: toast.action,
-        onDismiss: () {
-          if (entry.mounted) entry.remove();
-          _active = null;
-          _drain();
-        },
+        onDismiss: () => complete(drain: true),
+        onDisposed: () => complete(drain: false),
       ),
     );
     _active = _ActiveToast(
@@ -106,10 +131,13 @@ class _ToastQueue {
       actionLabel: toast.action?.label,
     );
     toast.overlay.insert(entry);
-    // Auto-dismiss.
-    Future<void>.delayed(toast.duration, () {
+    autoDismissTimer = Timer(toast.duration, () {
       controller.dismiss();
     });
+  }
+
+  void _dropStaleQueuedToasts() {
+    _queue.removeWhere((toast) => !toast.overlay.mounted);
   }
 }
 
@@ -157,6 +185,7 @@ class _ToastOverlay extends StatefulWidget {
     required this.colors,
     required this.message,
     required this.onDismiss,
+    required this.onDisposed,
     this.action,
   });
 
@@ -165,6 +194,7 @@ class _ToastOverlay extends StatefulWidget {
   final String message;
   final SnackBarAction? action;
   final VoidCallback onDismiss;
+  final VoidCallback onDisposed;
 
   @override
   State<_ToastOverlay> createState() => _ToastOverlayState();
@@ -177,6 +207,8 @@ class _ToastOverlayState extends State<_ToastOverlay>
     duration: const Duration(milliseconds: 220),
     reverseDuration: const Duration(milliseconds: 180),
   );
+  bool _dismissing = false;
+  bool _completed = false;
   late final Animation<double> _fade = CurvedAnimation(
     parent: _anim,
     curve: Curves.easeOutCubic,
@@ -197,8 +229,10 @@ class _ToastOverlayState extends State<_ToastOverlay>
   }
 
   Future<void> _playOut() async {
+    if (_dismissing) return;
+    _dismissing = true;
     if (!mounted) {
-      widget.onDismiss();
+      _completeDismiss();
       return;
     }
     // Don't await reverse() directly — if the ticker is canceled (e.g. the
@@ -209,9 +243,15 @@ class _ToastOverlayState extends State<_ToastOverlay>
       _anim.reverseDuration ?? const Duration(milliseconds: 180),
     );
     if (!mounted) {
-      widget.onDismiss();
+      _completeDismiss();
       return;
     }
+    _completeDismiss();
+  }
+
+  void _completeDismiss() {
+    if (_completed) return;
+    _completed = true;
     widget.onDismiss();
   }
 
@@ -219,6 +259,10 @@ class _ToastOverlayState extends State<_ToastOverlay>
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
     _anim.dispose();
+    if (!_completed) {
+      _completed = true;
+      widget.onDisposed();
+    }
     super.dispose();
   }
 
@@ -230,7 +274,6 @@ class _ToastOverlayState extends State<_ToastOverlay>
     final double left = isWide ? media.size.width - 440 - right : 12;
     final double bottom = isWide ? 20 : 20 + media.padding.bottom;
     final colors = widget.colors;
-    final remaining = _ToastQueue.instance.length;
     return Positioned(
       left: left,
       right: right,
@@ -302,9 +345,7 @@ class _ToastOverlayState extends State<_ToastOverlay>
                         ],
                         const SizedBox(width: 4),
                         IconButton(
-                          tooltip: remaining > 0
-                              ? 'Dismiss all ($remaining)'
-                              : 'Dismiss',
+                          tooltip: 'Dismiss',
                           iconSize: 16,
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
@@ -312,9 +353,7 @@ class _ToastOverlayState extends State<_ToastOverlay>
                             width: 28,
                             height: 28,
                           ),
-                          onPressed: remaining > 0
-                              ? _ToastQueue.instance.clear
-                              : widget.controller.dismiss,
+                          onPressed: _ToastQueue.instance.clear,
                           icon: Icon(
                             Icons.close_rounded,
                             color: colors.textSecondary,
