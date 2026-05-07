@@ -134,7 +134,11 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
   for (const kind of selectedProviders) {
     switch (kind) {
       case "codex":
-        resolvedProviders.push(await promptCodexProvider(existing));
+        resolvedProviders.push(
+          await promptCodexProvider(existing, {
+            advanced: options.advanced === true,
+          }),
+        );
         break;
       case "pi":
         resolvedProviders.push(await promptPiProvider(existing, stateDir));
@@ -194,28 +198,32 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     ? await promptBrowserPreviewDetails(existing)
     : defaultBrowserPreviewConfig(existing);
 
-  note(
-    "Stable gets tagged releases. Bleeding edge gets the newest commits on origin/main for git installs.",
-    "Update channel",
-  );
-  const updateChannel = await select<UpdateChannel>({
-    message: "Update channel",
-    initialValue: existing?.updateChannel ?? "stable",
-    options: [
-      {
-        value: "stable",
-        label: "Stable",
-        hint: "Tagged releases",
-      },
-      {
-        value: "bleeding-edge",
-        label: "Bleeding edge",
-        hint: "Latest commits on main (git installs only)",
-      },
-    ],
-  });
-  if (isCancel(updateChannel)) {
-    throw new Error("Setup cancelled.");
+  let updateChannel: UpdateChannel = existing?.updateChannel ?? "stable";
+  if (shouldPromptForUpdateChannel(existing, options)) {
+    note(
+      "Stable gets tagged releases. Bleeding edge gets the newest commits on origin/main for git installs.",
+      "Update channel",
+    );
+    const selectedUpdateChannel = await select<UpdateChannel>({
+      message: "Update channel",
+      initialValue: updateChannel,
+      options: [
+        {
+          value: "stable",
+          label: "Stable",
+          hint: "Tagged releases",
+        },
+        {
+          value: "bleeding-edge",
+          label: "Bleeding edge",
+          hint: "Latest commits on main (git installs only)",
+        },
+      ],
+    });
+    if (isCancel(selectedUpdateChannel)) {
+      throw new Error("Setup cancelled.");
+    }
+    updateChannel = selectedUpdateChannel as UpdateChannel;
   }
 
   // Token is auto-generated on first setup and preserved on re-runs.
@@ -248,7 +256,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
         ? "\n\nOn Linux, use `sudo sidemesh service install` if you want the app's Restart and Update buttons to bring the host back on their own."
         : "";
   outro(
-    `Saved ${persisted.path}\n\n  ❯ sidemesh start && sidemesh pair${lifecycleNote}`,
+    `Saved ${persisted.path}\n\n  ❯ sidemesh up${lifecycleNote}`,
   );
   return config;
 }
@@ -414,12 +422,19 @@ async function promptBrowserPreviewDetails(
 
 async function promptCodexProvider(
   existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
+  options: {
+    advanced: boolean;
+  },
 ): Promise<AgentProviderConfig> {
   const current =
     existing?.providers.find((provider) => provider.kind === "codex") ?? null;
+  const currentBin = current?.kind === "codex" ? current.bin : null;
+  if (!shouldPromptForCodexCommand(currentBin, options)) {
+    return { kind: "codex", bin: "codex" };
+  }
   const bin = await promptText({
     message: "Codex command",
-    defaultValue: current?.kind === "codex" ? current.bin : "codex",
+    defaultValue: currentBin ?? "codex",
     validate: (value) =>
       value.trim() ? undefined : "Codex command cannot be empty.",
   });
@@ -622,4 +637,29 @@ export function normalizePromptTextValue(
     return options.defaultValue!;
   }
   return value;
+}
+
+export function shouldPromptForCodexCommand(
+  currentBin: string | null,
+  options: {
+    advanced: boolean;
+  },
+): boolean {
+  if (options.advanced) {
+    return true;
+  }
+  if (!currentBin) {
+    return false;
+  }
+  return currentBin.trim() !== "codex";
+}
+
+export function shouldPromptForUpdateChannel(
+  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
+  options: SetupOptions,
+): boolean {
+  if (options.advanced === true) {
+    return true;
+  }
+  return existing != null;
 }
