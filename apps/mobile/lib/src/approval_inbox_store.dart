@@ -60,24 +60,30 @@ class ApprovalInboxStore extends ChangeNotifier {
   /// stops per-host live sockets as needed and keeps the reconcile timer armed.
   void configure({required List<HostProfile> hosts, required ApiClient api}) {
     _api = api;
-    final newSignatures = hosts.map(_hostSignature).toSet();
+    final enabledHosts = hosts
+        .where((host) => host.enabled)
+        .toList(growable: false);
+    final newSignatures = enabledHosts.map(_hostSignature).toSet();
     final oldSignatures = _hosts.map(_hostSignature).toSet();
     final hostsChanged =
         newSignatures.length != oldSignatures.length ||
         !newSignatures.containsAll(oldSignatures);
-    _hosts = List.unmodifiable(hosts);
+    _hosts = List.unmodifiable(enabledHosts);
     _syncLiveConnections(hosts: _hosts, api: api);
-    if (_hosts.isEmpty) {
-      _stopTimer();
-    } else {
-      _ensureTimer();
-    }
+    _syncPollTimer();
     if (hostsChanged || !_hasLoadedOnce) {
       unawaited(refresh());
     }
   }
 
-  void _ensureTimer() {
+  void _syncPollTimer() {
+    final needsPolling = _hosts.any(
+      (host) => host.enabled && !_liveSnapshotHostIds.contains(host.id),
+    );
+    if (!needsPolling) {
+      _stopTimer();
+      return;
+    }
     _pollTimer ??= Timer.periodic(_pollInterval, (_) {
       unawaited(refresh());
     });
@@ -172,7 +178,10 @@ class ApprovalInboxStore extends ChangeNotifier {
     required List<HostProfile> hosts,
     required ApiClient api,
   }) {
-    final activeIds = hosts.map((host) => host.id).toSet();
+    final activeIds = hosts
+        .where((host) => host.enabled)
+        .map((host) => host.id)
+        .toSet();
     for (final id in _liveConnections.keys.toList(growable: false)) {
       if (activeIds.contains(id)) continue;
       _liveConnections.remove(id)?.dispose();
@@ -181,6 +190,9 @@ class ApprovalInboxStore extends ChangeNotifier {
     }
 
     for (final host in hosts) {
+      if (!host.enabled) {
+        continue;
+      }
       final existing = _liveConnections[host.id];
       if (existing != null && existing.matches(host)) {
         continue;
@@ -199,6 +211,7 @@ class ApprovalInboxStore extends ChangeNotifier {
       _liveConnections[host.id] = connection;
       connection.connect();
     }
+    _syncPollTimer();
   }
 
   void _handleLiveOnline(HostProfile host) {
@@ -209,10 +222,14 @@ class ApprovalInboxStore extends ChangeNotifier {
     // Polling owns host reachability. Live approval sockets are an optional
     // fast path, so old servers or transient socket drops should not make an
     // otherwise healthy host look offline.
+    if (_liveSnapshotHostIds.remove(host.id)) {
+      _syncPollTimer();
+    }
   }
 
   void _handleLiveSnapshot(HostProfile host, List<PendingAction> actions) {
     final isInitialHostSnapshot = _liveSnapshotHostIds.add(host.id);
+    _syncPollTimer();
     unawaited(
       _applyHostSnapshot(
         host,
@@ -356,7 +373,7 @@ class ApprovalInboxStore extends ChangeNotifier {
   }
 
   String _hostSignature(HostProfile host) {
-    return '${host.id}|${host.label}|${host.baseUrl}|${host.token}';
+    return '${host.id}|${host.label}|${host.baseUrl}|${host.token}|${host.enabled ? 1 : 0}';
   }
 }
 
@@ -454,9 +471,13 @@ class _ApprovalHostLiveConnection {
 
   void _scheduleReconnect(Object? error) {
     if (_disposed || !host.enabled) return;
-    _subscription?.cancel();
+    final channel = _channel;
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
     _subscription = null;
     _channel = null;
+    if (channel != null) {
+      unawaited(channel.sink.close());
+    }
     onOffline(host, error);
     HostReconnectScheduler.instance.markDisconnected(host.id, _reconnectSlotId);
   }

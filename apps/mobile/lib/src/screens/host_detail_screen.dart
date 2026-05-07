@@ -49,19 +49,24 @@ class HostDetailScreen extends StatefulWidget {
   State<HostDetailScreen> createState() => _HostDetailScreenState();
 }
 
-class _HostDetailScreenState extends State<HostDetailScreen> {
+class _HostDetailScreenState extends State<HostDetailScreen>
+    with WidgetsBindingObserver {
   final SessionLocalStore _localStore = SessionLocalStore.instance;
   final AppVersionStore _appVersionStore = AppVersionStore.instance;
   late Future<_HostOverview> _future;
   Timer? _refreshTimer;
   Future<void>? _updateInfoRefresh;
   bool _checkingUpdateInfo = false;
-  static const Duration _refreshInterval = Duration(seconds: 20);
+  AppLifecycleState? _lifecycleState;
+  static const Duration _refreshInterval = Duration(minutes: 1);
 
   @override
   void initState() {
     super.initState();
 
+    _lifecycleState =
+        WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
     _localStore.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
     if (widget.showMobileClientCompatibility) {
@@ -72,12 +77,13 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_refreshUpdateInfo());
     });
-    _refreshTimer = Timer.periodic(_refreshInterval, (_) => _silentRefresh());
+    _startRefreshTimer();
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _stopRefreshTimer();
     if (widget.showMobileClientCompatibility) {
       _appVersionStore.removeListener(_handleAppVersionChanged);
     }
@@ -87,6 +93,35 @@ class _HostDetailScreenState extends State<HostDetailScreen> {
   void _handleAppVersionChanged() {
     if (!mounted) return;
     setState(() {});
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleState = state;
+    if (state == AppLifecycleState.resumed) {
+      _startRefreshTimer();
+      unawaited(_silentRefresh());
+      return;
+    }
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _stopRefreshTimer();
+    }
+  }
+
+  void _startRefreshTimer() {
+    if (_lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(_refreshInterval, (_) => _silentRefresh());
+  }
+
+  void _stopRefreshTimer() {
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
   }
 
   Future<void> _silentRefresh() async {

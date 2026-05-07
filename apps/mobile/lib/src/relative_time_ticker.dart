@@ -2,16 +2,24 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-/// A lightweight process-wide ticker that fires once per second so
-/// relative-time labels (e.g. "last connected 12s ago") stay fresh
-/// without every widget running its own [Timer.periodic].
+/// A lightweight process-wide ticker for relative-time labels.
 ///
 /// Widgets that display relative timestamps can wrap just the text
-/// portion in a [ListenableBuilder] driven by this instance.  The timer
-/// only runs while at least one listener is attached.
+/// portion in a [ListenableBuilder] driven by one of these instances. The
+/// timers only run while at least one listener is attached.
 class RelativeTimeTicker extends ChangeNotifier {
-  RelativeTimeTicker._();
-  static final RelativeTimeTicker instance = RelativeTimeTicker._();
+  RelativeTimeTicker._(this._interval);
+
+  /// Default to minute-level ticks for list and status surfaces.
+  static final RelativeTimeTicker instance = minutes;
+  static final RelativeTimeTicker minutes = RelativeTimeTicker._(
+    const Duration(minutes: 1),
+  );
+  static final RelativeTimeTicker seconds = RelativeTimeTicker._(
+    const Duration(seconds: 1),
+  );
+
+  final Duration _interval;
 
   Timer? _timer;
   int _listenerCount = 0;
@@ -21,9 +29,7 @@ class RelativeTimeTicker extends ChangeNotifier {
     super.addListener(listener);
     _listenerCount++;
     if (_timer == null) {
-      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-        notifyListeners();
-      });
+      _scheduleNextTick();
       // Fire immediately so the first frame is correct.
       notifyListeners();
     }
@@ -38,5 +44,29 @@ class RelativeTimeTicker extends ChangeNotifier {
       _timer = null;
       _listenerCount = 0;
     }
+  }
+
+  void _scheduleNextTick() {
+    _timer?.cancel();
+    if (_listenerCount <= 0) {
+      return;
+    }
+    _timer = Timer(_nextDelay(), () {
+      if (_listenerCount <= 0) {
+        return;
+      }
+      notifyListeners();
+      _scheduleNextTick();
+    });
+  }
+
+  Duration _nextDelay() {
+    if (_interval == const Duration(minutes: 1)) {
+      final now = DateTime.now();
+      final elapsedMs = now.second * 1000 + now.millisecond;
+      final nextMinuteMs = 60000 - elapsedMs;
+      return Duration(milliseconds: nextMinuteMs == 0 ? 60000 : nextMinuteMs);
+    }
+    return _interval;
   }
 }
