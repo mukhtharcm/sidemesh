@@ -45,6 +45,7 @@ sidemesh up
 
 This will:
 - Create `~/.sidemesh/config.json` if it does not exist yet
+- Auto-detect ready providers on the machine and default to Codex when it is ready
 - Start the daemon in the background
 - Print the base URL, token, and pairing QR code
 
