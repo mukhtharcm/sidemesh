@@ -9,7 +9,7 @@ and distribution because the product exposes powerful host-control surfaces.
 - Repository: public.
 - License: Apache-2.0.
 - npm: published as the `sidemesh` package.
-- Daemon distribution: npm, private GitHub install, or local clone.
+- Daemon distribution: npm or local clone.
 - App distribution: local Flutter builds and manual GitHub Actions artifacts.
 - Recommended network: Tailscale or trusted private LAN.
 
@@ -40,16 +40,14 @@ scripts/secret-scan.sh --history
 The manual GitHub Actions workflow `Secret Scan` runs gitleaks against full git
 history and should also pass before public release.
 
-## Daemon Install From GitHub
+## Daemon Install From npm
 
-On a trusted host that should consume the repo directly before npm publishing:
+On a trusted host that should consume the published package:
 
 ```bash
-npm install -g github:mukhtharcm/sidemesh
-sidemesh setup
-sidemesh doctor
+npm install -g sidemesh @openai/codex
+sidemesh up
 sidemesh service install
-sidemesh pair
 ```
 
 On Linux/systemd, use sudo for service install/restart/uninstall:
@@ -84,10 +82,10 @@ sidemesh service restart --yes
 sudo sidemesh service restart --yes
 ```
 
-For a global GitHub install:
+For a global npm install:
 
 ```bash
-npm install -g github:mukhtharcm/sidemesh
+npm install -g sidemesh@latest
 
 # macOS
 sidemesh service restart --yes
@@ -100,10 +98,8 @@ For a detached background daemon started with `sidemesh start`:
 
 ```bash
 sidemesh stop --yes
-git pull --ff-only
-npm install
-npm run build
-sidemesh start
+npm install -g sidemesh@latest
+sidemesh up
 ```
 
 For a foreground daemon started with `sidemesh daemon`, stop the terminal
