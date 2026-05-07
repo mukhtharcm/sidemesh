@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -426,6 +426,76 @@ describe("loadConfig", () => {
     assert.equal(raw.token, config.token);
   });
 
+  it("auto-detects a ready Pi provider on first run", async () => {
+    const homeDir = nodePath.join(tempDir, "home");
+    const piAgentDir = nodePath.join(tempDir, "pi-agent");
+    await mkdir(homeDir, { recursive: true });
+    await mkdir(piAgentDir, { recursive: true });
+
+    const config = await loadConfig({
+      configPath,
+      env: {
+        HOME: homeDir,
+        PATH: "",
+        SIDEMESH_PI_AGENT_DIR: piAgentDir,
+      },
+    });
+
+    assert.equal(config.defaultProviderKind, "pi");
+    assert.equal(config.provider.kind, "pi");
+    assert.deepEqual(
+      config.providers.map((provider) => provider.kind),
+      ["pi"],
+    );
+  });
+
+  it("persists inferred ready providers when generating a first-run config", async () => {
+    const homeDir = nodePath.join(tempDir, "home");
+    const binDir = nodePath.join(tempDir, "bin");
+    const piAgentDir = nodePath.join(tempDir, "pi-agent");
+    await mkdir(homeDir, { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    await mkdir(piAgentDir, { recursive: true });
+    await writeCommand(nodePath.join(binDir, "codex"), "#!/bin/sh\necho codex 1.2.3\n");
+    await mkdir(nodePath.join(homeDir, ".codex"), { recursive: true });
+    await writeFile(
+      nodePath.join(homeDir, ".codex", "auth.json"),
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        tokens: {
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+        },
+      }),
+    );
+
+    const config = await loadConfig({
+      configPath,
+      env: {
+        HOME: homeDir,
+        PATH: binDir,
+        SIDEMESH_PI_AGENT_DIR: piAgentDir,
+      },
+      persistGeneratedToken: true,
+    });
+
+    assert.equal(config.defaultProviderKind, "codex");
+    assert.deepEqual(
+      config.providers.map((provider) => provider.kind),
+      ["codex", "pi"],
+    );
+
+    const raw = JSON.parse(await readFile(configPath, "utf8")) as {
+      defaultProviderKind?: string;
+      providers?: Array<{ kind?: string }>;
+    };
+    assert.equal(raw.defaultProviderKind, "codex");
+    assert.deepEqual(
+      raw.providers?.map((provider) => provider.kind),
+      ["codex", "pi"],
+    );
+  });
+
   it("rotates the persisted token in place", async () => {
     await writeFile(
       configPath,
@@ -446,3 +516,8 @@ describe("loadConfig", () => {
     assert.equal(raw.token, config.token);
   });
 });
+
+async function writeCommand(path: string, content: string): Promise<void> {
+  await writeFile(path, content, "utf8");
+  await chmod(path, 0o755);
+}

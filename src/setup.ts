@@ -24,6 +24,7 @@ import type {
   UpdateChannel,
 } from "./types.js";
 import { listSetupAgentProviderDefinitionSummaries } from "./provider-registry.js";
+import { inferInstalledProviderConfigs } from "./provider-autodetect.js";
 
 export interface SetupOptions {
   configPath?: string | null;
@@ -38,12 +39,16 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
   const persisted = await readResolvedPersistedConfig({
     configPath: options.configPath,
   });
+  const enabledExperimentalKinds: AgentProviderKind[] =
+    process.env.SIDEMESH_ENABLE_COPILOT?.trim() === "1" ? ["copilot"] : [];
   const definitions = listSetupAgentProviderDefinitionSummaries({
     includeDev: options.includeDevProviders,
-    includeKinds:
-      persisted.value?.providers.map(
+    includeKinds: [
+      ...(persisted.value?.providers.map(
         (provider) => provider.kind as AgentProviderKind,
-      ) ?? [],
+      ) ?? []),
+      ...enabledExperimentalKinds,
+    ],
   });
   const existing = persisted.value;
 
@@ -87,9 +92,30 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     });
   }
 
+  const inferredProviders =
+    existing == null
+      ? await inferInstalledProviderConfigs({
+          env: process.env,
+          stateDir,
+          includeDev: options.includeDevProviders === true,
+          includeKinds: enabledExperimentalKinds,
+        })
+      : null;
+  if (existing == null && inferredProviders && inferredProviders.providers.length > 0) {
+    note(
+      `Detected ready providers: ${inferredProviders.candidates
+        .filter((candidate) => candidate.readiness === "ready")
+        .map((candidate) => candidate.displayName)
+        .join(", ")}`,
+      "Provider detection",
+    );
+  }
+
   // Providers
   const initialProviders =
-    existing?.providers.map((provider) => provider.kind) ?? ["codex"];
+    existing?.providers.map((provider) => provider.kind) ??
+    inferredProviders?.providers.map((provider) => provider.kind) ??
+    ["codex"];
   const providers = await multiselect<AgentProviderKind>({
     message: "Which providers should this daemon expose?",
     required: true,
