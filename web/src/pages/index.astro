@@ -502,6 +502,67 @@
     line-height: 1.65;
   }
 
+  /* ── Hero phone frame ── */
+  .hero-phone {
+    width: 260px;
+    margin: 0 auto;
+    border-radius: 44px;
+    border: 1px solid var(--border-strong);
+    background: #060810;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.04),
+      0 40px 100px rgba(0, 0, 0, 0.7),
+      0 12px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  .hero-phone img {
+    width: 100%;
+    display: block;
+  }
+
+  /* ── Screenshot gallery ── */
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 28px;
+    align-items: start;
+  }
+
+  .gallery-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .gallery-frame {
+    width: 100%;
+    max-width: 220px;
+    border-radius: 36px;
+    border: 1px solid var(--border-strong);
+    background: #060810;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.03),
+      0 28px 72px rgba(0, 0, 0, 0.6);
+  }
+
+  .gallery-frame img {
+    width: 100%;
+    display: block;
+  }
+
+  .gallery-caption {
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    text-align: center;
+  }
+
   /* ── Install section ── */
   .install-grid {
     display: grid;
@@ -786,6 +847,10 @@
 
   /* ── Responsive ── */
   @media (max-width: 980px) {
+    .hero-phone {
+      width: 220px;
+    }
+
     .hero-grid {
       grid-template-columns: 1fr;
     }
@@ -817,6 +882,19 @@
   }
 
   @media (max-width: 680px) {
+    .hero-phone {
+      display: none;
+    }
+
+    .gallery-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .gallery-frame {
+      border-radius: 24px;
+    }
+
     :root {
       --wrap: min(calc(100% - 32px), 1100px);
     }
@@ -971,30 +1049,15 @@
           </div>
         </div>
 
-        <!-- Terminal hero — install flow without screenshots -->
-        <div
-          class="terminal"
-          aria-label="Install commands: npm install -g sidemesh then sidemesh up"
-        >
-          <div class="terminal-bar" aria-hidden="true">
-            <span class="terminal-dot"></span>
-            <span class="terminal-dot"></span>
-            <span class="terminal-dot"></span>
-            <span class="terminal-title">host setup</span>
-          </div>
-          <div class="terminal-body">
-            <span class="t-cmt"># 1. install daemon + codex provider</span><br />
-            <span class="t-prompt">$</span>&nbsp;<span class="t-cmd">npm install -g sidemesh @openai/codex</span>
-            <span class="t-gap"></span>
-            <span class="t-cmt"># 2. start and get pairing details</span><br />
-            <span class="t-prompt">$</span>&nbsp;<span class="t-cmd">sidemesh up</span>
-            <span class="t-gap"></span>
-            <span class="t-ok">✓</span>&nbsp;daemon listening on :4000<br />
-            <span class="t-ok">✓</span>&nbsp;codex provider ready<br />
-            <span class="t-ok">✓</span>&nbsp;pair: <span class="t-val">sidemesh://100.x.x.x:4000</span>
-            <span class="t-gap"></span>
-            <span class="t-cmt"># scan the QR code in the iOS app</span>
-          </div>
+        <div class="hero-phone">
+          <img
+            src="/assets/screenshots/session-actions.png"
+            alt="Sidemesh session actions: terminal, port forwarding, resources, transcript search, and more."
+            width="640"
+            height="1391"
+            loading="eager"
+            decoding="async"
+          />
         </div>
 
       </div>
@@ -1082,6 +1145,58 @@
             <p>Stream a live browser running on the host when visual state matters. No tunnel, no staging server, no extra tooling needed.</p>
           </article>
 
+        </div>
+      </div>
+    </section>
+
+    <!-- ── App screenshots ── -->
+    <section class="section" id="screenshots">
+      <div class="wrap">
+        <div class="section-lead">
+          <span class="eyebrow">In the app</span>
+          <h2>See what you're installing.</h2>
+          <p>Real screenshots from the current iOS build. Terminal access, file browsing, and live session view. Dark by default.</p>
+        </div>
+        <div class="gallery-grid">
+          <div class="gallery-item">
+            <div class="gallery-frame">
+              <img
+                src="/assets/screenshots/terminal.png"
+                alt="Sidemesh live terminal showing a vite dev server running on the host."
+                width="640"
+                height="1391"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+            <span class="gallery-caption">Terminal access</span>
+          </div>
+          <div class="gallery-item">
+            <div class="gallery-frame">
+              <img
+                src="/assets/screenshots/file-browser.png"
+                alt="Sidemesh file browser showing astro.config.mjs with syntax highlighting."
+                width="640"
+                height="1391"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+            <span class="gallery-caption">File browser</span>
+          </div>
+          <div class="gallery-item">
+            <div class="gallery-frame">
+              <img
+                src="/assets/screenshots/session.png"
+                alt="Sidemesh session view showing a live agent transcript."
+                width="640"
+                height="1391"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+            <span class="gallery-caption">Session view</span>
+          </div>
         </div>
       </div>
     </section>
