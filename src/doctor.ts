@@ -66,7 +66,7 @@ export async function runDoctor(config: NodeConfig): Promise<DoctorReport> {
       : `No config file found at ${config.configPath}`,
     remedy: config.configExists
       ? undefined
-      : "Run `sidemesh setup` to persist the current configuration.",
+      : "Run `sidemesh up` or `sidemesh setup` to persist the current configuration.",
   });
 
   checks.push({
@@ -77,7 +77,7 @@ export async function runDoctor(config: NodeConfig): Promise<DoctorReport> {
       : `No daemon responded at ${healthUrl}`,
     remedy: daemonReachable
       ? undefined
-      : "Start it with `sidemesh start`, or install the macOS/Linux service if you want the app's Restart and Update buttons to bring it back on their own.",
+      : "Start it with `sidemesh up` or `sidemesh start`, or install the macOS/Linux service if you want the app's Restart and Update buttons to bring it back on their own.",
   });
 
   checks.push(await checkStateDir(config.stateDir));
@@ -87,7 +87,7 @@ export async function runDoctor(config: NodeConfig): Promise<DoctorReport> {
       label: "token",
       detail: "Token is generated from defaults, not loaded from config or env.",
       remedy:
-        "Run `sidemesh setup` or `sidemesh token rotate` so the token persists across restarts.",
+        "Run `sidemesh up`, `sidemesh setup`, or `sidemesh token rotate` so the token persists across restarts.",
     });
   } else {
     checks.push({

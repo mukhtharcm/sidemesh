@@ -7,7 +7,7 @@ Sidemesh uses a single shared bearer token for daemon-client authentication. Thi
 
 ## Token lifecycle
 
-1. `sidemesh setup` generates a random token and writes it to `~/.sidemesh/config.json`
+1. `sidemesh up` or `sidemesh setup` generates a random token and writes it to `~/.sidemesh/config.json`
 2. The daemon validates the `Authorization: Bearer <token>` header on every request
 3. The mobile app stores the token in platform secure storage (iOS Keychain, Android Keystore, macOS Keychain)
 4. The QR code printed by `sidemesh pair` contains the base URL and token

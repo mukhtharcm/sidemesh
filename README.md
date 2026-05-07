@@ -40,18 +40,17 @@ npm install
 npm run build
 npm link
 
-sidemesh setup
-sidemesh doctor
-sidemesh start
-sidemesh pair
+sidemesh up
 ```
 
-What those commands do:
+What that command does:
 
-1. `sidemesh setup` writes the daemon config to `~/.sidemesh/config.json`.
-2. `sidemesh doctor` checks the selected providers and local environment.
-3. `sidemesh start` launches the daemon in the background.
-4. `sidemesh pair` prints the host URL, token, and QR code for the app.
+1. Persists a default config to `~/.sidemesh/config.json` if you do not have one yet.
+2. Checks the selected provider enough to catch obvious command problems before launch.
+3. Launches the daemon in the background.
+4. Prints the host URL, token, and QR code for the app.
+
+Use `sidemesh setup` when you want to customize providers, host features, or advanced settings before starting the daemon.
 
 For foreground development instead of a managed background daemon:
 
@@ -62,8 +61,8 @@ npm run daemon
 
 ## Connecting the app
 
-Open the app, then either scan the QR code from `sidemesh pair` or add the host
-manually with:
+Open the app, then either use the QR code printed by `sidemesh up`, run
+`sidemesh pair`, or add the host manually with:
 
 - a label
 - a base URL such as `http://100.x.x.x:8787` or `http://192.168.x.x:8787`
@@ -83,7 +82,8 @@ Platform-specific app notes live in `apps/mobile/README.md`.
 
 | Command | Purpose |
 | --- | --- |
-| `sidemesh setup` | create or update the persisted config |
+| `sidemesh up` | create a default config if needed, start the daemon, and print pairing details |
+| `sidemesh setup` | customize the persisted config |
 | `sidemesh doctor` | run startup and provider diagnostics |
 | `sidemesh status` | show resolved config and local daemon health |
 | `sidemesh pair` | print host details and QR code |

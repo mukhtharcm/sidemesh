@@ -6,11 +6,10 @@ description: Pair the mobile app with your Sidemesh daemon.
 ## Start the Daemon
 
 ```bash
-sidemesh start       # background mode
-sidemesh pair        # show connection details
+sidemesh up          # create config if needed, start, and show connection details
 ```
 
-That is enough for pairing. If you want the app's Restart and Update buttons to
+That is enough for pairing. Run `sidemesh pair` any time you want to reprint the QR code or token. If you want the app's Restart and Update buttons to
 bring the host back on their own, install the background service on macOS or
 Linux:
 
@@ -33,13 +32,13 @@ The `pair` command prints:
 
 ### QR Code (fastest)
 
-1. Run `sidemesh pair` on the host
+1. Use the QR code printed by `sidemesh up`, or run `sidemesh pair` on the host
 2. In the app, tap the host editor -> "Scan QR"
 3. Point camera at the QR code
 
 ### Manual Entry
 
-1. Run `sidemesh pair` to see the base URL and token
+1. Use the base URL and token printed by `sidemesh up`, or run `sidemesh pair` again
 2. In the app, tap "Add host manually"
 3. Enter:
    - **Label**: friendly name (e.g., "MacBook", "lab-vps")
