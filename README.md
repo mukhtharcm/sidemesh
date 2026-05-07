@@ -56,9 +56,10 @@ npm link
 What that command does:
 
 1. Persists a default config to `~/.sidemesh/config.json` if you do not have one yet.
-2. Checks the selected provider enough to catch obvious command problems before launch.
-3. Launches the daemon in the background.
-4. Prints the host URL, token, and QR code for the app.
+2. Auto-detects ready providers on your machine and defaults to Codex when it is ready.
+3. Checks the selected provider enough to catch obvious command problems before launch.
+4. Launches the daemon in the background.
+5. Prints the host URL, token, and QR code for the app.
 
 Use `sidemesh setup` when you want to customize providers, host features, or advanced settings before starting the daemon.
 
