@@ -939,12 +939,11 @@
 
         <div>
           <span class="eyebrow">iOS Beta · Open Now</span>
-          <h1>Your agent workstation, <em>from anywhere.</em></h1>
+          <h1>Control your coding agents <em>from anywhere.</em></h1>
           <p class="lede">
-            Run coding agents on your own Mac, VPS, or workstation. Sidemesh gives
-            you the full remote layer: sessions, approvals, files, terminals,
-            port forwarding, and browser previews — all reachable from your phone
-            or desktop.
+            Sidemesh runs beside your coding agents on the machines you trust,
+            then gives you the remote surface around them: sessions, approvals,
+            files, terminals, ports, and previews from your phone or desktop.
           </p>
           <div class="hero-actions">
             <a
@@ -1006,10 +1005,11 @@
       <div class="wrap">
         <div class="section-lead">
           <span class="eyebrow">What you get</span>
-          <h2>The missing layer around agent work.</h2>
+          <h2>The missing layer around coding agents.</h2>
           <p>
-            More than remote chat. Sidemesh is the full host surface around coding-agent
-            sessions — the parts that matter when you are away from the machine.
+            Chat is only one part of supervising an agent. Sidemesh keeps the rest of
+            the workstation close too: approvals, files, git context, terminals,
+            ports, and previews.
           </p>
         </div>
 
@@ -1091,17 +1091,17 @@
       <div class="wrap">
         <div class="section-lead">
           <span class="eyebrow">How it works</span>
-          <h2>Three steps. Your machines stay central.</h2>
+          <h2>Install the host. Pair the app. Stay close.</h2>
           <p>
-            Sidemesh does not move code into a managed workspace. The daemon runs
-            next to your agents, credentials, and development servers.
+            Your code stays where it already lives. The daemon runs next to your agents,
+            credentials, and development servers on the machines you control.
           </p>
         </div>
 
         <div class="steps-grid">
           <article class="step">
             <span class="step-num">01 — Install</span>
-            <h3>Put the daemon on each machine you trust.</h3>
+            <h3>Run the daemon where your agents run.</h3>
             <p>
               One <code>npm install</code> and <code style="color:var(--accent)">sidemesh up</code> is enough.
               Run it on a Mac, VPS, or workstation. Pair over Tailscale, a VPN, or a local network.
@@ -1109,7 +1109,7 @@
           </article>
           <article class="step">
             <span class="step-num">02 — Pair</span>
-            <h3>Open the app and scan the QR code.</h3>
+            <h3>Pair the app over your private route.</h3>
             <p>
               The daemon prints a pairing URL on first run. Scan it in the iOS app.
               Sessions, approvals, and all host surfaces become immediately reachable.
@@ -1117,7 +1117,7 @@
           </article>
           <article class="step">
             <span class="step-num">03 — Work</span>
-            <h3>Use the right surface for the moment.</h3>
+            <h3>Drop into the right tool for the job.</h3>
             <p>
               Reply in chat, clear an approval, browse files, attach a terminal,
               forward a port, or stream the browser — from anywhere, in one app.
@@ -1132,10 +1132,10 @@
       <div class="wrap">
         <div class="section-lead">
           <span class="eyebrow">Install</span>
-          <h2>Daemon on npm. App on TestFlight.</h2>
+          <h2>Install the host. Join the beta. Pair once.</h2>
           <p>
-            The iOS beta is open now. The daemon is on npm. Discord is where setup
-            questions, bug reports, and rollout feedback actually get resolved fast.
+            The iOS beta is open now. Install the daemon on a trusted machine,
+            pair over your private network, and use Discord if setup gets weird.
           </p>
         </div>
 
@@ -1206,15 +1206,15 @@
 
         <div class="security-copy">
           <span class="eyebrow">Security model</span>
-          <h2>Keep the route private. The surface is real.</h2>
+          <h2>Powerful host access belongs on a private route.</h2>
           <p>
-            Sidemesh can expose agent transcripts, approval actions, workspace files,
-            terminal access, forwarded ports, and browser sessions. That reach is the
-            point — and the reason the connection should stay on a private route.
+            Sidemesh can reach transcripts, approvals, files, terminals, forwarded
+            ports, and browser sessions. That is what makes it useful — and why
+            you should run it over Tailscale, WireGuard, or a trusted LAN.
           </p>
           <p>
-            Use Tailscale, a WireGuard VPN, or a trusted LAN. Do not casually
-            expose a daemon with host-level capabilities to the open internet.
+            Do not casually expose a daemon with host-level capabilities to the open
+            internet. Keep the network boundary explicit.
           </p>
         </div>
 
@@ -1255,7 +1255,7 @@
         <div class="faq-list">
           <div class="faq-item">
             <strong>Is this a cloud IDE?</strong>
-            <p>No. Your code, credentials, terminals, and dev servers stay on your machine or VPS. Sidemesh connects to the daemon running next to them. Nothing moves to a managed workspace.</p>
+            <p>No. Sidemesh does not host your code or move your workspace. It connects to a daemon running on your own Mac, VPS, or workstation.</p>
           </div>
           <div class="faq-item">
             <strong>Do I need the daemon before TestFlight?</strong>
@@ -1271,7 +1271,7 @@
           </div>
           <div class="faq-item">
             <strong>How is this different from SSH?</strong>
-            <p>SSH gives you a shell. Sidemesh gives you the agent-aware layer on top: session history, approvals, transcript ordering, files, git context, port forwarding, browser preview, and usage — all without opening a raw terminal first.</p>
+            <p>SSH gives you a shell. Sidemesh gives you the agent-aware view: running sessions, pending approvals, transcripts, files, git context, ports, previews, and terminal access when you need it.</p>
           </div>
         </div>
       </div>
@@ -1284,8 +1284,8 @@
           <div>
             <h2>Carry the workstation surface, not the workstation.</h2>
             <p>
-              Install the daemon on trusted hosts, join the iOS beta, and keep sessions,
-              approvals, terminals, ports, and previews reachable from anywhere.
+              Install Sidemesh on the hosts you trust, join the iOS beta, and stay
+              close to your agents when your laptop is not in front of you.
             </p>
           </div>
           <div class="closing-actions">
