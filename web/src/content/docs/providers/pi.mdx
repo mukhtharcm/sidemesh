@@ -15,16 +15,16 @@ pi /login          # authenticate with your provider
 pi /model          # pick a default model
 ```
 
-2. Node.js 20+ (same as the Sidemesh daemon).
+2. Node.js 22.5+ (same as the Sidemesh daemon).
 
 ## Setup
 
 ### Guided setup
 
 ```bash
-npm install
-npm run setup          # select Pi from the provider list
-npm run daemon
+npm install -g sidemesh @mariozechner/pi-coding-agent
+sidemesh setup         # select Pi from the provider list
+sidemesh up
 ```
 
 ### Manual config
