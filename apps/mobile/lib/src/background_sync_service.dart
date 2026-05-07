@@ -84,19 +84,25 @@ class ApprovalBackgroundPoller {
         .where((host) => host.enabled)
         .toList(growable: false);
     if (hosts.isEmpty) {
+      final snapshot = await ApprovalActionSeenStore.instance.load();
       await ApprovalActionSeenStore.instance.replace(<String>{});
+      for (final key in snapshot.keys) {
+        await LocalNotificationService.instance.cancelPendingApprovalKey(key);
+      }
       await LiveActivityService.instance.clearPrimarySessionContext();
       return;
     }
 
     final api = ApiClient();
     final entries = <_PendingApprovalEntry>[];
+    final successfulHostIds = <String>{};
     await Future.wait(
       hosts.map((host) async {
         try {
           final actions = await api
               .fetchPendingActions(host)
               .timeout(_perHostTimeout);
+          successfulHostIds.add(host.id);
           entries.addAll(
             actions.map((action) {
               return _PendingApprovalEntry(host: host, action: action);
@@ -116,7 +122,7 @@ class ApprovalBackgroundPoller {
 
     await _syncPrimarySession(hosts, api);
     await _syncLiveActivity(entries);
-    await _notifyForNewActions(entries);
+    await _notifyForNewActions(entries, successfulHostIds: successfulHostIds);
   }
 
   Future<void> _syncPrimarySession(
@@ -172,7 +178,10 @@ class ApprovalBackgroundPoller {
     );
   }
 
-  Future<void> _notifyForNewActions(List<_PendingApprovalEntry> entries) async {
+  Future<void> _notifyForNewActions(
+    List<_PendingApprovalEntry> entries, {
+    required Set<String> successfulHostIds,
+  }) async {
     final seenStore = ApprovalActionSeenStore.instance;
     final snapshot = await seenStore.load();
     final nextKeys = entries
@@ -191,7 +200,19 @@ class ApprovalBackgroundPoller {
       }
     }
 
-    await seenStore.replace(nextKeys);
+    final retainedFailedHostKeys = snapshot.keys.where((key) {
+      final separator = key.indexOf(':');
+      if (separator <= 0) return false;
+      return !successfulHostIds.contains(key.substring(0, separator));
+    });
+    final removedKeys = snapshot.keys.difference({
+      ...nextKeys,
+      ...retainedFailedHostKeys,
+    });
+    await seenStore.replace({...nextKeys, ...retainedFailedHostKeys});
+    for (final key in removedKeys) {
+      await LocalNotificationService.instance.cancelPendingApprovalKey(key);
+    }
   }
 }
 
