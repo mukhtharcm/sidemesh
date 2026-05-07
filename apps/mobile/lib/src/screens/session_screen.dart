@@ -1216,9 +1216,9 @@ class _SessionScreenState extends State<SessionScreen>
     _searchFocusNode.dispose();
     _scrollController.removeListener(_onTranscriptScroll);
     _scrollController.dispose();
-    _subscription?.cancel();
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
     _liveFlushTimer?.cancel();
-    _channel?.sink.close();
+    unawaited(_channel?.sink.close() ?? Future<void>.value());
     _liveAssistantNotifier.dispose();
     _thinkingNotifier.dispose();
     _showJumpToLatest.dispose();
@@ -2258,8 +2258,8 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _connectLive() {
     if (_disposed || !widget.host.enabled) return;
-    _subscription?.cancel();
-    _channel?.sink.close();
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
+    unawaited(_channel?.sink.close() ?? Future<void>.value());
     _subscription = null;
     _channel = null;
     try {
@@ -2302,6 +2302,13 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _scheduleReconnect() {
     if (_disposed || !mounted || !widget.host.enabled) return;
+    final channel = _channel;
+    unawaited(_subscription?.cancel() ?? Future<void>.value());
+    _subscription = null;
+    _channel = null;
+    if (channel != null) {
+      unawaited(channel.sink.close());
+    }
     HostReconnectScheduler.instance.markDisconnected(
       widget.host.id,
       _reconnectSlotId,
@@ -5351,7 +5358,7 @@ class _SessionScreenState extends State<SessionScreen>
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
             child: ListenableBuilder(
-              listenable: RelativeTimeTicker.instance,
+              listenable: RelativeTimeTicker.seconds,
               builder: (context, _) {
                 return _CachedTranscriptStrip(
                   mode: freshnessMode,

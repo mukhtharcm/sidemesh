@@ -18,7 +18,8 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
 
   static final SessionSendOutboxWorker instance = SessionSendOutboxWorker._();
 
-  static const _idleInterval = Duration(seconds: 30);
+  static const _startupSweepDelay = Duration(seconds: 2);
+  static const _errorRetryInterval = Duration(seconds: 30);
   static const _maxSendsPerPass = 3;
   static const _hostDisabledMessage =
       'Host is disabled. Enable it before retrying.';
@@ -44,7 +45,8 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
     _lifecycleState =
         WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
-    _schedule(const Duration(seconds: 2));
+    _outbox.addListener(poke);
+    _schedule(_startupSweepDelay);
   }
 
   void stop() {
@@ -53,6 +55,7 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
     }
     _started = false;
     WidgetsBinding.instance.removeObserver(this);
+    _outbox.removeListener(poke);
     _timer?.cancel();
     _timer = null;
   }
@@ -95,7 +98,7 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
     try {
       final pending = await _duePendingSends();
       if (pending.isEmpty) {
-        _schedule(_idleInterval);
+        await _scheduleNextPass();
         return;
       }
 
@@ -114,7 +117,7 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
       await _scheduleNextPass();
     } catch (error) {
       debugPrint('Foreground send outbox retry failed: $error');
-      _schedule(_idleInterval);
+      _schedule(_errorRetryInterval);
     } finally {
       _running = false;
     }
@@ -136,7 +139,8 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
         .where((send) => !send.blocked)
         .toList(growable: false);
     if (retryable.isEmpty) {
-      _schedule(_idleInterval);
+      _timer?.cancel();
+      _timer = null;
       return;
     }
     retryable.sort(_comparePending);

@@ -210,11 +210,11 @@ void main() {
     },
   );
 
-  test('live snapshot cancels the initial HTTP fallback', () async {
+  test('live snapshot cancels HTTP fallback and periodic polling', () async {
     final api = _FakeApiClient()
       ..sessionsByHostId[host.id] = [_session('session-http', title: 'HTTP')];
     final store = RecentSessionsStore(
-      pollInterval: const Duration(hours: 1),
+      pollInterval: const Duration(milliseconds: 10),
       initialHttpFallbackDelay: const Duration(milliseconds: 30),
     );
     addTearDown(store.dispose);
@@ -228,10 +228,29 @@ void main() {
             'sessions': [_session('session-live', title: 'Live').toJson()],
           }),
         );
-    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await Future<void>.delayed(const Duration(milliseconds: 80));
 
     expect(api.fetchSessionsCalls, 0);
     expect(store.entries.map((entry) => entry.session.title), ['Live']);
+  });
+
+  test('disabled hosts do not open live sockets or poll', () async {
+    final api = _FakeApiClient()
+      ..sessionsByHostId[host.id] = [
+        _session('session-http', title: 'Disabled HTTP'),
+      ];
+    final store = RecentSessionsStore(
+      pollInterval: const Duration(milliseconds: 10),
+      initialHttpFallbackDelay: const Duration(milliseconds: 10),
+    );
+    addTearDown(store.dispose);
+
+    store.configure(hosts: [host.copyWith(enabled: false)], api: api);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    expect(api.openSessionsLiveCalls, 0);
+    expect(api.fetchSessionsCalls, 0);
+    expect(store.entries, isEmpty);
   });
 }
 
@@ -242,6 +261,7 @@ class _FakeApiClient extends ApiClient {
   Duration fetchDelay = Duration.zero;
   Future<void> liveReady = Future<void>.value();
   int fetchSessionsCalls = 0;
+  int openSessionsLiveCalls = 0;
 
   @override
   Future<List<SessionSummary>> fetchSessions(
@@ -257,6 +277,7 @@ class _FakeApiClient extends ApiClient {
 
   @override
   WebSocketChannel openSessionsLive(HostProfile host) {
+    openSessionsLiveCalls++;
     if (throwOnOpenSessionsLive) {
       throw StateError('live sessions unavailable');
     }

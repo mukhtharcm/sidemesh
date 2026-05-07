@@ -83,7 +83,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   Timer? _searchDebounce;
   Timer? _heartbeatTimer;
   bool _heartbeatInFlight = false;
-  static const Duration _heartbeatInterval = Duration(seconds: 45);
+  static const Duration _heartbeatInterval = Duration(minutes: 5);
   List<HostProfile> _hosts = const [];
   bool _loading = true;
   int _tabIndex = 0;
@@ -176,7 +176,9 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       _startHeartbeat();
       unawaited(_runHeartbeat());
     } else if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
       _stopHeartbeat();
     }
   }
@@ -3363,7 +3365,7 @@ class _HostRowCard extends StatelessWidget {
                         status.reachability != HostReachability.unknown) ...[
                       const SizedBox(height: 4),
                       ListenableBuilder(
-                        listenable: RelativeTimeTicker.instance,
+                        listenable: RelativeTimeTicker.minutes,
                         builder: (context, _) {
                           return Text(
                             _statusLine(status),
@@ -3453,7 +3455,7 @@ class _HostRowCard extends StatelessWidget {
           final elapsed = DateTime.now().difference(last);
           if (elapsed.inSeconds >= 5) {
             if (elapsed.inMinutes < 1) {
-              return 'Online · last event ${elapsed.inSeconds}s ago';
+              return 'Online · last event just now';
             } else if (elapsed.inHours < 1) {
               return 'Online · last event ${elapsed.inMinutes}m ago';
             } else {
@@ -3468,7 +3470,7 @@ class _HostRowCard extends StatelessWidget {
         if (last != null) {
           final elapsed = DateTime.now().difference(last);
           if (elapsed.inMinutes < 1) {
-            suffix = 'last seen ${elapsed.inSeconds}s ago';
+            suffix = 'last seen just now';
           } else if (elapsed.inHours < 1) {
             suffix = 'last seen ${elapsed.inMinutes}m ago';
           } else {
@@ -4447,4 +4449,3 @@ class _MobileClientUpdateBanner extends StatelessWidget {
     );
   }
 }
-

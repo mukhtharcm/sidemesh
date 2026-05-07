@@ -294,58 +294,22 @@ class MeshIconButton extends StatelessWidget {
   }
 }
 
-/// A subtle "pulse" indicator used in running/live contexts.
-class LivePulse extends StatefulWidget {
+/// A subtle live-status indicator used in running/live contexts.
+class LivePulse extends StatelessWidget {
   const LivePulse({super.key, this.color});
 
   final Color? color;
 
   @override
-  State<LivePulse> createState() => _LivePulseState();
-}
-
-class _LivePulseState extends State<LivePulse>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final color = widget.color ?? context.colors.success;
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        final t = (_controller.value * 2 - 1).abs();
-        return Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: color.withValues(alpha: 0.2 + 0.4 * (1 - t)),
-                blurRadius: 8 + 6 * (1 - t),
-                spreadRadius: 0.5,
-              ),
-            ],
-          ),
-        );
-      },
+    final color = this.color ?? context.colors.success;
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+      ),
     );
   }
 }

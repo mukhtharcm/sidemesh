@@ -307,7 +307,7 @@ class SessionRowCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               ListenableBuilder(
-                listenable: RelativeTimeTicker.instance,
+                listenable: RelativeTimeTicker.minutes,
                 builder: (_, _) => Text(
                   sessionTimeLabel(session.updatedAt),
                   style: monoStyle(
