@@ -28,6 +28,7 @@ import {
   summarizeAgentProviderConfig,
   supportedAgentProviderKinds,
 } from "./provider-registry.js";
+import { inferInstalledProviderConfigs } from "./provider-autodetect.js";
 
 type Environment = Record<string, string | undefined>;
 
@@ -64,9 +65,10 @@ export async function loadConfig(
     env.SIDEMESH_PORT,
     persisted.value?.port ?? 8787,
   );
-  const { defaultProviderKind, providers } = resolveProviderConfigs(
+  const { defaultProviderKind, providers } = await resolveProviderConfigs(
     persisted.value,
     env,
+    stateDir,
   );
   const terminal = resolveTerminalConfig(persisted.value, env);
   const portForwarding = resolvePortForwardingConfig(persisted.value, env);
@@ -178,18 +180,38 @@ export function summarizeProviderConfig(
   return summarizeAgentProviderConfig(provider);
 }
 
-function resolveProviderConfigs(
+async function resolveProviderConfigs(
   persisted: PersistedNodeConfig | null,
   env: Environment,
-): {
+  stateDir: string,
+): Promise<{
   defaultProviderKind: AgentProviderKind;
   providers: AgentProviderConfig[];
-} {
-  const configuredKinds = parseProviderKinds(
+}> {
+  const explicitProviderKinds = parseProviderKinds(
     env.SIDEMESH_PROVIDERS,
     persisted,
     env,
   );
+  let configuredKinds = explicitProviderKinds;
+  const hasExplicitProviderSelection = Boolean(
+    env.SIDEMESH_PROVIDER?.trim() || env.SIDEMESH_PROVIDERS?.trim(),
+  );
+  if (!hasExplicitProviderSelection && configuredKinds.length === 0) {
+    const detectAdditionalKinds: AgentProviderKind[] =
+      env.SIDEMESH_ENABLE_COPILOT?.trim() === "1" ? ["copilot"] : [];
+    const inferred = await inferInstalledProviderConfigs({
+      env,
+      stateDir,
+      includeKinds: detectAdditionalKinds,
+    });
+    if (inferred.providers.length > 0 && inferred.defaultProviderKind) {
+      return {
+        defaultProviderKind: inferred.defaultProviderKind,
+        providers: inferred.providers,
+      };
+    }
+  }
   const persistedDefaultProviderKind =
     persisted?.defaultProviderKind &&
     isProviderEnabled(persisted.defaultProviderKind, env)

@@ -17,6 +17,12 @@ import type {
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+type DoctorEnvironment = Record<string, string | undefined>;
+
+export interface DoctorRuntimeOptions {
+  env?: DoctorEnvironment;
+  cwd?: string;
+}
 
 export interface DoctorCheck {
   severity: "ok" | "warn" | "error";
@@ -52,7 +58,10 @@ export interface DoctorReport {
   providers: DoctorProviderReport[];
 }
 
-export async function runDoctor(config: NodeConfig): Promise<DoctorReport> {
+export async function runDoctor(
+  config: NodeConfig,
+  options: DoctorRuntimeOptions = {},
+): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
   const providers: DoctorProviderReport[] = [];
   const healthUrl = `http://127.0.0.1:${config.port}/healthz`;
@@ -98,25 +107,29 @@ export async function runDoctor(config: NodeConfig): Promise<DoctorReport> {
   }
 
   for (const provider of config.providers) {
-    providers.push(await inspectProvider(provider, config.stateDir));
+    providers.push(
+      await inspectProviderConfig(provider, config.stateDir, options),
+    );
   }
 
   return { configPath: config.configPath, configExists: config.configExists, healthUrl, daemonReachable, checks, providers };
 }
 
-async function inspectProvider(
+export async function inspectProviderConfig(
   provider: AgentProviderConfig,
   stateDir: string,
+  options: DoctorRuntimeOptions = {},
 ): Promise<DoctorProviderReport> {
+  const context = createDoctorRuntimeContext(options);
   switch (provider.kind) {
     case "codex":
-      return inspectCodexProvider(provider);
+      return inspectCodexProvider(provider, context);
     case "pi":
-      return inspectPiProvider(provider);
+      return inspectPiProvider(provider, context);
     case "fake":
       return inspectFakeProvider(provider, stateDir);
     case "copilot":
-      return inspectCopilotProvider(provider);
+      return inspectCopilotProvider(provider, context);
   }
 }
 
@@ -125,8 +138,9 @@ async function inspectCommandProvider(
   displayName: string,
   command: string,
   args: string[],
+  context: ResolvedDoctorRuntimeContext,
 ): Promise<DoctorProviderReport> {
-  const resolvedCommandPath = await resolveCommandPath(command);
+  const resolvedCommandPath = await resolveCommandPath(command, context);
   const checks: DoctorCheck[] = [];
   let version: string | null = null;
   if (!resolvedCommandPath) {
@@ -143,7 +157,9 @@ async function inspectCommandProvider(
       detail: `Resolved ${command} to ${resolvedCommandPath}`,
     });
     try {
-      const { stdout } = await execFileAsync(command, args, { encoding: "utf8" });
+      const { stdout } = await execFileAsync(resolvedCommandPath, args, {
+        encoding: "utf8",
+      });
       version = stdout.trim() || null;
       checks.push({
         severity: version ? "ok" : "warn",
@@ -172,13 +188,42 @@ async function inspectCommandProvider(
 
 async function inspectCodexProvider(
   provider: { bin: string },
+  context: ResolvedDoctorRuntimeContext,
 ): Promise<DoctorProviderReport> {
-  const base = await inspectCommandProvider("codex", "Codex", provider.bin, ["--version"]);
+  const base = await inspectCommandProvider(
+    "codex",
+    "Codex",
+    provider.bin,
+    ["--version"],
+    context,
+  );
   const checks = [...base.checks];
   let auth: DoctorProviderReport["auth"] = null;
 
   if (base.resolvedCommandPath) {
-    const authPath = nodePath.join(homedir(), ".codex", "auth.json");
+    const homeDir = context.homeDir;
+    const authPath = homeDir
+      ? nodePath.join(homeDir, ".codex", "auth.json")
+      : null;
+    if (!authPath) {
+      auth = {
+        status: "unknown",
+        source: null,
+        login: null,
+        host: null,
+        message: "No home directory available for auth inspection",
+      };
+      checks.push({
+        severity: "warn",
+        label: "auth",
+        detail: "No home directory available for auth inspection",
+      });
+      return {
+        ...base,
+        checks,
+        auth,
+      };
+    }
     try {
       const raw = await readFile(authPath, "utf8");
       const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -273,14 +318,29 @@ async function inspectFakeProvider(
 
 async function inspectPiProvider(
   provider: PiProviderConfig,
+  context: ResolvedDoctorRuntimeContext,
 ): Promise<DoctorProviderReport> {
+  const fallbackHomeDir = context.homeDir;
   const agentDir = nodePath.resolve(
-    provider.agentDir || nodePath.join(homedir(), ".pi", "agent"),
+    provider.agentDir ||
+      (fallbackHomeDir ? nodePath.join(fallbackHomeDir, ".pi", "agent") : ".pi-missing-home"),
   );
   const providerStateDir = nodePath.resolve(
-    provider.stateDir || nodePath.join(homedir(), ".sidemesh", "pi-provider"),
+    provider.stateDir ||
+      (fallbackHomeDir
+        ? nodePath.join(fallbackHomeDir, ".sidemesh", "pi-provider")
+        : ".sidemesh-pi-missing-home"),
   );
   const sessionsDir = nodePath.join(agentDir, "sessions");
+  const agentDirExists = fallbackHomeDir || provider.agentDir
+    ? await pathExists(agentDir)
+    : false;
+  const sessionsDirExists = fallbackHomeDir || provider.agentDir
+    ? await pathExists(sessionsDir)
+    : false;
+  const providerStateDirExists = fallbackHomeDir || provider.stateDir
+    ? await pathExists(providerStateDir)
+    : false;
   const checks: DoctorCheck[] = [
     {
       severity: "ok",
@@ -288,26 +348,28 @@ async function inspectPiProvider(
       detail: `Using Pi SDK ${PI_VERSION}`,
     },
     {
-      severity: (await pathExists(agentDir)) ? "ok" : "warn",
+      severity: agentDirExists ? "ok" : "warn",
       label: "agentDir",
       detail: `Pi agent dir: ${agentDir}`,
-      remedy: (await pathExists(agentDir))
+      remedy: agentDirExists
         ? undefined
-        : "Create the Pi agent directory by running Pi once or configuring SIDEMESH_PI_AGENT_DIR.",
+        : fallbackHomeDir || provider.agentDir
+          ? "Create the Pi agent directory by running Pi once or configuring SIDEMESH_PI_AGENT_DIR."
+          : "Set HOME or SIDEMESH_PI_AGENT_DIR so Sidemesh can inspect Pi readiness.",
     },
     {
-      severity: (await pathExists(sessionsDir)) ? "ok" : "warn",
+      severity: sessionsDirExists ? "ok" : "warn",
       label: "sessions",
       detail: `Pi sessions dir: ${sessionsDir}`,
-      remedy: (await pathExists(sessionsDir))
+      remedy: sessionsDirExists
         ? undefined
         : "Pi will create the sessions directory after the first persisted session.",
     },
     {
-      severity: (await pathExists(providerStateDir)) ? "ok" : "warn",
+      severity: providerStateDirExists ? "ok" : "warn",
       label: "state",
       detail: `Sidemesh Pi state dir: ${providerStateDir}`,
-      remedy: (await pathExists(providerStateDir))
+      remedy: providerStateDirExists
         ? undefined
         : "The state directory will be created automatically on first use.",
     },
@@ -325,8 +387,9 @@ async function inspectPiProvider(
 
 async function inspectCopilotProvider(
   provider: CopilotProviderConfig,
+  context: ResolvedDoctorRuntimeContext,
 ): Promise<DoctorProviderReport> {
-  const resolvedCommandPath = await resolveCommandPath(provider.bin);
+  const resolvedCommandPath = await resolveCommandPath(provider.bin, context);
   const checks: DoctorCheck[] = [];
   let version: string | null = null;
   let auth: DoctorProviderReport["auth"] = null;
@@ -357,8 +420,8 @@ async function inspectCopilotProvider(
 
   const client = await createCopilotSdkClient({
     bin: provider.bin,
-    cwd: process.cwd(),
-    env: process.env,
+    cwd: context.cwd,
+    env: context.env,
   });
   try {
     await client.start();
@@ -455,7 +518,10 @@ async function checkStateDir(stateDir: string): Promise<DoctorCheck> {
   }
 }
 
-async function resolveCommandPath(command: string): Promise<string | null> {
+async function resolveCommandPath(
+  command: string,
+  context: ResolvedDoctorRuntimeContext,
+): Promise<string | null> {
   const trimmed = command.trim();
   if (!trimmed) {
     return null;
@@ -469,7 +535,7 @@ async function resolveCommandPath(command: string): Promise<string | null> {
       return null;
     }
   }
-  const pathValue = process.env.PATH ?? "";
+  const pathValue = context.pathValue;
   for (const dir of pathValue.split(nodePath.delimiter)) {
     if (!dir) {
       continue;
@@ -481,6 +547,37 @@ async function resolveCommandPath(command: string): Promise<string | null> {
     } catch {}
   }
   return null;
+}
+
+interface ResolvedDoctorRuntimeContext {
+  env: DoctorEnvironment;
+  cwd: string;
+  homeDir: string | null;
+  pathValue: string;
+}
+
+function createDoctorRuntimeContext(
+  options: DoctorRuntimeOptions,
+): ResolvedDoctorRuntimeContext {
+  const explicitEnv = options.env ?? null;
+  const env = explicitEnv ?? process.env;
+  const homeDir =
+    env.HOME?.trim() ||
+    env.USERPROFILE?.trim() ||
+    (env.HOMEDRIVE && env.HOMEPATH
+      ? `${env.HOMEDRIVE}${env.HOMEPATH}`
+      : null) ||
+    (explicitEnv ? null : homedir());
+  const pathValue =
+    env.PATH ??
+    env.Path ??
+    (explicitEnv ? "" : process.env.PATH ?? "");
+  return {
+    env,
+    cwd: options.cwd ?? process.cwd(),
+    homeDir,
+    pathValue,
+  };
 }
 
 async function checkHealth(url: string): Promise<boolean> {
