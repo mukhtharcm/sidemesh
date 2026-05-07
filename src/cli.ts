@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { closeSync, openSync, realpathSync, writeSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import nodePath from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -65,6 +65,21 @@ export async function main(argv = process.argv): Promise<void> {
 
   withConfigOption(
     program
+      .command("up")
+      .description(
+        "create a default config if needed, start the daemon, and show pairing details",
+      )
+      .option("--no-qr", "skip terminal QR output")
+      .action(async (options: { config?: string; qr?: boolean }) => {
+        await runUpCommand({
+          configPath: options.config,
+          qr: options.qr !== false,
+        });
+      }),
+  );
+
+  withConfigOption(
+    program
       .command("daemon")
       .description("start the Sidemesh daemon in the foreground")
       .option("--allow-duplicate", "skip the local duplicate-daemon guard")
@@ -86,21 +101,6 @@ export async function main(argv = process.argv): Promise<void> {
           persistGeneratedToken: true,
         });
         await startDaemon(config, { configPath: options.config ?? null });
-      }),
-  );
-
-  withConfigOption(
-    program
-      .command("up")
-      .description(
-        "create a default config if needed, start the daemon, and show pairing details",
-      )
-      .option("--no-qr", "skip terminal QR output")
-      .action(async (options: { config?: string; qr?: boolean }) => {
-        await runUpCommand({
-          configPath: options.config,
-          qr: options.qr !== false,
-        });
       }),
   );
 
@@ -599,6 +599,14 @@ export async function main(argv = process.argv): Promise<void> {
             configPath: options.config,
             persistGeneratedToken: true,
           });
+          const daemon = await inspectDaemon(config);
+          const reachableConflict = await explainLivePairingConflict(
+            config,
+            daemon,
+          );
+          if (reachableConflict) {
+            throw new Error(reachableConflict);
+          }
           const pairInfo = buildPairInfo(config);
           if (options.json) {
             console.log(JSON.stringify(pairInfo, null, 2));
@@ -653,7 +661,7 @@ async function runUpCommand(options: {
   });
   const daemon = await inspectDaemon(config);
   if (daemon.healthReachable) {
-    const reachableConflict = explainReachableDaemonConflictForUp(config, daemon);
+    const reachableConflict = await explainLivePairingConflict(config, daemon);
     if (reachableConflict) {
       throw new Error(reachableConflict);
     }
@@ -1001,6 +1009,39 @@ export function explainReachableDaemonConflictForUp(
     return `A daemon is already reachable at ${healthUrl}, but it is managed by ${daemon.state.configPath}, not ${config.configPath}. Refusing to guess its pairing token.`;
   }
   return null;
+}
+
+export async function explainLivePairingConflict(
+  config: Pick<NodeConfig, "configPath" | "port">,
+  daemon: Awaited<ReturnType<typeof inspectDaemon>>,
+): Promise<string | null> {
+  const daemonConflict = explainReachableDaemonConflictForUp(config, daemon);
+  if (daemonConflict) {
+    return daemonConflict;
+  }
+  if (!daemon.healthReachable || !daemon.state || !daemon.pidAlive) {
+    return null;
+  }
+  const modifiedAtMs = await readModifiedAtMs(config.configPath);
+  if (modifiedAtMs == null) {
+    return null;
+  }
+  if (modifiedAtMs <= daemon.state.startedAt + 1_000) {
+    return null;
+  }
+  return `The config at ${config.configPath} was modified after the running daemon started. Restart Sidemesh before pairing so the live daemon and shared token stay in sync.`;
+}
+
+async function readModifiedAtMs(path: string): Promise<number | null> {
+  try {
+    const file = await stat(path);
+    return file.mtimeMs;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 function registerShutdownHandlers(
