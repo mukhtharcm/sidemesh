@@ -33,16 +33,18 @@ npm install -g github:mukhtharcm/sidemesh
 
 ## First-Time Setup
 
-Run the interactive setup wizard:
+For the default Codex path, one command is enough:
 
 ```bash
-sidemesh setup
+sidemesh up
 ```
 
-This writes ~/.sidemesh/config.json with:
-- Shared bearer token for client authentication
-- Selected agent provider(s)
-- Daemon port and label
+This will:
+- Create `~/.sidemesh/config.json` if it does not exist yet
+- Start the daemon in the background
+- Print the base URL, token, and pairing QR code
+
+Use `sidemesh setup` when you want to customize providers, host features, or advanced settings before starting.
 
 ### Provider-specific prerequisites
 
@@ -58,8 +60,7 @@ This writes ~/.sidemesh/config.json with:
 ### Background mode (manual)
 
 ```bash
-sidemesh start       # background mode
-sidemesh pair        # print QR code + connection details
+sidemesh up          # create config if needed, start, and print pairing details
 ```
 
 Use this if you want Sidemesh running in the background without setting up a
@@ -96,14 +97,14 @@ back on their own.
 
 ### Option 1: QR code (fastest)
 
-1. Run sidemesh pair on the host
+1. Use the QR code printed by sidemesh up, or run sidemesh pair on the host
 2. Open the Sidemesh app
 3. Tap the host editor -> Scan QR
 4. Point camera at the terminal QR code
 
 ### Option 2: Manual entry
 
-1. Run sidemesh pair to see the base URL and token
+1. Use the base URL and token printed by sidemesh up, or run sidemesh pair again
 2. In the app, tap Add host manually
 3. Enter:
    - **Label**: any friendly name (e.g., MacBook, lab-vps)
@@ -124,7 +125,7 @@ daemon, and run self-update.
 - **Bleeding edge** gets the newest commits on `main` for git installs.
 - If you want the app's Restart and Update buttons to work reliably, use
   `sidemesh service install`.
-- If you run `sidemesh daemon` or `sidemesh start`, update and restart it
+- If you run `sidemesh daemon`, `sidemesh start`, or `sidemesh up`, update and restart it
   yourself when needed.
 
 ### Build the app
@@ -145,7 +146,7 @@ flutter install --debug -d DEVICE_ID
 
 ## Daily Workflow
 
-1. **Start daemon** on host: sidemesh start for manual runs, or let the OS
+1. **Start daemon** on host: sidemesh up for most manual runs, or let the OS
    service auto-start
 2. **Open app** on phone/desktop
 3. **Select host** from the host list
@@ -156,19 +157,20 @@ flutter install --debug -d DEVICE_ID
 
 | Command | Purpose |
 |---------|---------|
-| sidemesh setup | Re-run config wizard |
+| sidemesh up | Create a default config if needed, start the daemon, and print pairing details |
+| sidemesh setup | Customize providers, host features, and advanced settings |
 | sidemesh doctor | Check provider health and connectivity |
 | sidemesh status | Show config, PID, and health |
 | sidemesh pair | Re-print connection QR/code |
 | sidemesh stop | Stop background daemon |
-| sidemesh restart --yes | Restart a daemon started with `sidemesh start` |
+| sidemesh restart --yes | Restart a daemon started with `sidemesh start` or `sidemesh up` |
 | sidemesh service restart --yes | Restart the OS service on macOS/Linux |
 | sidemesh service status | Check OS service state |
 
 ## Troubleshooting
 
 **No providers configured**
-Run sidemesh setup and select at least one provider.
+Run sidemesh up for the default Codex path, or sidemesh setup and select at least one provider.
 
 **Port already in use**
 Another Sidemesh daemon is running. Run sidemesh status to find it, or use
@@ -187,7 +189,7 @@ npm run build && npm link
 **App says the daemon is restarting or updating, but the host does not come back**
 - This works best when Sidemesh is installed as a background service on macOS
   or Linux
-- If you started it with `sidemesh daemon` or `sidemesh start`, start it again
+- If you started it with `sidemesh daemon`, `sidemesh start`, or `sidemesh up`, start it again
   yourself or switch to `sidemesh service install`
 
 **Pi model list is empty**

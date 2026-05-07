@@ -5,7 +5,7 @@ description: Common issues and how to resolve them.
 
 ## "No providers configured"
 
-Run `sidemesh setup` and select at least one provider.
+Run `sidemesh up` for the default Codex path, or run `sidemesh setup` and select at least one provider.
 
 ## "Port already in use"
 
@@ -42,7 +42,7 @@ sudo sidemesh service restart --yes
 This works best when Sidemesh is installed as a background service on macOS or
 Linux.
 
-If you started the daemon with `sidemesh daemon` or `sidemesh start`, start it
+If you started the daemon with `sidemesh daemon`, `sidemesh start`, or `sidemesh up`, start it
 again yourself or switch to the service install path:
 
 ```bash

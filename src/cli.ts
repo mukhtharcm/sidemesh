@@ -35,7 +35,7 @@ import {
   restartLaunchdService,
   uninstallLaunchdService,
 } from "./launchd-service.js";
-import { buildPairInfo } from "./pair.js";
+import { buildPairInfo, type PairInfo } from "./pair.js";
 import { startServer, type RunningServer } from "./server.js";
 import { runSetup } from "./setup.js";
 import {
@@ -56,8 +56,9 @@ export async function main(argv = process.argv): Promise<void> {
   const program = new Command();
   program
     .name("sidemesh")
-    .description("Sidemesh daemon and setup tools")
+    .description("Start, pair, and manage the Sidemesh daemon")
     .showHelpAfterError();
+  program.addHelpText("after", "\nTypical first run:\n  sidemesh up\n");
 
   const withConfigOption = (command: Command) =>
     command.option("-c, --config <path>", "path to the Sidemesh config file");
@@ -85,6 +86,21 @@ export async function main(argv = process.argv): Promise<void> {
           persistGeneratedToken: true,
         });
         await startDaemon(config, { configPath: options.config ?? null });
+      }),
+  );
+
+  withConfigOption(
+    program
+      .command("up")
+      .description(
+        "create a default config if needed, start the daemon, and show pairing details",
+      )
+      .option("--no-qr", "skip terminal QR output")
+      .action(async (options: { config?: string; qr?: boolean }) => {
+        await runUpCommand({
+          configPath: options.config,
+          qr: options.qr !== false,
+        });
       }),
   );
 
@@ -375,7 +391,7 @@ export async function main(argv = process.argv): Promise<void> {
   withConfigOption(
     program
       .command("setup")
-      .description("create or update the persisted Sidemesh config")
+      .description("create or update the persisted Sidemesh config for custom providers and host features")
       .option("--dev", "include internal test providers in the setup wizard")
       .option(
         "--advanced",
@@ -588,27 +604,7 @@ export async function main(argv = process.argv): Promise<void> {
             console.log(JSON.stringify(pairInfo, null, 2));
             return;
           }
-          console.log(`Label: ${pairInfo.label}`);
-          console.log(`Token: ${pairInfo.token}`);
-          console.log(`Config: ${pairInfo.configPath}`);
-          console.log("Base URLs:");
-          for (const entry of pairInfo.addresses) {
-            console.log(`- ${entry.url} [${entry.kind}]`);
-          }
-          if (pairInfo.pairUrl != null) {
-            console.log(
-              `\nScan to pair (${pairInfo.preferredAddress?.url ?? "preferred address"}):`,
-            );
-            if (options.qr !== false) {
-              console.log(
-                await QRCode.toString(pairInfo.pairUrl, {
-                  type: "terminal",
-                  small: true,
-                }),
-              );
-            }
-            console.log(pairInfo.pairUrl);
-          }
+          await printPairInfo(pairInfo, { qr: options.qr !== false });
         },
       ),
   );
@@ -645,6 +641,54 @@ export async function runDaemonCommand(options: {
     command: process.argv,
   });
   registerShutdownHandlers(config, () => server);
+}
+
+async function runUpCommand(options: {
+  configPath?: string | null;
+  qr: boolean;
+}): Promise<void> {
+  const config = await loadConfig({
+    configPath: options.configPath,
+    persistGeneratedToken: true,
+  });
+  const daemon = await inspectDaemon(config);
+  if (daemon.healthReachable) {
+    console.log(
+      `Sidemesh is already reachable on http://127.0.0.1:${config.port}/healthz.`,
+    );
+    await printPairInfo(buildPairInfo(config), { qr: options.qr });
+    return;
+  }
+
+  const report = await runDoctor(config);
+  const blockingChecks = findBlockingProviderChecks(report);
+  if (blockingChecks.length > 0) {
+    console.error(
+      "Sidemesh could not start because a selected provider command is not ready.",
+    );
+    for (const entry of blockingChecks) {
+      console.error("");
+      console.error(`${entry.provider.displayName} (${entry.provider.kind})`);
+      for (const check of entry.checks) {
+        console.error(`${glyph(check.severity)} ${check.label}: ${check.detail}`);
+        if (check.remedy) {
+          console.error(`  fix: ${check.remedy}`);
+        }
+      }
+    }
+    console.error("");
+    console.error(
+      "Run `sidemesh doctor` for full diagnostics, or `sidemesh setup` to change providers.",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  await startDaemon(config, {
+    configPath: options.configPath ?? null,
+    showPairHint: false,
+  });
+  await printPairInfo(buildPairInfo(config), { qr: options.qr });
 }
 
 function renderDoctorReport(report: Awaited<ReturnType<typeof runDoctor>>): void {
@@ -704,7 +748,7 @@ async function assertNoManagedDaemon(config: NodeConfig): Promise<void> {
 
 async function startDaemon(
   config: NodeConfig,
-  options: { configPath?: string | null },
+  options: { configPath?: string | null; showPairHint?: boolean },
 ): Promise<void> {
   await assertNoManagedDaemon(config);
   await mkdir(config.stateDir, { recursive: true });
@@ -732,6 +776,12 @@ async function startDaemon(
     }
     console.log(`Started Sidemesh daemon on port ${config.port} (pid ${child.pid}).`);
     console.log(`Logs: ${logPath}`);
+    const pairInfo = buildPairInfo(config);
+    if (options.showPairHint !== false && pairInfo.preferredAddress) {
+      console.log(
+        `Pair: ${pairInfo.preferredAddress.url} (run \`sidemesh pair\` for the QR and token)`,
+      );
+    }
   } finally {
     closeSync(logFd);
   }
@@ -879,6 +929,54 @@ async function confirmDanger(message: string, yes: boolean): Promise<void> {
   } finally {
     readline.close();
   }
+}
+
+async function printPairInfo(
+  pairInfo: PairInfo,
+  options: {
+    qr: boolean;
+  },
+): Promise<void> {
+  console.log(`Label: ${pairInfo.label}`);
+  console.log(`Token: ${pairInfo.token}`);
+  console.log(`Config: ${pairInfo.configPath}`);
+  console.log("Base URLs:");
+  for (const entry of pairInfo.addresses) {
+    console.log(`- ${entry.url} [${entry.kind}]`);
+  }
+  if (pairInfo.pairUrl == null) {
+    return;
+  }
+  console.log(
+    `\nScan to pair (${pairInfo.preferredAddress?.url ?? "preferred address"}):`,
+  );
+  if (options.qr) {
+    console.log(
+      await QRCode.toString(pairInfo.pairUrl, {
+        type: "terminal",
+        small: true,
+      }),
+    );
+  }
+  console.log(pairInfo.pairUrl);
+}
+
+function findBlockingProviderChecks(
+  report: Awaited<ReturnType<typeof runDoctor>>,
+): Array<{
+  provider: Awaited<ReturnType<typeof runDoctor>>["providers"][number];
+  checks: Awaited<ReturnType<typeof runDoctor>>["providers"][number]["checks"];
+}> {
+  return report.providers
+    .map((provider) => ({
+      provider,
+      checks: provider.checks.filter(
+        (check) =>
+          check.severity === "error" &&
+          (check.label === "binary" || check.label === "version"),
+      ),
+    }))
+    .filter((entry) => entry.checks.length > 0);
 }
 
 function registerShutdownHandlers(
