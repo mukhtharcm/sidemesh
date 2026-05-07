@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../local_notification_service.dart';
 import '../theme/app_colors.dart';
+import 'app_snackbar.dart';
 
 class NotificationPermissionBanner extends StatefulWidget {
   const NotificationPermissionBanner({
@@ -66,12 +67,9 @@ class _NotificationPermissionBannerState
     }
     await _dismiss();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Notifications were not enabled. You can turn them on later in system settings.',
-        ),
-      ),
+    showAppSnackBar(
+      context,
+      'Notifications were not enabled. You can turn them on later in system settings.',
     );
   }
 

@@ -101,6 +101,13 @@ class ApprovalInboxStore extends ChangeNotifier {
     final gen = ++_loadGen;
 
     if (hosts.isEmpty) {
+      final seenSnapshot = await ApprovalActionSeenStore.instance.load();
+      final removedKeys = {
+        ..._entriesByKey.keys,
+        ...seenSnapshot.keys,
+        ..._seenActionKeys,
+        ..._notifiedActionKeys,
+      };
       _entries = const [];
       _entriesByKey.clear();
       _liveSnapshotHostIds.clear();
@@ -110,6 +117,7 @@ class ApprovalInboxStore extends ChangeNotifier {
       _failedHostLabels = const [];
       _hasLoadedOnce = true;
       await ApprovalActionSeenStore.instance.replace(<String>{});
+      _cancelApprovalNotifications(removedKeys);
       unawaited(LiveActivityService.instance.endPendingApprovals());
       notifyListeners();
       return;
@@ -151,9 +159,13 @@ class ApprovalInboxStore extends ChangeNotifier {
       }),
     );
     if (gen != _loadGen) return;
-    _replaceSuccessfulHostEntries(successfulHostIds, collected);
+    final removedKeys = _replaceSuccessfulHostEntries(
+      successfulHostIds,
+      collected,
+    );
     await _notifyForNewActions(collected);
     await _persistCurrentActionKeys();
+    _cancelApprovalNotifications(removedKeys);
     _failedHostLabels = List.unmodifiable(failures);
     _hasLoadedOnce = true;
     _publishEntries();
@@ -171,6 +183,7 @@ class ApprovalInboxStore extends ChangeNotifier {
       _entriesByKey.remove(key);
     }
     unawaited(_persistCurrentActionKeys());
+    _cancelApprovalNotifications(keys);
     _publishEntries();
   }
 
@@ -186,7 +199,8 @@ class ApprovalInboxStore extends ChangeNotifier {
       if (activeIds.contains(id)) continue;
       _liveConnections.remove(id)?.dispose();
       _liveSnapshotHostIds.remove(id);
-      _removeEntriesForHost(id);
+      final removedKeys = _removeEntriesForHost(id);
+      _cancelApprovalNotifications(removedKeys);
     }
 
     for (final host in hosts) {
@@ -244,9 +258,14 @@ class ApprovalInboxStore extends ChangeNotifier {
   }
 
   void _handleLiveActionResolved(HostProfile host, String actionId) {
-    final removed = _entriesByKey.remove(_actionKeyFor(host.id, actionId));
-    if (removed == null) return;
+    final key = _actionKeyFor(host.id, actionId);
+    final removed = _entriesByKey.remove(key);
+    if (removed == null) {
+      _cancelApprovalNotifications([key]);
+      return;
+    }
     unawaited(_persistCurrentActionKeys());
+    _cancelApprovalNotifications([key]);
     _publishEntries();
   }
 
@@ -258,12 +277,13 @@ class ApprovalInboxStore extends ChangeNotifier {
     final entries = actions
         .map((action) => PendingActionEntry(host: host, action: action))
         .toList(growable: false);
-    _replaceSuccessfulHostEntries({host.id}, entries);
+    final removedKeys = _replaceSuccessfulHostEntries({host.id}, entries);
     await _notifyForNewActions(
       entries,
       allowCurrentSessionNotification: allowCurrentSessionNotification,
     );
     await _persistCurrentActionKeys();
+    _cancelApprovalNotifications(removedKeys);
     _failedHostLabels = _failedHostLabels
         .where((label) => label != host.label)
         .toList(growable: false);
@@ -284,25 +304,37 @@ class ApprovalInboxStore extends ChangeNotifier {
     _publishEntries();
   }
 
-  void _replaceSuccessfulHostEntries(
+  Set<String> _replaceSuccessfulHostEntries(
     Set<String> successfulHostIds,
     List<PendingActionEntry> entries,
   ) {
+    final nextKeys = entries.map(_actionKey).toSet();
+    final removedKeys = <String>{};
     for (final hostId in successfulHostIds) {
-      _removeEntriesForHost(hostId);
+      final prefix = '$hostId:';
+      for (final key in _entriesByKey.keys.toList(growable: false)) {
+        if (key.startsWith(prefix) && !nextKeys.contains(key)) {
+          _entriesByKey.remove(key);
+          removedKeys.add(key);
+        }
+      }
     }
     for (final entry in entries) {
       _entriesByKey[_actionKey(entry)] = entry;
     }
+    return removedKeys;
   }
 
-  void _removeEntriesForHost(String hostId) {
+  Set<String> _removeEntriesForHost(String hostId) {
+    final removedKeys = <String>{};
     final prefix = '$hostId:';
     for (final key in _entriesByKey.keys.toList(growable: false)) {
       if (key.startsWith(prefix)) {
         _entriesByKey.remove(key);
+        removedKeys.add(key);
       }
     }
+    return removedKeys;
   }
 
   void _publishEntries() {
@@ -362,6 +394,13 @@ class ApprovalInboxStore extends ChangeNotifier {
   Future<void> _persistCurrentActionKeys() async {
     _seenActionKeys = _entriesByKey.keys.toSet();
     await ApprovalActionSeenStore.instance.replace(_seenActionKeys);
+  }
+
+  void _cancelApprovalNotifications(Iterable<String> keys) {
+    final unique = keys.toSet();
+    for (final key in unique) {
+      unawaited(LocalNotificationService.instance.cancelPendingApprovalKey(key));
+    }
   }
 
   String _actionKey(PendingActionEntry entry) {

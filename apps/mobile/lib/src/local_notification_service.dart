@@ -144,6 +144,29 @@ class LocalNotificationService with WidgetsBindingObserver {
     }
   }
 
+  Future<void> cancelPendingApproval({
+    required String hostId,
+    required String actionId,
+  }) async {
+    if (kIsWeb || !_isSupportedPlatform) return;
+    await initialize();
+    if (!_initialized) return;
+    try {
+      await _plugin.cancel(id: _notificationId(hostId, actionId));
+    } catch (error) {
+      debugPrint('Failed to cancel approval notification: $error');
+    }
+  }
+
+  Future<void> cancelPendingApprovalKey(String key) async {
+    final separator = key.indexOf(':');
+    if (separator <= 0 || separator == key.length - 1) return;
+    await cancelPendingApproval(
+      hostId: key.substring(0, separator),
+      actionId: key.substring(separator + 1),
+    );
+  }
+
   Future<bool> requestPermissions() async {
     if (kIsWeb || !_isSupportedPlatform) return false;
     await initialize();
