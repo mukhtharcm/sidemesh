@@ -7,13 +7,23 @@ desktop app, with the daemon running on your development machines.
 ## What You Need
 
 - **Host machine** (where you code): macOS, Linux, or Windows with WSL
-  - Node.js 20+
+  - Node.js 22.5+
+  - A user-managed Node install such as Homebrew, nvm, or Volta if you want
+    `npm install -g` to work without sudo
   - For Pi provider: Pi must be installed separately
 - **Client device**: iOS, Android, macOS, or Linux
   - Flutter runtime for the mobile app
 - **Network**: Tailscale, private LAN, or localhost
 
 ## Install the Daemon
+
+### From npm (recommended)
+
+For the default Codex path:
+
+```bash
+npm install -g sidemesh @openai/codex
+```
 
 ### From source (recommended for development)
 
@@ -23,12 +33,6 @@ cd sidemesh
 npm install
 npm run build
 npm link              # makes sidemesh available globally
-```
-
-### From private GitHub repo
-
-```bash
-npm install -g github:mukhtharcm/sidemesh
 ```
 
 ## First-Time Setup
@@ -122,7 +126,7 @@ From the host details screen, you can choose an update channel, restart the
 daemon, and run self-update.
 
 - **Stable** gets tagged releases.
-- **Bleeding edge** gets the newest commits on `main` for git installs.
+- **Bleeding edge** gets the newest commits on `main` for local repo installs.
 - If you want the app's Restart and Update buttons to work reliably, use
   `sidemesh service install`.
 - If you run `sidemesh daemon`, `sidemesh start`, or `sidemesh up`, update and restart it
@@ -171,6 +175,14 @@ flutter install --debug -d DEVICE_ID
 
 **No providers configured**
 Run sidemesh up for the default Codex path, or sidemesh setup and select at least one provider.
+
+**npm install -g fails with EACCES**
+Use a user-managed Node install such as Homebrew, nvm, or Volta, or configure
+an npm prefix in a user-writable directory before retrying the global install.
+
+**Unsupported engine or node:sqlite error**
+Upgrade Node to 22.5 or newer, then rerun the install. Node 20 is not
+supported by the published package.
 
 **Port already in use**
 Another Sidemesh daemon is running. Run sidemesh status to find it, or use

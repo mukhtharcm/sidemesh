@@ -1,13 +1,23 @@
 ---
 title: Install
-description: Install Sidemesh from source or npm, then build the CLI.
+description: Install Sidemesh from npm or from source for development.
 ---
 
 ## Prerequisites
 
-- Node.js 20+ (`node --version` to check)
+- Node.js 22.5+ (`node --version` to check)
+- A user-managed Node install such as Homebrew, `nvm`, or Volta if you want
+  `npm install -g` to work without `sudo`
 - Git (for source install)
 - Optional: Flutter SDK (for mobile app development)
+
+## From npm
+
+For the default Codex path:
+
+```bash
+npm install -g sidemesh @openai/codex
+```
 
 ## From Source
 
@@ -20,14 +30,6 @@ npm link
 ```
 
 `npm link` makes `sidemesh` available as a global CLI command.
-
-## From Private GitHub Repo
-
-If you have access to the private repo:
-
-```bash
-npm install -g github:mukhtharcm/sidemesh
-```
 
 ## Verify Installation
 
@@ -55,6 +57,13 @@ pi /model          # select default model
 ### Copilot
 
 Install GitHub Copilot CLI and authenticate via `gh auth login`.
+
+## Install Troubleshooting
+
+- If `npm install -g` fails with `EACCES`, switch to a user-managed Node
+  install or configure a user-local npm prefix before retrying.
+- If you see `Unsupported engine` or `ERR_UNKNOWN_BUILTIN_MODULE:
+  node:sqlite`, upgrade Node to 22.5 or newer and rerun the install.
 
 ## Build the Mobile App
 

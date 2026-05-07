@@ -36,7 +36,6 @@ import {
   uninstallLaunchdService,
 } from "./launchd-service.js";
 import { buildPairInfo, type PairInfo } from "./pair.js";
-import { startServer, type RunningServer } from "./server.js";
 import { runSetup } from "./setup.js";
 import {
   installSystemdService,
@@ -51,6 +50,7 @@ import {
   applyUpdateChannelOverrideFromEnv,
   runSelfUpdate,
 } from "./self-update.js";
+import type { RunningServer } from "./server.js";
 
 export async function main(argv = process.argv): Promise<void> {
   const program = new Command();
@@ -638,6 +638,7 @@ export async function runDaemonCommand(options: {
   }
   let server: RunningServer | null = null;
   const startedAt = Date.now();
+  const { startServer } = await import("./server.js");
   server = await startServer(config);
   await writeDaemonState(config, {
     pid: process.pid,

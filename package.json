@@ -34,7 +34,9 @@
     "CONTRIBUTING.md",
     "TODO.md",
     "docs",
-    "scripts/*.sh"
+    "scripts/*.sh",
+    "scripts/check-node-version.mjs",
+    "scripts/prepare-package.mjs"
   ],
   "engines": {
     "node": ">=22.5.0"
@@ -42,7 +44,8 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
-    "prepare": "npm run build",
+    "preinstall": "node scripts/check-node-version.mjs",
+    "prepare": "node scripts/prepare-package.mjs",
     "daemon": "tsx src/cli.ts daemon",
     "daemon:compiled": "node dist/cli.js daemon",
     "daemon:dev": "tsx watch src/cli.ts daemon",

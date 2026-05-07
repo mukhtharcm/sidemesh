@@ -15,16 +15,16 @@ The Pi provider lets Sidemesh drive Pi sessions directly through its TypeScript 
 
    Pi stores credentials in ~/.pi/agent/ by default.
 
-2. Node.js 20+ -- same requirement as the Sidemesh daemon.
+2. Node.js 22.5+ -- same requirement as the Sidemesh daemon.
 
 ## Sidemesh Setup
 
 ### Guided setup
 
 ```bash
-npm install
-npm run setup          # select Pi from the provider list
-npm run daemon
+npm install -g sidemesh @mariozechner/pi-coding-agent
+sidemesh setup         # select Pi from the provider list
+sidemesh up
 ```
 
 ### Manual config

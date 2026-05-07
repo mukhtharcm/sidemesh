@@ -30,17 +30,27 @@ wizard.
 Requirements:
 
 - Node.js `>= 22.5.0`
+- A user-managed Node install such as Homebrew, `nvm`, or Volta if you want
+  `npm install -g` to work without `sudo`
 - Flutter, if you want to run the app locally
 - A trusted network such as Tailscale or a private LAN
 
-From the repo:
+Install the default Codex path:
 
 ```bash
+npm install -g sidemesh @openai/codex
+
+sidemesh up
+```
+
+From the repo instead, for development:
+
+```bash
+git clone https://github.com/mukhtharcm/sidemesh.git
+cd sidemesh
 npm install
 npm run build
 npm link
-
-sidemesh up
 ```
 
 What that command does:
