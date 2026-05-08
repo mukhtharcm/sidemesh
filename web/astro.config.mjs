@@ -2,8 +2,11 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
+const siteUrl = 'https://sidemesh.com';
+const defaultOgImage = `${siteUrl}/assets/og-card-v1.png`;
+
 export default defineConfig({
-  site: "https://sidemesh.com",
+  site: siteUrl,
   integrations: [
     starlight({
       title: 'Sidemesh',
@@ -16,6 +19,14 @@ export default defineConfig({
       ],
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/mukhtharcm/sidemesh' },
+      ],
+      head: [
+        { tag: 'meta', attrs: { property: 'og:image', content: defaultOgImage } },
+        { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+        { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: defaultOgImage } },
+        { tag: 'meta', attrs: { name: 'twitter:site', content: '@mukhtharcm' } },
+        { tag: 'meta', attrs: { name: 'twitter:creator', content: '@mukhtharcm' } },
       ],
       sidebar: [
         {
