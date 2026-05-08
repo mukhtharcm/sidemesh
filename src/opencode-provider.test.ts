@@ -113,12 +113,14 @@ exit 1
     if (!address || typeof address === "string") {
       throw new Error("Expected TCP server address");
     }
+    let closeCalls = 0;
 
     const provider = new OpenCodeAgentProvider({
       defaultDirectory: "/repo/app",
       serverFactory: async () => ({
         baseUrl: new URL(`http://127.0.0.1:${address.port}`),
         close: async () => {
+          closeCalls += 1;
           await new Promise<void>((resolve, reject) => {
             server.close((error) => {
               if (error) {
@@ -137,8 +139,10 @@ exit 1
         () => provider.start(),
         /did not expose a supported headless HTTP API/,
       );
+      assert.equal(closeCalls, 1);
     } finally {
       await provider.close();
+      assert.equal(closeCalls, 1);
     }
   });
 
@@ -476,6 +480,33 @@ exit 1
     assert.deepEqual(await provider.listLoadedSessionIds(), [session.id]);
   });
 
+  it("finds uncached sessions beyond the first 200 global results", async () => {
+    const client = new FakeOpenCodeClient();
+    for (let index = 0; index < 205; index += 1) {
+      const id = `ses_${index}`;
+      client.sessions.set(id, {
+        id,
+        directory: "/repo/app",
+        title: `Session ${index}`,
+        agent: "build",
+        model: { providerID: "opencode", modelID: "big-pickle" },
+        time: {
+          created: index,
+          updated: 10_000 - index,
+        },
+      });
+      client.messages.set(id, []);
+    }
+
+    const provider = createProvider(client);
+    const resumed = await provider.resumeSessionThread("ses_204");
+
+    assert.deepEqual(resumed, { resumed: true });
+    assert.deepEqual(await provider.listLoadedSessionIds(), ["ses_204"]);
+    const thread = await provider.readSessionThread("ses_204", false);
+    assert.equal(thread.name, "Session 204");
+  });
+
   it("keeps activity timestamps stable for parts without explicit timing", async () => {
     const client = new FakeOpenCodeClient();
     const session = await client.createSession({
@@ -696,12 +727,17 @@ class FakeOpenCodeClient {
   public async listGlobalSessions(options: {
     archived: boolean;
     limit: number;
+    cursor?: number | null;
   }) {
     const sessions = [...this.sessions.values()]
       .filter((session) => options.archived === Boolean(session.time.archived))
-      .sort((left, right) => right.time.updated - left.time.updated)
-      .slice(0, options.limit);
-    return { sessions, nextCursor: null };
+      .sort((left, right) => right.time.updated - left.time.updated);
+    const start = Math.max(0, options.cursor ?? 0);
+    const page = sessions.slice(start, start + options.limit);
+    return {
+      sessions: page,
+      nextCursor: start + page.length < sessions.length ? start + page.length : null,
+    };
   }
 
   public async getSession(options: { sessionID: string }) {

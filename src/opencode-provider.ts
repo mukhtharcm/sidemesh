@@ -547,6 +547,9 @@ export class OpenCodeAgentProvider
     this.startPromise = this.startInternal();
     try {
       await this.startPromise;
+    } catch (error) {
+      await this.close().catch(() => undefined);
+      throw error;
     } finally {
       this.startPromise = null;
     }
@@ -1304,14 +1307,39 @@ export class OpenCodeAgentProvider
       return info;
     }
 
-    const sessions = await this.listAllSessions(200, false);
-    const archived = await this.listAllSessions(200, true);
-    const match = [...sessions, ...archived].find((session) => session.id === sessionId);
+    const match =
+      (await this.findSessionInfoById(sessionId, false)) ??
+      (await this.findSessionInfoById(sessionId, true));
     if (!match) {
       throw new Error(`OpenCode session "${sessionId}" was not found.`);
     }
     this.touchCache(match);
     return match;
+  }
+
+  private async findSessionInfoById(
+    sessionId: string,
+    archived: boolean,
+  ): Promise<OpenCodeSessionInfo | null> {
+    let cursor: number | null = null;
+    while (true) {
+      const page = await this.requireClient().listGlobalSessions({
+        directory: this.defaultDirectory,
+        archived,
+        limit: 200,
+        cursor,
+      });
+      for (const session of page.sessions) {
+        this.touchCache(session);
+        if (session.id === sessionId) {
+          return session;
+        }
+      }
+      if (page.nextCursor == null || page.sessions.length === 0) {
+        return null;
+      }
+      cursor = page.nextCursor;
+    }
   }
 
   private threadFromSession(
