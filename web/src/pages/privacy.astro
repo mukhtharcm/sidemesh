@@ -1,4 +1,6 @@
 ---
+const pageUrl = new URL("/privacy", Astro.site);
+const ogImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
 ---
 <!doctype html>
 <html lang="en">
@@ -8,6 +10,20 @@
 <title>Privacy Policy — Sidemesh</title>
 <meta name="description" content="Sidemesh privacy policy. Your data stays on your devices and your own hosts." />
 <meta name="theme-color" content="#e9edf0" />
+<meta property="og:title" content="Privacy Policy — Sidemesh" />
+<meta property="og:description" content="Sidemesh privacy policy. Your data stays on your devices and your own hosts." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content={pageUrl.toString()} />
+<meta property="og:image" content={ogImageUrl.toString()} />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Sidemesh — agent workstation control from anywhere." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content={ogImageUrl.toString()} />
+<meta name="twitter:image:alt" content="Sidemesh — agent workstation control from anywhere." />
+<meta name="twitter:site" content="@mukhtharcm" />
+<meta name="twitter:creator" content="@mukhtharcm" />
+<link rel="canonical" href={pageUrl.toString()} />
 <link rel="icon" type="image/png" href="/assets/favicon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
