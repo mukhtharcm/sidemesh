@@ -813,6 +813,53 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("restores interrupted Copilot turns as idle after restart", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-restart-state-test-"),
+    );
+    const sdk = new FakeCopilotSdkClient({ holdResponses: true });
+    try {
+      const stateDir = nodePath.join(dir, "state");
+      const provider = new CopilotAgentProvider({
+        stateDir,
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "hello", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await settleProviderWrites();
+
+      const activeThread = await provider.readSessionThread(created.thread.id, true);
+      assert.equal(activeThread.status.type, "running");
+      assert.equal(activeThread.turns?.at(-1)?.status, "inProgress");
+
+      const restoredProvider = new CopilotAgentProvider({
+        stateDir,
+        sdkClientFactory: fakeSdkFactory(new FakeCopilotSdkClient()),
+      });
+      await restoredProvider.start();
+
+      const restoredThread = await restoredProvider.readSessionThread(
+        created.thread.id,
+        true,
+      );
+      assert.equal(restoredThread.status.type, "idle");
+      assert.equal(restoredThread.turns?.at(-1)?.status, "interrupted");
+      const restoredRuntime = await restoredProvider.readSessionRuntime(
+        restoredThread,
+      );
+      assert.equal(restoredRuntime?.turnId ?? null, null);
+    } finally {
+      sdk.flushHeldResponses();
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("bridges SDK permission requests into Sidemesh pending actions", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-approval-test-"),
@@ -2214,4 +2261,3 @@ describe("copilot rich event cleanup", () => {
     }
   });
 });
-
