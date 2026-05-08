@@ -1,11 +1,147 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
+import { tmpdir } from "node:os";
+import nodePath from "node:path";
 import { describe, it } from "node:test";
 
 import type { AgentProviderLiveEvent } from "./agent-provider.js";
-import { OpenCodeAgentProvider } from "./opencode-provider.js";
+import {
+  createOpenCodeServer,
+  OpenCodeAgentProvider,
+} from "./opencode-provider.js";
 
 describe("OpenCode provider", () => {
+  it("launches OpenCode serve with the supported upstream arguments", async () => {
+    const tempDir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-opencode-launch-test-"),
+    );
+    const fakeBin = nodePath.join(tempDir, "fake-opencode");
+    await writeFile(
+      fakeBin,
+      `#!/bin/sh
+if [ "$1" = "serve" ] && [ "$2" = "--hostname" ] && [ "$3" = "127.0.0.1" ] && [ "$4" = "--port" ] && [ "$5" = "0" ] && [ "$#" -eq 5 ]; then
+  echo "opencode server listening on http://127.0.0.1:4318"
+  exit 0
+fi
+echo "unexpected args: $@" >&2
+exit 1
+`,
+      "utf8",
+    );
+    await chmod(fakeBin, 0o755);
+
+    const output: string[] = [];
+    const handle = await createOpenCodeServer({
+      bin: fakeBin,
+      stateDir: null,
+      onOutput: (line) => output.push(line),
+      onExit: () => {},
+    });
+
+    assert.equal(handle.baseUrl.href, "http://127.0.0.1:4318/");
+    assert.deepEqual(output, []);
+
+    await handle.close();
+  });
+
+  it("detects /api-prefixed OpenCode HTTP routes on startup", async () => {
+    const server = createHttpServer((request, response) => {
+      if (request.url === "/api/global/health") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ healthy: true, version: "9.9.9" }));
+        return;
+      }
+      response.writeHead(404, { "content-type": "text/plain" });
+      response.end("not found");
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.listen(0, "127.0.0.1", (error?: Error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected TCP server address");
+    }
+
+    const provider = new OpenCodeAgentProvider({
+      defaultDirectory: "/repo/app",
+      serverFactory: async () => ({
+        baseUrl: new URL(`http://127.0.0.1:${address.port}`),
+        close: async () => {
+          await new Promise<void>((resolve, reject) => {
+            server.close((error) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+              resolve();
+            });
+          });
+        },
+      }),
+    });
+
+    try {
+      assert.equal(await provider.getVersion(), "OpenCode 9.9.9");
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("fails fast when the OpenCode build does not expose the required HTTP API", async () => {
+    const server = createHttpServer((_request, response) => {
+      response.writeHead(404, { "content-type": "text/plain" });
+      response.end("not found");
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.listen(0, "127.0.0.1", (error?: Error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected TCP server address");
+    }
+
+    const provider = new OpenCodeAgentProvider({
+      defaultDirectory: "/repo/app",
+      serverFactory: async () => ({
+        baseUrl: new URL(`http://127.0.0.1:${address.port}`),
+        close: async () => {
+          await new Promise<void>((resolve, reject) => {
+            server.close((error) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+              resolve();
+            });
+          });
+        },
+      }),
+    });
+
+    try {
+      await assert.rejects(
+        () => provider.start(),
+        /did not expose a supported headless HTTP API/,
+      );
+    } finally {
+      await provider.close();
+    }
+  });
+
   it("creates a session, completes a prompt, and maps history/runtime", async () => {
     const client = new FakeOpenCodeClient();
     const provider = createProvider(client);
@@ -51,6 +187,11 @@ describe("OpenCode provider", () => {
         : null,
       "done",
     );
+    assert.equal(client.createSessionInputs[0]?.model, undefined);
+    assert.deepEqual(client.promptInputs[0]?.input.model, {
+      providerID: "opencode",
+      modelID: "big-pickle",
+    });
   });
 
   it("maps permissions and multi-question replies through pending actions", async () => {
@@ -495,6 +636,21 @@ class FakeOpenCodeClient {
     requestID: string;
     reply: string;
   }> = [];
+  public readonly createSessionInputs: Array<{
+    directory: string;
+    title?: string | null;
+    agent?: string | null;
+    model?: { providerID: string; modelID: string } | null;
+  }> = [];
+  public readonly promptInputs: Array<{
+    directory: string;
+    sessionID: string;
+    input: {
+      agent?: string;
+      model?: { providerID: string; modelID: string };
+      parts: any[];
+    };
+  }> = [];
 
   public readonly questionReplies: Array<{
     directory: string;
@@ -570,6 +726,12 @@ class FakeOpenCodeClient {
     agent?: string | null;
     model?: { providerID: string; modelID: string } | null;
   }) {
+    this.createSessionInputs.push({
+      directory: options.directory,
+      title: options.title,
+      agent: options.agent,
+      ...(options.model ? { model: options.model } : {}),
+    });
     const id = `ses_${randomUUID()}`;
     const session = {
       id,
@@ -609,6 +771,11 @@ class FakeOpenCodeClient {
     sessionID: string;
     input: { agent?: string; model?: { providerID: string; modelID: string }; parts: any[] };
   }) {
+    this.promptInputs.push({
+      directory: options.directory,
+      sessionID: options.sessionID,
+      input: options.input,
+    });
     const session = await this.getSession({ sessionID: options.sessionID });
     session.time.updated = Date.now();
     const userMessageID = `msg_${randomUUID()}`;

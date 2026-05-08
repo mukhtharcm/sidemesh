@@ -517,6 +517,7 @@ export class OpenCodeAgentProvider
   private readonly pollIntervalMs: number;
   private readonly serverFactory: OpenCodeServerFactory;
   private readonly clientFactory: OpenCodeClientFactory;
+  private readonly usesDefaultClientFactory: boolean;
   private readonly sessionCache = new Map<string, OpenCodeSessionCache>();
   private readonly loadedSessionIds = new Set<string>();
   private readonly activeTurns = new Map<string, ActiveOpenCodeTurn>();
@@ -533,6 +534,7 @@ export class OpenCodeAgentProvider
     this.pollIntervalMs = Math.max(50, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
     this.serverFactory = options.serverFactory ?? createOpenCodeServer;
     this.clientFactory = options.clientFactory ?? createOpenCodeClient;
+    this.usesDefaultClientFactory = options.clientFactory == null;
   }
 
   public async start(): Promise<void> {
@@ -709,12 +711,18 @@ export class OpenCodeAgentProvider
       directory: request.cwd,
       title: deriveSessionTitle(request.input),
       agent,
-      model,
     });
+    const sessionInfo =
+      model == null
+        ? created
+        : {
+            ...created,
+            model,
+          };
     this.loadedSessionIds.add(created.id);
-    this.touchCache(created);
+    this.touchCache(sessionInfo);
     let activeTurnId: string | null = null;
-    let runtime = buildSessionRuntime(created, []);
+    let runtime = buildSessionRuntime(sessionInfo, []);
     if (request.input.length > 0) {
       const started = await this.startPromptTurn({
         sessionId: created.id,
@@ -732,7 +740,7 @@ export class OpenCodeAgentProvider
       this.updateRuntimeCache(created.id, runtime);
     }
     return {
-      thread: this.threadFromSession(created, { type: "idle" }, false),
+      thread: this.threadFromSession(sessionInfo, { type: "idle" }, false),
       activeTurnId,
       runtime,
     };
@@ -906,8 +914,11 @@ export class OpenCodeAgentProvider
       onExit: (code) => this.emit("exit", code),
     });
     this.server = server;
+    const resolvedBaseUrl = this.usesDefaultClientFactory
+      ? await resolveOpenCodeApiBaseUrl(server.baseUrl)
+      : server.baseUrl;
     this.client = this.clientFactory({
-      baseUrl: server.baseUrl,
+      baseUrl: resolvedBaseUrl,
       defaultDirectory: this.defaultDirectory,
     });
   }
@@ -1452,7 +1463,7 @@ class HttpOpenCodeClient implements OpenCodeClient {
     limit: number;
     cursor?: number | null;
   }): Promise<OpenCodeGlobalSessionPage> {
-    const url = new URL("/experimental/session", this.baseUrl);
+    const url = this.buildUrl("/experimental/session");
     url.searchParams.set("archived", options.archived ? "true" : "false");
     url.searchParams.set("limit", String(options.limit));
     if (options.cursor != null) {
@@ -1544,10 +1555,7 @@ class HttpOpenCodeClient implements OpenCodeClient {
     input: OpenCodePromptInput;
   }): Promise<void> {
     const response = await this.request(
-      new URL(
-        `/session/${encodeURIComponent(options.sessionID)}/prompt_async`,
-        this.baseUrl,
-      ),
+      this.buildUrl(`/session/${encodeURIComponent(options.sessionID)}/prompt_async`),
       {
         method: "POST",
         headers: this.jsonHeaders(options.directory),
@@ -1638,7 +1646,7 @@ class HttpOpenCodeClient implements OpenCodeClient {
       body?: unknown;
     } = {},
   ): Promise<T> {
-    const response = await this.request(new URL(path, this.baseUrl), {
+    const response = await this.request(this.buildUrl(path), {
       method: options.method ?? (options.body === undefined ? "GET" : "POST"),
       headers:
         options.body === undefined
@@ -1672,6 +1680,10 @@ class HttpOpenCodeClient implements OpenCodeClient {
     throw new Error(`OpenCode request failed for ${url.pathname}: ${message}`);
   }
 
+  private buildUrl(path: string): URL {
+    return resolveOpenCodeUrl(this.baseUrl, path);
+  }
+
   private headers(directory?: string | null): OpenCodeHeaders {
     return {
       "x-opencode-directory": directory?.trim() || this.defaultDirectory,
@@ -1692,6 +1704,24 @@ export function createOpenCodeClient(
   return new HttpOpenCodeClient(options.baseUrl, options.defaultDirectory);
 }
 
+async function resolveOpenCodeApiBaseUrl(baseUrl: URL): Promise<URL> {
+  for (const candidate of [baseUrl, resolveOpenCodeUrl(baseUrl, "/api/")]) {
+    try {
+      const response = await fetch(resolveOpenCodeUrl(candidate, "/global/health"), {
+        signal: AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS),
+      });
+      if (response.ok) {
+        return candidate;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  throw new Error(
+    "OpenCode server did not expose a supported headless HTTP API at /global/health or /api/global/health. The installed OpenCode build may be too old for the Sidemesh provider.",
+  );
+}
+
 export async function createOpenCodeServer(
   options: OpenCodeServerFactoryOptions,
 ): Promise<OpenCodeServerHandle> {
@@ -1705,7 +1735,7 @@ export async function createOpenCodeServer(
 
   const child: OpenCodeChildProcess = spawn(
     options.bin,
-    ["serve", "--hostname", "127.0.0.1", "--port", "0", "--pure"],
+    ["serve", "--hostname", "127.0.0.1", "--port", "0"],
     {
       env: {
         ...process.env,
@@ -2573,6 +2603,18 @@ function parseIntegerHeader(value: string | null): number | null {
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveOpenCodeUrl(baseUrl: URL, path: string): URL {
+  const resolved = new URL(baseUrl.href);
+  const basePath = resolved.pathname.endsWith("/")
+    ? resolved.pathname
+    : `${resolved.pathname}/`;
+  const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
+  resolved.pathname = `${basePath}${normalizedPath}`.replace(/\/{2,}/g, "/");
+  resolved.search = "";
+  resolved.hash = "";
+  return resolved;
 }
 
 function cloneThreadRecord(thread: ThreadRecord): ThreadRecord {
