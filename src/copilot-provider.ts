@@ -1688,9 +1688,8 @@ export class CopilotAgentProvider
     try {
       const raw = await readFile(this.statePath, "utf8");
       const parsed = JSON.parse(raw) as CopilotStateFile;
-      for (const id of parsed.archivedSessionIds ?? []) {
-        this.archivedSessionIds.add(id);
-      }
+      const archivedSessionIds = new Set(parsed.archivedSessionIds ?? []);
+      const restoredSessions = new Map<string, CopilotSessionState>();
       for (const item of parsed.sessions ?? []) {
         const state: CopilotSessionState = {
           thread: item.thread,
@@ -1709,7 +1708,18 @@ export class CopilotAgentProvider
           copilotSessionCreated:
             item.copilotSessionCreated ?? item.copilotSessionId != null,
         };
-        this.sessions.set(state.thread.id, state);
+        normalizeRestoredCopilotSessionState(state);
+        restoredSessions.set(state.thread.id, state);
+      }
+      this.archivedSessionIds.clear();
+      this.sessions.clear();
+      this.loadedSessionIds.clear();
+      this.activeTurns.clear();
+      for (const id of archivedSessionIds) {
+        this.archivedSessionIds.add(id);
+      }
+      for (const [threadId, state] of restoredSessions) {
+        this.sessions.set(threadId, state);
       }
     } catch {
       // Missing or corrupt provider state should not block daemon startup.
@@ -3773,6 +3783,47 @@ function normalizeStoredRuntime(
         }
       : {}),
   };
+}
+
+function normalizeRestoredCopilotSessionState(
+  session: CopilotSessionState,
+): void {
+  const restoredAt = session.thread.updatedAt;
+  const hadActiveTurn = session.turns.some((turn) => {
+    if (!isActiveCopilotTurnStatus(turn.status)) {
+      return false;
+    }
+    turn.status = "interrupted";
+    turn.completedAt ??= restoredAt;
+    return true;
+  });
+  if (hadActiveTurn || isActiveCopilotThreadStatus(session.thread.status)) {
+    session.thread.status = { type: "idle" };
+    session.runtime = runtimeWithoutTurnId(session.runtime);
+  }
+}
+
+function isActiveCopilotTurnStatus(
+  status: string | null | undefined,
+): boolean {
+  return status === "in_progress" || status === "inProgress";
+}
+
+function isActiveCopilotThreadStatus(
+  status: ThreadRecord["status"] | null | undefined,
+): boolean {
+  const type = status?.type;
+  return type === "running" || type === "active";
+}
+
+function runtimeWithoutTurnId(
+  runtime: SessionRuntimeSummary | null,
+): SessionRuntimeSummary | null {
+  if (!runtime) {
+    return null;
+  }
+  const { turnId: _turnId, ...rest } = runtime;
+  return rest;
 }
 
 function normalizeCopilotSessionMode(
