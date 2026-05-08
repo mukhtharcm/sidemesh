@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { describe, it } from "node:test";
@@ -833,6 +833,44 @@ describe("Copilot provider", () => {
       });
       await settleProviderWrites();
 
+      const statePath = nodePath.join(stateDir, "sessions.json");
+      const persisted = JSON.parse(await readFile(statePath, "utf8")) as {
+        sessions?: Array<Record<string, unknown>>;
+      };
+      const persistedSession = persisted.sessions?.[0];
+      assert.ok(persistedSession);
+      persistedSession.activities = [
+        {
+          id: "stale-tool",
+          type: "tool",
+          turnId: created.activeTurnId,
+          createdAt: 1_777_770_010_000,
+          seq: 99,
+          status: "in_progress",
+          toolName: "view",
+          title: "View README",
+          args: { path: "README.md" },
+          output: "partial",
+          result: null,
+          isError: null,
+          semantic: null,
+        },
+      ];
+      persistedSession.runtime = {
+        ...(persistedSession.runtime as Record<string, unknown> | null ?? {}),
+        turnId: created.activeTurnId,
+        telemetry: {
+          ...((persistedSession.runtime as { telemetry?: Record<string, unknown> } | null)
+            ?.telemetry ?? {}),
+          compaction: {
+            status: "running",
+            startedAt: 1_777_770_011_000,
+            updatedAt: 1_777_770_011_000,
+          },
+        },
+      };
+      await writeFile(statePath, JSON.stringify(persisted, null, 2));
+
       const activeThread = await provider.readSessionThread(created.thread.id, true);
       assert.equal(activeThread.status.type, "running");
       assert.equal(activeThread.turns?.at(-1)?.status, "inProgress");
@@ -857,12 +895,64 @@ describe("Copilot provider", () => {
       );
       assert.equal(restoredThread.status.type, "idle");
       assert.equal(restoredThread.turns?.at(-1)?.status, "interrupted");
+      const restoredLog = await restoredProvider.readSessionLog(restoredThread);
+      assert.equal(restoredLog.activities[0]?.status, "failed");
       const restoredRuntime = await restoredProvider.readSessionRuntime(
         restoredThread,
       );
       assert.equal(restoredRuntime?.turnId ?? null, null);
+      assert.equal(restoredRuntime?.telemetry?.compaction?.status, "failed");
     } finally {
       sdk.flushHeldResponses();
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes stale Copilot history activities and compaction on reload", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-history-restart-state-test-"),
+    );
+    try {
+      const sessionId = "history-session";
+      const sdk = new FakeCopilotSdkClient({
+        sessions: [
+          {
+            metadata: {
+              sessionId,
+              startTime: new Date("2026-04-01T00:00:00.000Z"),
+              modifiedTime: new Date("2026-04-01T00:05:00.000Z"),
+              summary: "History session",
+              isRemote: false,
+              context: { cwd: dir },
+            },
+            events: [
+              event("tool.execution_start", {
+                toolCallId: "tool-1",
+                toolName: "view",
+                arguments: { path: "README.md" },
+              }),
+              event("session.compaction_start", {
+                conversationTokens: 3600,
+                systemTokens: 320,
+                toolDefinitionsTokens: 176,
+              }),
+            ],
+          },
+        ],
+      });
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const thread = await provider.readSessionThread(sessionId, false);
+      assert.equal(thread.status.type, "idle");
+      const log = await provider.readSessionLog(thread);
+      assert.equal(log.activities[0]?.status, "failed");
+      assert.equal(log.runtime?.telemetry?.compaction?.status, "failed");
+    } finally {
       await settleProviderWrites();
       await rm(dir, { recursive: true, force: true });
     }
