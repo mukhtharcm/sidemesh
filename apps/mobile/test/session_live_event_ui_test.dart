@@ -105,6 +105,166 @@ void main() {
     expect(find.textContaining('Overloaded'), findsOneWidget);
   });
 
+  testWidgets('session screen keeps only the latest plan update per session', (
+    tester,
+  ) async {
+    final session = _session('latest-plan-only');
+    final api = _RichEventFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('latest-plan-only'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit(_planUpdatedEvent(
+      session.id,
+      turnId: 'turn-1',
+      explanation: 'Initial plan.',
+      plan: const [
+        {'step': 'Inspect the bug', 'status': 'completed'},
+      ],
+    ));
+    api.emit(_planUpdatedEvent(
+      session.id,
+      turnId: 'turn-2',
+      explanation: 'Revised plan.',
+      plan: const [
+        {'step': 'Ship the fix', 'status': 'in_progress'},
+      ],
+    ));
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Inspect the bug'), findsNothing);
+    expect(find.text('Ship the fix'), findsOneWidget);
+    expect(find.text('Revised plan.'), findsOneWidget);
+  });
+
+  testWidgets('session screen keeps one plan update after reopening', (
+    tester,
+  ) async {
+    final session = _session('plan-reopen');
+    final latestPlanUpdate = LiveEvent.fromJson(
+      _planUpdatedEvent(
+        session.id,
+        turnId: 'turn-1',
+        explanation: 'Keep the latest plan visible.',
+        plan: const [
+          {'step': 'Render from snapshot', 'status': 'completed'},
+          {'step': 'Avoid duplicates on reopen', 'status': 'in_progress'},
+        ],
+        seq: 3,
+      ),
+    );
+    final initialApi = _RichEventFakeApi(latestPlanUpdate: latestPlanUpdate);
+    addTearDown(initialApi.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('plan-reopen'),
+        session: session,
+        api: initialApi,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Avoid duplicates on reopen'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await _pumpFrames(tester);
+
+    final reopenedApi = _RichEventFakeApi(latestPlanUpdate: latestPlanUpdate);
+    addTearDown(reopenedApi.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('plan-reopen'),
+        session: session,
+        api: reopenedApi,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Avoid duplicates on reopen'), findsOneWidget);
+  });
+
+  testWidgets('session screen restores a missed plan update from delta replay', (
+    tester,
+  ) async {
+    final session = _session('plan-delta-replay');
+    final api = _RichEventFakeApi(
+      messages: [
+        _assistantMessage(
+          id: 'seed-message',
+          text: 'Existing transcript item.',
+          content: const [TextBlock('Existing transcript item.')],
+        ),
+      ],
+      eventsDelta: SessionEventsDelta(
+        sessionId: session.id,
+        since: 1,
+        nextSeq: 3,
+        messages: const [],
+        activities: const [],
+        latestPlanUpdate: LiveEvent.fromJson(
+          _planUpdatedEvent(
+            session.id,
+            turnId: 'turn-2',
+            explanation: 'Recovered from /events.',
+            plan: const [
+              {'step': 'Catch up missed plan state', 'status': 'in_progress'},
+            ],
+            seq: 2,
+          ),
+        ),
+        pendingAction: null,
+        session: null,
+      ),
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('plan-delta-replay'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Catch up missed plan state'), findsNothing);
+
+    api.emit({
+      'type': 'hello',
+      'sessionId': session.id,
+      'nextSeq': 3,
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Catch up missed plan state'), findsOneWidget);
+    expect(find.text('Recovered from /events.'), findsOneWidget);
+  });
+
   testWidgets('completed assistant message keeps collapsed reasoning visible', (
     tester,
   ) async {
@@ -355,10 +515,16 @@ NodeInfo _nodeInfo() => NodeInfo.fromJson({
 });
 
 class _RichEventFakeApi extends ApiClient {
-  _RichEventFakeApi({this.messages = const []});
+  _RichEventFakeApi({
+    this.messages = const [],
+    this.latestPlanUpdate,
+    this.eventsDelta,
+  });
 
   final _ControllableWebSocketChannel _channel = _ControllableWebSocketChannel();
   List<SessionMessage> messages;
+  final LiveEvent? latestPlanUpdate;
+  final SessionEventsDelta? eventsDelta;
 
   @override
   Future<NodeInfo> fetchNode(HostProfile host) async => _nodeInfo();
@@ -381,7 +547,25 @@ class _RichEventFakeApi extends ApiClient {
       totalActivities: 0,
       returnedActivities: 0,
     ),
+    latestPlanUpdate: latestPlanUpdate,
   );
+
+  @override
+  Future<SessionEventsDelta> fetchEvents(
+    HostProfile host,
+    String sessionId, {
+    required int since,
+  }) async => eventsDelta ??
+      SessionEventsDelta(
+        sessionId: sessionId,
+        since: since,
+        nextSeq: since,
+        messages: const [],
+        activities: const [],
+        latestPlanUpdate: null,
+        pendingAction: null,
+        session: null,
+      );
 
   @override
   Future<SkillCatalog> fetchSkills(
@@ -455,4 +639,24 @@ class _TestWebSocketSink implements WebSocketSink {
 
   @override
   void add(dynamic data) => _delegate.add(data);
+}
+
+Map<String, Object?> _planUpdatedEvent(
+  String sessionId, {
+  required String turnId,
+  required String explanation,
+  required List<Map<String, Object?>> plan,
+  int? seq,
+}) {
+  final event = <String, Object?>{
+    'type': 'plan_updated',
+    'sessionId': sessionId,
+    'turnId': turnId,
+    'explanation': explanation,
+    'plan': plan,
+  };
+  if (seq case final value?) {
+    event['seq'] = value;
+  }
+  return event;
 }
