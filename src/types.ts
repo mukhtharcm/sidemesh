@@ -849,6 +849,15 @@ export interface LiveEvent {
   runtime?: SessionRuntimeSummary;
 }
 
+export interface LatestPlanUpdate {
+  type: "plan_updated";
+  sessionId: string;
+  seq?: number;
+  turnId?: string;
+  explanation?: string;
+  plan: LivePlanStep[];
+}
+
 export interface ApprovalLiveEvent {
   type: "hello" | "snapshot" | "action_opened" | "action_resolved" | "error";
   actions?: PendingAction[];
@@ -924,6 +933,7 @@ export interface SessionLogSnapshot {
   totalMessages: number;
   totalActivities: number;
   nextSeq: number;
+  latestPlanUpdate?: LatestPlanUpdate | null;
 }
 
 export interface SessionRuntimeSummary {

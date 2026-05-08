@@ -3,6 +3,7 @@ import type { Server } from "node:http";
 import { homedir, hostname, platform } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import nodePath from "node:path";
 
 import { getRequestListener } from "@hono/node-server";
@@ -33,6 +34,7 @@ import type {
   ApprovalLiveEvent,
   GitInfoSummary,
   HostCapabilities,
+  LatestPlanUpdate,
   LiveEvent,
   SessionActivity,
   NodeConfig,
@@ -115,6 +117,9 @@ const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
 const SESSION_INPUT_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
+const SESSION_RUNTIME_SIGNALS_LIMIT = 500;
+const SESSION_RUNTIME_SIGNALS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_RUNTIME_SIGNALS_FILE = "session-runtime-signals-v1.json";
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
@@ -152,6 +157,7 @@ interface SessionLogCacheEntry {
   runtime: SessionRuntimeSummary | null;
   history: SessionHistorySummary;
   nextSeq: number;
+  latestPlanUpdate: LatestPlanUpdate | null;
 }
 
 interface SessionHistorySummary {
@@ -160,6 +166,11 @@ interface SessionHistorySummary {
   returnedMessages: number;
   totalActivities: number;
   returnedActivities: number;
+}
+
+interface SessionRuntimeSignalsEntry {
+  latestPlanUpdate: LatestPlanUpdate | null;
+  updatedAt: number;
 }
 
 interface SessionInputReceipt {
@@ -244,8 +255,12 @@ export async function startServer(
   );
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
   const logCache = new Map<string, SessionLogCacheEntry>();
+  const sessionRuntimeSignals = await loadSessionRuntimeSignalsState(
+    nodePath.join(config.stateDir, SESSION_RUNTIME_SIGNALS_FILE),
+  );
   const sessionSeqCursor = new Map<string, number>();
   const sessionInputDedupe = new Map<string, SessionInputDedupeEntry>();
+  let sessionRuntimeSignalsSaveChain = Promise.resolve();
   const sessionInputDedupeStore = await SessionInputDedupeStore.open(
     nodePath.join(config.stateDir, SESSION_INPUT_DEDUPE_FILE),
     {
@@ -368,7 +383,10 @@ export async function startServer(
   });
 
   function allocSeq(sessionId: string): number {
-    const current = sessionSeqCursor.get(sessionId) ?? 0;
+    const current = Math.max(
+      sessionSeqCursor.get(sessionId) ?? 0,
+      nextSeqForLatestPlanUpdate(0, latestPlanUpdateForSession(sessionId)),
+    );
     sessionSeqCursor.set(sessionId, current + 1);
     return current;
   }
@@ -378,6 +396,49 @@ export async function startServer(
     if (minimum > current) {
       sessionSeqCursor.set(sessionId, minimum);
     }
+  }
+
+  function latestPlanUpdateForSession(sessionId: string): LatestPlanUpdate | null {
+    return sessionRuntimeSignals.get(sessionId)?.latestPlanUpdate ?? null;
+  }
+
+  function persistSessionRuntimeSignalsEventually(): void {
+    sessionRuntimeSignalsSaveChain = sessionRuntimeSignalsSaveChain
+      .catch(() => undefined)
+      .then(() =>
+        saveSessionRuntimeSignalsState(
+          nodePath.join(config.stateDir, SESSION_RUNTIME_SIGNALS_FILE),
+          sessionRuntimeSignals,
+        )
+      );
+    void sessionRuntimeSignalsSaveChain.catch((error: unknown) => {
+      console.error(
+        error instanceof Error
+          ? `Failed to persist session runtime signals: ${error.message}`
+          : "Failed to persist session runtime signals.",
+      );
+    });
+  }
+
+  function setLatestPlanUpdateForSession(
+    sessionId: string,
+    latestPlanUpdate: LatestPlanUpdate | null,
+  ): void {
+    const normalized = normalizeLatestPlanUpdate(latestPlanUpdate, sessionId);
+    if (normalized == null) {
+      sessionRuntimeSignals.delete(sessionId);
+    } else {
+      sessionRuntimeSignals.set(sessionId, {
+        latestPlanUpdate: normalized,
+        updatedAt: Date.now(),
+      });
+    }
+    updateSessionLogCacheLatestPlanUpdate(
+      logCache,
+      sessionId,
+      latestPlanUpdateForSession(sessionId),
+    );
+    persistSessionRuntimeSignalsEventually();
   }
 
   function sessionInputDedupeKey(
@@ -564,10 +625,11 @@ export async function startServer(
   // Wrap each broadcast so every live event carries a monotonically
   // increasing `seq` — this lets clients detect gaps after a reconnect
   // and decide whether they need a fresh snapshot.
-  function broadcastLive(sessionId: string, event: LiveEvent): void {
+  function broadcastLive(sessionId: string, event: LiveEvent): LiveEvent {
     const stamped: LiveEvent =
       event.seq === undefined ? { ...event, seq: allocSeq(sessionId) } : event;
     broadcast(socketsBySession, sessionId, stamped);
+    return stamped;
   }
 
   function broadcastProviderWarning(event: {
@@ -864,13 +926,26 @@ export async function startServer(
         return;
       }
       case "plan_updated": {
-        broadcastLive(event.sessionId, {
+        const stamped = broadcastLive(event.sessionId, {
           type: "plan_updated",
           sessionId: event.sessionId,
           turnId: event.turnId,
           explanation: event.explanation,
           plan: event.plan,
         });
+        setLatestPlanUpdateForSession(
+          event.sessionId,
+          stamped.type === "plan_updated"
+            ? {
+                type: "plan_updated",
+                sessionId: event.sessionId,
+                seq: stamped.seq,
+                turnId: stamped.turnId,
+                explanation: stamped.explanation,
+                plan: stamped.plan ?? event.plan,
+              }
+            : null,
+        );
         return;
       }
       case "reasoning_delta": {
@@ -1640,7 +1715,15 @@ export async function startServer(
       if (cached) {
         const session = await readSession(provider, sessionId, false);
         if (cached.threadUpdatedAt === session.updatedAt) {
-          ensureSeqCursor(sessionId, cached.nextSeq);
+          const latestPlanUpdate = mergeLatestPlanUpdate(
+            sessionId,
+            cached.latestPlanUpdate,
+            latestPlanUpdateForSession(sessionId),
+          );
+          ensureSeqCursor(
+            sessionId,
+            nextSeqForLatestPlanUpdate(cached.nextSeq, latestPlanUpdate),
+          );
           runtimeCache.set(session.id, {
             threadUpdatedAt: session.updatedAt,
             runtime: cached.runtime,
@@ -1657,6 +1740,7 @@ export async function startServer(
               sessionId,
             ),
             history: cached.history,
+            latestPlanUpdate,
           });
           return;
         }
@@ -1667,7 +1751,15 @@ export async function startServer(
         messageLimit,
         activityLimit,
       });
-      ensureSeqCursor(sessionId, log.nextSeq);
+      const latestPlanUpdate = mergeLatestPlanUpdate(
+        sessionId,
+        log.latestPlanUpdate ?? null,
+        latestPlanUpdateForSession(sessionId),
+      );
+      ensureSeqCursor(
+        sessionId,
+        nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
+      );
       const activities = mergeSessionActivities(
         log.activities,
         liveActivities.get(sessionId)?.values() || [],
@@ -1686,6 +1778,7 @@ export async function startServer(
         runtime: log.runtime,
         history,
         nextSeq: log.nextSeq,
+        latestPlanUpdate,
       });
       runtimeCache.set(session.id, {
         threadUpdatedAt: session.updatedAt,
@@ -1697,6 +1790,7 @@ export async function startServer(
         activities,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
         history,
+        latestPlanUpdate,
       });
     }),
   );
@@ -1740,6 +1834,7 @@ export async function startServer(
       let newActivities: SessionActivity[];
       let nextSeq: number;
       let logRuntime: SessionRuntimeSummary | null;
+      let logLatestPlanUpdate: LatestPlanUpdate | null;
 
       if (session.path && session.path.endsWith(".jsonl")) {
         try {
@@ -1756,7 +1851,11 @@ export async function startServer(
             delta.activities,
             liveActivities.get(sessionId)?.values() || [],
           ).filter((a) => (a.seq ?? 0) > since);
-          nextSeq = delta.nextSeq;
+          logLatestPlanUpdate = mergeLatestPlanUpdate(
+            sessionId,
+            latestPlanUpdateForSession(sessionId),
+          );
+          nextSeq = nextSeqForLatestPlanUpdate(delta.nextSeq, logLatestPlanUpdate);
           logRuntime = delta.runtime;
         } catch (error: unknown) {
           const staleCursor = error && typeof error === "object"
@@ -1772,7 +1871,15 @@ export async function startServer(
           }
           // Fallback to provider readSessionLog on any other error
           const log = await provider.readSessionLog!(session);
-          ensureSeqCursor(sessionId, log.nextSeq);
+          const latestPlanUpdate = mergeLatestPlanUpdate(
+            sessionId,
+            log.latestPlanUpdate ?? null,
+            latestPlanUpdateForSession(sessionId),
+          );
+          ensureSeqCursor(
+            sessionId,
+            nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
+          );
           const activities = mergeSessionActivities(
             log.activities,
             liveActivities.get(sessionId)?.values() || [],
@@ -1786,12 +1893,21 @@ export async function startServer(
           for (const a of newActivities) {
             if ((a.seq ?? 0) > highestSeq) highestSeq = a.seq ?? highestSeq;
           }
-          nextSeq = highestSeq;
+          logLatestPlanUpdate = latestPlanUpdate;
+          nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
           logRuntime = log.runtime;
         }
       } else {
         const log = await provider.readSessionLog!(session);
-        ensureSeqCursor(sessionId, log.nextSeq);
+        const latestPlanUpdate = mergeLatestPlanUpdate(
+          sessionId,
+          log.latestPlanUpdate ?? null,
+          latestPlanUpdateForSession(sessionId),
+        );
+        ensureSeqCursor(
+          sessionId,
+          nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
+        );
         const activities = mergeSessionActivities(
           log.activities,
           liveActivities.get(sessionId)?.values() || [],
@@ -1805,13 +1921,22 @@ export async function startServer(
         for (const a of newActivities) {
           if ((a.seq ?? 0) > highestSeq) highestSeq = a.seq ?? highestSeq;
         }
-        nextSeq = highestSeq;
+        logLatestPlanUpdate = latestPlanUpdate;
+        nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
         logRuntime = log.runtime;
       }
+
+      const latestPlanUpdate = isLatestPlanUpdateNewerThan(
+        logLatestPlanUpdate,
+        since,
+      )
+        ? logLatestPlanUpdate
+        : null;
 
       const eventDeltaSize = measureSessionEventDelta(
         newMessages,
         newActivities,
+        latestPlanUpdate,
       );
       if (
         eventDeltaSize.items > SESSION_EVENT_DELTA_MAX_ITEMS ||
@@ -1836,6 +1961,7 @@ export async function startServer(
         nextSeq,
         messages: newMessages,
         activities: newActivities,
+        latestPlanUpdate,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
         session: mapSession(session, logRuntime),
       });
@@ -2732,17 +2858,20 @@ export async function startServer(
       return;
     }
 
-    wsServer.handleUpgrade(request, socket, head, (ws) => {
-      const set = socketsBySession.get(sessionId) || new Set<WebSocket>();
-      set.add(ws);
-      socketsBySession.set(sessionId, set);
-      sendEvent(ws, {
-        type: "hello",
-        sessionId,
-        nextSeq: sessionSeqCursor.get(sessionId) ?? 0,
-      });
-      ws.on("close", () => {
-        const current = socketsBySession.get(sessionId);
+      wsServer.handleUpgrade(request, socket, head, (ws) => {
+        const set = socketsBySession.get(sessionId) || new Set<WebSocket>();
+        set.add(ws);
+        socketsBySession.set(sessionId, set);
+        sendEvent(ws, {
+          type: "hello",
+          sessionId,
+          nextSeq: nextSeqForLatestPlanUpdate(
+            sessionSeqCursor.get(sessionId) ?? 0,
+            latestPlanUpdateForSession(sessionId),
+          ),
+        });
+        ws.on("close", () => {
+          const current = socketsBySession.get(sessionId);
         if (!current) {
           return;
         }
@@ -2899,6 +3028,7 @@ export async function startServer(
       }
       await closeWebSocketServer(wsServer);
       await closeHttpServer(server);
+      await sessionRuntimeSignalsSaveChain.catch(() => undefined);
       await provider.close?.();
     },
   };
@@ -3927,6 +4057,21 @@ function setSessionLogCacheEntry(
   }
 }
 
+function updateSessionLogCacheLatestPlanUpdate(
+  logCache: Map<string, SessionLogCacheEntry>,
+  sessionId: string,
+  latestPlanUpdate: LatestPlanUpdate | null,
+): void {
+  const prefix = `${sessionId}::`;
+  for (const [key, entry] of logCache) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+    entry.latestPlanUpdate = latestPlanUpdate;
+    entry.nextSeq = nextSeqForLatestPlanUpdate(entry.nextSeq, latestPlanUpdate);
+  }
+}
+
 function clearSessionLogCache(
   logCache: Map<string, SessionLogCacheEntry>,
   sessionId: string,
@@ -3937,6 +4082,156 @@ function clearSessionLogCache(
       logCache.delete(key);
     }
   }
+}
+
+function normalizeLatestPlanUpdate(
+  latestPlanUpdate: LatestPlanUpdate | null | undefined,
+  sessionId?: string,
+): LatestPlanUpdate | null {
+  if (!latestPlanUpdate) {
+    return null;
+  }
+  const normalizedSessionId = latestPlanUpdate.sessionId.trim() || sessionId?.trim() || "";
+  if (!normalizedSessionId) {
+    return null;
+  }
+  const plan = latestPlanUpdate.plan.filter(
+    (step) => step.step.trim().length > 0 && step.status.trim().length > 0,
+  );
+  if (plan.length === 0) {
+    return null;
+  }
+  return {
+    type: "plan_updated",
+    sessionId: normalizedSessionId,
+    seq: latestPlanUpdate.seq,
+    turnId: latestPlanUpdate.turnId?.trim() || undefined,
+    explanation: latestPlanUpdate.explanation?.trim() || undefined,
+    plan,
+  };
+}
+
+function mergeLatestPlanUpdate(
+  sessionId: string,
+  ...candidates: Array<LatestPlanUpdate | null | undefined>
+): LatestPlanUpdate | null {
+  let best: LatestPlanUpdate | null = null;
+  for (const candidate of candidates) {
+    const normalized = normalizeLatestPlanUpdate(candidate, sessionId);
+    if (normalized == null) {
+      continue;
+    }
+    if (best == null) {
+      best = normalized;
+      continue;
+    }
+    const bestSeq = best.seq ?? -1;
+    const nextSeq = normalized.seq ?? -1;
+    if (nextSeq > bestSeq) {
+      best = normalized;
+    }
+  }
+  return best;
+}
+
+function isLatestPlanUpdateNewerThan(
+  latestPlanUpdate: LatestPlanUpdate | null,
+  since: number,
+): latestPlanUpdate is LatestPlanUpdate {
+  return latestPlanUpdate?.seq != null && latestPlanUpdate.seq > since;
+}
+
+function nextSeqForLatestPlanUpdate(
+  nextSeq: number,
+  latestPlanUpdate: LatestPlanUpdate | null,
+): number {
+  if (latestPlanUpdate?.seq == null) {
+    return nextSeq;
+  }
+  return Math.max(nextSeq, latestPlanUpdate.seq + 1);
+}
+
+async function loadSessionRuntimeSignalsState(
+  filePath: string,
+): Promise<Map<string, SessionRuntimeSignalsEntry>> {
+  try {
+    const raw = await readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      sessions?: Array<{
+        sessionId?: string;
+        updatedAt?: number;
+        latestPlanUpdate?: LatestPlanUpdate | null;
+      }>;
+    };
+    const loaded = new Map<string, SessionRuntimeSignalsEntry>();
+    const now = Date.now();
+    for (const item of parsed.sessions ?? []) {
+      const sessionId = typeof item.sessionId === "string" ? item.sessionId.trim() : "";
+      const latestPlanUpdate = normalizeLatestPlanUpdate(
+        item.latestPlanUpdate ?? null,
+        sessionId,
+      );
+      const updatedAt = typeof item.updatedAt === "number" ? item.updatedAt : now;
+      if (!sessionId || latestPlanUpdate == null) {
+        continue;
+      }
+      if (now - updatedAt > SESSION_RUNTIME_SIGNALS_TTL_MS) {
+        continue;
+      }
+      loaded.set(sessionId, {
+        latestPlanUpdate,
+        updatedAt,
+      });
+    }
+    while (loaded.size > SESSION_RUNTIME_SIGNALS_LIMIT) {
+      const oldest = [...loaded.entries()].sort(
+        (left, right) => left[1].updatedAt - right[1].updatedAt,
+      )[0]?.[0];
+      if (!oldest) {
+        break;
+      }
+      loaded.delete(oldest);
+    }
+    return loaded;
+  } catch {
+    return new Map<string, SessionRuntimeSignalsEntry>();
+  }
+}
+
+async function saveSessionRuntimeSignalsState(
+  filePath: string,
+  sessionRuntimeSignals: Map<string, SessionRuntimeSignalsEntry>,
+): Promise<void> {
+  await mkdir(nodePath.dirname(filePath), { recursive: true, mode: 0o700 });
+  const now = Date.now();
+  const sessions = [...sessionRuntimeSignals.entries()]
+    .filter(([, entry]) => now - entry.updatedAt <= SESSION_RUNTIME_SIGNALS_TTL_MS)
+    .sort((left, right) => right[1].updatedAt - left[1].updatedAt)
+    .slice(0, SESSION_RUNTIME_SIGNALS_LIMIT)
+    .flatMap(([sessionId, entry]) => {
+      const latestPlanUpdate = normalizeLatestPlanUpdate(
+        entry.latestPlanUpdate,
+        sessionId,
+      );
+      if (latestPlanUpdate == null) {
+        return [];
+      }
+      return [{
+        sessionId,
+        updatedAt: entry.updatedAt,
+        latestPlanUpdate,
+      }];
+    });
+  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(
+    tmpPath,
+    JSON.stringify({ sessions }, null, 2),
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+  await rename(tmpPath, filePath);
 }
 
 function buildSessionLogCacheKey(
@@ -4167,10 +4462,17 @@ function buildSubmittedUserMessageAttachments(
 function measureSessionEventDelta(
   messages: SessionMessage[],
   activities: SessionActivity[],
+  latestPlanUpdate: LatestPlanUpdate | null,
 ): { items: number; bytes: number } {
   return {
-    items: messages.length + activities.length,
-    bytes: Buffer.byteLength(JSON.stringify({ messages, activities }), "utf8"),
+    items:
+      messages.length +
+      activities.length +
+      (latestPlanUpdate == null ? 0 : 1),
+    bytes: Buffer.byteLength(
+      JSON.stringify({ messages, activities, latestPlanUpdate }),
+      "utf8",
+    ),
   };
 }
 

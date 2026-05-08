@@ -2618,6 +2618,7 @@ class SessionLog {
     required this.activities,
     required this.pendingAction,
     required this.history,
+    this.latestPlanUpdate,
   });
 
   final SessionSummary session;
@@ -2625,24 +2626,43 @@ class SessionLog {
   final List<SessionActivity> activities;
   final PendingAction? pendingAction;
   final SessionLogHistorySummary? history;
+  final LiveEvent? latestPlanUpdate;
 
-  factory SessionLog.fromJson(Map<String, dynamic> json) => SessionLog(
-    session: SessionSummary.fromJson(json['session'] as Map<String, dynamic>),
-    messages: (json['messages'] as List<dynamic>? ?? [])
-        .map((item) => SessionMessage.fromJson(item as Map<String, dynamic>))
-        .toList(),
-    activities: (json['activities'] as List<dynamic>? ?? [])
-        .map((item) => SessionActivity.fromJson(item as Map<String, dynamic>))
-        .toList(),
-    pendingAction: json['pendingAction'] == null
-        ? null
-        : PendingAction.fromJson(json['pendingAction'] as Map<String, dynamic>),
-    history: json['history'] == null
-        ? null
-        : SessionLogHistorySummary.fromJson(
-            json['history'] as Map<String, dynamic>,
-          ),
-  );
+  factory SessionLog.fromJson(Map<String, dynamic> json) {
+    final latestPlanUpdateJson = json['latestPlanUpdate'];
+    final latestPlanUpdate =
+        latestPlanUpdateJson is Map<String, dynamic>
+            ? LiveEvent.fromJson(latestPlanUpdateJson)
+            : latestPlanUpdateJson is Map<dynamic, dynamic>
+            ? LiveEvent.fromJson(latestPlanUpdateJson.cast<String, dynamic>())
+            : null;
+    final normalizedPlanUpdate =
+        latestPlanUpdate != null &&
+                latestPlanUpdate.type == 'plan_updated' &&
+                (latestPlanUpdate.plan?.isNotEmpty ?? false)
+            ? latestPlanUpdate
+            : null;
+    return SessionLog(
+      session: SessionSummary.fromJson(json['session'] as Map<String, dynamic>),
+      messages: (json['messages'] as List<dynamic>? ?? [])
+          .map((item) => SessionMessage.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      activities: (json['activities'] as List<dynamic>? ?? [])
+          .map((item) => SessionActivity.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      pendingAction: json['pendingAction'] == null
+          ? null
+          : PendingAction.fromJson(
+              json['pendingAction'] as Map<String, dynamic>,
+            ),
+      history: json['history'] == null
+          ? null
+          : SessionLogHistorySummary.fromJson(
+              json['history'] as Map<String, dynamic>,
+            ),
+      latestPlanUpdate: normalizedPlanUpdate,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
     'session': session.toJson(),
@@ -2650,6 +2670,7 @@ class SessionLog {
     'activities': activities.map((item) => item.toJson()).toList(),
     'pendingAction': pendingAction?.toJson(),
     'history': history?.toJson(),
+    'latestPlanUpdate': latestPlanUpdate?.toJson(),
   };
 }
 
@@ -2660,6 +2681,7 @@ class SessionEventsDelta {
     required this.nextSeq,
     required this.messages,
     required this.activities,
+    required this.latestPlanUpdate,
     required this.pendingAction,
     required this.session,
   });
@@ -2669,6 +2691,7 @@ class SessionEventsDelta {
   final int nextSeq;
   final List<SessionMessage> messages;
   final List<SessionActivity> activities;
+  final LiveEvent? latestPlanUpdate;
   final PendingAction? pendingAction;
   final SessionSummary? session;
 
@@ -2684,6 +2707,14 @@ class SessionEventsDelta {
     activities: (json['activities'] as List<dynamic>? ?? [])
         .map((item) => SessionActivity.fromJson(item as Map<String, dynamic>))
         .toList(),
+    latestPlanUpdate: json['latestPlanUpdate'] is Map<String, dynamic>
+        ? LiveEvent.fromJson(json['latestPlanUpdate'] as Map<String, dynamic>)
+        : json['latestPlanUpdate'] is Map<dynamic, dynamic>
+        ? LiveEvent.fromJson(
+            (json['latestPlanUpdate'] as Map<dynamic, dynamic>)
+                .cast<String, dynamic>(),
+          )
+        : null,
     pendingAction: json['pendingAction'] == null
         ? null
         : PendingAction.fromJson(json['pendingAction'] as Map<String, dynamic>),
@@ -2798,6 +2829,8 @@ class LiveEventPlanStep {
         step: _stringValue(json['step']),
         status: _stringValue(json['status']),
       );
+
+  Map<String, dynamic> toJson() => {'step': step, 'status': status};
 }
 
 class LiveEvent {
@@ -2927,6 +2960,42 @@ class LiveEvent {
             json['runtime'] as Map<String, dynamic>,
           ),
   );
+
+  Map<String, dynamic> toJson() => {
+    'type': type,
+    'sessionId': sessionId,
+    'seq': seq,
+    'nextSeq': nextSeq,
+    'turnId': turnId,
+    'itemId': itemId,
+    'delta': delta,
+    'reasoningId': reasoningId,
+    'summary': summary,
+    'status': status,
+    'pendingActionKind': pendingActionKind,
+    'explanation': explanation,
+    'plan': plan?.map((item) => item.toJson()).toList(),
+    'steeringCount': steeringCount,
+    'followUpCount': followUpCount,
+    'steeringPreview': steeringPreview,
+    'followUpPreview': followUpPreview,
+    'phase': phase,
+    'attempt': attempt,
+    'maxAttempts': maxAttempts,
+    'delayMs': delayMs,
+    'errorMessage': errorMessage,
+    'success': success,
+    'finalError': finalError,
+    'level': level,
+    'code': code,
+    'source': source,
+    'action': action?.toJson(),
+    'actionId': actionId,
+    'message': message,
+    'messageItem': messageItem?.toJson(),
+    'activity': activity?.toJson(),
+    'runtime': runtime?.toJson(),
+  };
 }
 
 String _stringValue(Object? value) => value is String ? value : '';
