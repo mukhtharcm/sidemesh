@@ -1427,6 +1427,129 @@ describe("PiAgentProvider", () => {
     assert.equal(restoredRuntime?.telemetry?.compaction?.status, "failed");
   });
 
+  it("restores partial Pi assistant output after restart", async () => {
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const listeners = new Set<(event: unknown) => void>();
+    const fakeSession = {
+      sessionId: "pi-partial-restore-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe(listener: (event: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt() {
+        const partial = {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "Still reasoning..." },
+            { type: "text", text: "Partial Pi answer" },
+          ],
+          provider: "anthropic",
+          model: "claude-sonnet-4-5",
+          timestamp: 1_777_770_020_000,
+        };
+        for (const listener of listeners) {
+          listener({
+            type: "message_update",
+            message: partial,
+            assistantMessageEvent: {
+              type: "text_delta",
+              contentIndex: 1,
+              delta: "Partial Pi answer",
+              partial,
+            },
+          });
+        }
+      },
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "Hello", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    await provider.close();
+
+    const provider2 = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider2.start();
+
+    const restoredThread = await provider2.readSessionThread(created.thread.id, true);
+    assert.equal(restoredThread.status.type, "idle");
+    assert.equal(restoredThread.turns?.[0]?.status, "interrupted");
+
+    const restoredLog = await provider2.readSessionLog(restoredThread);
+    assert.equal(restoredLog.messages.length, 2);
+    const assistant = restoredLog.messages.at(-1);
+    const thinking = assistant?.content.find(
+      (block): block is { type: "thinking"; thinking: string } =>
+        block.type === "thinking",
+    );
+    assert.equal(assistant?.role, "assistant");
+    assert.equal(assistant?.text, "Partial Pi answer");
+    assert.equal(thinking?.thinking, "Still reasoning...");
+  });
+
   it("isolates multiple concurrent Pi sessions", async () => {
     const fakeModel = {
       id: "claude-sonnet-4-5",

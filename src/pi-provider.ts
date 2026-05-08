@@ -98,6 +98,7 @@ interface PiSessionState {
   runtime: SessionRuntimeSummary | null;
   archived: boolean;
   nextSeq: number;
+  draftAssistantMessage?: PiDraftAssistantMessage | null;
   session?: AgentSession | null;
   services?: AgentSessionServices | null;
   sessionManager?: SessionManager | null;
@@ -108,6 +109,15 @@ interface PiSessionState {
 interface ActivePiTurn {
   turnId: string;
   status: string | null;
+}
+
+interface PiDraftAssistantMessage {
+  id: string;
+  turnId: string;
+  text: string;
+  content: SessionMessageContentBlock[];
+  phase?: SessionMessage["phase"];
+  createdAt: number;
 }
 
 export interface PiAgentProviderOptions {
@@ -558,6 +568,7 @@ export class PiAgentProvider
       runtime: runtimeFromLoadedSession(session, null, null),
       archived: false,
       nextSeq: 0,
+      draftAssistantMessage: null,
       session,
       services,
       sessionManager,
@@ -663,6 +674,7 @@ export class PiAgentProvider
       runtime: null,
       archived: this.isArchived(threadId),
       nextSeq: 0,
+      draftAssistantMessage: null,
       pendingCompactionActivityId: null,
     };
     state.thread = mergeThreadWithSummary(summary, state, false);
@@ -1002,6 +1014,13 @@ export class PiAgentProvider
   ): void {
     const active = this.activeTurns.get(session.thread.id);
     const msgEvent = event.assistantMessageEvent;
+    const partialMessage =
+      "partial" in msgEvent ? msgEvent.partial : undefined;
+    this.syncDraftAssistantMessage(
+      session,
+      active?.turnId ?? null,
+      partialMessage ?? event.message,
+    );
     if (msgEvent.type === "text_delta") {
       this.emit("liveEvent", {
         type: "assistant_delta",
@@ -1049,6 +1068,7 @@ export class PiAgentProvider
           phase,
           createdAt,
         });
+        session.draftAssistantMessage = null;
       }
       const active = this.activeTurns.get(session.thread.id);
       const stopReason = stringValue(message.stopReason);
@@ -1215,6 +1235,46 @@ export class PiAgentProvider
     });
   }
 
+  private syncDraftAssistantMessage(
+    session: PiSessionState,
+    turnId: string | null,
+    message: unknown,
+  ): void {
+    if (!turnId) {
+      return;
+    }
+    const typed = asRecord(message);
+    if (!typed || stringValue(typed.role) !== "assistant") {
+      return;
+    }
+    const text = extractPiMessageText(typed) || stringValue(typed.errorMessage) || "";
+    const content = extractPiMessageContentBlocks(typed);
+    if (text.trim().length === 0 && content.length === 0) {
+      return;
+    }
+    const existing = session.draftAssistantMessage;
+    const next: PiDraftAssistantMessage = {
+      id:
+        existing?.turnId === turnId
+          ? existing.id
+          : `pi-assistant-draft:${turnId}`,
+      turnId,
+      text,
+      content: cloneSessionMessageContentBlocks(
+        content.length > 0 ? content : textToBlocks(text),
+      ),
+      phase: detectPiAssistantPhase(typed),
+      createdAt: existing?.turnId === turnId
+        ? existing.createdAt
+        : numberValue(typed.timestamp) ?? Date.now(),
+    };
+    if (piDraftAssistantMessageEquals(existing, next)) {
+      return;
+    }
+    session.draftAssistantMessage = next;
+    this.persistEventually();
+  }
+
   private reportPreparedInputWarnings(prepared: PiPreparedInput): void {
     for (const warning of prepared.warnings) {
       this.emit("stderr", warning);
@@ -1347,6 +1407,16 @@ export class PiAgentProvider
     if (!active || !session) {
       return;
     }
+    const draftMessage =
+      session.draftAssistantMessage?.turnId === active.turnId && status !== "completed"
+        ? materializeInterruptedPiDraftAssistantMessage(session)
+        : null;
+    if (
+      status === "completed" &&
+      session.draftAssistantMessage?.turnId === active.turnId
+    ) {
+      session.draftAssistantMessage = null;
+    }
     const turn = session.turns.find((candidate) => candidate.id === active.turnId);
     if (turn) {
       turn.status = status;
@@ -1367,6 +1437,18 @@ export class PiAgentProvider
       turnId: active.turnId,
       status,
     });
+    if (draftMessage) {
+      this.emit("liveEvent", {
+        type: "assistant_message_completed",
+        sessionId: threadId,
+        turnId: active.turnId,
+        message: {
+          id: draftMessage.id,
+          text: draftMessage.text,
+          phase: draftMessage.phase,
+        },
+      });
+    }
     this.touch(session);
   }
 
@@ -1406,6 +1488,7 @@ export class PiAgentProvider
           runtime?: SessionRuntimeSummary | null;
           archived?: boolean;
           nextSeq?: number;
+          draftAssistantMessage?: PiDraftAssistantMessage | null;
         }>;
       };
       const archivedSessionIds = new Set<string>();
@@ -1435,6 +1518,9 @@ export class PiAgentProvider
                 -1,
               ],
             ) + 1,
+          draftAssistantMessage: normalizeStoredPiDraftAssistantMessage(
+            item.draftAssistantMessage ?? null,
+          ),
           pendingCompactionActivityId: null,
         };
         normalizeInactivePiSessionState(state);
@@ -1500,6 +1586,9 @@ export class PiAgentProvider
         runtime: cloneRuntime(session.runtime),
         archived: session.archived,
         nextSeq: session.nextSeq,
+        draftAssistantMessage: clonePiDraftAssistantMessage(
+          session.draftAssistantMessage ?? null,
+        ),
       })),
     };
     await writeFile(this.statePath, JSON.stringify(payload, null, 2));
@@ -2149,6 +2238,10 @@ function mergeThreadWithSummary(
 
 function normalizeInactivePiSessionState(state: PiSessionState): void {
   const restoredAt = state.thread.updatedAt;
+  const hadDraftAssistantMessage = state.draftAssistantMessage != null;
+  if (hadDraftAssistantMessage) {
+    materializeInterruptedPiDraftAssistantMessage(state);
+  }
   const hadActiveTurn = state.turns.some((turn) => {
     if (!isActivePiTurnStatus(turn.status)) {
       return false;
@@ -2171,6 +2264,7 @@ function normalizeInactivePiSessionState(state: PiSessionState): void {
     state.runtime?.telemetry?.compaction?.status === "running";
   state.runtime = normalizeInactivePiRuntime(state.runtime, restoredAt);
   if (
+    hadDraftAssistantMessage ||
     hadActiveTurn ||
     hadActiveActivity ||
     hadRunningCompaction ||
@@ -2221,6 +2315,107 @@ function normalizeInactivePiRuntime(
       },
     },
   };
+}
+
+function materializeInterruptedPiDraftAssistantMessage(
+  state: PiSessionState,
+): SessionMessage | null {
+  const draft = state.draftAssistantMessage;
+  if (!draft) {
+    return null;
+  }
+  let materialized: SessionMessage | null = null;
+  if (
+    !state.messages.some((message) => message.id === draft.id) &&
+    hasPiDraftAssistantContent(draft)
+  ) {
+    materialized = {
+      id: draft.id,
+      role: "assistant",
+      text: draft.text,
+      content: cloneSessionMessageContentBlocks(draft.content),
+      attachments: [],
+      createdAt: draft.createdAt,
+      seq: state.nextSeq++,
+      phase: draft.phase ?? "final_answer",
+    };
+    state.messages.push(materialized);
+    if (draft.text.trim().length > 0) {
+      state.thread.preview = draft.text;
+    }
+  }
+  const turn = state.turns.find((candidate) => candidate.id === draft.turnId);
+  if (turn) {
+    const items = turn.items ?? [];
+    if (!items.some((item) => item.id === draft.id)) {
+      turn.items = [
+        ...items,
+        {
+          id: draft.id,
+          type: "agentMessage",
+          text: draft.text,
+          phase: draft.phase ?? "final_answer",
+        },
+      ];
+    }
+  }
+  state.draftAssistantMessage = null;
+  return materialized;
+}
+
+function hasPiDraftAssistantContent(draft: PiDraftAssistantMessage): boolean {
+  if (draft.text.trim().length > 0) {
+    return true;
+  }
+  return draft.content.some(
+    (block) =>
+      (block.type === "text" && block.text.trim().length > 0) ||
+      (block.type === "thinking" && block.thinking.trim().length > 0),
+  );
+}
+
+function cloneSessionMessageContentBlocks(
+  content: SessionMessageContentBlock[],
+): SessionMessageContentBlock[] {
+  return content.map((block) => ({ ...block }));
+}
+
+function normalizeStoredPiDraftAssistantMessage(
+  draft: PiDraftAssistantMessage | null | undefined,
+): PiDraftAssistantMessage | null {
+  if (!draft) {
+    return null;
+  }
+  return {
+    ...draft,
+    content: cloneSessionMessageContentBlocks(draft.content ?? []),
+    phase:
+      draft.phase === "commentary" || draft.phase === "final_answer"
+        ? draft.phase
+        : "final_answer",
+  };
+}
+
+function clonePiDraftAssistantMessage(
+  draft: PiDraftAssistantMessage | null | undefined,
+): PiDraftAssistantMessage | null {
+  if (!draft) {
+    return null;
+  }
+  return {
+    ...draft,
+    content: cloneSessionMessageContentBlocks(draft.content),
+  };
+}
+
+function piDraftAssistantMessageEquals(
+  left: PiDraftAssistantMessage | null | undefined,
+  right: PiDraftAssistantMessage,
+): boolean {
+  if (!left) {
+    return false;
+  }
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function isActivePiTurnStatus(status: string | null | undefined): boolean {
