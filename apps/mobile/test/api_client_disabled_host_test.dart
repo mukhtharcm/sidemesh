@@ -20,6 +20,11 @@ void main() {
 
     expect(api.fetchNode(disabledHost), throwsStateError);
     expect(api.fetchSessions(disabledHost), throwsA(isA<StateError>()));
+    expect(api.fetchServerConfig(disabledHost), throwsA(isA<StateError>()));
+    expect(
+      api.updateServerConfig(disabledHost, patch: const {'label': 'new'}),
+      throwsA(isA<StateError>()),
+    );
   });
 
   test('ApiClient rejects websocket and blob helpers for disabled hosts', () {

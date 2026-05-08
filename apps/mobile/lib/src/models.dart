@@ -313,6 +313,257 @@ class UpdateInfo {
   );
 }
 
+class HostServerConfigSnapshot {
+  const HostServerConfigSnapshot({
+    required this.config,
+    required this.fields,
+    required this.restart,
+  });
+
+  final HostServerConfigValues config;
+  final Map<String, HostServerConfigFieldMeta> fields;
+  final HostServerConfigRestartInfo restart;
+
+  factory HostServerConfigSnapshot.fromJson(Map<String, dynamic> json) {
+    final rawFields = json['fields'];
+    final fields = <String, HostServerConfigFieldMeta>{};
+    if (rawFields is Map) {
+      for (final entry in rawFields.entries) {
+        final key = entry.key.toString();
+        fields[key] = HostServerConfigFieldMeta.fromJson(entry.value);
+      }
+    }
+    return HostServerConfigSnapshot(
+      config: HostServerConfigValues.fromJson(json['config']),
+      fields: fields,
+      restart: HostServerConfigRestartInfo.fromJson(json['restart']),
+    );
+  }
+}
+
+class HostServerConfigUpdateResult {
+  const HostServerConfigUpdateResult({
+    required this.ok,
+    required this.changed,
+    required this.appliedImmediately,
+    required this.snapshot,
+  });
+
+  final bool ok;
+  final List<String> changed;
+  final List<String> appliedImmediately;
+  final HostServerConfigSnapshot snapshot;
+
+  factory HostServerConfigUpdateResult.fromJson(Map<String, dynamic> json) =>
+      HostServerConfigUpdateResult(
+        ok: json['ok'] != false,
+        changed: (json['changed'] as List<dynamic>? ?? const <dynamic>[])
+            .map(_stringValue)
+            .where((value) => value.isNotEmpty)
+            .toList(),
+        appliedImmediately:
+            (json['appliedImmediately'] as List<dynamic>? ?? const <dynamic>[])
+                .map(_stringValue)
+                .where((value) => value.isNotEmpty)
+                .toList(),
+        snapshot: HostServerConfigSnapshot.fromJson(json),
+      );
+}
+
+class HostServerConfigValues {
+  const HostServerConfigValues({
+    required this.label,
+    required this.recommendedMobileClientVersion,
+    required this.minimumMobileClientVersion,
+    required this.terminal,
+    required this.portForwarding,
+    required this.browserPreview,
+  });
+
+  final String label;
+  final String? recommendedMobileClientVersion;
+  final String? minimumMobileClientVersion;
+  final HostServerTerminalConfig terminal;
+  final HostServerPortForwardingConfig portForwarding;
+  final HostServerBrowserPreviewConfig browserPreview;
+
+  factory HostServerConfigValues.fromJson(Object? json) {
+    if (json is! Map) {
+      return const HostServerConfigValues(
+        label: '',
+        recommendedMobileClientVersion: null,
+        minimumMobileClientVersion: null,
+        terminal: HostServerTerminalConfig.empty,
+        portForwarding: HostServerPortForwardingConfig.empty,
+        browserPreview: HostServerBrowserPreviewConfig.empty,
+      );
+    }
+    return HostServerConfigValues(
+      label: _stringValue(json['label']),
+      recommendedMobileClientVersion: _stringOrNull(
+        json['recommendedMobileClientVersion'],
+      ),
+      minimumMobileClientVersion: _stringOrNull(
+        json['minimumMobileClientVersion'],
+      ),
+      terminal: HostServerTerminalConfig.fromJson(json['terminal']),
+      portForwarding: HostServerPortForwardingConfig.fromJson(
+        json['portForwarding'],
+      ),
+      browserPreview: HostServerBrowserPreviewConfig.fromJson(
+        json['browserPreview'],
+      ),
+    );
+  }
+}
+
+class HostServerTerminalConfig {
+  const HostServerTerminalConfig({
+    required this.enabled,
+    required this.shell,
+    required this.requirePty,
+  });
+
+  static const empty = HostServerTerminalConfig(
+    enabled: false,
+    shell: null,
+    requirePty: false,
+  );
+
+  final bool enabled;
+  final String? shell;
+  final bool requirePty;
+
+  factory HostServerTerminalConfig.fromJson(Object? json) {
+    if (json is! Map) return empty;
+    return HostServerTerminalConfig(
+      enabled: json['enabled'] == true,
+      shell: _stringOrNull(json['shell']),
+      requirePty: json['requirePty'] == true,
+    );
+  }
+}
+
+class HostServerPortForwardingConfig {
+  const HostServerPortForwardingConfig({
+    required this.enabled,
+    required this.allowNonLoopbackTargets,
+  });
+
+  static const empty = HostServerPortForwardingConfig(
+    enabled: false,
+    allowNonLoopbackTargets: false,
+  );
+
+  final bool enabled;
+  final bool allowNonLoopbackTargets;
+
+  factory HostServerPortForwardingConfig.fromJson(Object? json) {
+    if (json is! Map) return empty;
+    return HostServerPortForwardingConfig(
+      enabled: json['enabled'] == true,
+      allowNonLoopbackTargets: json['allowNonLoopbackTargets'] == true,
+    );
+  }
+}
+
+class HostServerBrowserPreviewConfig {
+  const HostServerBrowserPreviewConfig({
+    required this.enabled,
+    required this.chromePath,
+    required this.maxPreviews,
+    required this.idleTtlMs,
+    required this.frameIntervalMs,
+    required this.quality,
+  });
+
+  static const empty = HostServerBrowserPreviewConfig(
+    enabled: false,
+    chromePath: null,
+    maxPreviews: 8,
+    idleTtlMs: 3600000,
+    frameIntervalMs: 900,
+    quality: 55,
+  );
+
+  final bool enabled;
+  final String? chromePath;
+  final int maxPreviews;
+  final int idleTtlMs;
+  final int frameIntervalMs;
+  final int quality;
+
+  factory HostServerBrowserPreviewConfig.fromJson(Object? json) {
+    if (json is! Map) return empty;
+    return HostServerBrowserPreviewConfig(
+      enabled: json['enabled'] == true,
+      chromePath: _stringOrNull(json['chromePath']),
+      maxPreviews: _intValue(json['maxPreviews']),
+      idleTtlMs: _intValue(json['idleTtlMs']),
+      frameIntervalMs: _intValue(json['frameIntervalMs']),
+      quality: _intValue(json['quality']),
+    );
+  }
+}
+
+class HostServerConfigFieldMeta {
+  const HostServerConfigFieldMeta({
+    required this.source,
+    required this.writable,
+    required this.requiresRestart,
+  });
+
+  static const empty = HostServerConfigFieldMeta(
+    source: 'default',
+    writable: false,
+    requiresRestart: false,
+  );
+
+  final String source;
+  final bool writable;
+  final bool requiresRestart;
+
+  factory HostServerConfigFieldMeta.fromJson(Object? json) {
+    if (json is! Map) return empty;
+    return HostServerConfigFieldMeta(
+      source: _stringOrNull(json['source']) ?? 'default',
+      writable: json['writable'] == true,
+      requiresRestart: json['requiresRestart'] == true,
+    );
+  }
+}
+
+class HostServerConfigRestartInfo {
+  const HostServerConfigRestartInfo({
+    required this.requiredForPendingChanges,
+    required this.serviceManaged,
+    required this.serviceName,
+    required this.warning,
+  });
+
+  static const empty = HostServerConfigRestartInfo(
+    requiredForPendingChanges: false,
+    serviceManaged: false,
+    serviceName: null,
+    warning: null,
+  );
+
+  final bool requiredForPendingChanges;
+  final bool serviceManaged;
+  final String? serviceName;
+  final String? warning;
+
+  factory HostServerConfigRestartInfo.fromJson(Object? json) {
+    if (json is! Map) return empty;
+    return HostServerConfigRestartInfo(
+      requiredForPendingChanges: json['requiredForPendingChanges'] == true,
+      serviceManaged: json['serviceManaged'] == true,
+      serviceName: _stringOrNull(json['serviceName']),
+      warning: _stringOrNull(json['warning']),
+    );
+  }
+}
+
 class ProviderMetadata {
   const ProviderMetadata({
     required this.currentProvider,
@@ -935,8 +1186,9 @@ class SessionContextWindowSummary {
   final int? systemTokens;
   final int? toolDefinitionsTokens;
 
-  double? get usageFraction =>
-      tokenLimit <= 0 || currentTokens == null ? null : currentTokens! / tokenLimit;
+  double? get usageFraction => tokenLimit <= 0 || currentTokens == null
+      ? null
+      : currentTokens! / tokenLimit;
 
   factory SessionContextWindowSummary.fromJson(Map<String, dynamic> json) =>
       SessionContextWindowSummary(
@@ -1610,9 +1862,8 @@ class SessionMessage {
       content: blocks,
       attachments: (json['attachments'] as List<dynamic>? ?? [])
           .map(
-            (item) => SessionMessageAttachment.fromJson(
-              item as Map<String, dynamic>,
-            ),
+            (item) =>
+                SessionMessageAttachment.fromJson(item as Map<String, dynamic>),
           )
           .toList(),
       createdAt: _dateValue(json['createdAt']),
@@ -1671,10 +1922,8 @@ class TextBlock extends ContentBlock {
 }
 
 class ThinkingBlock extends ContentBlock {
-  const ThinkingBlock(
-    this.thinking, {
-    this.summary = false,
-  }) : super('thinking');
+  const ThinkingBlock(this.thinking, {this.summary = false})
+    : super('thinking');
 
   final String thinking;
   final bool summary;
@@ -2891,9 +3140,7 @@ class LiveEvent {
                 (item) =>
                     LiveEventPlanStep.fromJson(item.cast<String, dynamic>()),
               )
-              .where(
-                (item) => item.step.isNotEmpty && item.status.isNotEmpty,
-              )
+              .where((item) => item.step.isNotEmpty && item.status.isNotEmpty)
               .toList(growable: false)
         : null,
     steeringCount: _intOrNull(json['steeringCount']),

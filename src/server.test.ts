@@ -133,6 +133,54 @@ function request(options: http.RequestOptions & { body?: string }): Promise<{
   });
 }
 
+const ADMIN_CONFIG_ENV_KEYS = [
+  "SIDEMESH_LABEL",
+  "SIDEMESH_RECOMMENDED_MOBILE_CLIENT_VERSION",
+  "SIDEMESH_MINIMUM_MOBILE_CLIENT_VERSION",
+  "SIDEMESH_TERMINAL",
+  "SIDEMESH_ENABLE_TERMINAL",
+  "SIDEMESH_TERMINAL_SHELL",
+  "SIDEMESH_TERMINAL_REQUIRE_PTY",
+  "SIDEMESH_PORT_FORWARDING",
+  "SIDEMESH_ENABLE_PORT_FORWARDING",
+  "SIDEMESH_PORT_FORWARDING_ALLOW_NON_LOOPBACK",
+  "SIDEMESH_BROWSER_PREVIEW",
+  "SIDEMESH_ENABLE_BROWSER_PREVIEW",
+  "SIDEMESH_BROWSER_PREVIEW_CHROME_PATH",
+  "SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS",
+  "SIDEMESH_BROWSER_PREVIEW_IDLE_TTL_MS",
+  "SIDEMESH_BROWSER_PREVIEW_FRAME_INTERVAL_MS",
+  "SIDEMESH_BROWSER_PREVIEW_QUALITY",
+] as const;
+
+async function withOverriddenEnv(
+  overrides: Partial<Record<(typeof ADMIN_CONFIG_ENV_KEYS)[number], string | undefined>>,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const previous: Partial<Record<(typeof ADMIN_CONFIG_ENV_KEYS)[number], string | undefined>> = {};
+  for (const key of ADMIN_CONFIG_ENV_KEYS) {
+    previous[key] = process.env[key];
+    const nextValue = overrides[key];
+    if (nextValue === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = nextValue;
+    }
+  }
+  try {
+    await fn();
+  } finally {
+    for (const key of ADMIN_CONFIG_ENV_KEYS) {
+      const prior = previous[key];
+      if (prior === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = prior;
+      }
+    }
+  }
+}
+
 async function withServer(config: NodeConfig, fn: (server: RunningServer, config: NodeConfig) => Promise<void>): Promise<void> {
   const server = await startServer(config);
   try {
@@ -892,6 +940,218 @@ describe("GET /api/node", () => {
       assert.ok(defaultEntry);
       assert.equal(defaultEntry.capabilities.configuration.models, true);
     });
+  });
+});
+
+describe("Admin config routes", () => {
+  it("returns editable config fields and metadata", async () => {
+    await withOverriddenEnv({}, async () => {
+      const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+      await withServer(makeConfig(stateDir), async (server, config) => {
+        const res = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/admin/config",
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+
+        assert.equal(res.statusCode, 200);
+        const body = res.body as any;
+        assert.equal(body.config.label, "test");
+        assert.equal(body.fields.label.writable, true);
+        assert.equal(body.fields["terminal.enabled"].requiresRestart, true);
+        assert.equal(body.restart.requiredForPendingChanges, false);
+        assert.equal(typeof body.restart.serviceManaged, "boolean");
+      });
+    });
+  });
+
+  it("applies immediate fields without restart and reflects them in node/usage payloads", async () => {
+    await withOverriddenEnv({}, async () => {
+      const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+      await withServer(makeConfig(stateDir), async (server, config) => {
+        const patch = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/admin/config",
+          method: "PATCH",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            label: "test-renamed",
+            recommendedMobileClientVersion: "1.4.0",
+            minimumMobileClientVersion: "1.1.0",
+          }),
+        });
+        assert.equal(patch.statusCode, 200);
+        assert.equal((patch.body as any).ok, true);
+        assert.deepEqual((patch.body as any).changed, [
+          "label",
+          "recommendedMobileClientVersion",
+          "minimumMobileClientVersion",
+        ]);
+        assert.deepEqual((patch.body as any).appliedImmediately, [
+          "label",
+          "recommendedMobileClientVersion",
+          "minimumMobileClientVersion",
+        ]);
+        assert.equal((patch.body as any).restart.requiredForPendingChanges, false);
+
+        const node = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/node",
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(node.statusCode, 200);
+        assert.equal((node.body as any).label, "test-renamed");
+        assert.equal((node.body as any).recommendedMobileClientVersion, "1.4.0");
+        assert.equal((node.body as any).minimumMobileClientVersion, "1.1.0");
+
+        const health = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/healthz",
+          method: "GET",
+        });
+        assert.equal(health.statusCode, 200);
+        assert.equal((health.body as any).label, "test-renamed");
+
+        const usage = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/usage",
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(usage.statusCode, 200);
+        assert.equal((usage.body as any).host.label, "test-renamed");
+        assert.equal((usage.body as any).observations[0].hostLabel, "test-renamed");
+      });
+    });
+  });
+
+  it("marks runtime-only host features as restart-required", async () => {
+    await withOverriddenEnv({}, async () => {
+      const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+      await withServer(makeConfig(stateDir), async (server, config) => {
+        const patch = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/admin/config",
+          method: "PATCH",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            terminal: { enabled: true },
+            browserPreview: { quality: 65 },
+          }),
+        });
+        assert.equal(patch.statusCode, 200);
+        assert.equal((patch.body as any).restart.requiredForPendingChanges, true);
+        assert.ok(
+          (patch.body as any).restart.warning === null ||
+            typeof (patch.body as any).restart.warning === "string",
+        );
+        assert.deepEqual((patch.body as any).changed, [
+          "terminal.enabled",
+          "browserPreview.quality",
+        ]);
+        assert.deepEqual((patch.body as any).appliedImmediately, []);
+
+        const persisted = JSON.parse(
+          await readFile(config.configPath, "utf8"),
+        ) as {
+          terminal?: { enabled?: boolean };
+          browserPreview?: { quality?: number };
+        };
+        assert.equal(persisted.terminal?.enabled, true);
+        assert.equal(persisted.browserPreview?.quality, 65);
+      });
+    });
+  });
+
+  it("rejects edits when a field is env-overridden", async () => {
+    const previousLabel = process.env.SIDEMESH_LABEL;
+    process.env.SIDEMESH_LABEL = "forced-by-env";
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    try {
+      await withServer(makeConfig(stateDir), async (server, config) => {
+        const current = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/admin/config",
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(current.statusCode, 200);
+        assert.equal((current.body as any).fields.label.source, "env");
+        assert.equal((current.body as any).fields.label.writable, false);
+
+        const patch = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/admin/config",
+          method: "PATCH",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            label: "blocked-update",
+          }),
+        });
+        assert.equal(patch.statusCode, 409);
+        assert.match(
+          (patch.body as any).error,
+          /controlled by environment variables/,
+        );
+      });
+    } finally {
+      if (previousLabel === undefined) {
+        delete process.env.SIDEMESH_LABEL;
+      } else {
+        process.env.SIDEMESH_LABEL = previousLabel;
+      }
+    }
+  });
+
+  it("keeps fields writable when env vars are present but not effective overrides", async () => {
+    await withOverriddenEnv(
+      {
+        SIDEMESH_LABEL: "   ",
+        SIDEMESH_TERMINAL: "   ",
+        SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS: "not-a-number",
+      },
+      async () => {
+        const stateDir = await mkdtemp(
+          nodePath.join(tmpdir(), "sidemesh-server-test-"),
+        );
+        await withServer(makeConfig(stateDir), async (server, config) => {
+          const res = await request({
+            hostname: "127.0.0.1",
+            port: server.port,
+            path: "/api/admin/config",
+            method: "GET",
+            headers: { Authorization: "Bearer " + config.token },
+          });
+          assert.equal(res.statusCode, 200);
+          const body = res.body as any;
+          assert.equal(body.fields.label.source, "default");
+          assert.equal(body.fields.label.writable, true);
+          assert.equal(body.fields["terminal.enabled"].source, "default");
+          assert.equal(body.fields["terminal.enabled"].writable, true);
+          assert.equal(body.fields["browserPreview.maxPreviews"].source, "default");
+          assert.equal(body.fields["browserPreview.maxPreviews"].writable, true);
+        });
+      },
+    );
   });
 });
 

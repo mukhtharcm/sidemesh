@@ -102,6 +102,7 @@ import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionReplayIndex } from "./session-replay-index.js";
 import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js";
 import { saveConfig } from "./config.js";
+import { MOBILE_CLIENT_VERSION_PATTERN } from "./config-store.js";
 import { detectInstallInfo } from "./install-info.js";
 import { spawnSelfUpdater } from "./updater-spawn.js";
 import {
@@ -180,6 +181,61 @@ interface InstallInfoRefreshResult {
   refreshed: boolean;
   error: string | null;
 }
+
+type AdminConfigFieldSource = "default" | "file" | "env";
+
+interface AdminConfigFieldMeta {
+  source: AdminConfigFieldSource;
+  writable: boolean;
+  requiresRestart: boolean;
+}
+
+interface AdminConfigResponsePayload {
+  config: {
+    label: string;
+    recommendedMobileClientVersion: string | null;
+    minimumMobileClientVersion: string | null;
+    terminal: NodeConfig["terminal"];
+    portForwarding: NodeConfig["portForwarding"];
+    browserPreview: NodeConfig["browserPreview"];
+  };
+  fields: Record<string, AdminConfigFieldMeta>;
+  restart: {
+    requiredForPendingChanges: boolean;
+    serviceManaged: boolean;
+    serviceName: string | null;
+    warning: string | null;
+  };
+}
+
+const ADMIN_CONFIG_EDITABLE_TOP_LEVEL_KEYS = new Set([
+  "label",
+  "recommendedMobileClientVersion",
+  "minimumMobileClientVersion",
+  "terminal",
+  "portForwarding",
+  "browserPreview",
+] as const);
+
+const ADMIN_CONFIG_TERMINAL_KEYS = new Set([
+  "enabled",
+  "shell",
+  "requirePty",
+] as const);
+
+const ADMIN_CONFIG_PORT_FORWARDING_KEYS = new Set([
+  "enabled",
+  "allowNonLoopbackTargets",
+] as const);
+
+const ADMIN_CONFIG_BROWSER_PREVIEW_KEYS = new Set([
+  "enabled",
+  "chromePath",
+  "maxPreviews",
+  "idleTtlMs",
+  "frameIntervalMs",
+  "quality",
+] as const);
 
 export interface RunningServer {
   port: number;
@@ -271,6 +327,8 @@ export async function startServer(
     updateAvailable: false,
     installType: "unknown",
     updateSupported: false,
+    isManagedService: false,
+    serviceName: null as string | null,
   };
   let installInfoCheckedAt = 0;
   let installInfoRefreshPromise: Promise<InstallInfoRefreshResult> | null = null;
@@ -286,6 +344,8 @@ export async function startServer(
       updateAvailable: detected.updateAvailable,
       installType: detected.installType,
       updateSupported: detected.updateSupported,
+      isManagedService: detected.isManagedService,
+      serviceName: detected.serviceName,
     };
     installInfoCheckedAt = Date.now();
   };
@@ -366,6 +426,109 @@ export async function startServer(
     frameIntervalMs: config.browserPreview.frameIntervalMs,
     quality: config.browserPreview.quality,
   });
+
+  function buildAdminConfigFieldMetadata(): Record<string, AdminConfigFieldMeta> {
+    const sourceForField = (
+      path: string,
+      requiresRestart: boolean,
+    ): AdminConfigFieldMeta => {
+      const envOverride = isAdminConfigFieldEnvOverridden(path);
+      const source: AdminConfigFieldSource = envOverride
+        ? "env"
+        : runtimeConfig.configExists
+          ? "file"
+          : "default";
+      return {
+        source,
+        writable: !envOverride,
+        requiresRestart,
+      };
+    };
+
+    return {
+      label: sourceForField("label", false),
+      recommendedMobileClientVersion: sourceForField(
+        "recommendedMobileClientVersion",
+        false,
+      ),
+      minimumMobileClientVersion: sourceForField(
+        "minimumMobileClientVersion",
+        false,
+      ),
+      "terminal.enabled": sourceForField("terminal.enabled", true),
+      "terminal.shell": sourceForField("terminal.shell", true),
+      "terminal.requirePty": sourceForField("terminal.requirePty", true),
+      "portForwarding.enabled": sourceForField("portForwarding.enabled", true),
+      "portForwarding.allowNonLoopbackTargets": sourceForField(
+        "portForwarding.allowNonLoopbackTargets",
+        true,
+      ),
+      "browserPreview.enabled": sourceForField("browserPreview.enabled", true),
+      "browserPreview.chromePath": sourceForField("browserPreview.chromePath", true),
+      "browserPreview.maxPreviews": sourceForField(
+        "browserPreview.maxPreviews",
+        true,
+      ),
+      "browserPreview.idleTtlMs": sourceForField(
+        "browserPreview.idleTtlMs",
+        true,
+      ),
+      "browserPreview.frameIntervalMs": sourceForField(
+        "browserPreview.frameIntervalMs",
+        true,
+      ),
+      "browserPreview.quality": sourceForField("browserPreview.quality", true),
+    };
+  }
+
+  function buildAdminConfigResponse(
+    options: { restartRequired?: boolean } = {},
+  ): AdminConfigResponsePayload {
+    const restartRequired = options.restartRequired ?? false;
+    const warning = !restartRequired
+      ? null
+      : installInfo.isManagedService
+        ? null
+        : "This host is not running as a managed service. Restart from the app may require manual host intervention.";
+    return {
+      config: {
+        label: runtimeConfig.label,
+        recommendedMobileClientVersion:
+          runtimeConfig.recommendedMobileClientVersion ?? null,
+        minimumMobileClientVersion:
+          runtimeConfig.minimumMobileClientVersion ?? null,
+        terminal: runtimeConfig.terminal,
+        portForwarding: runtimeConfig.portForwarding,
+        browserPreview: runtimeConfig.browserPreview,
+      },
+      fields: buildAdminConfigFieldMetadata(),
+      restart: {
+        requiredForPendingChanges: restartRequired,
+        serviceManaged: installInfo.isManagedService,
+        serviceName: installInfo.serviceName,
+        warning,
+      },
+    };
+  }
+
+  function ensureWritableAdminConfigField(
+    fields: Record<string, AdminConfigFieldMeta>,
+    path: string,
+    response: JsonRouteResponse,
+  ): boolean {
+    const metadata = fields[path];
+    if (!metadata) {
+      response.status(400).json({ error: `unknown config field ${path}` });
+      return false;
+    }
+    if (metadata.writable) {
+      return true;
+    }
+    response.status(409).json({
+      error: `${path} is controlled by environment variables and cannot be edited from mobile`,
+    });
+    return false;
+  }
 
   function allocSeq(sessionId: string): number {
     const current = sessionSeqCursor.get(sessionId) ?? 0;
@@ -1013,12 +1176,12 @@ export async function startServer(
     ]);
     if (timer) clearTimeout(timer);
     if (providerHealthy) {
-      response.json({ ok: true, label: config.label });
+      response.json({ ok: true, label: runtimeConfig.label });
       return;
     }
     response.status(503).json({
       ok: false,
-      label: config.label,
+      label: runtimeConfig.label,
       error: "provider unreachable",
     });
   }));
@@ -1030,7 +1193,7 @@ export async function startServer(
     }
     const auth = c.req.header("Authorization") ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
-    if (token !== config.token) {
+    if (token !== runtimeConfig.token) {
       throw new HTTPException(401, { message: "unauthorized" });
     }
     await next();
@@ -1048,7 +1211,7 @@ export async function startServer(
       isDefault: entry.kind === providerRuntime.defaultProviderKind,
     }));
     response.json({
-      label: config.label,
+      label: runtimeConfig.label,
       hostname: hostname(),
       platform: platform(),
       homeDirectory: homedir(),
@@ -1068,7 +1231,7 @@ export async function startServer(
       searchIndexStats: searchIndex.getStats(),
       supportedProviders,
       startedAt: process.uptime(),
-      tokenSource: config.tokenSource,
+      tokenSource: runtimeConfig.tokenSource,
       packageVersion: installInfo.packageVersion,
       latestVersion: installInfo.latestVersion,
       currentCommitSha: installInfo.currentCommitSha,
@@ -1078,10 +1241,490 @@ export async function startServer(
       installType: installInfo.installType,
       updateSupported: installInfo.updateSupported,
       recommendedMobileClientVersion:
-        config.recommendedMobileClientVersion ?? null,
-      minimumMobileClientVersion: config.minimumMobileClientVersion ?? null,
+        runtimeConfig.recommendedMobileClientVersion ?? null,
+      minimumMobileClientVersion:
+        runtimeConfig.minimumMobileClientVersion ?? null,
     });
   }));
+
+  app.get("/api/admin/config", jsonRoute((_request, response) => {
+    response.json(buildAdminConfigResponse());
+  }));
+
+  app.patch(
+    "/api/admin/config",
+    asyncRoute(async (request, response) => {
+      const body = request.body;
+      if (!isObjectRecord(body)) {
+        response.status(400).json({ error: "expected JSON object" });
+        return;
+      }
+      const fields = buildAdminConfigFieldMetadata();
+      for (const key of Object.keys(body)) {
+        if (!ADMIN_CONFIG_EDITABLE_TOP_LEVEL_KEYS.has(key as never)) {
+          response.status(400).json({ error: `unknown config key ${key}` });
+          return;
+        }
+      }
+
+      let nextConfig = runtimeConfig;
+      const changedFields: string[] = [];
+      const immediateFields: string[] = [];
+      let restartRequired = false;
+
+      if (hasOwn(body, "label")) {
+        if (!ensureWritableAdminConfigField(fields, "label", response)) {
+          return;
+        }
+        const parsed = parseRequiredConfigString(body.label);
+        if (!parsed.ok) {
+          response.status(400).json({ error: parsed.error });
+          return;
+        }
+        if (parsed.value !== nextConfig.label) {
+          nextConfig = {
+            ...nextConfig,
+            label: parsed.value,
+            configExists: true,
+          };
+          changedFields.push("label");
+          immediateFields.push("label");
+        }
+      }
+
+      if (hasOwn(body, "recommendedMobileClientVersion")) {
+        if (
+          !ensureWritableAdminConfigField(
+            fields,
+            "recommendedMobileClientVersion",
+            response,
+          )
+        ) {
+          return;
+        }
+        const parsed = parseEditableMobileClientVersion(
+          body.recommendedMobileClientVersion,
+          "recommendedMobileClientVersion",
+        );
+        if (!parsed.ok) {
+          response.status(400).json({ error: parsed.error });
+          return;
+        }
+        if (parsed.value !== nextConfig.recommendedMobileClientVersion) {
+          nextConfig = {
+            ...nextConfig,
+            recommendedMobileClientVersion: parsed.value,
+            configExists: true,
+          };
+          changedFields.push("recommendedMobileClientVersion");
+          immediateFields.push("recommendedMobileClientVersion");
+        }
+      }
+
+      if (hasOwn(body, "minimumMobileClientVersion")) {
+        if (
+          !ensureWritableAdminConfigField(
+            fields,
+            "minimumMobileClientVersion",
+            response,
+          )
+        ) {
+          return;
+        }
+        const parsed = parseEditableMobileClientVersion(
+          body.minimumMobileClientVersion,
+          "minimumMobileClientVersion",
+        );
+        if (!parsed.ok) {
+          response.status(400).json({ error: parsed.error });
+          return;
+        }
+        if (parsed.value !== nextConfig.minimumMobileClientVersion) {
+          nextConfig = {
+            ...nextConfig,
+            minimumMobileClientVersion: parsed.value,
+            configExists: true,
+          };
+          changedFields.push("minimumMobileClientVersion");
+          immediateFields.push("minimumMobileClientVersion");
+        }
+      }
+
+      if (hasOwn(body, "terminal")) {
+        if (!isObjectRecord(body.terminal)) {
+          response.status(400).json({ error: "terminal must be an object" });
+          return;
+        }
+        const terminalPatch = body.terminal;
+        for (const key of Object.keys(terminalPatch)) {
+          if (!ADMIN_CONFIG_TERMINAL_KEYS.has(key as never)) {
+            response
+              .status(400)
+              .json({ error: `unknown terminal config key ${key}` });
+            return;
+          }
+        }
+        let terminal = nextConfig.terminal;
+        let terminalChanged = false;
+        if (hasOwn(terminalPatch, "enabled")) {
+          if (
+            !ensureWritableAdminConfigField(fields, "terminal.enabled", response)
+          ) {
+            return;
+          }
+          const parsed = parseRequiredConfigBoolean(terminalPatch.enabled);
+          if (!parsed.ok) {
+            response.status(400).json({ error: "terminal.enabled must be boolean" });
+            return;
+          }
+          if (parsed.value !== terminal.enabled) {
+            terminal = { ...terminal, enabled: parsed.value };
+            terminalChanged = true;
+            changedFields.push("terminal.enabled");
+            restartRequired = true;
+          }
+        }
+        if (hasOwn(terminalPatch, "shell")) {
+          if (!ensureWritableAdminConfigField(fields, "terminal.shell", response)) {
+            return;
+          }
+          const parsed = parseConfigNullableString(terminalPatch.shell);
+          if (!parsed.ok) {
+            response.status(400).json({ error: "terminal.shell must be string or null" });
+            return;
+          }
+          if (parsed.value !== terminal.shell) {
+            terminal = { ...terminal, shell: parsed.value };
+            terminalChanged = true;
+            changedFields.push("terminal.shell");
+            restartRequired = true;
+          }
+        }
+        if (hasOwn(terminalPatch, "requirePty")) {
+          if (
+            !ensureWritableAdminConfigField(
+              fields,
+              "terminal.requirePty",
+              response,
+            )
+          ) {
+            return;
+          }
+          const parsed = parseRequiredConfigBoolean(terminalPatch.requirePty);
+          if (!parsed.ok) {
+            response
+              .status(400)
+              .json({ error: "terminal.requirePty must be boolean" });
+            return;
+          }
+          if (parsed.value !== terminal.requirePty) {
+            terminal = { ...terminal, requirePty: parsed.value };
+            terminalChanged = true;
+            changedFields.push("terminal.requirePty");
+            restartRequired = true;
+          }
+        }
+        if (terminalChanged) {
+          nextConfig = {
+            ...nextConfig,
+            terminal,
+            configExists: true,
+          };
+        }
+      }
+
+      if (hasOwn(body, "portForwarding")) {
+        if (!isObjectRecord(body.portForwarding)) {
+          response.status(400).json({ error: "portForwarding must be an object" });
+          return;
+        }
+        const portForwardingPatch = body.portForwarding;
+        for (const key of Object.keys(portForwardingPatch)) {
+          if (!ADMIN_CONFIG_PORT_FORWARDING_KEYS.has(key as never)) {
+            response
+              .status(400)
+              .json({ error: `unknown portForwarding config key ${key}` });
+            return;
+          }
+        }
+        let portForwarding = nextConfig.portForwarding;
+        let portForwardingChanged = false;
+        if (hasOwn(portForwardingPatch, "enabled")) {
+          if (
+            !ensureWritableAdminConfigField(
+              fields,
+              "portForwarding.enabled",
+              response,
+            )
+          ) {
+            return;
+          }
+          const parsed = parseRequiredConfigBoolean(portForwardingPatch.enabled);
+          if (!parsed.ok) {
+            response
+              .status(400)
+              .json({ error: "portForwarding.enabled must be boolean" });
+            return;
+          }
+          if (parsed.value !== portForwarding.enabled) {
+            portForwarding = {
+              ...portForwarding,
+              enabled: parsed.value,
+            };
+            portForwardingChanged = true;
+            changedFields.push("portForwarding.enabled");
+            restartRequired = true;
+          }
+        }
+        if (hasOwn(portForwardingPatch, "allowNonLoopbackTargets")) {
+          if (
+            !ensureWritableAdminConfigField(
+              fields,
+              "portForwarding.allowNonLoopbackTargets",
+              response,
+            )
+          ) {
+            return;
+          }
+          const parsed = parseRequiredConfigBoolean(
+            portForwardingPatch.allowNonLoopbackTargets,
+          );
+          if (!parsed.ok) {
+            response.status(400).json({
+              error: "portForwarding.allowNonLoopbackTargets must be boolean",
+            });
+            return;
+          }
+          if (parsed.value !== portForwarding.allowNonLoopbackTargets) {
+            portForwarding = {
+              ...portForwarding,
+              allowNonLoopbackTargets: parsed.value,
+            };
+            portForwardingChanged = true;
+            changedFields.push("portForwarding.allowNonLoopbackTargets");
+            restartRequired = true;
+          }
+        }
+        if (portForwardingChanged) {
+          nextConfig = {
+            ...nextConfig,
+            portForwarding,
+            configExists: true,
+          };
+        }
+      }
+
+      if (hasOwn(body, "browserPreview")) {
+        if (!isObjectRecord(body.browserPreview)) {
+          response.status(400).json({ error: "browserPreview must be an object" });
+          return;
+        }
+        const browserPreviewPatch = body.browserPreview;
+        for (const key of Object.keys(browserPreviewPatch)) {
+          if (!ADMIN_CONFIG_BROWSER_PREVIEW_KEYS.has(key as never)) {
+            response
+              .status(400)
+              .json({ error: `unknown browserPreview config key ${key}` });
+            return;
+          }
+        }
+        let browserPreview = nextConfig.browserPreview;
+        let browserPreviewChanged = false;
+        if (hasOwn(browserPreviewPatch, "enabled")) {
+          if (
+            !ensureWritableAdminConfigField(
+              fields,
+              "browserPreview.enabled",
+              response,
+            )
+          ) {
+            return;
+          }
+          const parsed = parseRequiredConfigBoolean(browserPreviewPatch.enabled);
+          if (!parsed.ok) {
+            response.status(400).json({ error: "browserPreview.enabled must be boolean" });
+            return;
+          }
+          if (parsed.value !== browserPreview.enabled) {
+            browserPreview = { ...browserPreview, enabled: parsed.value };
+            browserPreviewChanged = true;
+            changedFields.push("browserPreview.enabled");
+            restartRequired = true;
+          }
+        }
+        if (hasOwn(browserPreviewPatch, "chromePath")) {
+          if (
+            !ensureWritableAdminConfigField(
+              fields,
+              "browserPreview.chromePath",
+              response,
+            )
+          ) {
+            return;
+          }
+          const parsed = parseConfigNullableString(browserPreviewPatch.chromePath);
+          if (!parsed.ok) {
+            response
+              .status(400)
+              .json({ error: "browserPreview.chromePath must be string or null" });
+            return;
+          }
+          if (parsed.value !== browserPreview.chromePath) {
+            browserPreview = { ...browserPreview, chromePath: parsed.value };
+            browserPreviewChanged = true;
+            changedFields.push("browserPreview.chromePath");
+            restartRequired = true;
+          }
+        }
+        if (hasOwn(browserPreviewPatch, "maxPreviews")) {
+          if (
+            !ensureWritableAdminConfigField(
+              fields,
+              "browserPreview.maxPreviews",
+              response,
+            )
+          ) {
+            return;
+          }
+          const parsed = parseBoundedIntegerField(
+            browserPreviewPatch.maxPreviews,
+            {
+              min: 1,
+              max: 32,
+            },
+          );
+          if (!parsed.ok) {
+            response.status(400).json({
+              error: "browserPreview.maxPreviews must be an integer between 1 and 32",
+            });
+            return;
+          }
+          if (parsed.value !== browserPreview.maxPreviews) {
+            browserPreview = { ...browserPreview, maxPreviews: parsed.value };
+            browserPreviewChanged = true;
+            changedFields.push("browserPreview.maxPreviews");
+            restartRequired = true;
+          }
+        }
+        if (hasOwn(browserPreviewPatch, "idleTtlMs")) {
+          if (
+            !ensureWritableAdminConfigField(
+              fields,
+              "browserPreview.idleTtlMs",
+              response,
+            )
+          ) {
+            return;
+          }
+          const parsed = parseBoundedIntegerField(
+            browserPreviewPatch.idleTtlMs,
+            {
+              min: 30_000,
+              max: 24 * 60 * 60 * 1000,
+            },
+          );
+          if (!parsed.ok) {
+            response.status(400).json({
+              error:
+                "browserPreview.idleTtlMs must be an integer between 30000 and 86400000",
+            });
+            return;
+          }
+          if (parsed.value !== browserPreview.idleTtlMs) {
+            browserPreview = { ...browserPreview, idleTtlMs: parsed.value };
+            browserPreviewChanged = true;
+            changedFields.push("browserPreview.idleTtlMs");
+            restartRequired = true;
+          }
+        }
+        if (hasOwn(browserPreviewPatch, "frameIntervalMs")) {
+          if (
+            !ensureWritableAdminConfigField(
+              fields,
+              "browserPreview.frameIntervalMs",
+              response,
+            )
+          ) {
+            return;
+          }
+          const parsed = parseBoundedIntegerField(
+            browserPreviewPatch.frameIntervalMs,
+            {
+              min: 250,
+              max: 10_000,
+            },
+          );
+          if (!parsed.ok) {
+            response.status(400).json({
+              error:
+                "browserPreview.frameIntervalMs must be an integer between 250 and 10000",
+            });
+            return;
+          }
+          if (parsed.value !== browserPreview.frameIntervalMs) {
+            browserPreview = { ...browserPreview, frameIntervalMs: parsed.value };
+            browserPreviewChanged = true;
+            changedFields.push("browserPreview.frameIntervalMs");
+            restartRequired = true;
+          }
+        }
+        if (hasOwn(browserPreviewPatch, "quality")) {
+          if (
+            !ensureWritableAdminConfigField(
+              fields,
+              "browserPreview.quality",
+              response,
+            )
+          ) {
+            return;
+          }
+          const parsed = parseBoundedIntegerField(browserPreviewPatch.quality, {
+            min: 20,
+            max: 95,
+          });
+          if (!parsed.ok) {
+            response.status(400).json({
+              error: "browserPreview.quality must be an integer between 20 and 95",
+            });
+            return;
+          }
+          if (parsed.value !== browserPreview.quality) {
+            browserPreview = { ...browserPreview, quality: parsed.value };
+            browserPreviewChanged = true;
+            changedFields.push("browserPreview.quality");
+            restartRequired = true;
+          }
+        }
+        if (browserPreviewChanged) {
+          nextConfig = {
+            ...nextConfig,
+            browserPreview,
+            configExists: true,
+          };
+        }
+      }
+
+      if (changedFields.length === 0) {
+        response.json({
+          ok: true,
+          changed: changedFields,
+          appliedImmediately: immediateFields,
+          ...buildAdminConfigResponse({ restartRequired }),
+        });
+        return;
+      }
+
+      await saveConfig(nextConfig, { configPath: nextConfig.configPath });
+      runtimeConfig = nextConfig;
+
+      response.json({
+        ok: true,
+        changed: changedFields,
+        appliedImmediately: immediateFields,
+        ...buildAdminConfigResponse({ restartRequired }),
+      });
+    }),
+  );
 
   app.post(
     "/api/admin/update-check",
@@ -1110,13 +1753,13 @@ export async function startServer(
       const generatedAt = Date.now();
       const observations = await collectUsageObservations(
         providerRuntime,
-        config.label,
+        runtimeConfig.label,
         generatedAt,
       );
       const payload: UsageSnapshotResponse = {
         generatedAt,
         host: {
-          label: config.label,
+          label: runtimeConfig.label,
           hostname: hostname(),
           provider: providerRuntime.defaultProviderKind,
         },
@@ -1137,7 +1780,7 @@ export async function startServer(
     }
 
     response.json({
-      label: config.label,
+      label: runtimeConfig.label,
       hostname: hostname(),
       platform: platform(),
       uptimeSeconds: Math.round(process.uptime()),
@@ -2629,7 +3272,7 @@ export async function startServer(
     const token = authHeader?.startsWith("Bearer ")
       ? authHeader.slice("Bearer ".length)
       : "";
-    if (token !== config.token) {
+    if (token !== runtimeConfig.token) {
       socket.destroy();
       return;
     }
@@ -4053,6 +4696,209 @@ function sendEvent(socket: WebSocket, event: unknown): void {
   if (socket.readyState === socket.OPEN) {
     socket.send(JSON.stringify(event));
   }
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOwn<T extends string>(
+  object: Record<string, unknown>,
+  key: T,
+): object is Record<T, unknown> & Record<string, unknown> {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function parseRequiredConfigString(
+  value: unknown,
+): { ok: true; value: string } | { ok: false; error: string } {
+  if (typeof value !== "string") {
+    return { ok: false, error: "label must be a string" };
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return { ok: false, error: "label cannot be empty" };
+  }
+  return {
+    ok: true,
+    value: trimmed,
+  };
+}
+
+function parseEditableMobileClientVersion(
+  value: unknown,
+  key:
+    | "recommendedMobileClientVersion"
+    | "minimumMobileClientVersion",
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (value === null) {
+    return { ok: true, value: null };
+  }
+  if (typeof value !== "string") {
+    return { ok: false, error: `${key} must be a string or null` };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { ok: true, value: null };
+  }
+  if (!MOBILE_CLIENT_VERSION_PATTERN.test(trimmed)) {
+    return {
+      ok: false,
+      error: `${key} must be a mobile client version like 1.2.0, v1.2.0, or 1.2.0+3`,
+    };
+  }
+  return {
+    ok: true,
+    value: trimmed,
+  };
+}
+
+function parseRequiredConfigBoolean(
+  value: unknown,
+): { ok: true; value: boolean } | { ok: false } {
+  if (typeof value !== "boolean") {
+    return { ok: false };
+  }
+  return {
+    ok: true,
+    value,
+  };
+}
+
+function parseConfigNullableString(
+  value: unknown,
+): { ok: true; value: string | null } | { ok: false } {
+  if (value === null) {
+    return { ok: true, value: null };
+  }
+  if (typeof value !== "string") {
+    return { ok: false };
+  }
+  const trimmed = value.trim();
+  return {
+    ok: true,
+    value: trimmed || null,
+  };
+}
+
+function parseBoundedIntegerField(
+  value: unknown,
+  options: { min: number; max: number },
+): { ok: true; value: number } | { ok: false } {
+  if (!Number.isInteger(value)) {
+    return { ok: false };
+  }
+  const parsed = value as number;
+  if (parsed < options.min || parsed > options.max) {
+    return { ok: false };
+  }
+  return {
+    ok: true,
+    value: parsed,
+  };
+}
+
+function isAdminConfigFieldEnvOverridden(path: string): boolean {
+  switch (path) {
+    case "label":
+      return hasNonEmptyTrimmedEnvValue(process.env.SIDEMESH_LABEL);
+    case "recommendedMobileClientVersion":
+      return process.env.SIDEMESH_RECOMMENDED_MOBILE_CLIENT_VERSION !== undefined;
+    case "minimumMobileClientVersion":
+      return process.env.SIDEMESH_MINIMUM_MOBILE_CLIENT_VERSION !== undefined;
+    case "terminal.enabled":
+      return (
+        parseOptionalEnvBoolean(
+          process.env.SIDEMESH_TERMINAL ??
+            process.env.SIDEMESH_ENABLE_TERMINAL,
+        ) !== null
+      );
+    case "terminal.shell":
+      return process.env.SIDEMESH_TERMINAL_SHELL !== undefined;
+    case "terminal.requirePty":
+      return (
+        parseOptionalEnvBoolean(process.env.SIDEMESH_TERMINAL_REQUIRE_PTY) !==
+        null
+      );
+    case "portForwarding.enabled":
+      return (
+        parseOptionalEnvBoolean(
+          process.env.SIDEMESH_PORT_FORWARDING ??
+            process.env.SIDEMESH_ENABLE_PORT_FORWARDING,
+        ) !== null
+      );
+    case "portForwarding.allowNonLoopbackTargets":
+      return (
+        parseOptionalEnvBoolean(
+          process.env.SIDEMESH_PORT_FORWARDING_ALLOW_NON_LOOPBACK,
+        ) !== null
+      );
+    case "browserPreview.enabled":
+      return (
+        parseOptionalEnvBoolean(
+          process.env.SIDEMESH_BROWSER_PREVIEW ??
+            process.env.SIDEMESH_ENABLE_BROWSER_PREVIEW,
+        ) !== null
+      );
+    case "browserPreview.chromePath":
+      return process.env.SIDEMESH_BROWSER_PREVIEW_CHROME_PATH !== undefined;
+    case "browserPreview.maxPreviews":
+      return (
+        parseOptionalEnvInteger(process.env.SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS) !==
+        null
+      );
+    case "browserPreview.idleTtlMs":
+      return (
+        parseOptionalEnvInteger(process.env.SIDEMESH_BROWSER_PREVIEW_IDLE_TTL_MS) !==
+        null
+      );
+    case "browserPreview.frameIntervalMs":
+      return (
+        parseOptionalEnvInteger(
+          process.env.SIDEMESH_BROWSER_PREVIEW_FRAME_INTERVAL_MS,
+        ) !== null
+      );
+    case "browserPreview.quality":
+      return (
+        parseOptionalEnvInteger(process.env.SIDEMESH_BROWSER_PREVIEW_QUALITY) !==
+        null
+      );
+    default:
+      return false;
+  }
+}
+
+function hasNonEmptyTrimmedEnvValue(value: string | undefined): boolean {
+  return Boolean(value?.trim());
+}
+
+function parseOptionalEnvBoolean(value: string | undefined): boolean | null {
+  if (value === undefined) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return null;
+}
+
+function parseOptionalEnvInteger(value: string | undefined): number | null {
+  if (value === undefined) {
+    return null;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function asString(value: unknown): string | null {
