@@ -87,9 +87,19 @@ interface CopilotSessionState {
   runtime: SessionRuntimeSummary | null;
   archived: boolean;
   nextSeq: number;
+  draftAssistantMessages: Map<string, CopilotDraftAssistantMessage>;
   copilotSessionId: string | null;
   copilotSessionCreated: boolean;
   sdkSession?: CopilotSdkSession | null;
+}
+
+interface CopilotDraftAssistantMessage {
+  id: string;
+  turnId: string;
+  text: string;
+  content: SessionMessageContentBlock[];
+  phase: "commentary" | "final_answer";
+  createdAt: number;
 }
 
 interface CopilotStateFile {
@@ -102,6 +112,7 @@ interface CopilotStateFile {
     runtime: SessionRuntimeSummary | null;
     archived?: boolean;
     nextSeq: number;
+    draftAssistantMessages?: CopilotDraftAssistantMessage[];
     copilotSessionId?: string | null;
     copilotSessionCreated?: boolean;
   }>;
@@ -761,6 +772,7 @@ export class CopilotAgentProvider
       ),
       archived: false,
       nextSeq: 0,
+      draftAssistantMessages: new Map(),
       copilotSessionId: id,
       copilotSessionCreated: false,
     };
@@ -1071,6 +1083,7 @@ export class CopilotAgentProvider
           summary: false,
         });
       }
+      this.syncDraftAssistantMessages(session, active);
       this.emit("liveEvent", {
         type: "reasoning_delta",
         sessionId,
@@ -1106,6 +1119,7 @@ export class CopilotAgentProvider
           summary: false,
         });
       }
+      this.syncDraftAssistantMessages(session, active);
       this.emit("liveEvent", {
         type: "reasoning_delta",
         sessionId,
@@ -1146,6 +1160,7 @@ export class CopilotAgentProvider
         messageId,
         `${active.assistantBuffers.get(messageId) ?? ""}${delta}`,
       );
+      this.syncDraftAssistantMessages(session, active);
       this.emit("liveEvent", {
         type: "assistant_delta",
         sessionId,
@@ -1174,6 +1189,7 @@ export class CopilotAgentProvider
           assistantPhase(event.data.phase),
           messageId,
         );
+        session.draftAssistantMessages.delete(messageId);
       }
       active.completedAssistantMessageIds.add(messageId);
       active.assistantBuffers.delete(messageId);
@@ -1330,6 +1346,13 @@ export class CopilotAgentProvider
           messageId,
         );
         active.completedAssistantMessageIds.add(messageId);
+      }
+    }
+    if (session.draftAssistantMessages.size > 0) {
+      for (const [messageId, draft] of session.draftAssistantMessages) {
+        if (draft.turnId === active.turnId) {
+          session.draftAssistantMessages.delete(messageId);
+        }
       }
     }
 
@@ -1587,7 +1610,9 @@ export class CopilotAgentProvider
     id = `copilot-assistant-${randomUUID()}`,
   ): void {
     const active = this.activeTurns.get(session.thread.id);
-    const content = active?.reasoningBlocks ?? [];
+    const content = cloneSessionMessageContentBlocks(
+      active?.reasoningBlocks ?? [],
+    );
     this.appendMessage(session, {
       id,
       role: "assistant",
@@ -1601,6 +1626,33 @@ export class CopilotAgentProvider
       ...(turn.items ?? []),
       { id, type: "agentMessage", text, phase },
     ];
+  }
+
+  private syncDraftAssistantMessages(
+    session: CopilotSessionState,
+    active: ActiveCopilotTurn,
+  ): void {
+    let changed = false;
+    for (const [messageId, text] of active.assistantBuffers) {
+      const next = {
+        id: messageId,
+        turnId: active.turnId,
+        text,
+        content: buildAssistantMessageContent(text, active.reasoningBlocks),
+        phase: "final_answer" as const,
+        createdAt:
+          session.draftAssistantMessages.get(messageId)?.createdAt ?? Date.now(),
+      };
+      const existing = session.draftAssistantMessages.get(messageId);
+      if (copilotDraftAssistantMessageEquals(existing, next)) {
+        continue;
+      }
+      session.draftAssistantMessages.set(messageId, next);
+      changed = true;
+    }
+    if (changed) {
+      this.persistEventually();
+    }
   }
 
   private appendMessage(
@@ -1704,6 +1756,12 @@ export class CopilotAgentProvider
           runtime: normalizeStoredRuntime(item.runtime ?? null),
           archived: item.archived === true,
           nextSeq: item.nextSeq ?? item.messages?.length ?? 0,
+          draftAssistantMessages: new Map(
+            (item.draftAssistantMessages ?? []).map((draft) => [
+              draft.id,
+              normalizeStoredCopilotDraftAssistantMessage(draft),
+            ]),
+          ),
           copilotSessionId: item.copilotSessionId ?? null,
           copilotSessionCreated:
             item.copilotSessionCreated ?? item.copilotSessionId != null,
@@ -1756,6 +1814,9 @@ export class CopilotAgentProvider
         runtime: session.runtime ? { ...session.runtime } : null,
         archived: session.archived,
         nextSeq: session.nextSeq,
+        draftAssistantMessages: [...session.draftAssistantMessages.values()].map(
+          cloneCopilotDraftAssistantMessage,
+        ),
         copilotSessionId: session.copilotSessionId,
         copilotSessionCreated: session.copilotSessionCreated,
       })),
@@ -1816,6 +1877,7 @@ export class CopilotAgentProvider
       runtime: null,
       archived: this.archivedSessionIds.has(sessionId),
       nextSeq: 0,
+      draftAssistantMessages: new Map(),
       copilotSessionId: sessionId,
       copilotSessionCreated: true,
     };
@@ -3790,6 +3852,10 @@ function normalizeInactiveCopilotSessionState(
   session: CopilotSessionState,
 ): void {
   const restoredAt = session.thread.updatedAt;
+  const hadDraftAssistantMessages = session.draftAssistantMessages.size > 0;
+  if (hadDraftAssistantMessages) {
+    materializeInterruptedCopilotDraftMessages(session);
+  }
   const hadActiveTurn = session.turns.some((turn) => {
     if (!isActiveCopilotTurnStatus(turn.status)) {
       return false;
@@ -3812,6 +3878,7 @@ function normalizeInactiveCopilotSessionState(
     session.runtime?.telemetry?.compaction?.status === "running";
   session.runtime = normalizeInactiveCopilotRuntime(session.runtime, restoredAt);
   if (
+    hadDraftAssistantMessages ||
     hadActiveTurn ||
     hadActiveActivity ||
     hadRunningCompaction ||
@@ -3887,6 +3954,110 @@ function runtimeWithoutTurnId(
   }
   const { turnId: _turnId, ...rest } = runtime;
   return rest;
+}
+
+function materializeInterruptedCopilotDraftMessages(
+  session: CopilotSessionState,
+): void {
+  const drafts = [...session.draftAssistantMessages.values()].sort(
+    (left, right) => left.createdAt - right.createdAt,
+  );
+  for (const draft of drafts) {
+    if (!hasCopilotDraftAssistantContent(draft)) {
+      continue;
+    }
+    if (!session.messages.some((message) => message.id === draft.id)) {
+      session.messages.push({
+        id: draft.id,
+        role: "assistant",
+        text: draft.text,
+        content: cloneSessionMessageContentBlocks(draft.content),
+        attachments: [],
+        createdAt: draft.createdAt,
+        seq: session.nextSeq++,
+        phase: draft.phase,
+      });
+      if (draft.text.trim().length > 0) {
+        session.thread.preview = draft.text;
+      }
+    }
+    const turn = session.turns.find((candidate) => candidate.id === draft.turnId);
+    if (!turn) {
+      continue;
+    }
+    const items = turn.items ?? [];
+    if (!items.some((item) => item.id === draft.id)) {
+      turn.items = [
+        ...items,
+        {
+          id: draft.id,
+          type: "agentMessage",
+          text: draft.text,
+          phase: draft.phase,
+        },
+      ];
+    }
+  }
+  session.draftAssistantMessages.clear();
+}
+
+function hasCopilotDraftAssistantContent(
+  draft: CopilotDraftAssistantMessage,
+): boolean {
+  if (draft.text.trim().length > 0) {
+    return true;
+  }
+  return draft.content.some(
+    (block) =>
+      (block.type === "thinking" && block.thinking.trim().length > 0) ||
+      (block.type === "text" && block.text.trim().length > 0),
+  );
+}
+
+function cloneSessionMessageContentBlocks(
+  blocks: SessionMessageContentBlock[],
+): SessionMessageContentBlock[] {
+  return blocks.map((block) => ({ ...block }));
+}
+
+function buildAssistantMessageContent(
+  text: string,
+  reasoningBlocks: SessionMessageContentBlock[],
+): SessionMessageContentBlock[] {
+  const blocks = cloneSessionMessageContentBlocks(reasoningBlocks);
+  if (text.trim().length > 0) {
+    blocks.push({ type: "text", text });
+  }
+  return blocks;
+}
+
+function copilotDraftAssistantMessageEquals(
+  left: CopilotDraftAssistantMessage | undefined,
+  right: CopilotDraftAssistantMessage,
+): boolean {
+  if (!left) {
+    return false;
+  }
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function normalizeStoredCopilotDraftAssistantMessage(
+  draft: CopilotDraftAssistantMessage,
+): CopilotDraftAssistantMessage {
+  return {
+    ...draft,
+    content: cloneSessionMessageContentBlocks(draft.content ?? []),
+    phase: draft.phase === "commentary" ? "commentary" : "final_answer",
+  };
+}
+
+function cloneCopilotDraftAssistantMessage(
+  draft: CopilotDraftAssistantMessage,
+): CopilotDraftAssistantMessage {
+  return {
+    ...draft,
+    content: cloneSessionMessageContentBlocks(draft.content),
+  };
 }
 
 function normalizeCopilotSessionMode(
@@ -4090,6 +4261,7 @@ function cloneTurn(turn: TurnRecord): TurnRecord {
 function cloneMessage(message: SessionMessage): SessionMessage {
   return {
     ...message,
+    content: cloneSessionMessageContentBlocks(message.content),
     attachments: message.attachments.map((attachment) => ({ ...attachment })),
   };
 }
