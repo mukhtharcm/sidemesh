@@ -54,6 +54,7 @@ import type {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
+const DEFAULT_SERVER_READY_TIMEOUT_MS = 30_000;
 const READY_LINE_PREFIX = "opencode server listening on ";
 
 interface OpenCodeModelRef {
@@ -381,6 +382,7 @@ interface OpenCodeServerHandle {
 export interface OpenCodeServerFactoryOptions {
   bin: string;
   stateDir: string | null;
+  readyTimeoutMs?: number;
   onOutput(line: string): void;
   onExit(code: number | null): void;
 }
@@ -629,7 +631,7 @@ export class OpenCodeAgentProvider
       directory: info.directory,
       sessionID: threadId,
     });
-    const turns = buildTurns(messages);
+    const turns = buildTurns(messages, status);
     const thread = this.threadFromSession(info, status, true);
     thread.turns = turns;
     this.cacheSession(threadId, info, messages);
@@ -856,12 +858,17 @@ export class OpenCodeAgentProvider
     const result = await this.requireClient().listProviders(
       options.cwd ?? this.defaultDirectory,
     );
+    const providerFilter = options.provider?.trim() || null;
     const models: ModelSummary[] = [];
     for (const provider of result.all) {
       for (const model of Object.values(provider.models)) {
+        const providerId = model.providerID || provider.id;
+        if (providerFilter && providerId !== providerFilter) {
+          continue;
+        }
         models.push({
           id: encodeModelRef({
-            providerID: model.providerID || provider.id,
+            providerID: providerId,
             modelID: model.id,
           }),
           model: model.id,
@@ -877,7 +884,7 @@ export class OpenCodeAgentProvider
           additionalSpeedTiers: [],
           inputModalities: buildInputModalities(model),
           isDefault: result.default[provider.id] === model.id,
-          source: provider.id,
+          source: providerId,
         });
       }
     }
@@ -971,15 +978,6 @@ export class OpenCodeAgentProvider
       aborted: false,
     };
 
-    this.activeTurns.set(input.sessionId, turn);
-    this.loadedSessionIds.add(input.sessionId);
-    this.emit("liveEvent", {
-      type: "turn_started",
-      sessionId: input.sessionId,
-      turnId,
-    });
-    this.emitThreadStatusIfChanged(turn, "running");
-
     if (prepared.warnings.length > 0) {
       for (const warning of prepared.warnings) {
         this.emit("liveEvent", {
@@ -997,6 +995,14 @@ export class OpenCodeAgentProvider
       sessionID: input.sessionId,
       input: promptInput,
     });
+    this.activeTurns.set(input.sessionId, turn);
+    this.loadedSessionIds.add(input.sessionId);
+    this.emit("liveEvent", {
+      type: "turn_started",
+      sessionId: input.sessionId,
+      turnId,
+    });
+    this.emitThreadStatusIfChanged(turn, "running");
     void this.monitorTurn(turn);
     return { mode: input.mode, turnId };
   }
@@ -1424,6 +1430,7 @@ export class OpenCodeAgentProvider
         reply,
       });
     } catch (error) {
+      this.reopenPendingAction(action);
       this.emit("liveEvent", {
         type: "provider_warning",
         sessionId: action.sessionId,
@@ -1446,6 +1453,7 @@ export class OpenCodeAgentProvider
         answers,
       });
     } catch (error) {
+      this.reopenPendingAction(action);
       this.emit("liveEvent", {
         type: "provider_warning",
         sessionId: action.sessionId,
@@ -1464,6 +1472,7 @@ export class OpenCodeAgentProvider
         requestID: String(action.providerRequestId),
       });
     } catch (error) {
+      this.reopenPendingAction(action);
       this.emit("liveEvent", {
         type: "provider_warning",
         sessionId: action.sessionId,
@@ -1472,6 +1481,15 @@ export class OpenCodeAgentProvider
         source: "opencode/question",
       });
     }
+  }
+
+  private reopenPendingAction(action: AgentPendingAction): void {
+    const cache = this.sessionCache.get(action.sessionId);
+    if (!cache || cache.pendingActions.has(action.id)) {
+      return;
+    }
+    cache.pendingActions.set(action.id, action);
+    this.emit("liveEvent", { type: "action_opened", action });
   }
 }
 
@@ -1765,6 +1783,7 @@ export async function createOpenCodeServer(
     options.bin,
     ["serve", "--hostname", "127.0.0.1", "--port", "0"],
     {
+      detached: process.platform !== "win32",
       env: {
         ...process.env,
         ...(options.stateDir
@@ -1800,14 +1819,22 @@ async function waitForOpenCodeReady(
 ): Promise<URL> {
   return new Promise<URL>((resolve, reject) => {
     let settled = false;
+    const readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_SERVER_READY_TIMEOUT_MS;
     const stdout = createInterface({ input: child.stdout });
     const stderr = createInterface({ input: child.stderr });
+    const readyTimer = setTimeout(() => {
+      finish(() => {
+        void terminateChild(child).catch(() => undefined);
+        reject(new Error(`OpenCode did not become ready within ${readyTimeoutMs}ms.`));
+      });
+    }, readyTimeoutMs);
 
     const finish = (fn: () => void) => {
       if (settled) {
         return;
       }
       settled = true;
+      clearTimeout(readyTimer);
       stdout.close();
       stderr.close();
       fn();
@@ -1854,14 +1881,33 @@ async function terminateChild(
   }
   await new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      signalChild(child, "SIGKILL");
     }, 5_000);
     child.once("exit", () => {
       clearTimeout(timer);
       resolve();
     });
-    child.kill("SIGTERM");
+    signalChild(child, "SIGTERM");
   });
+}
+
+function signalChild(
+  child: OpenCodeChildProcess,
+  signal: NodeJS.Signals,
+): void {
+  const pid = child.pid;
+  if (!pid) {
+    return;
+  }
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // Fall back to the direct child signal below.
+    }
+  }
+  child.kill(signal);
 }
 
 function preparePromptInput(input: AgentSessionInputItem[]): {
@@ -2026,7 +2072,10 @@ function buildSessionLogSnapshot(
   };
 }
 
-function buildTurns(messages: OpenCodeMessage[]): TurnRecord[] {
+function buildTurns(
+  messages: OpenCodeMessage[],
+  sessionStatus: OpenCodeSessionStatus = { type: "idle" },
+): TurnRecord[] {
   const assistantsByParent = new Map<string, OpenCodeAssistantMessageInfo[]>();
   for (const message of messages) {
     if (message.info.role !== "assistant") {
@@ -2039,22 +2088,35 @@ function buildTurns(messages: OpenCodeMessage[]): TurnRecord[] {
       assistantsByParent.set(message.info.parentID, [message.info]);
     }
   }
-  return messages
-    .filter(
-      (message): message is OpenCodeMessage & { info: OpenCodeUserMessageInfo } =>
-        message.info.role === "user",
-    )
-    .map((message) => {
+  const userMessages = messages.filter(
+    (message): message is OpenCodeMessage & { info: OpenCodeUserMessageInfo } =>
+      message.info.role === "user",
+  );
+  const latestUserMessageId = userMessages.at(-1)?.info.id ?? null;
+  return userMessages.map((message) => {
       const assistants = assistantsByParent.get(message.info.id) ?? [];
-      const completedAt = assistants
-        .map((assistant) => assistant.time.completed ?? assistant.time.created)
-        .reduce<number | null>(
-          (max, value) => (max == null || value > max ? value : max),
-          null,
-        );
+      const isLatestActiveTurn =
+        latestUserMessageId === message.info.id && sessionStatus.type !== "idle";
+      const hasIncompleteAssistant = assistants.some(
+        (assistant) => assistant.error == null && assistant.time.completed == null,
+      );
+      const status = assistants.some((assistant) => assistant.error)
+        ? "failed"
+        : hasIncompleteAssistant || (assistants.length === 0 && isLatestActiveTurn)
+          ? "in_progress"
+          : "completed";
+      const completedAt =
+        status === "in_progress"
+          ? null
+          : assistants
+              .map((assistant) => assistant.time.completed ?? assistant.time.created)
+              .reduce<number | null>(
+                (max, value) => (max == null || value > max ? value : max),
+                null,
+              );
       return {
         id: message.info.id,
-        status: assistants.some((assistant) => assistant.error) ? "failed" : "completed",
+        status,
         startedAt: message.info.time.created,
         completedAt,
       };

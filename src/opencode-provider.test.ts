@@ -46,6 +46,33 @@ exit 1
     await handle.close();
   });
 
+  it("times out when OpenCode never reports a ready server", async () => {
+    const tempDir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-opencode-timeout-test-"),
+    );
+    const fakeBin = nodePath.join(tempDir, "fake-opencode-hang");
+    await writeFile(
+      fakeBin,
+      `#!/bin/sh
+sleep 10
+`,
+      "utf8",
+    );
+    await chmod(fakeBin, 0o755);
+
+    await assert.rejects(
+      () =>
+        createOpenCodeServer({
+          bin: fakeBin,
+          stateDir: null,
+          readyTimeoutMs: 50,
+          onOutput: () => {},
+          onExit: () => {},
+        }),
+      /did not become ready within 50ms/,
+    );
+  });
+
   it("detects /api-prefixed OpenCode HTTP routes on startup", async () => {
     const server = createHttpServer((request, response) => {
       if (request.url === "/api/global/health") {
@@ -396,6 +423,73 @@ exit 1
     ]);
   });
 
+  it("reopens a pending action when the upstream permission reply fails", async () => {
+    const client = new FakeOpenCodeClient();
+    const provider = createProvider(client);
+    const events: AgentProviderLiveEvent[] = [];
+    provider.on("liveEvent", (event) => events.push(event));
+
+    client.onPrompt = ({ directory, sessionID }) => {
+      client.permissionsByDirectory.set(directory, [
+        {
+          id: "perm-fail",
+          sessionID,
+          permission: "read",
+          patterns: ["src/server.ts"],
+          metadata: {},
+        },
+      ]);
+      client.statusesByDirectory.set(directory, {
+        [sessionID]: { type: "busy" },
+      });
+    };
+    client.permissionReplyError = new Error("permission reply failed");
+
+    try {
+      await provider.start();
+      await provider.createSession({
+        cwd: "/repo/app",
+        input: [{ type: "text", text: "Trigger permission failure", text_elements: [] }],
+        overrides: {
+          model: null,
+          mode: "build",
+          reasoningEffort: null,
+          fastMode: null,
+          approvalPolicy: null,
+          sandboxMode: null,
+          networkAccess: null,
+          webSearch: null,
+          profile: null,
+        },
+      });
+
+      const permissionAction = await waitForOpenedAction(
+        events,
+        (action) => action.id === "permission:perm-fail",
+      );
+      assert.equal(
+        provider.respondToPendingAction(permissionAction, {
+          decision: "approve",
+          scope: "location",
+        }),
+        true,
+      );
+
+      const reopened = await waitForNthOpenedAction(events, permissionAction.id, 2);
+      assert.equal(reopened.id, permissionAction.id);
+      assert.ok(
+        events.some(
+          (event) =>
+            event.type === "provider_warning" &&
+            event.sessionId === permissionAction.sessionId &&
+            event.message.includes("permission reply failed"),
+        ),
+      );
+    } finally {
+      await provider.close();
+    }
+  });
+
   it("lists models and skills from OpenCode metadata", async () => {
     const client = new FakeOpenCodeClient();
     client.providerList = {
@@ -456,6 +550,12 @@ exit 1
       models.find((model) => model.id === "opencode/big-pickle")
         ?.supportedReasoningEfforts.length,
     );
+    const openAiOnly = await provider.listModels({
+      cwd: "/repo/app",
+      profile: null,
+      provider: "openai",
+    });
+    assert.deepEqual(openAiOnly.map((model) => model.id), ["openai/gpt-4.1"]);
 
     const skills = await provider.listSkills({
       cwd: "/repo/app",
@@ -478,6 +578,40 @@ exit 1
     const resumed = await provider.resumeSessionThread(session.id);
     assert.deepEqual(resumed, { resumed: true });
     assert.deepEqual(await provider.listLoadedSessionIds(), [session.id]);
+  });
+
+  it("does not emit a started turn when prompt submission fails", async () => {
+    const client = new FakeOpenCodeClient();
+    client.promptAsyncError = new Error("OpenCode prompt_async returned 500");
+    const provider = createProvider(client);
+    const events: AgentProviderLiveEvent[] = [];
+    provider.on("liveEvent", (event) => events.push(event));
+
+    await provider.start();
+    await assert.rejects(
+      () =>
+        provider.createSession({
+          cwd: "/repo/app",
+          input: [{ type: "text", text: "Fail this prompt", text_elements: [] }],
+          overrides: {
+            model: null,
+            mode: "build",
+            reasoningEffort: null,
+            fastMode: null,
+            approvalPolicy: null,
+            sandboxMode: null,
+            networkAccess: null,
+            webSearch: null,
+            profile: null,
+          },
+        }),
+      /prompt_async returned 500/,
+    );
+    assert.equal(events.some((event) => event.type === "turn_started"), false);
+    assert.equal(
+      events.some((event) => event.type === "thread_status_changed"),
+      false,
+    );
   });
 
   it("finds uncached sessions beyond the first 200 global results", async () => {
@@ -505,6 +639,39 @@ exit 1
     assert.deepEqual(await provider.listLoadedSessionIds(), ["ses_204"]);
     const thread = await provider.readSessionThread("ses_204", false);
     assert.equal(thread.name, "Session 204");
+  });
+
+  it("marks the latest turn in progress while OpenCode is still busy", async () => {
+    const client = new FakeOpenCodeClient();
+    const session = await client.createSession({
+      directory: "/repo/app",
+      title: "Running turn",
+      agent: "build",
+      model: { providerID: "opencode", modelID: "big-pickle" },
+    });
+    client.messages.set(session.id, [
+      {
+        info: {
+          id: "msg-user",
+          sessionID: session.id,
+          role: "user",
+          time: { created: 100 },
+          agent: "build",
+          model: { providerID: "opencode", modelID: "big-pickle" },
+        },
+        parts: [{ id: "user-text", type: "text", text: "still running" }],
+      },
+    ]);
+    client.statusesByDirectory.set("/repo/app", {
+      [session.id]: { type: "busy" },
+    });
+
+    const provider = createProvider(client);
+    await provider.start();
+    const thread = await provider.readSessionThread(session.id, true);
+
+    assert.equal(thread.turns?.[0]?.status, "in_progress");
+    assert.equal(thread.turns?.[0]?.completedAt, null);
   });
 
   it("keeps activity timestamps stable for parts without explicit timing", async () => {
@@ -632,6 +799,26 @@ async function waitForOpenedAction(
   return event.action;
 }
 
+async function waitForNthOpenedAction(
+  events: AgentProviderLiveEvent[],
+  actionId: string,
+  count: number,
+  timeoutMs = 2_000,
+): Promise<Extract<AgentProviderLiveEvent, { type: "action_opened" }>["action"]> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const matches = events.filter(
+      (event): event is Extract<AgentProviderLiveEvent, { type: "action_opened" }> =>
+        event.type === "action_opened" && event.action.id === actionId,
+    );
+    if (matches.length >= count) {
+      return matches[count - 1]!.action;
+    }
+    await delay(10);
+  }
+  throw new Error("Timed out waiting for reopened action.");
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -694,6 +881,8 @@ class FakeOpenCodeClient {
   public readonly statusesByDirectory = new Map<string, Record<string, any>>();
   public readonly permissionsByDirectory = new Map<string, any[]>();
   public readonly questionsByDirectory = new Map<string, any[]>();
+  public promptAsyncError: Error | null = null;
+  public permissionReplyError: Error | null = null;
 
   public onPrompt:
     | ((input: {
@@ -812,6 +1001,9 @@ class FakeOpenCodeClient {
       sessionID: options.sessionID,
       input: options.input,
     });
+    if (this.promptAsyncError) {
+      throw this.promptAsyncError;
+    }
     const session = await this.getSession({ sessionID: options.sessionID });
     session.time.updated = Date.now();
     const userMessageID = `msg_${randomUUID()}`;
@@ -929,6 +1121,9 @@ class FakeOpenCodeClient {
     requestID: string;
     reply: "once" | "always" | "reject";
   }) {
+    if (this.permissionReplyError) {
+      throw this.permissionReplyError;
+    }
     this.permissionReplies.push({
       directory: options.directory,
       requestID: options.requestID,
