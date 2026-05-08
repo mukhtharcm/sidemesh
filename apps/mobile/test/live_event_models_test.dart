@@ -149,4 +149,50 @@ void main() {
     expect(parsed.content, hasLength(1));
     expect((parsed.content.single as TextBlock).text, 'Hello');
   });
+
+  test('SessionLog round-trips latest plan update payloads', () {
+    final latestPlanUpdate = LiveEvent.fromJson({
+      'type': 'plan_updated',
+      'sessionId': 'session-1',
+      'turnId': 'turn-1',
+      'explanation': 'Use the latest daemon snapshot.',
+      'plan': [
+        {'step': 'Store the plan', 'status': 'completed'},
+        {'step': 'Restore the plan', 'status': 'in_progress'},
+      ],
+      'seq': 7,
+    });
+    final log = SessionLog(
+      session: SessionSummary(
+        id: 'session-1',
+        title: 'Session',
+        preview: '',
+        cwd: '/repo',
+        createdAt: DateTime(2026, 1, 1),
+        updatedAt: DateTime(2026, 1, 1, 0, 1),
+        source: 'fake',
+        provider: null,
+        status: 'idle',
+        runtime: null,
+        gitInfo: null,
+      ),
+      messages: const [],
+      activities: const [],
+      pendingAction: null,
+      history: const SessionLogHistorySummary(
+        isTruncated: false,
+        totalMessages: 0,
+        returnedMessages: 0,
+        totalActivities: 0,
+        returnedActivities: 0,
+      ),
+      latestPlanUpdate: latestPlanUpdate,
+    );
+
+    final parsed = SessionLog.fromJson(log.toJson());
+    expect(parsed.latestPlanUpdate?.type, 'plan_updated');
+    expect(parsed.latestPlanUpdate?.seq, 7);
+    expect(parsed.latestPlanUpdate?.plan, hasLength(2));
+    expect(parsed.latestPlanUpdate?.plan?.last.step, 'Restore the plan');
+  });
 }

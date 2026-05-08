@@ -1976,6 +1976,10 @@ class _SessionScreenState extends State<SessionScreen>
             log.session.isActive &&
             _liveAssistantText.isEmpty &&
             _pendingAction == null;
+        final restoredPlanSeq = _restoreLatestPlanUpdate(
+          log.latestPlanUpdate,
+          fallbackCreatedAt: log.session.updatedAt,
+        );
         // Seed lastSeq from the snapshot so subsequent resyncs can use the
         // cheap delta endpoint instead of re-downloading everything.
         var highestSeq = _lastEventSeq ?? 0;
@@ -1984,6 +1988,9 @@ class _SessionScreenState extends State<SessionScreen>
         }
         for (final a in log.activities) {
           if (a.seq > highestSeq) highestSeq = a.seq;
+        }
+        if (restoredPlanSeq != null && restoredPlanSeq > highestSeq) {
+          highestSeq = restoredPlanSeq;
         }
         if (highestSeq > 0) {
           _lastEventSeq = highestSeq;
@@ -2061,12 +2068,19 @@ class _SessionScreenState extends State<SessionScreen>
             log.session.isActive &&
             _liveAssistantText.isEmpty &&
             _pendingAction == null;
+        final restoredPlanSeq = _restoreLatestPlanUpdate(
+          log.latestPlanUpdate,
+          fallbackCreatedAt: log.session.updatedAt,
+        );
         var highestSeq = _lastEventSeq ?? 0;
         for (final m in log.messages) {
           if (m.seq > highestSeq) highestSeq = m.seq;
         }
         for (final a in log.activities) {
           if (a.seq > highestSeq) highestSeq = a.seq;
+        }
+        if (restoredPlanSeq != null && restoredPlanSeq > highestSeq) {
+          highestSeq = restoredPlanSeq;
         }
         if (highestSeq > 0) {
           _lastEventSeq = highestSeq;
@@ -2120,8 +2134,10 @@ class _SessionScreenState extends State<SessionScreen>
         since: last,
       );
       if (!mounted) return true;
+      final latestPlanUpdate = delta.latestPlanUpdate;
       if (delta.messages.isEmpty &&
           delta.activities.isEmpty &&
+          latestPlanUpdate == null &&
           delta.pendingAction == null &&
           delta.session == null) {
         HostStatusStore.instance.markOnline(widget.host.id);
@@ -2158,6 +2174,10 @@ class _SessionScreenState extends State<SessionScreen>
         }
         _messages = mergedMessages;
         _optimisticMessages = _reconcileOptimisticMessages(mergedMessages);
+        final restoredPlanSeq = _restoreLatestPlanUpdate(
+          latestPlanUpdate,
+          fallbackCreatedAt: delta.session?.updatedAt ?? DateTime.now(),
+        );
         _pendingAction = delta.pendingAction ?? _pendingAction;
         _running = nextRunning;
         if (!nextRunning || _hasPersistedLiveAssistant(mergedMessages)) {
@@ -2165,8 +2185,12 @@ class _SessionScreenState extends State<SessionScreen>
         }
         _awaitingAssistantReply =
             nextRunning && _liveAssistantText.isEmpty && _pendingAction == null;
-        if (delta.nextSeq > (_lastEventSeq ?? 0)) {
-          _lastEventSeq = delta.nextSeq;
+        final highestSeq = math.max(
+          delta.nextSeq,
+          restoredPlanSeq ?? delta.nextSeq,
+        );
+        if (highestSeq > (_lastEventSeq ?? 0)) {
+          _lastEventSeq = highestSeq;
         }
       });
       _refreshThinkingState();
@@ -2197,6 +2221,7 @@ class _SessionScreenState extends State<SessionScreen>
           activities: _activities,
           pendingAction: null,
           history: _history,
+          latestPlanUpdate: _latestPlanUpdateForCache(),
         ),
       ),
     );
@@ -2525,10 +2550,10 @@ class _SessionScreenState extends State<SessionScreen>
           _appendTimelineRuntimeEvent(
             _TimelineLiveEventKind.planUpdated,
             event,
-            replaceSemanticKey:
-                'plan:${event.turnId ?? event.itemId ?? event.sessionId}',
+            replaceSemanticKey: 'plan:${event.sessionId}',
           );
         });
+        _schedulePersistCurrentSessionLog();
       case 'reasoning_delta':
         final delta = event.delta;
         if (delta == null || delta.isEmpty) {
@@ -2573,12 +2598,14 @@ class _SessionScreenState extends State<SessionScreen>
     _TimelineLiveEventKind kind,
     LiveEvent event, {
     String? replaceSemanticKey,
+    DateTime? createdAt,
+    int? seqOverride,
   }) {
     final record = _TimelineLiveEventRecord(
       kind: kind,
       event: event,
-      createdAt: DateTime.now(),
-      seq: event.seq ?? _nextTimelineSeq(),
+      createdAt: createdAt ?? DateTime.now(),
+      seq: seqOverride ?? event.seq ?? _nextTimelineSeq(),
       keyId:
           replaceSemanticKey == null
               ? '${kind.name}:${event.seq ?? DateTime.now().microsecondsSinceEpoch}'
@@ -2599,6 +2626,41 @@ class _SessionScreenState extends State<SessionScreen>
     final updated = [..._timelineLiveEvents];
     updated[existingIndex] = record;
     _timelineLiveEvents = updated;
+  }
+
+  LiveEvent? _latestPlanUpdateForCache() {
+    for (var i = _timelineLiveEvents.length - 1; i >= 0; i -= 1) {
+      final record = _timelineLiveEvents[i];
+      final plan = record.event.plan;
+      if (record.kind == _TimelineLiveEventKind.planUpdated &&
+          plan != null &&
+          plan.isNotEmpty) {
+        return record.event;
+      }
+    }
+    return null;
+  }
+
+  int? _restoreLatestPlanUpdate(
+    LiveEvent? latestPlanUpdate, {
+    required DateTime fallbackCreatedAt,
+  }) {
+    final plan = latestPlanUpdate?.plan;
+    if (latestPlanUpdate == null ||
+        latestPlanUpdate.type != 'plan_updated' ||
+        plan == null ||
+        plan.isEmpty) {
+      return null;
+    }
+    final restoredSeq = latestPlanUpdate.seq ?? _nextTimelineSeq();
+    _appendTimelineRuntimeEvent(
+      _TimelineLiveEventKind.planUpdated,
+      latestPlanUpdate,
+      replaceSemanticKey: 'plan:${latestPlanUpdate.sessionId}',
+      createdAt: fallbackCreatedAt,
+      seqOverride: restoredSeq,
+    );
+    return restoredSeq;
   }
 
   bool get _showRuntimeSignalStrip {
