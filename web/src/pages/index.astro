@@ -504,8 +504,9 @@
 
   /* ── Hero phone frame ── */
   .hero-phone {
-    width: 260px;
+    width: min(300px, 100%);
     margin: 0 auto;
+    max-height: 560px;
     border-radius: 44px;
     border: 1px solid var(--border-strong);
     background: #060810;
@@ -525,7 +526,7 @@
   .gallery-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 28px;
+    gap: 20px;
     align-items: start;
   }
 
@@ -533,19 +534,19 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 16px;
+    gap: 14px;
   }
 
   .gallery-frame {
     width: 100%;
-    max-width: 220px;
-    border-radius: 36px;
+    max-height: 480px;
+    border-radius: 28px;
     border: 1px solid var(--border-strong);
     background: #060810;
     overflow: hidden;
     box-shadow:
       0 0 0 1px rgba(255, 255, 255, 0.03),
-      0 28px 72px rgba(0, 0, 0, 0.6);
+      0 24px 60px rgba(0, 0, 0, 0.55);
   }
 
   .gallery-frame img {
@@ -848,7 +849,8 @@
   /* ── Responsive ── */
   @media (max-width: 980px) {
     .hero-phone {
-      width: 220px;
+      width: min(260px, 100%);
+      max-height: 480px;
     }
 
     .hero-grid {
@@ -888,11 +890,12 @@
 
     .gallery-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
+      gap: 10px;
     }
 
     .gallery-frame {
-      border-radius: 24px;
+      border-radius: 20px;
+      max-height: 320px;
     }
 
     :root {
