@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -1363,6 +1363,44 @@ describe("PiAgentProvider", () => {
     });
     await provider.close();
 
+    const statePath = nodePath.join(stateDir, "sessions.json");
+    const persisted = JSON.parse(await readFile(statePath, "utf8")) as {
+      sessions?: Array<Record<string, unknown>>;
+    };
+    const persistedSession = persisted.sessions?.[0];
+    assert.ok(persistedSession);
+    persistedSession.activities = [
+      {
+        id: "stale-tool",
+        type: "tool",
+        turnId: created.activeTurnId,
+        createdAt: 1_777_770_010_000,
+        seq: 99,
+        status: "in_progress",
+        toolName: "read",
+        title: "Read README",
+        args: { path: "README.md" },
+        output: "partial",
+        result: null,
+        isError: null,
+        semantic: null,
+      },
+    ];
+    persistedSession.runtime = {
+      ...(persistedSession.runtime as Record<string, unknown> | null ?? {}),
+      turnId: created.activeTurnId,
+      telemetry: {
+        ...((persistedSession.runtime as { telemetry?: Record<string, unknown> } | null)
+          ?.telemetry ?? {}),
+        compaction: {
+          status: "running",
+          startedAt: 1_777_770_011_000,
+          updatedAt: 1_777_770_011_000,
+        },
+      },
+    };
+    await writeFile(statePath, JSON.stringify(persisted, null, 2));
+
     // start a fresh provider instance pointing at the same state dir
     const provider2 = new PiAgentProvider({
       agentDir,
@@ -1379,6 +1417,137 @@ describe("PiAgentProvider", () => {
     const threads = await provider2.listSessionThreads({ limit: 10, archived: false });
     assert.equal(threads.length, 1);
     assert.equal(threads[0]?.id, created.thread.id);
+    assert.equal(threads[0]?.status.type, "idle");
+    const restoredThread = await provider2.readSessionThread(created.thread.id, true);
+    assert.equal(restoredThread.turns?.[0]?.status, "interrupted");
+    const restoredLog = await provider2.readSessionLog(restoredThread);
+    assert.equal(restoredLog.activities[0]?.status, "failed");
+    const restoredRuntime = await provider2.readSessionRuntime(restoredThread);
+    assert.equal(restoredRuntime?.turnId ?? null, null);
+    assert.equal(restoredRuntime?.telemetry?.compaction?.status, "failed");
+  });
+
+  it("restores partial Pi assistant output after restart", async () => {
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const listeners = new Set<(event: unknown) => void>();
+    const fakeSession = {
+      sessionId: "pi-partial-restore-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe(listener: (event: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt() {
+        const partial = {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "Still reasoning..." },
+            { type: "text", text: "Partial Pi answer" },
+          ],
+          provider: "anthropic",
+          model: "claude-sonnet-4-5",
+          timestamp: 1_777_770_020_000,
+        };
+        for (const listener of listeners) {
+          listener({
+            type: "message_update",
+            message: partial,
+            assistantMessageEvent: {
+              type: "text_delta",
+              contentIndex: 1,
+              delta: "Partial Pi answer",
+              partial,
+            },
+          });
+        }
+      },
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "Hello", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    await provider.close();
+
+    const provider2 = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider2.start();
+
+    const restoredThread = await provider2.readSessionThread(created.thread.id, true);
+    assert.equal(restoredThread.status.type, "idle");
+    assert.equal(restoredThread.turns?.[0]?.status, "interrupted");
+
+    const restoredLog = await provider2.readSessionLog(restoredThread);
+    assert.equal(restoredLog.messages.length, 2);
+    const assistant = restoredLog.messages.at(-1);
+    const thinking = assistant?.content.find(
+      (block): block is { type: "thinking"; thinking: string } =>
+        block.type === "thinking",
+    );
+    assert.equal(assistant?.role, "assistant");
+    assert.equal(assistant?.text, "Partial Pi answer");
+    assert.equal(thinking?.thinking, "Still reasoning...");
   });
 
   it("isolates multiple concurrent Pi sessions", async () => {
