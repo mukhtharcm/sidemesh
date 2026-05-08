@@ -234,6 +234,7 @@ export class PiAgentProvider
   }
 
   public async close(): Promise<void> {
+    this.activeTurns.clear();
     for (const session of this.sessions.values()) {
       this.unloadSession(session);
     }
@@ -1435,10 +1436,13 @@ export class PiAgentProvider
             ) + 1,
           pendingCompactionActivityId: null,
         };
+        normalizeRestoredPiSessionState(state);
         restoredSessions.set(state.thread.id, state);
       }
       this.archivedSessionIds.clear();
       this.sessions.clear();
+      this.loadedSessionIds.clear();
+      this.activeTurns.clear();
       for (const id of archivedSessionIds) {
         this.archivedSessionIds.add(id);
       }
@@ -2140,6 +2144,31 @@ function mergeThreadWithSummary(
     status: preferState ? { ...state.thread.status } : { ...base.status },
     turns: includeTurns ? state.turns.map(cloneTurn) : undefined,
   };
+}
+
+function normalizeRestoredPiSessionState(state: PiSessionState): void {
+  const restoredAt = state.thread.updatedAt;
+  const hadActiveTurn = state.turns.some((turn) => {
+    if (!isActivePiTurnStatus(turn.status)) {
+      return false;
+    }
+    turn.status = "interrupted";
+    turn.completedAt ??= restoredAt;
+    return true;
+  });
+  if (hadActiveTurn || isActivePiThreadStatus(state.thread.status)) {
+    state.thread.status = { type: "idle" };
+    state.runtime = runtimeWithTurnId(state.runtime, null);
+  }
+}
+
+function isActivePiTurnStatus(status: string | null | undefined): boolean {
+  return status === "in_progress" || status === "inProgress";
+}
+
+function isActivePiThreadStatus(status: ThreadRecord["status"] | null | undefined): boolean {
+  const type = status?.type;
+  return type === "running" || type === "active";
 }
 
 function buildThreadFromSummary(

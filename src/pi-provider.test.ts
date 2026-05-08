@@ -1379,6 +1379,11 @@ describe("PiAgentProvider", () => {
     const threads = await provider2.listSessionThreads({ limit: 10, archived: false });
     assert.equal(threads.length, 1);
     assert.equal(threads[0]?.id, created.thread.id);
+    assert.equal(threads[0]?.status.type, "idle");
+    const restoredThread = await provider2.readSessionThread(created.thread.id, true);
+    assert.equal(restoredThread.turns?.[0]?.status, "interrupted");
+    const restoredRuntime = await provider2.readSessionRuntime(restoredThread);
+    assert.equal(restoredRuntime?.turnId ?? null, null);
   });
 
   it("isolates multiple concurrent Pi sessions", async () => {
