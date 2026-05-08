@@ -909,6 +909,62 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("restores partial Copilot assistant output after restart", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-partial-restart-test-"),
+    );
+    try {
+      const stateDir = nodePath.join(dir, "state");
+      const provider = new CopilotAgentProvider({
+        stateDir,
+        sdkClientFactory: fakeSdkFactory(new FakeCopilotSdkClient()),
+      });
+      await provider.start();
+
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "crash partial", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await settleProviderWrites();
+
+      const activeThread = await provider.readSessionThread(created.thread.id, true);
+      assert.equal(activeThread.status.type, "running");
+      assert.equal(activeThread.turns?.at(-1)?.status, "inProgress");
+
+      const restoredProvider = new CopilotAgentProvider({
+        stateDir,
+        sdkClientFactory: fakeSdkFactory(new FakeCopilotSdkClient()),
+      });
+      await restoredProvider.start();
+
+      const restoredThread = await restoredProvider.readSessionThread(
+        created.thread.id,
+        true,
+      );
+      assert.equal(restoredThread.status.type, "idle");
+      assert.equal(restoredThread.turns?.at(-1)?.status, "interrupted");
+
+      const restoredLog = await restoredProvider.readSessionLog(restoredThread);
+      assert.equal(restoredLog.messages.length, 2);
+      const assistant = restoredLog.messages.at(-1);
+      const reasoning = assistant?.content.find(
+        (block): block is { type: "thinking"; thinking: string } =>
+          block.type === "thinking",
+      );
+      assert.equal(assistant?.role, "assistant");
+      assert.equal(assistant?.text, "copilot says: crash partial");
+      assert.equal(reasoning?.type, "thinking");
+      assert.equal(
+        reasoning?.thinking,
+        "Thinking through the interrupted response...",
+      );
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes stale Copilot history activities and compaction on reload", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-history-restart-state-test-"),
@@ -1893,6 +1949,27 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
             : "";
       const text =
         `${this.resumed ? "resumed" : "copilot says"}: ${options.prompt}${suffix}`;
+      if (options.prompt.includes("crash partial")) {
+        this.emit(
+          event("assistant.reasoning_delta", {
+            reasoningId: "reasoning-interrupted",
+            deltaContent: "Thinking through the interrupted response...",
+          }),
+        );
+        this.emit(
+          event("assistant.message_delta", {
+            messageId,
+            deltaContent: text.slice(0, 8),
+          }),
+        );
+        this.emit(
+          event("assistant.message_delta", {
+            messageId,
+            deltaContent: text.slice(8),
+          }),
+        );
+        return;
+      }
       this.emit(
         event("assistant.message_delta", {
           messageId,
