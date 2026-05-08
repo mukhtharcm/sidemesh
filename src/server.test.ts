@@ -1458,6 +1458,218 @@ describe("session live rich events", () => {
     });
   });
 
+  it("includes the latest plan update in log responses and refreshes cache hits", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const sessionId = created.thread.id;
+      const logPath = `/api/sessions/${encodeURIComponent(sessionId)}/log`;
+
+      const initialLog = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: logPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(initialLog.statusCode, 200);
+      assert.equal((initialLog.body as any).latestPlanUpdate, null);
+
+      provider.emit("liveEvent", {
+        type: "plan_updated",
+        sessionId,
+        turnId: "turn-1",
+        explanation: "First plan.",
+        plan: [{ step: "Inspect the daemon path", status: "completed" }],
+      });
+
+      const firstPlanLog = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: logPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(firstPlanLog.statusCode, 200);
+      assert.equal(
+        (firstPlanLog.body as any).latestPlanUpdate.explanation,
+        "First plan.",
+      );
+      assert.equal(
+        (firstPlanLog.body as any).latestPlanUpdate.plan[0].step,
+        "Inspect the daemon path",
+      );
+
+      provider.emit("liveEvent", {
+        type: "plan_updated",
+        sessionId,
+        turnId: "turn-2",
+        explanation: "Second plan.",
+        plan: [{ step: "Return the freshest plan", status: "in_progress" }],
+      });
+
+      const secondPlanLog = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: logPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(secondPlanLog.statusCode, 200);
+      assert.equal(
+        (secondPlanLog.body as any).latestPlanUpdate.turnId,
+        "turn-2",
+      );
+      assert.equal(
+        (secondPlanLog.body as any).latestPlanUpdate.plan[0].step,
+        "Return the freshest plan",
+      );
+    });
+  });
+
+  it("replays the latest missed plan update through the events delta route", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const sessionId = created.thread.id;
+
+      provider.emit("liveEvent", {
+        type: "plan_updated",
+        sessionId,
+        turnId: "turn-1",
+        explanation: "Catch up on reconnect.",
+        plan: [{ step: "Replay the latest plan", status: "in_progress" }],
+      });
+
+      const delta = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=-1`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(delta.statusCode, 200);
+      assert.equal(
+        (delta.body as any).latestPlanUpdate.plan[0].step,
+        "Replay the latest plan",
+      );
+      const replayedSeq = (delta.body as any).latestPlanUpdate.seq as number;
+      assert.equal(typeof replayedSeq, "number");
+
+      const upToDate = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=${replayedSeq}`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(upToDate.statusCode, 200);
+      assert.equal((upToDate.body as any).latestPlanUpdate, null);
+    });
+  });
+
+  it("restores the latest plan update and replay cursor from persisted daemon state after restart", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    const config = makeConfig(stateDir);
+    let firstServer: RunningServer | null = null;
+    let secondServer: RunningServer | null = null;
+    try {
+      firstServer = await startServer(config, runtime);
+      const created = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const sessionId = created.thread.id;
+
+      provider.emit("liveEvent", {
+        type: "plan_updated",
+        sessionId,
+        turnId: "turn-1",
+        explanation: "Persist this plan.",
+        plan: [{ step: "Reload after restart", status: "completed" }],
+      });
+
+      await firstServer.close();
+      firstServer = null;
+
+      secondServer = await startServer(config, runtime);
+      const restored = await request({
+        hostname: "127.0.0.1",
+        port: secondServer.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(restored.statusCode, 200);
+      assert.equal(
+        (restored.body as any).latestPlanUpdate.explanation,
+        "Persist this plan.",
+      );
+      assert.equal(
+        (restored.body as any).latestPlanUpdate.plan[0].step,
+        "Reload after restart",
+      );
+      assert.equal((restored.body as any).latestPlanUpdate.seq, 0);
+
+      const replay = await request({
+        hostname: "127.0.0.1",
+        port: secondServer.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=-1`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(replay.statusCode, 200);
+      assert.equal((replay.body as any).latestPlanUpdate.seq, 0);
+
+      const live = await openSessionLiveSocket(
+        secondServer.port,
+        config.token,
+        sessionId,
+      );
+      try {
+        const hello = await waitFor(
+          () => live.events.find((event) => event.type === "hello"),
+          "restart hello after persisted plan restore",
+        );
+        assert.equal(hello.nextSeq, 1);
+      } finally {
+        await closeSessionLiveSocket(live.socket);
+      }
+    } finally {
+      if (secondServer) {
+        await secondServer.close();
+      }
+      if (firstServer) {
+        await firstServer.close();
+      }
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("fans out provider warnings without a session id to every open session room", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const { runtime, provider } = makeSingleProviderRuntime({
