@@ -14,6 +14,10 @@ import {
   PI_PROVIDER_CAPABILITIES,
   PiAgentProvider,
 } from "./pi-provider.js";
+import {
+  OPENCODE_PROVIDER_CAPABILITIES,
+  OpenCodeAgentProvider,
+} from "./opencode-provider.js";
 import type {
   AgentProvider,
   AgentProviderCapabilities,
@@ -26,6 +30,7 @@ import type {
   CopilotProviderConfig,
   FakeCapabilityProfile,
   FakeProviderConfig,
+  OpenCodeProviderConfig,
   PiProviderConfig,
 } from "./types.js";
 
@@ -62,6 +67,7 @@ export interface AgentProviderDefinitionSummary {
 export const DEFAULT_AGENT_PROVIDER_KIND: AgentProviderKind = "codex";
 const CODEX_DEFAULT_COMMAND = "codex";
 const PI_DEFAULT_COMMAND = "sdk";
+const OPENCODE_DEFAULT_COMMAND = "opencode";
 const FAKE_DEFAULT_COMMAND = "builtin";
 const COPILOT_DEFAULT_COMMAND = "copilot";
 
@@ -321,10 +327,68 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
   },
 };
 
+const OPENCODE_PROVIDER_DEFINITION: AgentProviderDefinition = {
+  kind: "opencode",
+  displayName: "OpenCode",
+  setupAudience: "dev",
+  defaultCommand: OPENCODE_DEFAULT_COMMAND,
+  capabilities: OPENCODE_PROVIDER_CAPABILITIES,
+  commandEnvironmentVariables: [
+    "SIDEMESH_OPENCODE_BIN",
+    "SIDEMESH_PROVIDER_COMMAND",
+    "SIDEMESH_OPENCODE_STATE_DIR",
+  ],
+  supportedApprovalPolicies: [],
+
+  create(config) {
+    const opencode = expectOpenCodeProviderConfig(config);
+    return new OpenCodeAgentProvider({
+      bin: opencode.bin,
+      stateDir: opencode.stateDir,
+    });
+  },
+
+  loadConfig(env) {
+    return {
+      kind: "opencode",
+      bin:
+        env.SIDEMESH_OPENCODE_BIN?.trim() ||
+        env.SIDEMESH_PROVIDER_COMMAND?.trim() ||
+        OPENCODE_DEFAULT_COMMAND,
+      stateDir: env.SIDEMESH_OPENCODE_STATE_DIR?.trim() || null,
+    };
+  },
+
+  resolveConfig(env, base) {
+    const opencode = base?.kind === "opencode" ? base : null;
+    return {
+      kind: "opencode",
+      bin:
+        env.SIDEMESH_OPENCODE_BIN?.trim() ||
+        env.SIDEMESH_PROVIDER_COMMAND?.trim() ||
+        opencode?.bin ||
+        OPENCODE_DEFAULT_COMMAND,
+      stateDir:
+        env.SIDEMESH_OPENCODE_STATE_DIR === undefined
+          ? opencode?.stateDir ?? null
+          : env.SIDEMESH_OPENCODE_STATE_DIR?.trim() || null,
+    };
+  },
+
+  summarizeConfig(config) {
+    const opencode = expectOpenCodeProviderConfig(config);
+    return {
+      kind: opencode.kind,
+      command: opencode.bin,
+    };
+  },
+};
+
 const AGENT_PROVIDER_DEFINITIONS = [
   CODEX_PROVIDER_DEFINITION,
   PI_PROVIDER_DEFINITION,
   FAKE_PROVIDER_DEFINITION,
+  OPENCODE_PROVIDER_DEFINITION,
   COPILOT_PROVIDER_DEFINITION,
 ] as const;
 
@@ -440,6 +504,15 @@ function expectCopilotProviderConfig(
 ): CopilotProviderConfig {
   if (config.kind !== "copilot") {
     throw new Error(`Expected Copilot provider config, got "${config.kind}"`);
+  }
+  return config;
+}
+
+function expectOpenCodeProviderConfig(
+  config: AgentProviderConfig,
+): OpenCodeProviderConfig {
+  if (config.kind !== "opencode") {
+    throw new Error(`Expected OpenCode provider config, got "${config.kind}"`);
   }
   return config;
 }

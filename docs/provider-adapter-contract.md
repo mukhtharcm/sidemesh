@@ -1,8 +1,9 @@
 # Provider Adapter Contract
 
-Sidemesh currently ships with a production Codex adapter, a text-first GitHub
-Copilot CLI adapter, and an in-process fake test adapter. The daemon is
-structured so future agents can be added behind the same host/session API.
+Sidemesh currently ships with a production Codex adapter, a supported Pi
+adapter, dev-only OpenCode and GitHub Copilot adapters, and an in-process fake
+test adapter. The daemon is structured so future agents can be added behind the
+same host/session API.
 
 ## Entry Points
 

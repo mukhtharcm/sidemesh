@@ -1,10 +1,16 @@
-export type AgentProviderKind = "codex" | "pi" | "fake" | "copilot";
+export type AgentProviderKind =
+  | "codex"
+  | "pi"
+  | "fake"
+  | "copilot"
+  | "opencode";
 
 export type AgentProviderConfig =
   | CodexProviderConfig
   | PiProviderConfig
   | FakeProviderConfig
-  | CopilotProviderConfig;
+  | CopilotProviderConfig
+  | OpenCodeProviderConfig;
 
 export interface CodexProviderConfig {
   kind: "codex";
@@ -31,6 +37,12 @@ export interface CopilotProviderConfig {
   stateDir: string | null;
   allowAll: boolean;
   configuredModel: string | null;
+}
+
+export interface OpenCodeProviderConfig {
+  kind: "opencode";
+  bin: string;
+  stateDir: string | null;
 }
 
 export type FakeCapabilityProfile =

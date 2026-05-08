@@ -208,6 +208,40 @@ describe("loadConfig", () => {
     assert.equal(config.provider.stateDir, "/tmp/pi-state-old");
   });
 
+  it("loads OpenCode provider config from env and persisted values", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        defaultProviderKind: "opencode",
+        providers: [
+          {
+            kind: "opencode",
+            bin: "opencode-old",
+            stateDir: "/tmp/opencode-state-old",
+          },
+        ],
+      }),
+    );
+
+    const config = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_PROVIDER: "opencode",
+        SIDEMESH_OPENCODE_BIN: "opencode-beta",
+      },
+    });
+
+    assert.equal(config.defaultProviderKind, "opencode");
+    assert.equal(config.provider.kind, "opencode");
+    if (config.provider.kind !== "opencode") {
+      throw new Error("expected opencode provider");
+    }
+    assert.equal(config.provider.bin, "opencode-beta");
+    assert.equal(config.provider.stateDir, "/tmp/opencode-state-old");
+  });
+
   it("loads terminal settings from persisted config and env overrides", async () => {
     await writeFile(
       configPath,

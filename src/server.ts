@@ -387,12 +387,120 @@ export async function startServer(
     return `${sessionId}:${clientMessageId}`;
   }
 
+  function sessionInputDedupeKeyMatchesSession(
+    key: string,
+    sessionId: string,
+  ): boolean {
+    return key.startsWith(`${sessionId}:`);
+  }
+
+  async function clearInterruptedSessionInputDedupe(
+    interruptedTurnIds: Map<string, string>,
+  ): Promise<void> {
+    if (interruptedTurnIds.size === 0) {
+      return;
+    }
+    const keysToDelete: string[] = [];
+    for (const [key, entry] of sessionInputDedupe) {
+      for (const [sessionId, turnId] of interruptedTurnIds) {
+        if (!sessionInputDedupeKeyMatchesSession(key, sessionId)) {
+          continue;
+        }
+        if (entry.promise || entry.receipt?.turnId === turnId) {
+          keysToDelete.push(key);
+        }
+        break;
+      }
+    }
+    if (keysToDelete.length === 0) {
+      return;
+    }
+    for (const key of keysToDelete) {
+      sessionInputDedupe.delete(key);
+    }
+    await sessionInputDedupeStore.deleteMany(keysToDelete);
+  }
+
   function providerEntryForKind(kind: string | null | undefined) {
     return providerRuntime.providerForKind(kind);
   }
 
   function providerEntryForSessionId(sessionId: string) {
     return providerRuntime.providerForSessionId(sessionId);
+  }
+
+  async function clearProviderScopedRuntimeState(kind: string): Promise<void> {
+    const sessionIds = new Set<string>();
+    const sessionIdsNeedingIdleBroadcast = new Set<string>();
+    const interruptedTurnIds = new Map<string, string>();
+    const isProviderSession = (sessionId: string): boolean =>
+      providerEntryForSessionId(sessionId)?.kind === kind;
+
+    for (const sessionId of activeTurns.keys()) {
+      if (isProviderSession(sessionId)) {
+        sessionIds.add(sessionId);
+        sessionIdsNeedingIdleBroadcast.add(sessionId);
+        const activeTurn = activeTurns.get(sessionId);
+        if (activeTurn?.turnId) {
+          interruptedTurnIds.set(sessionId, activeTurn.turnId);
+        }
+      }
+    }
+    for (const action of pendingActions.values()) {
+      if (isProviderSession(action.sessionId)) {
+        sessionIds.add(action.sessionId);
+        sessionIdsNeedingIdleBroadcast.add(action.sessionId);
+      }
+    }
+    for (const sessionId of liveActivities.keys()) {
+      if (isProviderSession(sessionId)) {
+        sessionIds.add(sessionId);
+      }
+    }
+    for (const sessionId of runtimeCache.keys()) {
+      if (isProviderSession(sessionId)) {
+        sessionIds.add(sessionId);
+      }
+    }
+    for (const key of logCache.keys()) {
+      const delimiterIndex = key.indexOf("::");
+      const sessionId = delimiterIndex >= 0 ? key.slice(0, delimiterIndex) : key;
+      if (isProviderSession(sessionId)) {
+        sessionIds.add(sessionId);
+      }
+    }
+
+    await clearInterruptedSessionInputDedupe(interruptedTurnIds);
+    recentSessionsCache.clear();
+    for (const sessionId of sessionIds) {
+      const interruptedTurnId = interruptedTurnIds.get(sessionId);
+      if (interruptedTurnId) {
+        broadcastLive(sessionId, {
+          type: "turn_completed",
+          sessionId,
+          turnId: interruptedTurnId,
+          status: "interrupted",
+        });
+      }
+      activeTurns.delete(sessionId);
+      liveActivities.delete(sessionId);
+      runtimeCache.delete(sessionId);
+      clearSessionLogCache(logCache, sessionId);
+      clearActionsForSession(
+        pendingActions,
+        sessionId,
+        broadcastLive,
+        broadcastApprovalLive,
+      );
+      if (sessionIdsNeedingIdleBroadcast.has(sessionId)) {
+        broadcastLive(sessionId, {
+          type: "thread_status_changed",
+          sessionId,
+          status: "idle",
+        });
+      }
+      scheduleRecentSessionUpsert(sessionId, 0);
+    }
   }
 
   async function getSessionCwd(sessionId: string): Promise<string | null> {
@@ -1085,6 +1193,7 @@ export async function startServer(
         return;
       }
       await selectedProvider.provider.restart();
+      await clearProviderScopedRuntimeState(kind);
       response.json({ ok: true, kind });
     }),
   );

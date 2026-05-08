@@ -64,6 +64,22 @@ export class SessionInputDedupeStore {
     await write;
   }
 
+  async deleteMany(keys: Iterable<string>): Promise<void> {
+    const uniqueKeys = [...new Set(keys)];
+    if (uniqueKeys.length === 0) {
+      return;
+    }
+    const write = this.writeQueue.then(async () => {
+      for (const key of uniqueKeys) {
+        this.entriesByKey.delete(key);
+      }
+      this.prune(Date.now());
+      await this.flush();
+    });
+    this.writeQueue = write.catch(() => undefined);
+    await write;
+  }
+
   private async load(): Promise<void> {
     let raw: string;
     try {

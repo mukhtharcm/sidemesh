@@ -19,6 +19,7 @@ Sidemesh currently supports these provider adapters:
 | --- | --- | --- |
 | Codex | primary | default setup option |
 | Pi | supported | public setup option |
+| OpenCode | dev | available through `sidemesh setup --dev` |
 | GitHub Copilot CLI | dev | available through `sidemesh setup --dev` |
 | Fake test provider | dev | deterministic contract-testing adapter |
 
