@@ -703,6 +703,7 @@ export class PiAgentProvider
     state.thread.path = summary.path;
     state.thread.updatedAt = summary.updatedAt;
     state.archived = this.isArchived(threadId);
+    normalizeInactivePiSessionState(state);
     this.sessions.set(threadId, state);
     await this.persistSoon();
     return state;
@@ -1436,7 +1437,7 @@ export class PiAgentProvider
             ) + 1,
           pendingCompactionActivityId: null,
         };
-        normalizeRestoredPiSessionState(state);
+        normalizeInactivePiSessionState(state);
         restoredSessions.set(state.thread.id, state);
       }
       this.archivedSessionIds.clear();
@@ -2146,7 +2147,7 @@ function mergeThreadWithSummary(
   };
 }
 
-function normalizeRestoredPiSessionState(state: PiSessionState): void {
+function normalizeInactivePiSessionState(state: PiSessionState): void {
   const restoredAt = state.thread.updatedAt;
   const hadActiveTurn = state.turns.some((turn) => {
     if (!isActivePiTurnStatus(turn.status)) {
@@ -2156,10 +2157,70 @@ function normalizeRestoredPiSessionState(state: PiSessionState): void {
     turn.completedAt ??= restoredAt;
     return true;
   });
-  if (hadActiveTurn || isActivePiThreadStatus(state.thread.status)) {
+  let hadActiveActivity = false;
+  state.activities = new Map(
+    [...state.activities.entries()].map(([id, activity]) => {
+      const normalized = normalizeInactivePiActivity(activity);
+      if (normalized.status !== activity.status) {
+        hadActiveActivity = true;
+      }
+      return [id, normalized];
+    }),
+  );
+  const hadRunningCompaction =
+    state.runtime?.telemetry?.compaction?.status === "running";
+  state.runtime = normalizeInactivePiRuntime(state.runtime, restoredAt);
+  if (
+    hadActiveTurn ||
+    hadActiveActivity ||
+    hadRunningCompaction ||
+    isActivePiThreadStatus(state.thread.status)
+  ) {
     state.thread.status = { type: "idle" };
     state.runtime = runtimeWithTurnId(state.runtime, null);
   }
+}
+
+function normalizeInactivePiActivity(activity: SessionActivity): SessionActivity {
+  if (activity.status !== "in_progress") {
+    return activity;
+  }
+  if (activity.type === "command") {
+    return {
+      ...activity,
+      status: "failed",
+      terminalStatus: null,
+    };
+  }
+  return {
+    ...activity,
+    status: "failed",
+  };
+}
+
+function normalizeInactivePiRuntime(
+  runtime: SessionRuntimeSummary | null,
+  restoredAt: number,
+): SessionRuntimeSummary | null {
+  if (runtime?.telemetry?.compaction?.status !== "running") {
+    return runtime;
+  }
+  const restoredAtMs = restoredAt * 1000;
+  return {
+    ...runtime,
+    telemetry: {
+      ...(runtime.telemetry ?? {}),
+      compaction: {
+        ...runtime.telemetry.compaction,
+        status: "failed",
+        completedAt: runtime.telemetry.compaction.completedAt ?? restoredAtMs,
+        updatedAt: restoredAtMs,
+        error:
+          runtime.telemetry.compaction.error ??
+          "Interrupted by provider restart.",
+      },
+    },
+  };
 }
 
 function isActivePiTurnStatus(status: string | null | undefined): boolean {

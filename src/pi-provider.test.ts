@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -1363,6 +1363,44 @@ describe("PiAgentProvider", () => {
     });
     await provider.close();
 
+    const statePath = nodePath.join(stateDir, "sessions.json");
+    const persisted = JSON.parse(await readFile(statePath, "utf8")) as {
+      sessions?: Array<Record<string, unknown>>;
+    };
+    const persistedSession = persisted.sessions?.[0];
+    assert.ok(persistedSession);
+    persistedSession.activities = [
+      {
+        id: "stale-tool",
+        type: "tool",
+        turnId: created.activeTurnId,
+        createdAt: 1_777_770_010_000,
+        seq: 99,
+        status: "in_progress",
+        toolName: "read",
+        title: "Read README",
+        args: { path: "README.md" },
+        output: "partial",
+        result: null,
+        isError: null,
+        semantic: null,
+      },
+    ];
+    persistedSession.runtime = {
+      ...(persistedSession.runtime as Record<string, unknown> | null ?? {}),
+      turnId: created.activeTurnId,
+      telemetry: {
+        ...((persistedSession.runtime as { telemetry?: Record<string, unknown> } | null)
+          ?.telemetry ?? {}),
+        compaction: {
+          status: "running",
+          startedAt: 1_777_770_011_000,
+          updatedAt: 1_777_770_011_000,
+        },
+      },
+    };
+    await writeFile(statePath, JSON.stringify(persisted, null, 2));
+
     // start a fresh provider instance pointing at the same state dir
     const provider2 = new PiAgentProvider({
       agentDir,
@@ -1382,8 +1420,11 @@ describe("PiAgentProvider", () => {
     assert.equal(threads[0]?.status.type, "idle");
     const restoredThread = await provider2.readSessionThread(created.thread.id, true);
     assert.equal(restoredThread.turns?.[0]?.status, "interrupted");
+    const restoredLog = await provider2.readSessionLog(restoredThread);
+    assert.equal(restoredLog.activities[0]?.status, "failed");
     const restoredRuntime = await provider2.readSessionRuntime(restoredThread);
     assert.equal(restoredRuntime?.turnId ?? null, null);
+    assert.equal(restoredRuntime?.telemetry?.compaction?.status, "failed");
   });
 
   it("isolates multiple concurrent Pi sessions", async () => {
