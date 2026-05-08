@@ -14,6 +14,10 @@ import {
   FakeAgentProvider,
 } from "./fake-provider.js";
 import {
+  OPENCODE_PROVIDER_CAPABILITIES,
+  OpenCodeAgentProvider,
+} from "./opencode-provider.js";
+import {
   PI_PROVIDER_CAPABILITIES,
   PiAgentProvider,
 } from "./pi-provider.js";
@@ -35,11 +39,13 @@ describe("provider registry", () => {
       "codex",
       "pi",
       "fake",
+      "opencode",
       "copilot",
     ]);
     assert.equal(isAgentProviderKind("codex"), true);
     assert.equal(isAgentProviderKind("pi"), true);
     assert.equal(isAgentProviderKind("fake"), true);
+    assert.equal(isAgentProviderKind("opencode"), true);
     assert.equal(isAgentProviderKind("copilot"), true);
   });
 
@@ -95,6 +101,19 @@ describe("provider registry", () => {
         setupAudience: "dev",
       },
       {
+        kind: "opencode",
+        displayName: "OpenCode",
+        defaultCommand: "opencode",
+        commandEnvironmentVariables: [
+          "SIDEMESH_OPENCODE_BIN",
+          "SIDEMESH_PROVIDER_COMMAND",
+          "SIDEMESH_OPENCODE_STATE_DIR",
+        ],
+        supportedApprovalPolicies: [],
+        capabilities: OPENCODE_PROVIDER_CAPABILITIES,
+        setupAudience: "dev",
+      },
+      {
         kind: "copilot",
         displayName: "GitHub Copilot",
         defaultCommand: "copilot",
@@ -131,7 +150,7 @@ describe("provider registry", () => {
       listSetupAgentProviderDefinitionSummaries({
         includeDev: true,
       }).map((summary) => summary.kind),
-      ["codex", "pi", "fake", "copilot"],
+      ["codex", "pi", "fake", "opencode", "copilot"],
     );
   });
 
@@ -233,6 +252,36 @@ describe("provider registry", () => {
     assert.equal(provider.capabilities.runtimeControls.model, true);
     assert.equal(provider.capabilities.runtimeControls.reasoningEffort, true);
     assert.equal(provider.capabilities.interaction.userInput, false);
+  });
+
+  it("loads and constructs the OpenCode provider", () => {
+    const config = loadAgentProviderConfig("opencode", {
+      SIDEMESH_OPENCODE_BIN: "opencode-beta",
+      SIDEMESH_PROVIDER_COMMAND: "ignored",
+      SIDEMESH_OPENCODE_STATE_DIR: "/tmp/sidemesh-opencode",
+    });
+
+    assert.deepEqual(config, {
+      kind: "opencode",
+      bin: "opencode-beta",
+      stateDir: "/tmp/sidemesh-opencode",
+    });
+    assert.deepEqual(summarizeAgentProviderConfig(config), {
+      kind: "opencode",
+      command: "opencode-beta",
+    });
+
+    const provider = createAgentProviderFromConfig(config);
+    assert.ok(provider instanceof OpenCodeAgentProvider);
+    assert.equal(provider.kind, "opencode");
+    assert.equal(provider.displayName, "OpenCode");
+    assert.equal(provider.capabilities.input.text, true);
+    assert.equal(provider.capabilities.input.imageUrl, false);
+    assert.equal(provider.capabilities.configuration.models, true);
+    assert.equal(provider.capabilities.configuration.skills, true);
+    assert.equal(provider.capabilities.runtimeControls.model, true);
+    assert.equal(provider.capabilities.runtimeControls.mode, true);
+    assert.equal(provider.capabilities.interaction.userInput, true);
   });
 
   it("rejects unknown fake capability profiles", () => {
