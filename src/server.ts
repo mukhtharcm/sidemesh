@@ -387,6 +387,40 @@ export async function startServer(
     return `${sessionId}:${clientMessageId}`;
   }
 
+  function sessionInputDedupeKeyMatchesSession(
+    key: string,
+    sessionId: string,
+  ): boolean {
+    return key.startsWith(`${sessionId}:`);
+  }
+
+  async function clearInterruptedSessionInputDedupe(
+    interruptedTurnIds: Map<string, string>,
+  ): Promise<void> {
+    if (interruptedTurnIds.size === 0) {
+      return;
+    }
+    const keysToDelete: string[] = [];
+    for (const [key, entry] of sessionInputDedupe) {
+      for (const [sessionId, turnId] of interruptedTurnIds) {
+        if (!sessionInputDedupeKeyMatchesSession(key, sessionId)) {
+          continue;
+        }
+        if (entry.promise || entry.receipt?.turnId === turnId) {
+          keysToDelete.push(key);
+        }
+        break;
+      }
+    }
+    if (keysToDelete.length === 0) {
+      return;
+    }
+    for (const key of keysToDelete) {
+      sessionInputDedupe.delete(key);
+    }
+    await sessionInputDedupeStore.deleteMany(keysToDelete);
+  }
+
   function providerEntryForKind(kind: string | null | undefined) {
     return providerRuntime.providerForKind(kind);
   }
@@ -395,9 +429,10 @@ export async function startServer(
     return providerRuntime.providerForSessionId(sessionId);
   }
 
-  function clearProviderScopedRuntimeState(kind: string): void {
+  async function clearProviderScopedRuntimeState(kind: string): Promise<void> {
     const sessionIds = new Set<string>();
     const sessionIdsNeedingIdleBroadcast = new Set<string>();
+    const interruptedTurnIds = new Map<string, string>();
     const isProviderSession = (sessionId: string): boolean =>
       providerEntryForSessionId(sessionId)?.kind === kind;
 
@@ -405,6 +440,10 @@ export async function startServer(
       if (isProviderSession(sessionId)) {
         sessionIds.add(sessionId);
         sessionIdsNeedingIdleBroadcast.add(sessionId);
+        const activeTurn = activeTurns.get(sessionId);
+        if (activeTurn?.turnId) {
+          interruptedTurnIds.set(sessionId, activeTurn.turnId);
+        }
       }
     }
     for (const action of pendingActions.values()) {
@@ -431,8 +470,18 @@ export async function startServer(
       }
     }
 
+    await clearInterruptedSessionInputDedupe(interruptedTurnIds);
     recentSessionsCache.clear();
     for (const sessionId of sessionIds) {
+      const interruptedTurnId = interruptedTurnIds.get(sessionId);
+      if (interruptedTurnId) {
+        broadcastLive(sessionId, {
+          type: "turn_completed",
+          sessionId,
+          turnId: interruptedTurnId,
+          status: "interrupted",
+        });
+      }
       activeTurns.delete(sessionId);
       liveActivities.delete(sessionId);
       runtimeCache.delete(sessionId);
@@ -1144,7 +1193,7 @@ export async function startServer(
         return;
       }
       await selectedProvider.provider.restart();
-      clearProviderScopedRuntimeState(kind);
+      await clearProviderScopedRuntimeState(kind);
       response.json({ ok: true, kind });
     }),
   );

@@ -30,6 +30,8 @@ import type {
   AgentProviderCapabilities,
   AgentSessionListOptions,
   AgentSessionLogOptions,
+  AgentSubmitInputRequest,
+  AgentSubmitInputResult,
 } from "./agent-provider.js";
 import type { SessionLogSnapshot, ThreadRecord } from "./types.js";
 
@@ -267,11 +269,17 @@ class RestartableFakeProvider
   public readonly capabilities = RESTARTABLE_FAKE_CAPABILITIES;
 
   private readonly sessionId = "fake-restart-session";
-  private readonly turnId = "fake-restart-turn";
+  private readonly initialTurnId = "fake-restart-turn";
   private readonly actionId = "fake-restart-action";
   private cwd = "/tmp";
   private created = false;
   private restarted = false;
+  private currentTurnId: string | null = null;
+  private submitCount = 0;
+
+  public get submittedInputs(): number {
+    return this.submitCount;
+  }
 
   public async start(): Promise<void> {}
 
@@ -279,6 +287,7 @@ class RestartableFakeProvider
 
   public async restart(): Promise<void> {
     this.restarted = true;
+    this.currentTurnId = null;
   }
 
   public async getVersion(): Promise<string> {
@@ -291,6 +300,7 @@ class RestartableFakeProvider
     this.created = true;
     this.restarted = false;
     this.cwd = request.cwd;
+    this.currentTurnId = this.initialTurnId;
     const action: AgentPendingAction = {
       id: this.actionId,
       sessionId: this.sessionId,
@@ -317,8 +327,28 @@ class RestartableFakeProvider
     });
     return {
       thread: this.buildThread(false),
-      activeTurnId: this.turnId,
+      activeTurnId: this.currentTurnId,
       runtime: null,
+    };
+  }
+
+  public async submitInput(
+    request: AgentSubmitInputRequest,
+  ): Promise<AgentSubmitInputResult> {
+    assert.equal(request.sessionId, this.sessionId);
+    this.submitCount += 1;
+    this.restarted = false;
+    if (request.activeTurnId) {
+      this.currentTurnId = request.activeTurnId;
+      return {
+        mode: "steer",
+        turnId: request.activeTurnId,
+      };
+    }
+    this.currentTurnId = `fake-restart-turn-${this.submitCount}`;
+    return {
+      mode: "turn",
+      turnId: this.currentTurnId,
     };
   }
 
@@ -379,11 +409,11 @@ class RestartableFakeProvider
         : { type: "running", activeFlags: ["inProgress"] },
       ...(includeTurns
         ? {
-            turns: this.restarted
+            turns: this.restarted || !this.currentTurnId
               ? []
               : [
                   {
-                    id: this.turnId,
+                    id: this.currentTurnId,
                     status: "in_progress",
                     startedAt: 1,
                     completedAt: null,
@@ -636,6 +666,15 @@ describe("POST /api/admin/provider/:kind/restart", () => {
             ),
           "restart action resolved live event",
         );
+        const turnCompleted = await waitFor(
+          () =>
+            sessionLive.events.find(
+              (event) =>
+                event.type === "turn_completed" &&
+                event.turnId === "fake-restart-turn",
+            ),
+          "restart turn completed live event",
+        );
         const idleStatus = await waitFor(
           () =>
             sessionLive.events.find(
@@ -644,7 +683,9 @@ describe("POST /api/admin/provider/:kind/restart", () => {
             ),
           "restart idle status live event",
         );
-        assert.equal(actionResolved.seq, seeded.seq + 1);
+        assert.equal(turnCompleted.status, "interrupted");
+        assert.equal(turnCompleted.seq, seeded.seq + 1);
+        assert.equal(actionResolved.seq, turnCompleted.seq + 1);
         assert.equal(idleStatus.seq, actionResolved.seq + 1);
       } finally {
         await closeSessionLiveSocket(sessionLive.socket);
@@ -670,6 +711,93 @@ describe("POST /api/admin/provider/:kind/restart", () => {
       });
       assert.equal(afterActions.statusCode, 200);
       assert.deepEqual(afterActions.body, []);
+    });
+  });
+
+  it("clears interrupted input dedupe receipts after provider restart", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd: "/tmp/restart-test",
+          prompt: "start",
+        }),
+      });
+      assert.equal(created.statusCode, 201);
+      const sessionId = (created.body as any).session.id as string;
+
+      const firstSend = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          text: "retry me",
+          clientMessageId: "local-1",
+        }),
+      });
+      assert.equal(firstSend.statusCode, 200);
+      assert.equal((firstSend.body as any).replayed, false);
+      assert.equal(provider.submittedInputs, 1);
+
+      const duplicateBeforeRestart = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          text: "retry me",
+          clientMessageId: "local-1",
+        }),
+      });
+      assert.equal(duplicateBeforeRestart.statusCode, 200);
+      assert.equal((duplicateBeforeRestart.body as any).replayed, true);
+      assert.equal(provider.submittedInputs, 1);
+
+      const restart = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/admin/provider/fake/restart",
+        method: "POST",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(restart.statusCode, 200);
+
+      const retryAfterRestart = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          text: "retry me",
+          clientMessageId: "local-1",
+        }),
+      });
+      assert.equal(retryAfterRestart.statusCode, 200);
+      assert.equal((retryAfterRestart.body as any).replayed, false);
+      assert.equal(provider.submittedInputs, 2);
     });
   });
 });
