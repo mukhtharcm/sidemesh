@@ -264,7 +264,7 @@
 
   .hero-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+    grid-template-columns: minmax(0, 0.95fr) minmax(420px, 0.8fr);
     gap: 56px;
     align-items: center;
   }
@@ -502,66 +502,64 @@
     line-height: 1.65;
   }
 
-  /* ── Hero phone frame ── */
-  .hero-phone {
-    width: min(300px, 100%);
-    margin: 0 auto;
-    max-height: 560px;
-    border-radius: 44px;
-    border: 1px solid var(--border-strong);
-    background: #060810;
-    overflow: hidden;
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.04),
-      0 40px 100px rgba(0, 0, 0, 0.7),
-      0 12px 32px rgba(0, 0, 0, 0.4);
-  }
-
-  .hero-phone img {
-    width: 100%;
+  /* ── Marketing visuals ── */
+  .hero-visual {
     display: block;
-  }
-
-  /* ── Screenshot gallery ── */
-  .gallery-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 20px;
-    align-items: start;
-  }
-
-  .gallery-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 14px;
-  }
-
-  .gallery-frame {
-    width: 100%;
-    max-height: 480px;
-    border-radius: 28px;
-    border: 1px solid var(--border-strong);
-    background: #060810;
     overflow: hidden;
+    border: 1px solid var(--border-strong);
+    border-radius: 30px;
+    background: #080a0f;
     box-shadow:
       0 0 0 1px rgba(255, 255, 255, 0.03),
-      0 24px 60px rgba(0, 0, 0, 0.55);
+      0 38px 100px rgba(0, 0, 0, 0.55);
   }
 
-  .gallery-frame img {
-    width: 100%;
+  .hero-visual img,
+  .showcase-media img {
     display: block;
+    width: 100%;
+    height: auto;
   }
 
-  .gallery-caption {
-    font-family: "Geist Mono", monospace;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-3);
-    text-align: center;
+  .showcase-list {
+    display: grid;
+    gap: 24px;
+  }
+
+  .showcase-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.75fr);
+    gap: 32px;
+    align-items: center;
+    padding: 26px;
+    border: 1px solid var(--border);
+    border-radius: 30px;
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .showcase-row.reverse {
+    grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.05fr);
+  }
+
+  .showcase-media {
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    background: #080a0f;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.36);
+  }
+
+  .showcase-copy h3 {
+    margin: 10px 0 12px;
+    font-size: clamp(1.7rem, 3vw, 2.6rem);
+    line-height: 1;
+    letter-spacing: -0.055em;
+    text-wrap: balance;
+  }
+
+  .showcase-copy p {
+    color: var(--text-2);
+    line-height: 1.7;
   }
 
   /* ── Install section ── */
@@ -848,9 +846,8 @@
 
   /* ── Responsive ── */
   @media (max-width: 980px) {
-    .hero-phone {
-      width: min(260px, 100%);
-      max-height: 480px;
+    .hero-visual {
+      width: min(100%, 640px);
     }
 
     .hero-grid {
@@ -868,8 +865,14 @@
     }
 
     .security-inner,
-    .closing-card {
+    .closing-card,
+    .showcase-row,
+    .showcase-row.reverse {
       grid-template-columns: 1fr;
+    }
+
+    .showcase-row.reverse .showcase-copy {
+      order: -1;
     }
 
     .closing-actions {
@@ -884,18 +887,13 @@
   }
 
   @media (max-width: 680px) {
-    .hero-phone {
-      display: none;
-    }
-
-    .gallery-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
-    }
-
-    .gallery-frame {
+    .hero-visual,
+    .showcase-media {
       border-radius: 20px;
-      max-height: 320px;
+    }
+
+    .showcase-row {
+      padding: 16px;
     }
 
     :root {
@@ -1052,12 +1050,12 @@
           </div>
         </div>
 
-        <div class="hero-phone">
+        <div class="hero-visual">
           <img
-            src="/assets/screenshots/session-actions.png"
-            alt="Sidemesh session actions: terminal, port forwarding, resources, transcript search, and more."
-            width="640"
-            height="1391"
+            src="/assets/marketing/hero-visual.png"
+            alt="Sidemesh hero visual showing two iPhones connected through a private network command map."
+            width="1536"
+            height="960"
             loading="eager"
             decoding="async"
           />
@@ -1157,49 +1155,46 @@
       <div class="wrap">
         <div class="section-lead">
           <span class="eyebrow">In the app</span>
-          <h2>See what you're installing.</h2>
-          <p>Real screenshots from the current iOS build. Terminal access, file browsing, and live session view. Dark by default.</p>
+          <h2>Mobile first, without hiding the host.</h2>
+          <p>These slots are wired for final marketing creatives. Replace the placeholder files with generated product art when ready.</p>
         </div>
-        <div class="gallery-grid">
-          <div class="gallery-item">
-            <div class="gallery-frame">
+
+        <div class="showcase-list">
+          <article class="showcase-row">
+            <div class="showcase-media">
               <img
-                src="/assets/screenshots/terminal.png"
-                alt="Sidemesh live terminal showing a vite dev server running on the host."
-                width="640"
-                height="1391"
+                src="/assets/marketing/feature-host-access.png"
+                alt="Sidemesh feature visual showing terminal access and file browsing on iPhone."
+                width="1200"
+                height="900"
                 loading="lazy"
                 decoding="async"
               />
             </div>
-            <span class="gallery-caption">Terminal access</span>
-          </div>
-          <div class="gallery-item">
-            <div class="gallery-frame">
+            <div class="showcase-copy">
+              <span class="eyebrow">Host access</span>
+              <h3>Use the machine without opening the laptop.</h3>
+              <p>Attach a terminal, inspect files, and understand what changed while the agent keeps running on the host you already trust.</p>
+            </div>
+          </article>
+
+          <article class="showcase-row reverse">
+            <div class="showcase-copy">
+              <span class="eyebrow">Session control</span>
+              <h3>Unblock work from the phone in your hand.</h3>
+              <p>Open the current session, review the transcript, jump into actions, search, ports, resources, git details, or a terminal exactly when the work needs you.</p>
+            </div>
+            <div class="showcase-media">
               <img
-                src="/assets/screenshots/file-browser.png"
-                alt="Sidemesh file browser showing astro.config.mjs with syntax highlighting."
-                width="640"
-                height="1391"
+                src="/assets/marketing/feature-session-control.png"
+                alt="Sidemesh feature visual showing session transcript and session actions on iPhone."
+                width="1200"
+                height="900"
                 loading="lazy"
                 decoding="async"
               />
             </div>
-            <span class="gallery-caption">File browser</span>
-          </div>
-          <div class="gallery-item">
-            <div class="gallery-frame">
-              <img
-                src="/assets/screenshots/session.png"
-                alt="Sidemesh session view showing a live agent transcript."
-                width="640"
-                height="1391"
-                loading="lazy"
-                decoding="async"
-              />
-            </div>
-            <span class="gallery-caption">Session view</span>
-          </div>
+          </article>
         </div>
       </div>
     </section>
