@@ -592,6 +592,7 @@ class _SessionScreenState extends State<SessionScreen>
   int _messageLimit = _initialMessageLimit;
   int _activityLimit = _initialActivityLimit;
   bool _running = false;
+  bool _composerFocused = false;
   bool _loading = true;
   bool _loadingOlderHistory = false;
   bool _sending = false;
@@ -795,6 +796,7 @@ class _SessionScreenState extends State<SessionScreen>
     _policyStore.ensureLoaded();
     _readStore.ensureLoaded();
     _composerController.addListener(_handleComposerChanged);
+    _composerFocusNode.addListener(_handleComposerFocusChanged);
     _searchController.addListener(_handleSearchChanged);
     _session = widget.session;
     _applyInitialComposerSeed();
@@ -1207,6 +1209,7 @@ class _SessionScreenState extends State<SessionScreen>
     _sessionCachePersistTimer?.cancel();
     _pendingSendRetryTimer?.cancel();
     _composerController.removeListener(_handleComposerChanged);
+    _composerFocusNode.removeListener(_handleComposerFocusChanged);
     _searchController.removeListener(_handleSearchChanged);
     _pinsStore.removeListener(_handlePinsChanged);
     _sendOutbox.removeListener(_handleSendOutboxChanged);
@@ -1651,6 +1654,48 @@ class _SessionScreenState extends State<SessionScreen>
     if (nextFileQuery != null && !_loadingFileSearch) {
       unawaited(_loadFileSuggestions());
     }
+  }
+
+  /// Tracks composer focus changes → drives the animated pill border.
+  void _handleComposerFocusChanged() {
+    final focused = _composerFocusNode.hasFocus;
+    if (focused != _composerFocused) {
+      setState(() => _composerFocused = focused);
+    }
+  }
+
+  /// Inserts a `$` skill-trigger character at the current cursor and focuses
+  /// the composer.  Called by the mobile + button → context sheet.
+  void _addSkillTriggerToComposer() {
+    final text = _composerController.text;
+    final sel = _composerController.selection;
+    final offset = sel.isValid ? sel.end : text.length;
+    final needsSpace = offset > 0 && text[offset - 1] != ' ';
+    final insert = needsSpace ? r' $' : r'$';
+    final newText =
+        text.substring(0, offset) + insert + text.substring(offset);
+    _composerController.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: offset + insert.length),
+    );
+    _composerFocusNode.requestFocus();
+  }
+
+  /// Inserts a `@` file-trigger character at the current cursor and focuses
+  /// the composer.  Called by the mobile + button → context sheet.
+  void _addFileTriggerToComposer() {
+    final text = _composerController.text;
+    final sel = _composerController.selection;
+    final offset = sel.isValid ? sel.end : text.length;
+    final needsSpace = offset > 0 && text[offset - 1] != ' ';
+    final insert = needsSpace ? ' @' : '@';
+    final newText =
+        text.substring(0, offset) + insert + text.substring(offset);
+    _composerController.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: offset + insert.length),
+    );
+    _composerFocusNode.requestFocus();
   }
 
   _ActiveComposerSkillQuery? _extractActiveSkillQuery(TextEditingValue value) {
@@ -5547,6 +5592,7 @@ class _SessionScreenState extends State<SessionScreen>
         _Composer(
           controller: _composerController,
           focusNode: _composerFocusNode,
+          isFocused: _composerFocused,
           attachments: _draftAttachments,
           skills: _draftSkillMentions,
           files: _draftFileMentions,
@@ -5561,6 +5607,7 @@ class _SessionScreenState extends State<SessionScreen>
           sending: _sending,
           supportsImageInput: _supportsImageInput,
           supportsSkillInput: _supportsSkillInput,
+          supportsFileMentions: _supportsFileMentions,
           onPickImages: _pickComposerImages,
           onPasteImage: () => _pasteComposerImage(),
           onNativePaste: () => _pasteComposerImage(showEmptyFeedback: false),
@@ -5571,6 +5618,10 @@ class _SessionScreenState extends State<SessionScreen>
           onRemoveFile: _removeDraftFileMention,
           onSend: _sendInput,
           onDismiss: _dismissKeyboard,
+          onAddSkillTrigger:
+              _supportsSkillInput ? _addSkillTriggerToComposer : null,
+          onAddFileTrigger:
+              _supportsFileMentions ? _addFileTriggerToComposer : null,
           submitOnEnter: widget.desktopMode,
         ),
       ],

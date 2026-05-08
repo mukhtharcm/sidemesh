@@ -1,9 +1,18 @@
 part of 'session_screen.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// _Composer
+// Three-zone layout:
+//   Zone 3 — Suggestion trays (skill / file, above the shelf, animated in/out)
+//   Zone 2 — Context shelf   (chips: images, skills, files – horizontal scroll)
+//   Zone 1 — The bar          (+ button | text pill | send button)
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
     required this.focusNode,
+    required this.isFocused,
     required this.attachments,
     required this.skills,
     required this.files,
@@ -18,6 +27,7 @@ class _Composer extends StatelessWidget {
     required this.sending,
     required this.supportsImageInput,
     required this.supportsSkillInput,
+    required this.supportsFileMentions,
     required this.onPickImages,
     required this.onPasteImage,
     required this.onNativePaste,
@@ -28,25 +38,38 @@ class _Composer extends StatelessWidget {
     required this.onRemoveFile,
     required this.onSend,
     required this.onDismiss,
+    this.onAddSkillTrigger,
+    this.onAddFileTrigger,
     this.submitOnEnter = false,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
+
+  /// Whether the text field currently has focus; drives the animated pill style.
+  final bool isFocused;
+
   final List<_ComposerImageAttachment> attachments;
   final List<_ComposerSkillMention> skills;
   final List<_ComposerFileMention> files;
+
   final String? activeSkillQuery;
   final List<SkillSummary> skillSuggestions;
   final bool loadingSkills;
   final String? skillError;
+
   final String? activeFileQuery;
   final List<FsSearchResult> fileSuggestions;
   final bool loadingFileSearch;
   final String? fileError;
+
   final bool sending;
   final bool supportsImageInput;
   final bool supportsSkillInput;
+
+  /// Whether @file-mention is supported by the current provider.
+  final bool supportsFileMentions;
+
   final VoidCallback onPickImages;
   final Future<bool> Function() onPasteImage;
   final Future<bool> Function() onNativePaste;
@@ -57,6 +80,13 @@ class _Composer extends StatelessWidget {
   final ValueChanged<String> onRemoveFile;
   final VoidCallback onSend;
   final VoidCallback onDismiss;
+
+  /// Inserts a `$` trigger into the text field and focuses it (mobile + button).
+  final VoidCallback? onAddSkillTrigger;
+
+  /// Inserts a `@` trigger into the text field and focuses it (mobile + button).
+  final VoidCallback? onAddFileTrigger;
+
   final bool submitOnEnter;
 
   @override
@@ -64,7 +94,9 @@ class _Composer extends StatelessWidget {
     final colors = context.colors;
     final isMacDesktop =
         submitOnEnter && defaultTargetPlatform == TargetPlatform.macOS;
-    final enableDesktopSubmitShortcut = submitOnEnter;
+    final isDesktop = submitOnEnter;
+
+    // ── Zone 1: text field ──────────────────────────────────────────────────
     Widget field = TextField(
       controller: controller,
       focusNode: focusNode,
@@ -73,26 +105,27 @@ class _Composer extends StatelessWidget {
       onTapOutside: isMacDesktop ? null : (_) => onDismiss(),
       style: Theme.of(context).textTheme.bodyMedium,
       decoration: InputDecoration(
-        hintText: enableDesktopSubmitShortcut
+        hintText: submitOnEnter
             ? 'Message this session — Enter to send, Shift+Enter for newline'
             : 'Message this session',
         hintStyle: TextStyle(color: colors.textTertiary),
         border: InputBorder.none,
         enabledBorder: InputBorder.none,
         focusedBorder: InputBorder.none,
-        contentPadding: const EdgeInsets.symmetric(vertical: 11),
+        isDense: true,
+        // Padding is handled by the animated pill container below.
+        contentPadding: EdgeInsets.zero,
       ),
     );
+
     field = Actions(
       actions: <Type, Action<Intent>>{
         PasteTextIntent: ComposerPasteTextAction(onPasteImage: onNativePaste),
       },
       child: field,
     );
-    if (enableDesktopSubmitShortcut) {
-      // Desktop affordance: bare Enter sends, Shift+Enter inserts a newline.
-      // Wrapping the TextField with CallbackShortcuts at a higher priority
-      // than its default newline handler.
+
+    if (submitOnEnter) {
       field = CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
           const SingleActivator(LogicalKeyboardKey.enter): () {
@@ -115,129 +148,144 @@ class _Composer extends StatelessWidget {
         child: field,
       );
     }
+
+    // ── Animated pill wrapper (focus-responsive border + padding) ───────────
+    final pill = AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeInOut,
+      decoration: BoxDecoration(
+        color: colors.composerBackground,
+        borderRadius: AppShapes.input,
+        border: Border.all(
+          color: isFocused
+              ? colors.accent.withValues(alpha: 0.65)
+              : colors.border,
+        ),
+      ),
+      // Subtle vertical expansion on focus signals "ready to type".
+      padding: EdgeInsets.symmetric(
+        horizontal: 14,
+        vertical: isFocused ? 13 : 9,
+      ),
+      child: field,
+    );
+
+    // ── Zone 1: bar row ─────────────────────────────────────────────────────
+    final bool showPlusButton = !isDesktop &&
+        (supportsImageInput || supportsSkillInput || supportsFileMentions);
+
+    final barRow = Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        // Desktop keeps dedicated attach + paste buttons.
+        if (isDesktop) ...[
+          _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
+          const SizedBox(width: 4),
+          _ComposerPasteButton(
+            enabled: !sending,
+            onPressed: () => unawaited(onPasteImage()),
+          ),
+          const SizedBox(width: 6),
+        ]
+        // Mobile: single + button that opens a context sheet.
+        else if (showPlusButton) ...[
+          _ComposerPlusButton(
+            enabled: !sending,
+            supportsImageInput: supportsImageInput,
+            supportsSkillInput: supportsSkillInput,
+            supportsFileMentions: supportsFileMentions,
+            onPickImages: onPickImages,
+            onAddSkillTrigger: onAddSkillTrigger,
+            onAddFileTrigger: onAddFileTrigger,
+          ),
+          const SizedBox(width: 6),
+        ],
+        Expanded(child: pill),
+        const SizedBox(width: 8),
+        _SendButton(
+          sending: sending,
+          controller: controller,
+          hasAttachments: attachments.isNotEmpty,
+          hasSkills: skills.isNotEmpty || files.isNotEmpty,
+          onSend: onSend,
+        ),
+      ],
+    );
+
+    final hasContext =
+        attachments.isNotEmpty || skills.isNotEmpty || files.isNotEmpty;
+
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
-        decoration: BoxDecoration(
-          color: colors.canvas,
-          border: Border(top: BorderSide(color: colors.border)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        color: colors.canvas,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (supportsImageInput) ...[
-              _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
-              const SizedBox(width: 4),
-              _ComposerPasteButton(
-                enabled: !sending,
-                onPressed: () => unawaited(onPasteImage()),
-              ),
-              const SizedBox(width: 6),
-            ],
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: colors.composerBackground,
-                  borderRadius: AppShapes.input,
-                  border: Border.all(color: colors.border),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 220),
-                  child: SingleChildScrollView(
-                    reverse: true,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                    if (supportsSkillInput && activeSkillQuery != null) ...[
-                      _ComposerSkillSuggestionTray(
+            // Top border replaces the old BoxDecoration border so the canvas
+            // colour can bleed edge-to-edge without a hairline gap artefact.
+            Container(height: 1, color: colors.border),
+
+            // ── Zone 3a: Skill suggestion tray ─────────────────────────────
+            // Lives *above* the context shelf so it overlays the conversation
+            // list visually without being clipped by the pill.
+            AnimatedSize(
+              duration: const Duration(milliseconds: 150),
+              curve: Curves.easeOut,
+              child: (supportsSkillInput && activeSkillQuery != null)
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                      child: _ComposerSkillSuggestionTray(
                         query: activeSkillQuery!,
                         suggestions: skillSuggestions,
                         loading: loadingSkills,
                         error: skillError,
                         onSelectSkill: onSelectSkill,
                       ),
-                      const SizedBox(height: 8),
-                    ],
-                    if (activeFileQuery != null) ...[
-                      _ComposerFileSuggestionTray(
+                    )
+                  : const SizedBox.shrink(),
+            ),
+
+            // ── Zone 3b: File suggestion tray ──────────────────────────────
+            AnimatedSize(
+              duration: const Duration(milliseconds: 150),
+              curve: Curves.easeOut,
+              child: activeFileQuery != null
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                      child: _ComposerFileSuggestionTray(
                         query: activeFileQuery!,
                         suggestions: fileSuggestions,
                         loading: loadingFileSearch,
                         error: fileError,
                         onSelectFile: onSelectFile,
                       ),
-                      const SizedBox(height: 8),
-                    ],
-                    if (supportsSkillInput && skills.isNotEmpty) ...[
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: skills
-                              .map(
-                                (skill) => _ComposerSkillChip(
-                                  mention: skill,
-                                  onRemove: onRemoveSkill,
-                                ),
-                              )
-                              .toList(growable: false),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    if (files.isNotEmpty) ...[
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: files
-                              .map(
-                                (file) => _ComposerFileChip(
-                                  mention: file,
-                                  onRemove: onRemoveFile,
-                                ),
-                              )
-                              .toList(growable: false),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    if (attachments.isNotEmpty) ...[
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: attachments
-                              .map(
-                                (attachment) => _ComposerAttachmentChip(
-                                  attachment: attachment,
-                                  onRemove: onRemoveAttachment,
-                                ),
-                              )
-                              .toList(growable: false),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    field,
-                  ],
-                ),
-                  ),
-                ),
-              ),
+                    )
+                  : const SizedBox.shrink(),
             ),
-            const SizedBox(width: 8),
-            _SendButton(
-              sending: sending,
-              controller: controller,
-              hasAttachments: attachments.isNotEmpty,
-              hasSkills: skills.isNotEmpty || files.isNotEmpty,
-              onSend: onSend,
+
+            // ── Zone 2: Context shelf ──────────────────────────────────────
+            // Horizontal scroll row of flat chips; smoothly animates in/out.
+            AnimatedSize(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              child: hasContext
+                  ? _ComposerContextShelf(
+                      attachments: attachments,
+                      skills: skills,
+                      files: files,
+                      onRemoveAttachment: onRemoveAttachment,
+                      onRemoveSkill: onRemoveSkill,
+                      onRemoveFile: onRemoveFile,
+                      isDesktop: isDesktop,
+                    )
+                  : const SizedBox.shrink(),
+            ),
+
+            // ── Zone 1: The bar ────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+              child: barRow,
             ),
           ],
         ),
@@ -246,6 +294,291 @@ class _Composer extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Zone 2: Context shelf
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ComposerContextShelf extends StatelessWidget {
+  const _ComposerContextShelf({
+    required this.attachments,
+    required this.skills,
+    required this.files,
+    required this.onRemoveAttachment,
+    required this.onRemoveSkill,
+    required this.onRemoveFile,
+    required this.isDesktop,
+  });
+
+  final List<_ComposerImageAttachment> attachments;
+  final List<_ComposerSkillMention> skills;
+  final List<_ComposerFileMention> files;
+  final ValueChanged<String> onRemoveAttachment;
+  final ValueChanged<String> onRemoveSkill;
+  final ValueChanged<String> onRemoveFile;
+  final bool isDesktop;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+
+    // Build chip list: images first, then skills, then file mentions.
+    final chips = <Widget>[
+      for (final a in attachments)
+        _ComposerShelfChip(
+          icon: isDesktop
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Image.memory(
+                    a.bytes,
+                    width: 20,
+                    height: 20,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  ),
+                )
+              : Icon(
+                  Icons.image_rounded,
+                  size: 14,
+                  color: colors.textSecondary,
+                ),
+          label: a.name,
+          // Show file size as sublabel only on desktop where space allows.
+          sublabel: isDesktop ? _formatByteCount(a.byteLength) : null,
+          onRemove: () => onRemoveAttachment(a.id),
+        ),
+      for (final s in skills)
+        _ComposerShelfChip(
+          icon: Icon(
+            Icons.auto_awesome_rounded,
+            size: 14,
+            color: colors.accent,
+          ),
+          label: s.tokenText,
+          onRemove: () => onRemoveSkill(s.skill.path),
+        ),
+      for (final f in files)
+        _ComposerShelfChip(
+          icon: Icon(
+            f.file.isDirectory
+                ? Icons.folder_rounded
+                : Icons.insert_drive_file_rounded,
+            size: 14,
+            color: colors.textTertiary,
+          ),
+          label: f.file.name,
+          onRemove: () => onRemoveFile(f.file.path),
+        ),
+    ];
+
+    return SizedBox(
+      // Slightly taller on desktop to give room for sublabels.
+      height: isDesktop ? 52 : 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        itemCount: chips.length,
+        separatorBuilder: (_, _x) => const SizedBox(width: 8),
+        itemBuilder: (ctx, i) => chips[i],
+      ),
+    );
+  }
+}
+
+/// A compact pill-shaped chip for the context shelf.
+/// Replaces the taller, richer desktop-style chips in the old pill interior.
+class _ComposerShelfChip extends StatelessWidget {
+  const _ComposerShelfChip({
+    required this.icon,
+    required this.label,
+    required this.onRemove,
+    this.sublabel,
+  });
+
+  final Widget icon;
+  final String label;
+  final String? sublabel;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        borderRadius: AppShapes.pill,
+        border: Border.all(color: colors.border),
+      ),
+      padding: const EdgeInsets.only(left: 8, right: 4, top: 4, bottom: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          icon,
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 120),
+            child: sublabel != null
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            Theme.of(context).textTheme.labelSmall?.copyWith(
+                              fontWeight: AppWeights.emphasis,
+                            ),
+                      ),
+                      Text(
+                        sublabel!,
+                        style: monoStyle(
+                          color: colors.textTertiary,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  )
+                : Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      fontWeight: AppWeights.emphasis,
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 2),
+          InkWell(
+            onTap: onRemove,
+            borderRadius: AppShapes.pill,
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: Icon(
+                Icons.close_rounded,
+                size: 14,
+                color: colors.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Zone 1 buttons
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Mobile-only: single `+` button that opens a context action sheet.
+/// Replaces the separate attach + paste buttons so the bar stays compact.
+class _ComposerPlusButton extends StatelessWidget {
+  const _ComposerPlusButton({
+    required this.enabled,
+    required this.supportsImageInput,
+    required this.supportsSkillInput,
+    required this.supportsFileMentions,
+    required this.onPickImages,
+    this.onAddSkillTrigger,
+    this.onAddFileTrigger,
+  });
+
+  final bool enabled;
+  final bool supportsImageInput;
+  final bool supportsSkillInput;
+  final bool supportsFileMentions;
+  final VoidCallback onPickImages;
+  final VoidCallback? onAddSkillTrigger;
+  final VoidCallback? onAddFileTrigger;
+
+  void _handleTap(BuildContext context) {
+    // Collect available options.
+    final options = <(IconData, String, VoidCallback)>[
+      if (supportsImageInput)
+        (Icons.add_photo_alternate_rounded, 'Attach image', onPickImages),
+      if (supportsSkillInput && onAddSkillTrigger != null)
+        (Icons.auto_awesome_rounded, 'Add skill', onAddSkillTrigger!),
+      if (supportsFileMentions && onAddFileTrigger != null)
+        (Icons.insert_drive_file_rounded, 'Mention file', onAddFileTrigger!),
+    ];
+
+    if (options.isEmpty) return;
+
+    // If there's only one option, fire it directly — no sheet needed.
+    if (options.length == 1) {
+      options.first.$3();
+      return;
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.colors.surface,
+      showDragHandle: true,
+      builder: (ctx) {
+        final colors = ctx.colors;
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Add to message',
+                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final option in options)
+                  ListTile(
+                    leading: Icon(option.$1, color: colors.accent),
+                    title: Text(option.$2),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      option.$3();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: 'Add to message',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: enabled ? () => _handleTap(context) : null,
+          child: Padding(
+            padding: const EdgeInsets.all(9),
+            child: Icon(
+              Icons.add_rounded,
+              color: enabled ? colors.accent : colors.textTertiary,
+              size: 22,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Desktop-only: dedicated image-attach button (kept from original).
 class _ComposerAttachButton extends StatelessWidget {
   const _ComposerAttachButton({required this.enabled, required this.onPressed});
 
@@ -276,6 +609,9 @@ class _ComposerAttachButton extends StatelessWidget {
   }
 }
 
+/// Desktop-only: clipboard paste button.
+/// Not shown on mobile — the system long-press menu and PasteTextIntent
+/// already handle clipboard paste there without needing a dedicated button.
 class _ComposerPasteButton extends StatelessWidget {
   const _ComposerPasteButton({required this.enabled, required this.onPressed});
 
@@ -305,6 +641,10 @@ class _ComposerPasteButton extends StatelessWidget {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Send button
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _SendButton extends StatelessWidget {
   const _SendButton({
@@ -376,79 +716,9 @@ class _SendButton extends StatelessWidget {
   }
 }
 
-class _ComposerAttachmentChip extends StatelessWidget {
-  const _ComposerAttachmentChip({
-    required this.attachment,
-    required this.onRemove,
-  });
-
-  final _ComposerImageAttachment attachment;
-  final ValueChanged<String> onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
-      padding: const EdgeInsets.fromLTRB(6, 6, 8, 6),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Image.memory(
-              attachment.bytes,
-              width: 36,
-              height: 36,
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-            ),
-          ),
-          const SizedBox(width: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 140),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  attachment.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _formatByteCount(attachment.byteLength),
-                  style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 4),
-          InkWell(
-            onTap: () => onRemove(attachment.id),
-            borderRadius: AppShapes.input,
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: Icon(
-                Icons.close_rounded,
-                size: 16,
-                color: colors.textSecondary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Zone 3: Skill suggestion tray
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _ComposerSkillSuggestionTray extends StatefulWidget {
   const _ComposerSkillSuggestionTray({
@@ -522,8 +792,8 @@ class _ComposerSkillSuggestionTrayState
       );
     } else {
       final maxHeight = math.min(
-        340.0,
-        MediaQuery.sizeOf(context).height * 0.32,
+        300.0,
+        MediaQuery.sizeOf(context).height * 0.40,
       );
       child = ConstrainedBox(
         constraints: BoxConstraints(maxHeight: maxHeight),
@@ -659,67 +929,164 @@ class _SkillScopeBadge extends StatelessWidget {
   }
 }
 
-class _ComposerSkillChip extends StatelessWidget {
-  const _ComposerSkillChip({required this.mention, required this.onRemove});
+// ─────────────────────────────────────────────────────────────────────────────
+// Zone 3: File suggestion tray
+// ─────────────────────────────────────────────────────────────────────────────
 
-  final _ComposerSkillMention mention;
-  final ValueChanged<String> onRemove;
+class _ComposerFileSuggestionTray extends StatefulWidget {
+  const _ComposerFileSuggestionTray({
+    required this.query,
+    required this.suggestions,
+    required this.loading,
+    required this.error,
+    required this.onSelectFile,
+  });
+
+  final String query;
+  final List<FsSearchResult> suggestions;
+  final bool loading;
+  final String? error;
+  final ValueChanged<FsSearchResult> onSelectFile;
+
+  @override
+  State<_ComposerFileSuggestionTray> createState() =>
+      _ComposerFileSuggestionTrayState();
+}
+
+class _ComposerFileSuggestionTrayState
+    extends State<_ComposerFileSuggestionTray> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    Widget child;
+    if (widget.loading && widget.suggestions.isEmpty) {
+      child = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 10),
+        child: Center(
+          child: SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 1.8),
+          ),
+        ),
+      );
+    } else if (widget.error != null && widget.error!.trim().isNotEmpty) {
+      child = Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.error_outline_rounded, size: 16, color: colors.danger),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                widget.error!,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.danger,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (widget.suggestions.isEmpty) {
+      child = Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              size: 16,
+              color: colors.textTertiary,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'No files match "@${widget.query}".',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      final maxHeight = math.min(
+        300.0,
+        MediaQuery.sizeOf(context).height * 0.40,
+      );
+      child = ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: widget.suggestions.length > 6,
+          child: ListView.builder(
+            controller: _scrollController,
+            primary: false,
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            itemCount: widget.suggestions.length,
+            itemBuilder: (context, index) =>
+                _buildFileRow(context, widget.suggestions[index]),
+          ),
+        ),
+      );
+    }
+
     return Container(
       decoration: BoxDecoration(
-        color: colors.surfaceMuted,
+        color: colors.canvas,
         borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
-      padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.auto_awesome_rounded, size: 15, color: colors.accent),
-          const SizedBox(width: 6),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 180),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  mention.skill.displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  mention.tokenText,
-                  style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
-                ),
-              ],
+      clipBehavior: Clip.antiAlias,
+      child: child,
+    );
+  }
+
+  Widget _buildFileRow(BuildContext context, FsSearchResult file) {
+    final colors = context.colors;
+    return InkWell(
+      onTap: () => widget.onSelectFile(file),
+      borderRadius: AppShapes.input,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(
+              file.isDirectory
+                  ? Icons.folder_rounded
+                  : Icons.insert_drive_file_rounded,
+              size: 16,
+              color: colors.textTertiary,
             ),
-          ),
-          const SizedBox(width: 6),
-          InkWell(
-            onTap: () => onRemove(mention.skill.path),
-            borderRadius: AppShapes.input,
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: Icon(
-                Icons.close_rounded,
-                size: 16,
-                color: colors.textSecondary,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                file.path,
+                style: TextStyle(color: colors.textPrimary, fontSize: 13),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Data models (unchanged from original)
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _ComposerImageAttachment {
   const _ComposerImageAttachment({
@@ -840,193 +1207,4 @@ class _ClipboardImageData {
   final String name;
   final String mimeType;
   final Uint8List bytes;
-}
-
-class _ComposerFileSuggestionTray extends StatefulWidget {
-  const _ComposerFileSuggestionTray({
-    required this.query,
-    required this.suggestions,
-    required this.loading,
-    required this.error,
-    required this.onSelectFile,
-  });
-
-  final String query;
-  final List<FsSearchResult> suggestions;
-  final bool loading;
-  final String? error;
-  final ValueChanged<FsSearchResult> onSelectFile;
-
-  @override
-  State<_ComposerFileSuggestionTray> createState() => _ComposerFileSuggestionTrayState();
-}
-
-class _ComposerFileSuggestionTrayState
-    extends State<_ComposerFileSuggestionTray> {
-  final _scrollController = ScrollController();
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    Widget child;
-    if (widget.loading && widget.suggestions.isEmpty) {
-      child = const Padding(
-        padding: EdgeInsets.symmetric(vertical: 10),
-        child: Center(
-          child: SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 1.8),
-          ),
-        ),
-      );
-    } else if (widget.error != null && widget.error!.trim().isNotEmpty) {
-      child = Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Icon(
-              Icons.error_outline_rounded,
-              size: 16,
-              color: colors.danger,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                widget.error!,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.danger,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    } else if (widget.suggestions.isEmpty) {
-      child = Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Icon(
-              Icons.search_off_rounded,
-              size: 16,
-              color: colors.textTertiary,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'No files match "@${widget.query}".',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    } else {
-      final maxHeight = math.min(
-        340.0,
-        MediaQuery.sizeOf(context).height * 0.32,
-      );
-      child = ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxHeight),
-        child: Scrollbar(
-          controller: _scrollController,
-          thumbVisibility: widget.suggestions.length > 6,
-          child: ListView.builder(
-            controller: _scrollController,
-            primary: false,
-            shrinkWrap: true,
-            padding: EdgeInsets.zero,
-            itemCount: widget.suggestions.length,
-            itemBuilder: (context, index) =>
-                _buildFileRow(context, widget.suggestions[index]),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.canvas,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: child,
-    );
-  }
-
-  Widget _buildFileRow(BuildContext context, FsSearchResult file) {
-    final colors = context.colors;
-    return InkWell(
-      onTap: () => widget.onSelectFile(file),
-      borderRadius: AppShapes.input,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Icon(
-              file.isDirectory
-                  ? Icons.folder_rounded
-                  : Icons.insert_drive_file_rounded,
-              size: 16,
-              color: colors.textTertiary,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                file.path,
-                style: TextStyle(
-                  color: colors.textPrimary,
-                  fontSize: 13,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ComposerFileChip extends StatelessWidget {
-  const _ComposerFileChip({
-    required this.mention,
-    required this.onRemove,
-  });
-
-  final _ComposerFileMention mention;
-  final ValueChanged<String> onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Chip(
-      avatar: Icon(
-        mention.file.isDirectory ? Icons.folder_rounded : Icons.insert_drive_file_rounded,
-        size: 14,
-        color: colors.textTertiary,
-      ),
-      label: Text(
-        mention.file.name,
-        style: TextStyle(color: colors.textPrimary, fontSize: 12),
-      ),
-      backgroundColor: colors.surface,
-      side: BorderSide(color: colors.border),
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      visualDensity: VisualDensity.compact,
-      onDeleted: () => onRemove(mention.file.path),
-      deleteIconColor: colors.textTertiary,
-    );
-  }
 }
