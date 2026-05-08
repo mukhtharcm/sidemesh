@@ -843,6 +843,14 @@ describe("Copilot provider", () => {
       });
       await restoredProvider.start();
 
+      const threads = await restoredProvider.listSessionThreads({
+        limit: 10,
+        archived: false,
+      });
+      assert.equal(threads.length, 1);
+      assert.equal(threads[0]?.id, created.thread.id);
+      assert.equal(threads[0]?.status.type, "idle");
+
       const restoredThread = await restoredProvider.readSessionThread(
         created.thread.id,
         true,
