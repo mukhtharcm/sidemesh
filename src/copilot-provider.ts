@@ -1708,7 +1708,7 @@ export class CopilotAgentProvider
           copilotSessionCreated:
             item.copilotSessionCreated ?? item.copilotSessionId != null,
         };
-        normalizeRestoredCopilotSessionState(state);
+        normalizeInactiveCopilotSessionState(state);
         restoredSessions.set(state.thread.id, state);
       }
       this.archivedSessionIds.clear();
@@ -1836,6 +1836,7 @@ export class CopilotAgentProvider
       state.runtime = parsed.runtime;
       state.nextSeq = parsed.nextSeq;
     }
+    normalizeInactiveCopilotSessionState(state);
     this.sessions.set(sessionId, state);
     await this.persistSoon();
     return state;
@@ -3785,7 +3786,7 @@ function normalizeStoredRuntime(
   };
 }
 
-function normalizeRestoredCopilotSessionState(
+function normalizeInactiveCopilotSessionState(
   session: CopilotSessionState,
 ): void {
   const restoredAt = session.thread.updatedAt;
@@ -3797,10 +3798,72 @@ function normalizeRestoredCopilotSessionState(
     turn.completedAt ??= restoredAt;
     return true;
   });
-  if (hadActiveTurn || isActiveCopilotThreadStatus(session.thread.status)) {
+  let hadActiveActivity = false;
+  session.activities = new Map(
+    [...session.activities.entries()].map(([id, activity]) => {
+      const normalized = normalizeInactiveCopilotActivity(activity);
+      if (normalized.status !== activity.status) {
+        hadActiveActivity = true;
+      }
+      return [id, normalized];
+    }),
+  );
+  const hadRunningCompaction =
+    session.runtime?.telemetry?.compaction?.status === "running";
+  session.runtime = normalizeInactiveCopilotRuntime(session.runtime, restoredAt);
+  if (
+    hadActiveTurn ||
+    hadActiveActivity ||
+    hadRunningCompaction ||
+    isActiveCopilotThreadStatus(session.thread.status)
+  ) {
     session.thread.status = { type: "idle" };
     session.runtime = runtimeWithoutTurnId(session.runtime);
   }
+}
+
+function normalizeInactiveCopilotActivity(
+  activity: SessionActivity,
+): SessionActivity {
+  if (activity.status !== "in_progress") {
+    return activity;
+  }
+  if (activity.type === "command") {
+    return {
+      ...activity,
+      status: "failed",
+      terminalStatus: null,
+    };
+  }
+  return {
+    ...activity,
+    status: "failed",
+  };
+}
+
+function normalizeInactiveCopilotRuntime(
+  runtime: SessionRuntimeSummary | null,
+  restoredAt: number,
+): SessionRuntimeSummary | null {
+  if (runtime?.telemetry?.compaction?.status !== "running") {
+    return runtime;
+  }
+  const restoredAtMs = restoredAt * 1000;
+  return {
+    ...runtime,
+    telemetry: {
+      ...(runtime.telemetry ?? {}),
+      compaction: {
+        ...runtime.telemetry.compaction,
+        status: "failed",
+        completedAt: runtime.telemetry.compaction.completedAt ?? restoredAtMs,
+        updatedAt: restoredAtMs,
+        error:
+          runtime.telemetry.compaction.error ??
+          "Interrupted by provider restart.",
+      },
+    },
+  };
 }
 
 function isActiveCopilotTurnStatus(
