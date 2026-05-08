@@ -3,7 +3,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-  site: "https://sidemesh.dev",
+  site: "https://sidemesh.com",
   integrations: [
     starlight({
       title: 'Sidemesh',
