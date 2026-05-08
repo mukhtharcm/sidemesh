@@ -45,6 +45,12 @@ const copilotProviderConfigSchema = z.object({
   configuredModel: z.string().trim().min(1).nullable(),
 });
 
+const opencodeProviderConfigSchema = z.object({
+  kind: z.literal("opencode"),
+  bin: z.string().trim().min(1),
+  stateDir: z.string().trim().min(1).nullable(),
+});
+
 const fakeProviderConfigSchema = z.object({
   kind: z.literal("fake"),
   latencyMs: z.number().int().min(0),
@@ -82,6 +88,7 @@ const persistedProviderConfigSchema = z.discriminatedUnion("kind", [
   codexProviderConfigSchema,
   piProviderConfigSchema,
   copilotProviderConfigSchema,
+  opencodeProviderConfigSchema,
   fakeProviderConfigSchema,
 ]);
 
@@ -112,7 +119,9 @@ const persistedNodeConfigSchema = z.object({
   terminal: terminalConfigSchema.optional(),
   portForwarding: portForwardingConfigSchema.optional(),
   browserPreview: browserPreviewConfigSchema.optional(),
-  defaultProviderKind: z.enum(["codex", "pi", "copilot", "fake"]).optional(),
+  defaultProviderKind: z
+    .enum(["codex", "pi", "copilot", "opencode", "fake"])
+    .optional(),
   providers: z.array(persistedProviderConfigSchema).default([]),
 });
 
@@ -247,6 +256,12 @@ export function normalizePersistedProviderConfig(
         stateDir: provider.stateDir,
         allowAll: provider.allowAll,
         configuredModel: provider.configuredModel,
+      };
+    case "opencode":
+      return {
+        kind: "opencode",
+        bin: provider.bin,
+        stateDir: provider.stateDir,
       };
     case "pi":
       return {

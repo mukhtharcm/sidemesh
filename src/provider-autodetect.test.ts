@@ -92,6 +92,39 @@ describe("inferInstalledProviderConfigs", () => {
     assert.equal(result.defaultProviderKind, null);
     assert.deepEqual(result.providers, []);
   });
+
+  it("detects OpenCode only when dev providers are included", async () => {
+    const homeDir = nodePath.join(tempDir, "home");
+    const binDir = nodePath.join(tempDir, "bin");
+    await mkdir(homeDir, { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    await writeCommand(
+      nodePath.join(binDir, "opencode"),
+      "#!/bin/sh\necho opencode 0.1.0\n",
+    );
+
+    const hidden = await inferInstalledProviderConfigs({
+      env: {
+        HOME: homeDir,
+        PATH: binDir,
+      },
+      stateDir: nodePath.join(tempDir, "state-hidden"),
+    });
+    assert.equal(readinessFor(hidden, "opencode"), null);
+
+    const included = await inferInstalledProviderConfigs({
+      env: {
+        HOME: homeDir,
+        PATH: binDir,
+      },
+      stateDir: nodePath.join(tempDir, "state-included"),
+      includeDev: true,
+    });
+
+    assert.equal(included.defaultProviderKind, null);
+    assert.deepEqual(included.providers, []);
+    assert.equal(readinessFor(included, "opencode"), "detected");
+  });
 });
 
 async function writeCodexFixture(homeDir: string, binDir: string): Promise<void> {

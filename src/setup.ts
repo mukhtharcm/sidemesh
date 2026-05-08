@@ -172,6 +172,13 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
       case "copilot":
         resolvedProviders.push(await promptCopilotProvider(existing, stateDir));
         break;
+      case "opencode":
+        resolvedProviders.push(
+          await promptOpenCodeProvider(existing, stateDir, {
+            advanced: options.advanced === true,
+          }),
+        );
+        break;
       case "fake":
         resolvedProviders.push(await promptFakeProvider(existing));
         break;
@@ -538,6 +545,44 @@ async function promptPiProvider(
     kind: "pi",
     agentDir: agentDir.trim() || null,
     stateDir: piStateDir.trim() || null,
+  };
+}
+
+async function promptOpenCodeProvider(
+  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
+  stateDir: string,
+  options: {
+    advanced: boolean;
+  },
+): Promise<AgentProviderConfig> {
+  const current =
+    existing?.providers.find((provider) => provider.kind === "opencode") ??
+    null;
+  const bin = await promptText({
+    message: "OpenCode command",
+    defaultValue: current?.kind === "opencode" ? current.bin : "opencode",
+    validate: (value) =>
+      value.trim() ? undefined : "OpenCode command cannot be empty.",
+  });
+  if (!options.advanced && current?.kind !== "opencode") {
+    return {
+      kind: "opencode",
+      bin: bin.trim(),
+      stateDir: null,
+    };
+  }
+  const opencodeStateDir = await promptText({
+    message: "OpenCode state directory (leave blank to use default OpenCode paths)",
+    defaultValue:
+      current?.kind === "opencode"
+        ? (current.stateDir ?? "")
+        : nodePath.join(stateDir, "opencode-provider"),
+    fallbackToDefaultOnEmpty: false,
+  });
+  return {
+    kind: "opencode",
+    bin: bin.trim(),
+    stateDir: opencodeStateDir.trim() || null,
   };
 }
 

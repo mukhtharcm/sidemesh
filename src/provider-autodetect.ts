@@ -86,6 +86,8 @@ export function classifyProviderAutoDetectReadiness(
       return report.auth?.status === "authenticated" ? "ready" : "detected";
     case "pi":
       return hasCheck(report, "agentDir", "ok") ? "ready" : "unavailable";
+    case "opencode":
+      return hasCheck(report, "binary", "ok") ? "detected" : "unavailable";
     case "fake":
       return "unavailable";
     default:

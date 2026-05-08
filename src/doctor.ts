@@ -13,6 +13,7 @@ import type {
   CopilotProviderConfig,
   FakeProviderConfig,
   NodeConfig,
+  OpenCodeProviderConfig,
   PiProviderConfig,
 } from "./types.js";
 
@@ -130,6 +131,8 @@ export async function inspectProviderConfig(
       return inspectFakeProvider(provider, stateDir);
     case "copilot":
       return inspectCopilotProvider(provider, context);
+    case "opencode":
+      return inspectOpenCodeProvider(provider, context);
   }
 }
 
@@ -487,6 +490,40 @@ async function inspectCopilotProvider(
     version,
     auth,
     checks,
+  };
+}
+
+async function inspectOpenCodeProvider(
+  provider: OpenCodeProviderConfig,
+  context: ResolvedDoctorRuntimeContext,
+): Promise<DoctorProviderReport> {
+  const base = await inspectCommandProvider(
+    "opencode",
+    "OpenCode",
+    provider.bin,
+    ["--version"],
+    context,
+  );
+  const checks = [...base.checks];
+  if (provider.stateDir) {
+    checks.push({
+      severity: "ok",
+      label: "state",
+      detail: `Isolated OpenCode state dir: ${provider.stateDir}`,
+    });
+  } else {
+    checks.push({
+      severity: "warn",
+      label: "state",
+      detail: "Using the operator's default OpenCode XDG state/config paths.",
+      remedy:
+        "Set SIDEMESH_OPENCODE_STATE_DIR if you want Sidemesh to isolate the OpenCode server state.",
+    });
+  }
+  return {
+    ...base,
+    checks,
+    auth: { status: "unknown", message: "OpenCode auth readiness is not inspected yet." },
   };
 }
 
