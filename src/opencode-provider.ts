@@ -2102,9 +2102,13 @@ function buildTurns(
       );
       const status = assistants.some((assistant) => assistant.error)
         ? "failed"
-        : hasIncompleteAssistant || (assistants.length === 0 && isLatestActiveTurn)
-          ? "in_progress"
-          : "completed";
+        : hasIncompleteAssistant
+          ? sessionStatus.type === "idle"
+            ? "interrupted"
+            : "in_progress"
+          : assistants.length === 0 && isLatestActiveTurn
+            ? "in_progress"
+            : "completed";
       const completedAt =
         status === "in_progress"
           ? null

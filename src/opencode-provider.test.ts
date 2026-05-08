@@ -674,6 +674,62 @@ sleep 10
     assert.equal(thread.turns?.[0]?.completedAt, null);
   });
 
+  it("marks incomplete assistant turns interrupted once OpenCode reports idle", async () => {
+    const client = new FakeOpenCodeClient();
+    const session = await client.createSession({
+      directory: "/repo/app",
+      title: "Interrupted turn",
+      agent: "build",
+      model: { providerID: "opencode", modelID: "big-pickle" },
+    });
+    client.messages.set(session.id, [
+      {
+        info: {
+          id: "msg-user",
+          sessionID: session.id,
+          role: "user",
+          time: { created: 100 },
+          agent: "build",
+          model: { providerID: "opencode", modelID: "big-pickle" },
+        },
+        parts: [{ id: "user-text", type: "text", text: "got interrupted" }],
+      },
+      {
+        info: {
+          id: "msg-assistant",
+          sessionID: session.id,
+          role: "assistant",
+          parentID: "msg-user",
+          providerID: "opencode",
+          modelID: "big-pickle",
+          agent: "build",
+          mode: "build",
+          time: { created: 200 },
+          cost: 0,
+          finish: "stop",
+          tokens: {
+            total: 0,
+            input: 0,
+            output: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+        },
+        parts: [],
+      },
+    ]);
+    client.statusesByDirectory.set("/repo/app", {
+      [session.id]: { type: "idle" },
+    });
+
+    const provider = createProvider(client);
+    await provider.start();
+    const thread = await provider.readSessionThread(session.id, true);
+
+    assert.equal(thread.turns?.[0]?.status, "interrupted");
+    assert.equal(thread.turns?.[0]?.completedAt, 200);
+  });
+
   it("keeps activity timestamps stable for parts without explicit timing", async () => {
     const client = new FakeOpenCodeClient();
     const session = await client.createSession({
