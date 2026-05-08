@@ -177,8 +177,9 @@ class _Composer extends StatelessWidget {
     final barRow = Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        // Desktop keeps dedicated attach + paste buttons.
-        if (isDesktop) ...[
+        // Desktop keeps dedicated attach + paste buttons (only when the
+        // current provider supports image input).
+        if (isDesktop && supportsImageInput) ...[
           _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
           const SizedBox(width: 4),
           _ComposerPasteButton(
@@ -218,13 +219,15 @@ class _Composer extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        color: colors.canvas,
+        // Use BoxDecoration so the top border is drawn as decoration inside
+        // the box bounds — adds zero height unlike a child Container.
+        decoration: BoxDecoration(
+          color: colors.canvas,
+          border: Border(top: BorderSide(color: colors.border)),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Top border replaces the old BoxDecoration border so the canvas
-            // colour can bleed edge-to-edge without a hairline gap artefact.
-            Container(height: 1, color: colors.border),
 
             // ── Zone 3a: Skill suggestion tray ─────────────────────────────
             // Lives *above* the context shelf so it overlays the conversation
@@ -411,7 +414,6 @@ class _ComposerShelfChip extends StatelessWidget {
       padding: const EdgeInsets.only(left: 8, right: 4, top: 4, bottom: 4),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           icon,
           const SizedBox(width: 6),
@@ -516,6 +518,7 @@ class _ComposerPlusButton extends StatelessWidget {
       context: context,
       backgroundColor: context.colors.surface,
       showDragHandle: true,
+      useSafeArea: true,
       builder: (ctx) {
         final colors = ctx.colors;
         return SafeArea(
