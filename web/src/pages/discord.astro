@@ -1,0 +1,184 @@
+---
+const discordInviteUrl = "https://discord.gg/URvvnN7Dv";
+const pageUrl = new URL("/discord", Astro.site);
+const ogImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
+const redirectDelaySeconds = 0;
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sidemesh Discord</title>
+<meta
+  name="description"
+  content="Join the Sidemesh Discord. Use the short link to open the community invite."
+/>
+<meta name="theme-color" content="#0d0f14" />
+<meta property="og:title" content="Join the Sidemesh Discord" />
+<meta
+  property="og:description"
+  content="Open the Sidemesh community invite from a short sidemesh.com link."
+/>
+<meta property="og:type" content="website" />
+<meta property="og:url" content={pageUrl.toString()} />
+<meta property="og:image" content={ogImageUrl.toString()} />
+<meta property="og:image:alt" content="Sidemesh community invite." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Join the Sidemesh Discord" />
+<meta
+  name="twitter:description"
+  content="Open the Sidemesh community invite from a short sidemesh.com link."
+/>
+<meta name="twitter:image" content={ogImageUrl.toString()} />
+<meta name="twitter:image:alt" content="Sidemesh community invite." />
+<meta http-equiv="refresh" content={`${redirectDelaySeconds};url=${discordInviteUrl}`} />
+<link rel="canonical" href={pageUrl.toString()} />
+<link rel="icon" type="image/png" href="/assets/favicon.png" />
+<link rel="apple-touch-icon" href="/assets/app-icon.png" />
+<style>
+  :root {
+    --bg: #0d0f14;
+    --bg-2: #151922;
+    --border: rgba(255, 255, 255, 0.12);
+    --text: #ece9e3;
+    --text-2: #9da3b4;
+    --accent: #f97316;
+    --accent-2: #34d399;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    color: var(--text);
+    background:
+      radial-gradient(circle at top left, rgba(249, 115, 22, 0.14), transparent 32%),
+      radial-gradient(circle at right 20%, rgba(52, 211, 153, 0.12), transparent 28%),
+      linear-gradient(180deg, #0d0f14 0%, #080a0f 100%);
+    font-family: "Manrope", system-ui, sans-serif;
+  }
+
+  main {
+    width: min(680px, 100%);
+  }
+
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 28px;
+    padding: 32px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(18px);
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    color: var(--text-2);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .eyebrow::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  }
+
+  h1 {
+    margin: 0 0 12px;
+    font-size: clamp(36px, 8vw, 56px);
+    line-height: 0.96;
+    letter-spacing: -0.05em;
+  }
+
+  p {
+    margin: 0;
+    color: var(--text-2);
+    font-size: 17px;
+    line-height: 1.6;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 28px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    padding: 0 18px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .btn-primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .btn-secondary {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .meta {
+    display: grid;
+    gap: 10px;
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    color: var(--text-2);
+    font-size: 14px;
+  }
+
+  code {
+    font-family: "SFMono-Regular", ui-monospace, monospace;
+    color: var(--text);
+  }
+
+  @media (max-width: 640px) {
+    .card {
+      padding: 24px;
+      border-radius: 22px;
+    }
+  }
+</style>
+<script>
+  window.location.replace("https://discord.gg/URvvnN7Dv");
+</script>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <span class="eyebrow">Sidemesh community</span>
+      <h1>Redirecting to Discord.</h1>
+      <p>If nothing opens, use the button below.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href={discordInviteUrl}>Open Discord</a>
+        <a class="btn btn-secondary" href="/">Back to sidemesh.com</a>
+      </div>
+      <div class="meta">
+        <span>Short link: <code>sidemesh.com/discord</code></span>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
