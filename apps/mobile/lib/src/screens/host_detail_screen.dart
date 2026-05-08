@@ -18,6 +18,7 @@ import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/session_row_card.dart';
 import 'create_session_sheet.dart';
+import 'host_server_config_sheet.dart';
 import 'terminal_screen.dart';
 
 class HostDetailScreen extends StatefulWidget {
@@ -179,9 +180,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
     List<SessionSummary> recents,
     List<SessionSummary> favorites,
   ) {
-    final byId = <String, SessionSummary>{
-      for (final s in recents) s.id: s,
-    };
+    final byId = <String, SessionSummary>{for (final s in recents) s.id: s};
     for (final fav in favorites) {
       byId.putIfAbsent(fav.id, () => fav);
     }
@@ -665,13 +664,14 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
         'This host requires Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
       MobileClientCompatibilityLevel.recommended =>
         'This host recommends Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
-      MobileClientCompatibilityLevel.none => node.minimumMobileClientVersion != null &&
-              node.minimumMobileClientVersion!.isNotEmpty
-          ? 'This host currently supports Sidemesh mobile ${mobileClientVersionLabel(node.minimumMobileClientVersion!)} or newer.'
-          : node.recommendedMobileClientVersion != null &&
-                node.recommendedMobileClientVersion!.isNotEmpty
-          ? 'This host currently recommends Sidemesh mobile ${mobileClientVersionLabel(node.recommendedMobileClientVersion!)} or newer.'
-          : 'This host did not publish a mobile client policy.',
+      MobileClientCompatibilityLevel.none =>
+        node.minimumMobileClientVersion != null &&
+                node.minimumMobileClientVersion!.isNotEmpty
+            ? 'This host currently supports Sidemesh mobile ${mobileClientVersionLabel(node.minimumMobileClientVersion!)} or newer.'
+            : node.recommendedMobileClientVersion != null &&
+                  node.recommendedMobileClientVersion!.isNotEmpty
+            ? 'This host currently recommends Sidemesh mobile ${mobileClientVersionLabel(node.recommendedMobileClientVersion!)} or newer.'
+            : 'This host did not publish a mobile client policy.',
     };
 
     return MeshCard(
@@ -748,9 +748,9 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   currentVersion,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textTertiary,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
                 ),
               ],
             ),
@@ -1490,8 +1490,9 @@ class _ProviderContractSummaryCard extends StatelessWidget {
                     children: [
                       Text(
                         'Providers & capabilities',
-                        style: Theme.of(context).textTheme.titleSmall
-                            ?.copyWith(fontWeight: AppWeights.title),
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: AppWeights.title,
+                        ),
                       ),
                       const SizedBox(height: 3),
                       Text(
@@ -1898,9 +1899,9 @@ class _CapabilityGroupRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   group.title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: AppWeights.title,
+                  ),
                 ),
               ),
               MeshPill(
@@ -1963,11 +1964,9 @@ class _SectionHeader extends StatelessWidget {
                   child: Text(
                     title,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.titleSmall?.copyWith(
-                          fontWeight: AppWeights.title,
-                        ),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: AppWeights.title,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -2118,10 +2117,7 @@ String _humanizeCamelCase(String value) {
 }
 
 class _WorkspaceLaunchRow extends StatelessWidget {
-  const _WorkspaceLaunchRow({
-    required this.workspaces,
-    required this.onTap,
-  });
+  const _WorkspaceLaunchRow({required this.workspaces, required this.onTap});
 
   final List<WorkspaceSummary> workspaces;
   final ValueChanged<WorkspaceSummary> onTap;
@@ -2217,6 +2213,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   bool _restartingDaemon = false;
   bool _restartingProvider = false;
   bool _savingUpdateChannel = false;
+  bool _savingServerSettings = false;
 
   DateTime? _updateStartedAt;
   String? _updatePreviousVersion;
@@ -2253,6 +2250,40 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       _selectedUpdateChannel == 'bleeding-edge';
 
   String get _providerDisplayName => widget.node.providerDisplayName;
+
+  Future<void> _openServerSettings() async {
+    if (_savingServerSettings) return;
+    setState(() => _savingServerSettings = true);
+    try {
+      final result = await showHostServerConfigSheet(
+        context,
+        host: widget.host,
+        api: widget.api,
+      );
+      if (!mounted || result == null) return;
+      var refreshFailed = false;
+      try {
+        await widget.onRefresh();
+      } catch (_) {
+        refreshFailed = true;
+      }
+      if (!mounted) return;
+      final requiresRestart = result.snapshot.restart.requiredForPendingChanges;
+      final savedMessage = requiresRestart
+          ? 'Server settings saved. Restart Sidemesh daemon to apply some changes.'
+          : 'Server settings saved.';
+      showAppSnackBar(
+        context,
+        refreshFailed ? '$savedMessage Refresh failed.' : savedMessage,
+      );
+      final warning = result.snapshot.restart.warning;
+      if (warning != null && warning.isNotEmpty) {
+        showAppSnackBar(context, warning);
+      }
+    } finally {
+      if (mounted) setState(() => _savingServerSettings = false);
+    }
+  }
 
   Future<void> _restartProvider() async {
     if (_restartingProvider) return;
@@ -2336,15 +2367,12 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         refreshFailed
             ? 'Update channel set, but refresh failed.'
             : selected == 'bleeding-edge'
-                ? 'Update channel set to bleeding edge.'
-                : 'Update channel set to stable.',
+            ? 'Update channel set to bleeding edge.'
+            : 'Update channel set to stable.',
       );
     } catch (e) {
       if (!mounted) return;
-      showAppSnackBar(
-        context,
-        'Update channel failed: ${friendlyError(e)}',
-      );
+      showAppSnackBar(context, 'Update channel failed: ${friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _savingUpdateChannel = false);
     }
@@ -2484,7 +2512,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   String _updateDetail() {
     final isOffline =
         HostStatusStore.instance.statusFor(widget.host.id).reachability ==
-            HostReachability.offline;
+        HostReachability.offline;
     if (isOffline) {
       return 'Host offline — cannot update';
     }
@@ -2542,7 +2570,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         final colors = context.colors;
         final isOffline =
             HostStatusStore.instance.statusFor(widget.host.id).reachability ==
-                HostReachability.offline;
+            HostReachability.offline;
 
         return MeshCard(
           tone: MeshCardTone.muted,
@@ -2557,7 +2585,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                   targetLabel: _updateTargetLabel,
                   previousVersion: _updatePreviousVersion,
                   previousCommitSha: _updatePreviousCommitSha,
-                  updateChannel: _updateChannelAtStart ?? widget.node.updateChannel,
+                  updateChannel:
+                      _updateChannelAtStart ?? widget.node.updateChannel,
                   currentNode: widget.node,
                   onDismiss: () => setState(() => _updateStartedAt = null),
                   onRetry: () {
@@ -2567,6 +2596,14 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 ),
                 Divider(height: 1, color: colors.border),
               ],
+              _ManagementRow(
+                icon: Icons.tune_rounded,
+                label: 'Server settings',
+                detail: 'Edit daemon config for this host.',
+                busy: _savingServerSettings,
+                onTap: _openServerSettings,
+              ),
+              Divider(height: 1, indent: 46, color: colors.border),
               if (widget.node.supportsHostCapability('workspace', 'terminal'))
                 _ManagementRow(
                   icon: Icons.terminal_rounded,
@@ -2660,10 +2697,10 @@ class _UpdateProgressBanner extends StatelessWidget {
     if (status.reachability == HostReachability.online) {
       final changed = updateChannel == 'bleeding-edge'
           ? currentNode.currentCommitSha != null &&
-              currentNode.currentCommitSha != previousCommitSha
+                currentNode.currentCommitSha != previousCommitSha
           : currentNode.packageVersion != null &&
-              currentNode.packageVersion!.isNotEmpty &&
-              currentNode.packageVersion != previousVersion;
+                currentNode.packageVersion!.isNotEmpty &&
+                currentNode.packageVersion != previousVersion;
       if (changed) {
         return _buildSuccess(context, colors, _successLabel());
       }

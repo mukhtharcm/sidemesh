@@ -205,16 +205,11 @@ class ApiClient {
     );
   }
 
-  Future<void> updateDaemon(
-    HostProfile host, {
-    String? updateChannel,
-  }) async {
+  Future<void> updateDaemon(HostProfile host, {String? updateChannel}) async {
     await _post(
       host,
       '/api/admin/update',
-      body: {
-        if ((updateChannel ?? '').isNotEmpty) 'channel': updateChannel,
-      },
+      body: {if ((updateChannel ?? '').isNotEmpty) 'channel': updateChannel},
       timeout: const Duration(seconds: 15),
       operation: 'update daemon',
     );
@@ -228,6 +223,30 @@ class ApiClient {
       timeout: const Duration(seconds: 15),
       operation: 'set update channel',
     );
+  }
+
+  Future<HostServerConfigSnapshot> fetchServerConfig(HostProfile host) async {
+    final response = await _get(
+      host,
+      '/api/admin/config',
+      timeout: _quickReadTimeout,
+      operation: 'load server config',
+    );
+    return HostServerConfigSnapshot.fromJson(_decodeObject(response));
+  }
+
+  Future<HostServerConfigUpdateResult> updateServerConfig(
+    HostProfile host, {
+    required Map<String, dynamic> patch,
+  }) async {
+    final response = await _patch(
+      host,
+      '/api/admin/config',
+      body: patch,
+      timeout: const Duration(seconds: 20),
+      operation: 'save server config',
+    );
+    return HostServerConfigUpdateResult.fromJson(_decodeObject(response));
   }
 
   Future<UpdateInfo> refreshUpdateInfo(HostProfile host) async {
@@ -848,11 +867,7 @@ class ApiClient {
     final response = await _post(
       host,
       '/api/fs/search',
-      body: {
-        'query': query,
-        'sessionId?': sessionId,
-        'limit?': limit,
-      },
+      body: {'query': query, 'sessionId?': sessionId, 'limit?': limit},
       operation: 'search files',
     );
     final decoded = _decodeObject(response);
@@ -1044,6 +1059,29 @@ class ApiClient {
   }) {
     _ensureHostEnabled(host);
     final request = _client.post(
+      _uri(host, path),
+      headers: _headers(host),
+      body: jsonEncode(body),
+    );
+    if (timeout == null) {
+      return request;
+    }
+    return _withTimeout(
+      request,
+      timeout: timeout,
+      operation: operation ?? 'send request',
+    );
+  }
+
+  Future<http.Response> _patch(
+    HostProfile host,
+    String path, {
+    required Map<String, dynamic> body,
+    Duration? timeout,
+    String? operation,
+  }) {
+    _ensureHostEnabled(host);
+    final request = _client.patch(
       _uri(host, path),
       headers: _headers(host),
       body: jsonEncode(body),
