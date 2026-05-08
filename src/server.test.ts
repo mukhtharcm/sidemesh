@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
@@ -10,13 +11,27 @@ import { WebSocket } from "ws";
 import type { InstallInfo } from "./install-info.js";
 import { startServer, type RunningServer } from "./server.js";
 import type { FakeCapabilityProfile, NodeConfig } from "./types.js";
-import { FakeAgentProvider, type FakeAgentProviderOptions } from "./fake-provider.js";
+import {
+  FAKE_PROVIDER_CAPABILITIES,
+  FakeAgentProvider,
+  type FakeAgentProviderOptions,
+} from "./fake-provider.js";
 import { MultiAgentProvider } from "./multi-provider.js";
 import {
   listAgentProviderDefinitionSummaries,
   summarizeAgentProviderConfig,
 } from "./provider-registry.js";
 import type { AgentProviderRuntime, AgentProviderRuntimeEntry } from "./provider-factory.js";
+import type {
+  AgentCreateSessionRequest,
+  AgentCreateSessionResult,
+  AgentPendingAction,
+  AgentProvider,
+  AgentProviderCapabilities,
+  AgentSessionListOptions,
+  AgentSessionLogOptions,
+} from "./agent-provider.js";
+import type { SessionLogSnapshot, ThreadRecord } from "./types.js";
 
 const EMPTY_OVERRIDES = {
   model: null,
@@ -201,6 +216,185 @@ function makeMultiProviderRuntime(fakeOptions: FakeAgentProviderOptions, seconda
   };
 }
 
+function makeCustomSingleProviderRuntime(provider: AgentProvider): AgentProviderRuntime {
+  const definitionSummary = listAgentProviderDefinitionSummaries().find(
+    (summary) => summary.kind === "fake",
+  );
+  if (!definitionSummary) {
+    throw new Error("Missing fake provider definition");
+  }
+  const configSummary = summarizeAgentProviderConfig({
+    kind: "fake",
+    latencyMs: 0,
+    seedSessions: false,
+    workspaceRoot: null,
+    capabilityProfile: "full",
+  });
+  const entry: AgentProviderRuntimeEntry = {
+    kind: "fake",
+    provider,
+    configSummary,
+    definitionSummary,
+  };
+  return {
+    provider,
+    providers: [entry],
+    defaultProviderKind: "fake",
+    defaultProvider: entry,
+    providerForKind(kind) {
+      return kind == null || kind.trim() === "fake" ? entry : null;
+    },
+    providerForSessionId() {
+      return entry;
+    },
+  };
+}
+
+const RESTARTABLE_FAKE_CAPABILITIES: AgentProviderCapabilities = {
+  ...FAKE_PROVIDER_CAPABILITIES,
+  lifecycle: {
+    ...FAKE_PROVIDER_CAPABILITIES.lifecycle,
+    restart: true,
+  },
+};
+
+class RestartableFakeProvider
+  extends EventEmitter
+  implements AgentProvider
+{
+  public readonly kind = "fake";
+  public readonly displayName = "Restartable Fake Test Provider";
+  public readonly capabilities = RESTARTABLE_FAKE_CAPABILITIES;
+
+  private readonly sessionId = "fake-restart-session";
+  private readonly turnId = "fake-restart-turn";
+  private readonly actionId = "fake-restart-action";
+  private cwd = "/tmp";
+  private created = false;
+  private restarted = false;
+
+  public async start(): Promise<void> {}
+
+  public async close(): Promise<void> {}
+
+  public async restart(): Promise<void> {
+    this.restarted = true;
+  }
+
+  public async getVersion(): Promise<string> {
+    return "restart-test";
+  }
+
+  public async createSession(
+    request: AgentCreateSessionRequest,
+  ): Promise<AgentCreateSessionResult> {
+    this.created = true;
+    this.restarted = false;
+    this.cwd = request.cwd;
+    const action: AgentPendingAction = {
+      id: this.actionId,
+      sessionId: this.sessionId,
+      kind: "user_input",
+      title: "Restart action",
+      detail: "Answer before restart",
+      requestedAt: Date.now(),
+      canApprove: true,
+      canApproveForSession: false,
+      canDecline: true,
+      sessionTitle: "Restart session",
+      cwd: this.cwd,
+      userInput: {
+        question: "Continue?",
+        choices: ["yes"],
+        allowFreeform: true,
+      },
+      providerRequestId: this.actionId,
+      providerRequestKind: "restartable-fake/user-input",
+    };
+    this.emit("liveEvent", {
+      type: "action_opened",
+      action,
+    });
+    return {
+      thread: this.buildThread(false),
+      activeTurnId: this.turnId,
+      runtime: null,
+    };
+  }
+
+  public async listSessionThreads(
+    options: AgentSessionListOptions,
+  ): Promise<ThreadRecord[]> {
+    if (!this.created || options.archived) {
+      return [];
+    }
+    return [this.buildThread(false)].slice(0, options.limit);
+  }
+
+  public async readSessionThread(
+    threadId: string,
+    includeTurns: boolean,
+  ): Promise<ThreadRecord> {
+    assert.equal(threadId, this.sessionId);
+    return this.buildThread(includeTurns);
+  }
+
+  public async listRecentUnindexedSessionThreads(limit: number): Promise<ThreadRecord[]> {
+    if (!this.created) {
+      return [];
+    }
+    return [this.buildThread(false)].slice(0, limit);
+  }
+
+  public async readSessionLog(
+    _thread: ThreadRecord,
+    _options?: AgentSessionLogOptions,
+  ): Promise<SessionLogSnapshot> {
+    return {
+      messages: [],
+      activities: [],
+      runtime: null,
+      totalMessages: 0,
+      totalActivities: 0,
+      nextSeq: 1,
+    };
+  }
+
+  public async readSessionRuntime(): Promise<null> {
+    return null;
+  }
+
+  private buildThread(includeTurns: boolean): ThreadRecord {
+    return {
+      id: this.sessionId,
+      name: "Restart session",
+      preview: "Restart session",
+      createdAt: 1,
+      updatedAt: this.restarted ? 2 : 1,
+      cwd: this.cwd,
+      source: "fake",
+      path: null,
+      status: this.restarted
+        ? { type: "idle" }
+        : { type: "running", activeFlags: ["inProgress"] },
+      ...(includeTurns
+        ? {
+            turns: this.restarted
+              ? []
+              : [
+                  {
+                    id: this.turnId,
+                    status: "in_progress",
+                    startedAt: 1,
+                    completedAt: null,
+                  },
+                ],
+          }
+        : {}),
+    };
+  }
+}
+
 function makeSingleProviderRuntime(
   fakeOptions: FakeAgentProviderOptions,
 ): { runtime: AgentProviderRuntime; provider: FakeAgentProvider } {
@@ -353,6 +547,129 @@ describe("POST /api/admin/provider/:kind/restart", () => {
       });
       assert.equal(res.statusCode, 501);
       assert.equal((res.body as any).error, "provider does not support restart");
+    });
+  });
+
+  it("clears stale pending actions and active turns after provider restart", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd: "/tmp/restart-test",
+          prompt: "start",
+        }),
+      });
+      assert.equal(created.statusCode, 201);
+      const sessionId = (created.body as any).session.id as string;
+      assert.equal((created.body as any).activeTurnId, "fake-restart-turn");
+
+      const beforeStatus = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(beforeStatus.statusCode, 200);
+      assert.equal((beforeStatus.body as any).isRunning, true);
+      assert.equal((beforeStatus.body as any).pendingAction.id, "fake-restart-action");
+
+      const beforeActions = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/actions",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(beforeActions.statusCode, 200);
+      assert.equal((beforeActions.body as any[]).length, 1);
+
+      const sessionLive = await openSessionLiveSocket(server.port, config.token, sessionId);
+      try {
+        await waitFor(
+          () => sessionLive.events.find((event) => event.type === "hello"),
+          "restart session hello",
+        );
+        const hello = sessionLive.events.find((event) => event.type === "hello");
+        provider.emit("liveEvent", {
+          type: "provider_warning",
+          sessionId,
+          level: "warning",
+          code: "restart-seed",
+          message: "seed session seq",
+        });
+        const seeded = await waitFor(
+          () =>
+            sessionLive.events.find(
+              (event) =>
+                event.type === "provider_warning" && event.code === "restart-seed",
+            ),
+          "restart seed live event",
+        );
+        assert.equal(seeded.seq, hello?.nextSeq);
+
+        const restart = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/admin/provider/fake/restart",
+          method: "POST",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(restart.statusCode, 200);
+
+        const actionResolved = await waitFor(
+          () =>
+            sessionLive.events.find(
+              (event) =>
+                event.type === "action_resolved" &&
+                event.actionId === "fake-restart-action",
+            ),
+          "restart action resolved live event",
+        );
+        const idleStatus = await waitFor(
+          () =>
+            sessionLive.events.find(
+              (event) =>
+                event.type === "thread_status_changed" && event.status === "idle",
+            ),
+          "restart idle status live event",
+        );
+        assert.equal(actionResolved.seq, seeded.seq + 1);
+        assert.equal(idleStatus.seq, actionResolved.seq + 1);
+      } finally {
+        await closeSessionLiveSocket(sessionLive.socket);
+      }
+
+      const afterStatus = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(afterStatus.statusCode, 200);
+      assert.equal((afterStatus.body as any).isRunning, false);
+      assert.equal((afterStatus.body as any).pendingAction, null);
+
+      const afterActions = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/actions",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(afterActions.statusCode, 200);
+      assert.deepEqual(afterActions.body, []);
     });
   });
 });

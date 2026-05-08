@@ -395,6 +395,65 @@ export async function startServer(
     return providerRuntime.providerForSessionId(sessionId);
   }
 
+  function clearProviderScopedRuntimeState(kind: string): void {
+    const sessionIds = new Set<string>();
+    const sessionIdsNeedingIdleBroadcast = new Set<string>();
+    const isProviderSession = (sessionId: string): boolean =>
+      providerEntryForSessionId(sessionId)?.kind === kind;
+
+    for (const sessionId of activeTurns.keys()) {
+      if (isProviderSession(sessionId)) {
+        sessionIds.add(sessionId);
+        sessionIdsNeedingIdleBroadcast.add(sessionId);
+      }
+    }
+    for (const action of pendingActions.values()) {
+      if (isProviderSession(action.sessionId)) {
+        sessionIds.add(action.sessionId);
+        sessionIdsNeedingIdleBroadcast.add(action.sessionId);
+      }
+    }
+    for (const sessionId of liveActivities.keys()) {
+      if (isProviderSession(sessionId)) {
+        sessionIds.add(sessionId);
+      }
+    }
+    for (const sessionId of runtimeCache.keys()) {
+      if (isProviderSession(sessionId)) {
+        sessionIds.add(sessionId);
+      }
+    }
+    for (const key of logCache.keys()) {
+      const delimiterIndex = key.indexOf("::");
+      const sessionId = delimiterIndex >= 0 ? key.slice(0, delimiterIndex) : key;
+      if (isProviderSession(sessionId)) {
+        sessionIds.add(sessionId);
+      }
+    }
+
+    recentSessionsCache.clear();
+    for (const sessionId of sessionIds) {
+      activeTurns.delete(sessionId);
+      liveActivities.delete(sessionId);
+      runtimeCache.delete(sessionId);
+      clearSessionLogCache(logCache, sessionId);
+      clearActionsForSession(
+        pendingActions,
+        sessionId,
+        broadcastLive,
+        broadcastApprovalLive,
+      );
+      if (sessionIdsNeedingIdleBroadcast.has(sessionId)) {
+        broadcastLive(sessionId, {
+          type: "thread_status_changed",
+          sessionId,
+          status: "idle",
+        });
+      }
+      scheduleRecentSessionUpsert(sessionId, 0);
+    }
+  }
+
   async function getSessionCwd(sessionId: string): Promise<string | null> {
     const sessionProvider = providerEntryForSessionId(sessionId);
     if (
@@ -1085,6 +1144,7 @@ export async function startServer(
         return;
       }
       await selectedProvider.provider.restart();
+      clearProviderScopedRuntimeState(kind);
       response.json({ ok: true, kind });
     }),
   );
