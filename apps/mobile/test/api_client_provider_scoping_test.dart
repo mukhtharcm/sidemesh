@@ -16,7 +16,7 @@ void main() {
   );
 
   test(
-    'ApiClient scopes skills and profiles requests by agent provider',
+    'ApiClient scopes skills, profiles, and modes requests by agent provider',
     () async {
       final requests = <Uri>[];
       final api = ApiClient(
@@ -36,6 +36,13 @@ void main() {
               headers: {'content-type': 'application/json'},
             );
           }
+          if (request.url.path == '/api/modes') {
+            return http.Response(
+              '{"defaultMode":null,"modes":[]}',
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
           throw StateError('Unexpected path ${request.url.path}');
         }),
       );
@@ -47,8 +54,9 @@ void main() {
         agentProvider: 'copilot',
       );
       await api.fetchProfiles(host, cwd: '/repo', agentProvider: 'copilot');
+      await api.fetchModes(host, cwd: '/repo', agentProvider: 'copilot');
 
-      expect(requests, hasLength(2));
+      expect(requests, hasLength(3));
       expect(
         requests.first.queryParameters,
         containsPair('agentProvider', 'copilot'),
@@ -58,6 +66,11 @@ void main() {
         requests.first.queryParameters,
         containsPair('forceReload', 'true'),
       );
+      expect(
+        requests[1].queryParameters,
+        containsPair('agentProvider', 'copilot'),
+      );
+      expect(requests[1].queryParameters, containsPair('cwd', '/repo'));
       expect(
         requests.last.queryParameters,
         containsPair('agentProvider', 'copilot'),

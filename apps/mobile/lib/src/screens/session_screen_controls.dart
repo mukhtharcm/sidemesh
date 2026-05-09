@@ -40,7 +40,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   late SessionPolicy _policy;
   late SessionTurnConfig _turnConfig;
   List<ModelCatalogEntry> _models = const <ModelCatalogEntry>[];
+  List<ProviderModeSummary> _providerModes = const <ProviderModeSummary>[];
   bool _loadingModels = true;
+  bool _loadingProviderModes = false;
   bool _loadingNode = false;
   String? _modelsError;
   NodeInfo? _nodeInfo;
@@ -55,6 +57,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     );
     unawaited(_loadNodeInfo());
     unawaited(_loadModels());
+    unawaited(_loadProviderModes());
   }
 
   String get _providerKind => widget.session.provider ?? '';
@@ -74,6 +77,21 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   bool get _supportsModelOverride => _supports('runtimeControls', 'model');
 
   bool get _supportsMode => _supports('runtimeControls', 'mode');
+
+  List<ProviderModeSummary> get _availableModeChoices {
+    final result = <ProviderModeSummary>[..._providerModes];
+    final currentMode = _trimmedOrNull(_effectiveMode);
+    if (currentMode != null &&
+        !result.any((candidate) => candidate.id == currentMode)) {
+      result.add(
+        ProviderModeSummary(
+          id: currentMode,
+          label: sessionModeLabel(currentMode),
+        ),
+      );
+    }
+    return result;
+  }
 
   bool get _supportsReasoningEffort =>
       _supports('runtimeControls', 'reasoningEffort');
@@ -282,6 +300,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         _loadingNode = false;
         _coerceForProviderCapabilities();
       });
+      if (_supportsMode) {
+        unawaited(_loadProviderModes(force: true));
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -317,6 +338,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     }
     if (!_supportsMode) {
       nextConfig = nextConfig.copyWith(mode: null);
+      _providerModes = const <ProviderModeSummary>[];
+      _loadingProviderModes = false;
     }
     if (!_supportsFastMode) {
       nextConfig = nextConfig.copyWith(fastMode: null);
@@ -325,6 +348,49 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     _policy = nextPolicy;
     _turnConfig = nextConfig;
   }
+
+  Future<void> _loadProviderModes({bool force = false}) async {
+    if (!_supportsMode) {
+      setState(() {
+        _providerModes = const <ProviderModeSummary>[];
+        _loadingProviderModes = false;
+      });
+      return;
+    }
+    if (_loadingProviderModes && !force) {
+      return;
+    }
+    setState(() {
+      _loadingProviderModes = true;
+    });
+
+    try {
+      final catalog = await widget.api.fetchModes(
+        widget.host,
+        cwd: widget.session.cwd,
+        agentProvider: widget.session.provider,
+      );
+      if (!mounted) return;
+      setState(() {
+        _providerModes = catalog.modes;
+        _loadingProviderModes = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingProviderModes = false;
+        if (_shouldUseModeFallback(error)) {
+          _providerModes = kDefaultProviderModes;
+        } else {
+          _providerModes = const <ProviderModeSummary>[];
+        }
+      });
+    }
+  }
+
+  bool _shouldUseModeFallback(Object error) =>
+      error is ApiException &&
+      (error.statusCode == 404 || error.statusCode == 501);
 
   Future<void> _loadModels() async {
     if (!_supportsModels || !_supportsModelOverride) {
@@ -732,14 +798,20 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: <String?>[null, ...kSessionModes].map((mode) {
+                    children: <String?>[
+                      null,
+                      ..._availableModeChoices.map((mode) => mode.id),
+                    ].map((mode) {
                       final selected = mode == _effectiveMode;
                       final fromRuntime =
                           mode != null &&
                           _turnConfig.mode == null &&
                           widget.runtimeMode == mode;
                       return _ReasoningChoiceChip(
-                        label: _sessionModeChoiceLabel(mode),
+                        label: _sessionModeChoiceLabel(
+                          mode,
+                          _availableModeChoices,
+                        ),
                         selected: selected,
                         isDefault: mode == null || fromRuntime,
                         defaultLabel: mode == null ? 'inherit' : 'current',
@@ -758,6 +830,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                     _sessionModeDescription(
                       _effectiveMode,
                       providerName: _providerName,
+                      modes: _availableModeChoices,
                     ),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: colors.textSecondary,
@@ -1722,14 +1795,26 @@ String _reasoningEffortLabel(String value) {
   };
 }
 
-String _sessionModeChoiceLabel(String? value) {
+String _sessionModeChoiceLabel(
+  String? value,
+  Iterable<ProviderModeSummary> modes,
+) {
   if (value == null || value.trim().isEmpty) {
     return 'Inherit current';
   }
-  return sessionModeLabel(value);
+  return providerModeLabel(value, modes);
 }
 
-String _sessionModeDescription(String? value, {required String providerName}) {
+String _sessionModeDescription(
+  String? value, {
+  required String providerName,
+  required Iterable<ProviderModeSummary> modes,
+}) {
+  final summary = findProviderModeSummary(modes, value);
+  if (summary?.description case final description?
+      when description.trim().isNotEmpty) {
+    return description.trim();
+  }
   return switch (value) {
     null =>
       'Leave mode alone and keep the current $providerName session behavior.',
@@ -1740,7 +1825,7 @@ String _sessionModeDescription(String? value, {required String providerName}) {
     'autopilot' =>
       'Autopilot lets the provider run with its most self-directed execution mode.',
     _ =>
-      '$providerName will switch to ${sessionModeLabel(value)} mode on the next fresh turn.',
+      '$providerName will switch to ${providerModeLabel(value, modes)} mode on the next fresh turn.',
   };
 }
 

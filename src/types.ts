@@ -348,6 +348,17 @@ export interface ProviderProfileCatalog {
   profiles: ProviderProfileSummary[];
 }
 
+export interface ProviderModeCatalog {
+  defaultMode: string | null;
+  modes: ProviderModeSummary[];
+}
+
+export interface ProviderModeSummary {
+  id: string;
+  label: string;
+  description?: string | null;
+}
+
 export interface ProviderProfileSummary {
   name: string;
   isDefault: boolean;
