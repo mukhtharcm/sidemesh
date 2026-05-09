@@ -10,11 +10,16 @@ InspectorSurface buildInspectorPortsSurface({
   required HostProfile host,
   required ApiClient api,
   required SessionSummary session,
+  required bool supportsBrowserPreview,
+  required bool supportsPortForwarding,
 }) {
   return InspectorSurface(
     kind: InspectorSurfaceKind.ports,
     ownerKey: ownerKey,
-    title: 'Ports',
+    title: portForwardScreenTitle(
+      supportsBrowserPreview: supportsBrowserPreview,
+      supportsPortForwarding: supportsPortForwarding,
+    ),
     icon: Icons.cable_rounded,
     bodyBuilder: (context) => PortForwardPane(
       key: ValueKey('ports:${host.id}:${session.id}:${session.cwd}'),
@@ -23,6 +28,8 @@ InspectorSurface buildInspectorPortsSurface({
       cwd: session.cwd,
       sessionId: session.id,
       sessionTitle: session.title,
+      supportsBrowserPreview: supportsBrowserPreview,
+      supportsPortForwarding: supportsPortForwarding,
       previewPresentation: PortForwardPreviewPresentation.inline,
     ),
   );

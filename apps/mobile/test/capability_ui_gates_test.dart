@@ -71,12 +71,88 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Browse files'), findsOneWidget);
+    expect(find.text('Preview web app'), findsNothing);
+    expect(find.text('Manage connections'), findsNothing);
     expect(find.text('Rename'), findsNothing);
     expect(find.text('Archive'), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
+
+  testWidgets(
+    'session screen surfaces preview and connections actions for preview-capable hosts',
+    (tester) async {
+      final api = _CapabilityFakeApi(
+        _nodeForCapabilities(
+          _minimalCapabilities,
+          hostWorkspaceCapabilities: const {
+            'filesystem': true,
+            'gitStatus': false,
+            'gitDiff': false,
+            'browserPreview': true,
+            'portForwarding': false,
+          },
+        ),
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('session-preview-capable'),
+          session: _session('preview-capable-session'),
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      await tester.tap(find.byTooltip('Session actions'));
+      await _pumpFrames(tester);
+
+      expect(find.text('Preview web app'), findsOneWidget);
+      expect(find.text('Manage connections'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'session screen keeps connections but hides preview for tunnel-only hosts',
+    (tester) async {
+      final api = _CapabilityFakeApi(
+        _nodeForCapabilities(
+          _minimalCapabilities,
+          hostWorkspaceCapabilities: const {
+            'filesystem': true,
+            'gitStatus': false,
+            'gitDiff': false,
+            'browserPreview': false,
+            'portForwarding': true,
+          },
+        ),
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('session-tunnel-capable'),
+          session: _session('tunnel-capable-session'),
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      await tester.tap(find.byTooltip('Session actions'));
+      await _pumpFrames(tester);
+
+      expect(find.text('Preview web app'), findsNothing);
+      expect(find.text('Manage connections'), findsOneWidget);
+    },
+  );
 
   testWidgets('session controls show empty state for chat-only providers', (
     tester,
@@ -579,6 +655,11 @@ NodeInfo _nodeForCapabilities(
   String providerVersion = 'fake-provider 1.0.0',
   String providerCommand = 'builtin',
   List<ProviderDefinitionSummary> supportedProviders = const [],
+  Map<String, Object?> hostWorkspaceCapabilities = const {
+    'filesystem': true,
+    'gitStatus': false,
+    'gitDiff': false,
+  },
 }) => NodeInfo.fromJson({
   'label': 'fake-profile',
   'hostname': 'localhost',
@@ -590,9 +671,7 @@ NodeInfo _nodeForCapabilities(
   'providerConfig': {'kind': providerKind, 'command': providerCommand},
   'providerCapabilities': capabilities,
   'defaultProviderCapabilities': capabilities,
-  'hostCapabilities': {
-    'workspace': {'filesystem': true, 'gitStatus': false, 'gitDiff': false},
-  },
+  'hostCapabilities': {'workspace': hostWorkspaceCapabilities},
   'supportedProviders': supportedProviders
       .map(
         (provider) => {

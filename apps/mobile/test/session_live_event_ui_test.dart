@@ -373,6 +373,103 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'session screen surfaces preview, terminal, and file actions from activities',
+    (tester) async {
+      final session = _session('activity-actions');
+      final api = _RichEventFakeApi(
+        sessionSummary: session,
+        nodeInfo: _nodeInfo(
+          hostWorkspaceCapabilities: const {
+            'filesystem': true,
+            'gitStatus': false,
+            'gitDiff': false,
+            'browserPreview': true,
+            'terminal': true,
+          },
+        ),
+        activities: [
+          _commandActivity(
+            id: 'cmd-preview',
+            seq: 2,
+            command: 'npm run dev',
+            cwd: '/repo/apps/web',
+            output: 'Local: http://localhost:3000',
+          ),
+          _fileChangeActivity(
+            id: 'file-change',
+            seq: 1,
+            path: '/repo/apps/web/src/main.dart',
+          ),
+        ],
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('activity-actions'),
+          session: session,
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      await tester.tap(find.text('npm run dev'));
+      await _pumpFrames(tester);
+      await tester.tap(find.text('apps/web/src/main.dart'));
+      await _pumpFrames(tester);
+
+      expect(find.text('Preview :3000'), findsOneWidget);
+      expect(find.text('Open terminal'), findsOneWidget);
+      expect(find.text('Browse files'), findsOneWidget);
+      expect(find.text('Open file'), findsOneWidget);
+    },
+  );
+
+  testWidgets('mobile running session shows stop pill and stops after confirmation', (
+    tester,
+  ) async {
+    final session = _session('mobile-stop');
+    final api = _RichEventFakeApi(sessionSummary: session);
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('mobile-stop'),
+        session: session,
+        api: api,
+        desktopMode: false,
+      ),
+      size: const Size(430, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'thread_status_changed',
+      'sessionId': session.id,
+      'status': 'running',
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Stop agent'), findsOneWidget);
+
+    await tester.tap(find.text('Stop agent'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Stop session?'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Stop'));
+    await _pumpFrames(tester);
+
+    expect(api.stopSessionCalls, 1);
+    expect(find.text('Stop agent'), findsNothing);
+    expect(find.text('Session stopped.'), findsOneWidget);
+  });
 }
 
 Future<void> _pumpFrames(WidgetTester tester) async {
@@ -412,7 +509,7 @@ HostProfile _host(String id) => HostProfile(
   token: 'test-token',
 );
 
-SessionSummary _session(String id) {
+SessionSummary _session(String id, {String status = 'idle'}) {
   final now = DateTime(2026, 1, 1, 12);
   return SessionSummary(
     id: id,
@@ -423,7 +520,7 @@ SessionSummary _session(String id) {
     updatedAt: now,
     source: 'fake',
     provider: null,
-    status: 'idle',
+    status: status,
     runtime: null,
     gitInfo: null,
   );
@@ -447,7 +544,101 @@ SessionMessage _assistantMessage({
   );
 }
 
-NodeInfo _nodeInfo() => NodeInfo.fromJson({
+SessionActivity _commandActivity({
+  required String id,
+  required int seq,
+  required String command,
+  required String cwd,
+  required String output,
+}) {
+  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  return SessionActivity(
+    id: id,
+    type: 'command',
+    createdAt: now,
+    seq: seq,
+    status: 'completed',
+    turnId: 'turn-$seq',
+    command: command,
+    cwd: cwd,
+    output: output,
+    exitCode: 0,
+    durationMs: 1200,
+    source: 'agent',
+    processId: 'pty-$seq',
+    commandActions: const [],
+    terminalStatus: null,
+    terminalInput: null,
+    toolName: null,
+    toolTitle: null,
+    toolArgs: null,
+    toolResult: null,
+    toolError: null,
+    toolSemantic: null,
+    changes: const [],
+    diff: null,
+    query: null,
+    queries: const [],
+    targetUrl: null,
+    pattern: null,
+    revisedPrompt: null,
+    savedPath: null,
+  );
+}
+
+SessionActivity _fileChangeActivity({
+  required String id,
+  required int seq,
+  required String path,
+}) {
+  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  return SessionActivity(
+    id: id,
+    type: 'file_change',
+    createdAt: now,
+    seq: seq,
+    status: 'completed',
+    turnId: 'turn-$seq',
+    command: null,
+    cwd: '/repo',
+    output: null,
+    exitCode: null,
+    durationMs: null,
+    source: null,
+    processId: null,
+    commandActions: const [],
+    terminalStatus: null,
+    terminalInput: null,
+    toolName: null,
+    toolTitle: null,
+    toolArgs: null,
+    toolResult: null,
+    toolError: null,
+    toolSemantic: null,
+    changes: [
+      SessionActivityChange(
+        path: path,
+        kind: 'modified',
+        diff: '@@ -1 +1 @@\n-old\n+new',
+      ),
+    ],
+    diff: null,
+    query: null,
+    queries: const [],
+    targetUrl: null,
+    pattern: null,
+    revisedPrompt: null,
+    savedPath: null,
+  );
+}
+
+NodeInfo _nodeInfo({
+  Map<String, Object?> hostWorkspaceCapabilities = const {
+    'filesystem': false,
+    'gitStatus': false,
+    'gitDiff': false,
+  },
+}) => NodeInfo.fromJson({
   'label': 'fake-profile',
   'hostname': 'localhost',
   'platform': 'darwin',
@@ -508,26 +699,31 @@ NodeInfo _nodeInfo() => NodeInfo.fromJson({
     },
     'workspace': {'remoteGitDiff': false},
   },
-  'hostCapabilities': {
-    'workspace': {'filesystem': false, 'gitStatus': false, 'gitDiff': false},
-  },
+  'hostCapabilities': {'workspace': hostWorkspaceCapabilities},
   'supportedProviders': const [],
 });
 
 class _RichEventFakeApi extends ApiClient {
   _RichEventFakeApi({
     this.messages = const [],
+    this.activities = const [],
     this.latestPlanUpdate,
     this.eventsDelta,
+    this.nodeInfo,
+    this.sessionSummary,
   });
 
   final _ControllableWebSocketChannel _channel = _ControllableWebSocketChannel();
   List<SessionMessage> messages;
+  final List<SessionActivity> activities;
   final LiveEvent? latestPlanUpdate;
   final SessionEventsDelta? eventsDelta;
+  final NodeInfo? nodeInfo;
+  final SessionSummary? sessionSummary;
+  int stopSessionCalls = 0;
 
   @override
-  Future<NodeInfo> fetchNode(HostProfile host) async => _nodeInfo();
+  Future<NodeInfo> fetchNode(HostProfile host) async => nodeInfo ?? _nodeInfo();
 
   @override
   Future<SessionLog> fetchLog(
@@ -536,16 +732,16 @@ class _RichEventFakeApi extends ApiClient {
     int? messageLimit,
     int? activityLimit,
   }) async => SessionLog(
-    session: _session(sessionId),
+    session: sessionSummary ?? _session(sessionId),
     messages: messages,
-    activities: const [],
+    activities: activities,
     pendingAction: null,
-    history: const SessionLogHistorySummary(
+    history: SessionLogHistorySummary(
       isTruncated: false,
-      totalMessages: 0,
-      returnedMessages: 0,
-      totalActivities: 0,
-      returnedActivities: 0,
+      totalMessages: messages.length,
+      returnedMessages: messages.length,
+      totalActivities: activities.length,
+      returnedActivities: activities.length,
     ),
     latestPlanUpdate: latestPlanUpdate,
   );
@@ -574,6 +770,11 @@ class _RichEventFakeApi extends ApiClient {
     bool forceReload = false,
     String? agentProvider,
   }) async => SkillCatalog(cwd: cwd, skills: const [], errors: const []);
+
+  @override
+  Future<void> stopSession(HostProfile host, String sessionId) async {
+    stopSessionCalls += 1;
+  }
 
   @override
   WebSocketChannel openLive(HostProfile host, String sessionId) => _channel;

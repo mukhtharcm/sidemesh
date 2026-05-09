@@ -9,12 +9,26 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../api_client.dart';
 import '../models.dart';
 import '../port_forward_bridge.dart';
+import '../session_preview_candidates.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import 'browser_preview_screen.dart';
+
+String portForwardScreenTitle({
+  required bool supportsBrowserPreview,
+  required bool supportsPortForwarding,
+}) {
+  if (supportsBrowserPreview && supportsPortForwarding) {
+    return 'Previews & tunnels';
+  }
+  if (supportsBrowserPreview) {
+    return 'Browser previews';
+  }
+  return 'Connections';
+}
 
 class PortForwardScreen extends StatelessWidget {
   const PortForwardScreen({
@@ -24,6 +38,8 @@ class PortForwardScreen extends StatelessWidget {
     required this.cwd,
     required this.sessionId,
     required this.sessionTitle,
+    required this.supportsBrowserPreview,
+    required this.supportsPortForwarding,
     this.onBrowserPreviewOpened,
   });
 
@@ -32,6 +48,8 @@ class PortForwardScreen extends StatelessWidget {
   final String cwd;
   final String sessionId;
   final String sessionTitle;
+  final bool supportsBrowserPreview;
+  final bool supportsPortForwarding;
   final PortForwardBrowserPreviewOpened? onBrowserPreviewOpened;
 
   @override
@@ -41,7 +59,12 @@ class PortForwardScreen extends StatelessWidget {
       backgroundColor: colors.canvas,
       appBar: AppBar(
         backgroundColor: colors.canvas,
-        title: const Text('Ports'),
+        title: Text(
+          portForwardScreenTitle(
+            supportsBrowserPreview: supportsBrowserPreview,
+            supportsPortForwarding: supportsPortForwarding,
+          ),
+        ),
       ),
       body: PortForwardPane(
         host: host,
@@ -49,6 +72,8 @@ class PortForwardScreen extends StatelessWidget {
         cwd: cwd,
         sessionId: sessionId,
         sessionTitle: sessionTitle,
+        supportsBrowserPreview: supportsBrowserPreview,
+        supportsPortForwarding: supportsPortForwarding,
         onBrowserPreviewOpened: onBrowserPreviewOpened,
       ),
     );
@@ -56,7 +81,7 @@ class PortForwardScreen extends StatelessWidget {
 }
 
 typedef PortForwardBrowserPreviewOpened =
-    void Function(HostPortForwardInfo forward, HostBrowserPreviewInfo preview);
+    void Function(HostBrowserPreviewInfo preview);
 
 class PortForwardPane extends StatefulWidget {
   const PortForwardPane({
@@ -66,6 +91,8 @@ class PortForwardPane extends StatefulWidget {
     required this.cwd,
     required this.sessionId,
     required this.sessionTitle,
+    required this.supportsBrowserPreview,
+    required this.supportsPortForwarding,
     this.previewPresentation = PortForwardPreviewPresentation.route,
     this.onBrowserPreviewOpened,
   });
@@ -75,6 +102,8 @@ class PortForwardPane extends StatefulWidget {
   final String cwd;
   final String sessionId;
   final String sessionTitle;
+  final bool supportsBrowserPreview;
+  final bool supportsPortForwarding;
   final PortForwardPreviewPresentation previewPresentation;
   final PortForwardBrowserPreviewOpened? onBrowserPreviewOpened;
 
@@ -95,6 +124,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   final Set<String> _startingBrowserPreviews = {};
   bool _loading = true;
   bool _creating = false;
+  bool _creatingPreview = false;
   bool _rememberBrowserLogins = true;
   String _scheme = 'http';
   String? _error;
@@ -102,6 +132,9 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   @override
   void initState() {
     super.initState();
+    if (!widget.supportsPortForwarding) {
+      _scheme = 'http';
+    }
     unawaited(_loadPorts());
   }
 
@@ -123,12 +156,13 @@ class _PortForwardPaneState extends State<PortForwardPane> {
       _error = null;
     });
     try {
-      final ports = await widget.api.fetchPortForwards(widget.host);
+      var ports = const <HostPortForwardInfo>[];
+      if (widget.supportsPortForwarding) {
+        ports = await widget.api.fetchPortForwards(widget.host);
+      }
       var browserPreviews = const <HostBrowserPreviewInfo>[];
-      try {
+      if (widget.supportsBrowserPreview) {
         browserPreviews = await widget.api.fetchBrowserPreviews(widget.host);
-      } catch (_) {
-        // Older daemons may support port forwarding but not browser previews.
       }
       if (!mounted) return;
       setState(() {
@@ -157,6 +191,10 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   }
 
   Future<void> _createForward() async {
+    if (!widget.supportsPortForwarding) {
+      showAppSnackBar(context, 'This host does not expose TCP tunnels.');
+      return;
+    }
     final targetPort = int.tryParse(_portController.text.trim());
     if (targetPort == null || targetPort < 1 || targetPort > 65535) {
       showAppSnackBar(context, 'Enter a valid port between 1 and 65535.');
@@ -181,13 +219,96 @@ class _PortForwardPaneState extends State<PortForwardPane> {
         _ports = [forward, ..._ports.where((item) => item.id != forward.id)];
         _creating = false;
       });
-      showAppSnackBar(context, 'Forwarded ${forward.target} to $uri');
+      showAppSnackBar(
+        context,
+        _scheme == 'tcp'
+            ? 'Opened TCP tunnel for ${forward.target} at $uri'
+            : 'Created local URL bridge for ${forward.target} at $uri',
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() => _creating = false);
       showAppSnackBar(
         context,
-        'Could not forward port: ${friendlyError(error)}',
+        'Could not create tunnel: ${friendlyError(error)}',
+      );
+    }
+  }
+
+  Future<void> _createBrowserPreviewFromInputs() async {
+    if (!widget.supportsBrowserPreview) {
+      showAppSnackBar(context, 'This host does not expose browser previews.');
+      return;
+    }
+    final targetPort = int.tryParse(_portController.text.trim());
+    if (targetPort == null || targetPort < 1 || targetPort > 65535) {
+      showAppSnackBar(context, 'Enter a valid port between 1 and 65535.');
+      return;
+    }
+    final rawHost = _hostController.text.trim().isEmpty
+        ? '127.0.0.1'
+        : _hostController.text.trim();
+    final targetHost = normalizeBrowserPreviewHost(rawHost);
+    if (targetHost == null) {
+      showAppSnackBar(
+        context,
+        'Browser previews only support localhost targets.',
+      );
+      return;
+    }
+    setState(() => _creatingPreview = true);
+    try {
+      final previews = await widget.api.fetchBrowserPreviews(widget.host);
+      final candidate = BrowserPreviewTargetCandidate(
+        host: targetHost,
+        port: targetPort,
+        scheme: _scheme == 'https' ? 'https' : 'http',
+        sourceLabel: _labelController.text.trim().isEmpty
+            ? 'Preview ${targetHost == '127.0.0.1' ? 'localhost' : targetHost}:$targetPort'
+            : _labelController.text.trim(),
+        cwd: widget.cwd,
+      );
+      final existing = findReusableBrowserPreview(
+        previews,
+        candidate,
+        sessionId: widget.sessionId,
+        cwd: widget.cwd,
+        profileMode: _browserProfileMode,
+      );
+      if (!mounted) return;
+      final viewport = MediaQuery.sizeOf(context);
+      final preview = existing ??
+          await widget.api.createBrowserPreview(
+            widget.host,
+            targetPort: targetPort,
+            targetHost: targetHost,
+            scheme: candidate.scheme,
+            label: candidate.sourceLabel,
+            cwd: widget.cwd,
+            sessionId: widget.sessionId,
+            width: viewport.width.round().clamp(320, 1200),
+            height: viewport.height.round().clamp(480, 1400),
+            profileMode: _browserProfileMode,
+          );
+      if (!mounted) return;
+      setState(() {
+        _creatingPreview = false;
+        _browserPreviews = [
+          preview,
+          ...previews.where(
+            (item) =>
+                item.id != preview.id &&
+                (item.sessionId == null || item.sessionId == widget.sessionId),
+          ),
+        ];
+      });
+      _openBrowserPreview(preview);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _creatingPreview = false);
+      showAppSnackBar(
+        context,
+        'Could not open browser preview: ${friendlyError(error)}',
       );
     }
   }
@@ -244,7 +365,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
         if (_inlinePreview?.forward.id == stopped.id) {
           _inlinePreview = null;
         }
-        if (_inlineBrowserPreview?.forward.id == stopped.id) {
+        if (_inlineBrowserPreview?.sourceForwardId == stopped.id) {
           _inlineBrowserPreview = null;
         }
         _ports = _ports
@@ -268,7 +389,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
 
   Future<void> _openRemoteBrowserPreview(HostPortForwardInfo forward) async {
     if (forward.scheme == 'tcp') {
-      showAppSnackBar(context, 'TCP forwards do not have browser previews.');
+      showAppSnackBar(context, 'TCP tunnels do not have browser previews.');
       return;
     }
     final viewport = MediaQuery.sizeOf(context);
@@ -306,38 +427,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
           ),
         ];
       });
-      final onBrowserPreviewOpened = widget.onBrowserPreviewOpened;
-      if (onBrowserPreviewOpened != null) {
-        onBrowserPreviewOpened(forward, preview);
-        return;
-      }
-      if (widget.previewPresentation == PortForwardPreviewPresentation.inline) {
-        setState(() {
-          _inlinePreview = null;
-          _inlineBrowserPreview = _ActiveBrowserPreview(
-            forward: forward,
-            preview: preview,
-          );
-        });
-        return;
-      }
-      final stopped = await Navigator.of(context).push<bool>(
-        MaterialPageRoute<bool>(
-          builder: (_) => BrowserPreviewScreen(
-            host: widget.host,
-            api: widget.api,
-            preview: preview,
-          ),
-        ),
-      );
-      if (!mounted) return;
-      if (stopped ?? false) {
-        setState(() {
-          _browserPreviews = _browserPreviews
-              .where((item) => item.id != preview.id)
-              .toList(growable: false);
-        });
-      }
+      _openBrowserPreview(preview, sourceForwardId: forward.id);
     } catch (error) {
       if (!mounted) return;
       showAppSnackBar(
@@ -349,6 +439,48 @@ class _PortForwardPaneState extends State<PortForwardPane> {
         setState(() => _startingBrowserPreviews.remove(forward.id));
       }
     }
+  }
+
+  Future<void> _openExistingBrowserPreview(HostBrowserPreviewInfo preview) async {
+    _openBrowserPreview(preview);
+  }
+
+  void _openBrowserPreview(
+    HostBrowserPreviewInfo preview, {
+    String? sourceForwardId,
+  }) {
+    final onBrowserPreviewOpened = widget.onBrowserPreviewOpened;
+    if (onBrowserPreviewOpened != null) {
+      onBrowserPreviewOpened(preview);
+      return;
+    }
+    if (widget.previewPresentation == PortForwardPreviewPresentation.inline) {
+      setState(() {
+        _inlinePreview = null;
+        _inlineBrowserPreview = _ActiveBrowserPreview(
+          preview: preview,
+          sourceForwardId: sourceForwardId,
+        );
+      });
+      return;
+    }
+    unawaited(() async {
+      final stopped = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => BrowserPreviewScreen(
+            host: widget.host,
+            api: widget.api,
+            preview: preview,
+          ),
+        ),
+      );
+      if (!mounted || !(stopped ?? false)) return;
+      setState(() {
+        _browserPreviews = _browserPreviews
+            .where((item) => item.id != preview.id)
+            .toList(growable: false);
+      });
+    }());
   }
 
   Future<void> _copy(Uri uri) async {
@@ -388,7 +520,8 @@ class _PortForwardPaneState extends State<PortForwardPane> {
     HostPortForwardInfo forward, {
     String? profileMode,
   }) {
-    return preview.targetHost == forward.targetHost &&
+    return normalizeBrowserPreviewHost(preview.targetHost) ==
+            normalizeBrowserPreviewHost(forward.targetHost) &&
         preview.targetPort == forward.targetPort &&
         preview.scheme == forward.scheme &&
         preview.cwd == (forward.cwd ?? widget.cwd) &&
@@ -446,6 +579,39 @@ class _PortForwardPaneState extends State<PortForwardPane> {
     }
 
     final colors = context.colors;
+    final browserPreviews = _browserPreviews;
+    final tcpTunnels = _ports
+        .where((port) => port.scheme == 'tcp')
+        .toList(growable: false);
+    final localUrlBridges = _ports
+        .where((port) => port.scheme != 'tcp')
+        .toList(growable: false);
+    final hasAnyConnections = browserPreviews.isNotEmpty ||
+        tcpTunnels.isNotEmpty ||
+        localUrlBridges.isNotEmpty;
+    final formTitle = _scheme == 'tcp'
+        ? 'Tunnel a TCP service'
+        : widget.supportsBrowserPreview
+        ? 'Preview a localhost web app'
+        : 'Create a local URL bridge';
+    final formBody = _scheme == 'tcp'
+        ? 'Open a raw tunnel to a service like Redis, Postgres, or any other localhost TCP port on ${widget.host.label}.'
+        : widget.supportsBrowserPreview && widget.supportsPortForwarding
+        ? 'Remote browser previews are the fastest way to inspect modern dev servers from ${widget.host.label}. Local URL bridges stay available as an advanced fallback.'
+        : widget.supportsBrowserPreview
+        ? 'Open a remote browser preview for a localhost app on ${widget.host.label}. Browser rendering stays on the host, so modern dev servers remain responsive.'
+        : 'Create a local HTTP or HTTPS URL for a localhost service on ${widget.host.label}. Use TCP mode for raw socket services like Redis or Postgres.';
+    final emptyTitle = widget.supportsBrowserPreview && widget.supportsPortForwarding
+        ? 'No active previews or tunnels'
+        : widget.supportsBrowserPreview
+        ? 'No active browser previews'
+        : 'No active connections';
+    final emptyBody = widget.supportsBrowserPreview && widget.supportsPortForwarding
+        ? 'Open a browser preview for your localhost app or create a tunnel for an advanced service.'
+        : widget.supportsBrowserPreview
+        ? 'Open a browser preview for a localhost app on ${widget.host.label}.'
+        : 'Create a local URL bridge or TCP tunnel for a localhost service on ${widget.host.label}.';
+
     return RefreshIndicator(
       onRefresh: _loadPorts,
       child: ListView(
@@ -458,11 +624,17 @@ class _PortForwardPaneState extends State<PortForwardPane> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.cable_rounded, color: colors.accent, size: 18),
+                    Icon(
+                      _scheme == 'tcp'
+                          ? Icons.settings_ethernet_rounded
+                          : Icons.open_in_browser_rounded,
+                      color: colors.accent,
+                      size: 18,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Forward a dev server',
+                        formTitle,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           color: colors.textPrimary,
                           fontWeight: AppWeights.title,
@@ -473,7 +645,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Bridge a localhost port from ${widget.host.label} into this device for previews.',
+                  formBody,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.35,
@@ -490,8 +662,8 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                       child: TextField(
                         controller: _portController,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Port',
+                        decoration: InputDecoration(
+                          labelText: _scheme == 'tcp' ? 'TCP port' : 'Web port',
                           hintText: '3000',
                         ),
                       ),
@@ -510,14 +682,22 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                       width: 120,
                       child: DropdownButtonFormField<String>(
                         initialValue: _scheme,
+                        isExpanded: true,
                         decoration: const InputDecoration(labelText: 'Type'),
-                        items: const [
-                          DropdownMenuItem(value: 'http', child: Text('HTTP')),
-                          DropdownMenuItem(
+                        items: [
+                          const DropdownMenuItem(
+                            value: 'http',
+                            child: Text('HTTP'),
+                          ),
+                          const DropdownMenuItem(
                             value: 'https',
                             child: Text('HTTPS'),
                           ),
-                          DropdownMenuItem(value: 'tcp', child: Text('TCP')),
+                          if (widget.supportsPortForwarding)
+                            const DropdownMenuItem(
+                              value: 'tcp',
+                              child: Text('TCP'),
+                            ),
                         ],
                         onChanged: (value) =>
                             setState(() => _scheme = value ?? 'http'),
@@ -527,43 +707,63 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                       width: 180,
                       child: TextField(
                         controller: _labelController,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Label',
-                          hintText: 'Vite',
+                          hintText: _scheme == 'tcp' ? 'Redis' : 'Vite',
                         ),
                       ),
                     ),
-                    FilterChip(
-                      selected: _rememberBrowserLogins,
-                      avatar: Icon(
-                        _rememberBrowserLogins
-                            ? Icons.lock_clock_rounded
-                            : Icons.lock_reset_rounded,
-                        size: 17,
+                    if (_scheme != 'tcp' && widget.supportsBrowserPreview)
+                      FilterChip(
+                        selected: _rememberBrowserLogins,
+                        avatar: Icon(
+                          _rememberBrowserLogins
+                              ? Icons.lock_clock_rounded
+                              : Icons.lock_reset_rounded,
+                          size: 17,
+                        ),
+                        label: const Text('Remember browser logins'),
+                        onSelected: (selected) =>
+                            setState(() => _rememberBrowserLogins = selected),
                       ),
-                      label: const Text('Remember browser logins'),
-                      onSelected: _scheme == 'tcp'
-                          ? null
-                          : (selected) => setState(
-                              () => _rememberBrowserLogins = selected,
-                            ),
-                    ),
                   ],
                 ),
                 const SizedBox(height: 14),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: FilledButton.icon(
-                    onPressed: _creating ? null : _createForward,
-                    icon: _creating
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.play_arrow_rounded),
-                    label: const Text('Start forward'),
-                  ),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    if (_scheme != 'tcp' && widget.supportsBrowserPreview)
+                      FilledButton.icon(
+                        onPressed: _creatingPreview ? null : _createBrowserPreviewFromInputs,
+                        icon: _creatingPreview
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.open_in_browser_rounded),
+                        label: const Text('Open preview'),
+                      ),
+                    if (widget.supportsPortForwarding)
+                      OutlinedButton.icon(
+                        onPressed: _creating ? null : _createForward,
+                        icon: _creating
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Icon(
+                                _scheme == 'tcp'
+                                    ? Icons.settings_ethernet_rounded
+                                    : Icons.link_rounded,
+                              ),
+                        label: Text(
+                          _scheme == 'tcp' ? 'Start tunnel' : 'Get local URL',
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -577,48 +777,106 @@ class _PortForwardPaneState extends State<PortForwardPane> {
           else if (_error != null)
             MeshEmptyState(
               icon: Icons.warning_amber_rounded,
-              title: 'Could not load ports',
+              title: 'Could not load connections',
               body: _error!,
             )
-          else if (_ports.isEmpty)
-            const MeshEmptyState(
-              icon: Icons.cable_rounded,
-              title: 'No forwarded ports',
-              body:
-                  'Start your dev server in the terminal, then forward its localhost port here.',
+          else if (!hasAnyConnections)
+            MeshEmptyState(
+              icon: widget.supportsBrowserPreview
+                  ? Icons.open_in_browser_rounded
+                  : Icons.settings_ethernet_rounded,
+              title: emptyTitle,
+              body: emptyBody,
             )
-          else
-            ..._ports.map((port) {
-              final bridge = _bridges[port.id];
-              final uri = bridge?.localUri;
-              final browserPreview = _firstMatchingPreview(
-                _browserPreviews,
-                port,
-              );
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _PortForwardCard(
-                  port: port,
-                  localUri: uri,
-                  hasBrowserPreview: browserPreview != null,
-                  startingBrowserPreview: _startingBrowserPreviews.contains(
-                    port.id,
+          else ...[
+            if (browserPreviews.isNotEmpty) ...[
+              _SectionHeading(
+                icon: Icons.open_in_browser_rounded,
+                title: 'Browser previews',
+                subtitle: 'Remote Chromium sessions running on ${widget.host.label}',
+              ),
+              for (final preview in browserPreviews)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _BrowserPreviewCard(
+                    preview: preview,
+                    onOpen: () => unawaited(_openExistingBrowserPreview(preview)),
+                    onStop: () => unawaited(_stopBrowserPreview(preview)),
                   ),
-                  onConnect: () => unawaited(_connectLocal(port)),
-                  onPreview: uri == null ? null : () => _openPreview(port, uri),
-                  onRemoteBrowserPreview: () =>
-                      unawaited(_openRemoteBrowserPreview(port)),
-                  onExternal: uri == null
-                      ? null
-                      : () => unawaited(_openExternal(uri)),
-                  onCopy: uri == null ? null : () => unawaited(_copy(uri)),
-                  onStop: () => unawaited(_stopForward(port)),
                 ),
-              );
-            }),
+              const SizedBox(height: 8),
+            ],
+            if (tcpTunnels.isNotEmpty) ...[
+              const _SectionHeading(
+                icon: Icons.settings_ethernet_rounded,
+                title: 'TCP tunnels',
+                subtitle: 'Raw service tunnels for databases and other socket services',
+              ),
+              for (final port in tcpTunnels)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _buildPortForwardCard(port),
+                ),
+              const SizedBox(height: 8),
+            ],
+            if (localUrlBridges.isNotEmpty) ...[
+              const _SectionHeading(
+                icon: Icons.link_rounded,
+                title: 'Local URL bridges',
+                subtitle: 'Advanced local HTTP/HTTPS bridges for native browser debugging',
+              ),
+              for (final port in localUrlBridges)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _buildPortForwardCard(port),
+                ),
+            ],
+          ],
         ],
       ),
     );
+  }
+
+  Widget _buildPortForwardCard(HostPortForwardInfo port) {
+    final bridge = _bridges[port.id];
+    final uri = bridge?.localUri;
+    final browserPreview = _firstMatchingPreview(
+      _browserPreviews,
+      port,
+    );
+    return _PortForwardCard(
+      port: port,
+      localUri: uri,
+      hasBrowserPreview: browserPreview != null,
+      startingBrowserPreview: _startingBrowserPreviews.contains(port.id),
+      onConnect: () => unawaited(_connectLocal(port)),
+      onPreview: uri == null ? null : () => _openPreview(port, uri),
+      onRemoteBrowserPreview: widget.supportsBrowserPreview && port.scheme != 'tcp'
+          ? () => unawaited(_openRemoteBrowserPreview(port))
+          : null,
+      onExternal: uri == null ? null : () => unawaited(_openExternal(uri)),
+      onCopy: uri == null ? null : () => unawaited(_copy(uri)),
+      onStop: () => unawaited(_stopForward(port)),
+    );
+  }
+
+  Future<void> _stopBrowserPreview(HostBrowserPreviewInfo preview) async {
+    try {
+      final stopped = await widget.api.stopBrowserPreview(widget.host, preview.id);
+      if (!mounted) return;
+      setState(() {
+        _inlineBrowserPreview = null;
+        _browserPreviews = _browserPreviews
+            .where((item) => item.id != stopped.id)
+            .toList(growable: false);
+      });
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        'Could not stop browser preview: ${friendlyError(error)}',
+      );
+    }
   }
 }
 
@@ -632,10 +890,13 @@ class _ActivePortPreview {
 }
 
 class _ActiveBrowserPreview {
-  const _ActiveBrowserPreview({required this.forward, required this.preview});
+  const _ActiveBrowserPreview({
+    required this.preview,
+    this.sourceForwardId,
+  });
 
-  final HostPortForwardInfo forward;
   final HostBrowserPreviewInfo preview;
+  final String? sourceForwardId;
 }
 
 bool get _supportsEmbeddedPreview =>
@@ -661,7 +922,7 @@ class _PortForwardCard extends StatelessWidget {
   final bool startingBrowserPreview;
   final VoidCallback onConnect;
   final VoidCallback? onPreview;
-  final VoidCallback onRemoteBrowserPreview;
+  final VoidCallback? onRemoteBrowserPreview;
   final VoidCallback? onExternal;
   final VoidCallback? onCopy;
   final VoidCallback onStop;
@@ -723,15 +984,15 @@ class _PortForwardCard extends StatelessWidget {
                 OutlinedButton.icon(
                   onPressed: onConnect,
                   icon: const Icon(Icons.link_rounded),
-                  label: const Text('Connect locally'),
+                  label: const Text('Connect local URL'),
                 ),
               if (running && localUri != null && port.scheme != 'tcp')
                 FilledButton.icon(
                   onPressed: onPreview,
                   icon: const Icon(Icons.preview_rounded),
-                  label: const Text('Preview'),
+                  label: const Text('Open local preview'),
                 ),
-              if (running && port.scheme != 'tcp')
+              if (running && port.scheme != 'tcp' && onRemoteBrowserPreview != null)
                 OutlinedButton.icon(
                   onPressed: startingBrowserPreview
                       ? null
@@ -744,20 +1005,20 @@ class _PortForwardCard extends StatelessWidget {
                         )
                       : const Icon(Icons.cast_connected_rounded),
                   label: Text(
-                    hasBrowserPreview ? 'Remote' : 'Stream',
+                    hasBrowserPreview ? 'Open preview' : 'Start preview',
                   ),
                 ),
               if (running && localUri != null)
                 OutlinedButton.icon(
                   onPressed: onCopy,
                   icon: const Icon(Icons.copy_rounded),
-                  label: const Text('Copy'),
+                  label: const Text('Copy URL'),
                 ),
               if (running && localUri != null && port.scheme != 'tcp')
                 OutlinedButton.icon(
                   onPressed: onExternal,
                   icon: const Icon(Icons.open_in_browser_rounded),
-                  label: const Text('Browser'),
+                  label: const Text('Native browser'),
                 ),
               if (running)
                 TextButton.icon(
@@ -765,6 +1026,138 @@ class _PortForwardCard extends StatelessWidget {
                   icon: const Icon(Icons.stop_circle_rounded),
                   label: const Text('Stop'),
                 ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionHeading extends StatelessWidget {
+  const _SectionHeading({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: colors.accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BrowserPreviewCard extends StatelessWidget {
+  const _BrowserPreviewCard({
+    required this.preview,
+    required this.onOpen,
+    required this.onStop,
+  });
+
+  final HostBrowserPreviewInfo preview;
+  final VoidCallback onOpen;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final running = preview.status == 'running' || preview.status == 'starting';
+    return MeshCard(
+      tone: MeshCardTone.surface,
+      accentStrip: running ? colors.success : colors.textTertiary,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                running ? Icons.open_in_browser_rounded : Icons.stop_circle_rounded,
+                color: running ? colors.success : colors.textSecondary,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  preview.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+              ),
+              MeshPill(
+                label: running ? 'LIVE' : preview.status.toUpperCase(),
+                tone: running ? MeshPillTone.success : MeshPillTone.neutral,
+                mono: true,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${preview.targetHost}:${preview.targetPort}',
+            style: monoStyle(color: colors.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            preview.url,
+            style: monoStyle(color: colors.textTertiary, fontSize: 11),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (running)
+                FilledButton.icon(
+                  onPressed: onOpen,
+                  icon: const Icon(Icons.open_in_browser_rounded),
+                  label: const Text('Open preview'),
+                ),
+              TextButton.icon(
+                onPressed: onStop,
+                icon: const Icon(Icons.stop_circle_rounded),
+                label: const Text('Stop'),
+              ),
             ],
           ),
         ],
