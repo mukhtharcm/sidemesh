@@ -2787,6 +2787,7 @@ class _UpdateProgressBanner extends StatelessWidget {
           if (showDismiss)
             MeshIconButton(
               icon: Icons.close_rounded,
+              tooltip: 'Dismiss',
               onTap: onDismiss,
               color: colors.textSecondary,
             ),
