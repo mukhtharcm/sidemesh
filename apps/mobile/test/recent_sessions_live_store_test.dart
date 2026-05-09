@@ -2,32 +2,20 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
-import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
+import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/recent_sessions_live_store.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
-import 'package:sidemesh_mobile/src/db.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-class _FakePathProvider extends PathProviderPlatform
-    with MockPlatformInterfaceMixin {
-  @override
-  Future<String?> getApplicationDocumentsPath() async => '/tmp/sidemesh_test';
-  @override
-  Future<String?> getApplicationSupportPath() async => '/tmp/sidemesh_test';
-  @override
-  Future<String?> getTemporaryPath() async => '/tmp/sidemesh_test';
-}
+
+import 'test_path_provider.dart';
 
 void main() {
   setUpAll(() {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfiNoIsolate;
-    PathProviderPlatform.instance = _FakePathProvider();
+    configureTestDatabaseFactory();
   });
 
   const host = HostProfile(
@@ -141,6 +129,46 @@ void main() {
     expect(store.entries.map((entry) => entry.session.id), {'session-2'});
   });
 
+  test('buffers live upserts until the first snapshot arrives', () async {
+    final stale = _session('session-stale', title: 'Cached stale');
+    final fresh = _session('session-fresh', title: 'Fresh snapshot');
+    await SessionLocalStore.instance.upsertSessions(host, [stale]);
+    final api = _FakeApiClient()
+      ..sessionsByHostId[host.id] = const <SessionSummary>[];
+    final store = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: const Duration(milliseconds: 100),
+    );
+    addTearDown(store.dispose);
+
+    store.configure(hosts: const [host], api: api);
+    await _settle();
+
+    final channel = api.liveChannelFor(host);
+    channel.addIncoming(
+      jsonEncode({
+        'type': 'upsert',
+        'session': _session('session-early', title: 'Early upsert').toJson(),
+      }),
+    );
+    channel.addIncoming(
+      jsonEncode({
+        'type': 'snapshot',
+        'sessions': [fresh.toJson()],
+      }),
+    );
+    await _settle();
+
+    expect(store.entries.map((entry) => entry.session.id), {
+      'session-fresh',
+      'session-early',
+    });
+    expect(
+      store.entries.any((entry) => entry.session.id == 'session-stale'),
+      false,
+    );
+  });
+
   test(
     'swallows websocket handshake failures and keeps HTTP fallback alive',
     () async {
@@ -252,6 +280,41 @@ void main() {
     expect(api.fetchSessionsCalls, 0);
     expect(store.entries, isEmpty);
   });
+
+  test(
+    'reconfigure does not rehydrate stale cache over confirmed live data',
+    () async {
+      final cached = _session('session-cached', title: 'Cached');
+      final live = _session('session-live', title: 'Live');
+      await SessionLocalStore.instance.upsertSessions(host, [cached]);
+      final api = _FakeApiClient()
+        ..sessionsByHostId[host.id] = const <SessionSummary>[];
+      final store = RecentSessionsStore(
+        pollInterval: const Duration(hours: 1),
+        initialHttpFallbackDelay: const Duration(milliseconds: 100),
+      );
+      addTearDown(store.dispose);
+
+      store.configure(hosts: const [host], api: api);
+      await _settle();
+      api
+          .liveChannelFor(host)
+          .addIncoming(
+            jsonEncode({
+              'type': 'snapshot',
+              'sessions': [live.toJson()],
+            }),
+          );
+      await _settle();
+      expect(store.entries.single.session.id, 'session-live');
+
+      await SessionLocalStore.instance.upsertSessions(host, [cached]);
+      store.configure(hosts: const [host], api: api);
+      await _settle();
+
+      expect(store.entries.single.session.id, 'session-live');
+    },
+  );
 }
 
 class _FakeApiClient extends ApiClient {

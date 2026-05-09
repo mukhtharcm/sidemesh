@@ -33,6 +33,7 @@ class SessionLocalStore extends ChangeNotifier {
     _favoritesLoadFuture = null;
     _favoriteKeys.clear();
   }
+
   final Set<String> _favoriteKeys = <String>{};
   bool _favoritesLoaded = false;
   Future<void>? _favoritesLoadFuture;
@@ -57,8 +58,7 @@ class SessionLocalStore extends ChangeNotifier {
     }
   }
 
-  String _favoriteKey(String hostId, String sessionId) =>
-      '$hostId::$sessionId';
+  String _favoriteKey(String hostId, String sessionId) => '$hostId::$sessionId';
 
   Future<void> ensureLoaded() async {
     await _ensureFavoritesLoaded();
@@ -104,7 +104,6 @@ class SessionLocalStore extends ChangeNotifier {
 
   Future<bool> toggleFavorite(HostProfile host, String sessionId) async {
     await _ensureFavoritesLoaded();
-    final db = await SidemeshDb.instance;
     final key = _favoriteKey(host.id, sessionId);
     final current = _favoriteKeys.contains(key);
     final next = !current;
@@ -113,19 +112,7 @@ class SessionLocalStore extends ChangeNotifier {
     } else {
       _favoriteKeys.remove(key);
     }
-    // Upsert a minimal row if it doesn't exist so the favorite is tracked.
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await db.rawInsert(
-      '''
-      INSERT INTO sessions (
-        host_id, session_id, title, preview, cwd, status,
-        created_at, updated_at, is_favorite, source, cached_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'favorite', ?)
-      ON CONFLICT(host_id, session_id) DO UPDATE SET
-        is_favorite = excluded.is_favorite
-    ''',
-      [host.id, sessionId, 'Unknown', '', '', 'unknown', 0, 0, now],
-    );
+    await _persistFavoriteFlag(host, sessionId, favorite: next);
     notifyListeners();
     return next;
   }
@@ -136,7 +123,6 @@ class SessionLocalStore extends ChangeNotifier {
     required bool favorite,
   }) async {
     await _ensureFavoritesLoaded();
-    final db = await SidemeshDb.instance;
     final key = _favoriteKey(host.id, sessionId);
     final current = _favoriteKeys.contains(key);
     if (current == favorite) return;
@@ -145,19 +131,42 @@ class SessionLocalStore extends ChangeNotifier {
     } else {
       _favoriteKeys.remove(key);
     }
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await db.rawInsert(
-      '''
-      INSERT INTO sessions (
-        host_id, session_id, title, preview, cwd, status,
-        created_at, updated_at, is_favorite, source, cached_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'favorite', ?)
-      ON CONFLICT(host_id, session_id) DO UPDATE SET
-        is_favorite = excluded.is_favorite
-    ''',
-      [host.id, sessionId, 'Unknown', '', '', 'unknown', 0, 0, now],
-    );
+    await _persistFavoriteFlag(host, sessionId, favorite: favorite);
     notifyListeners();
+  }
+
+  Future<void> _persistFavoriteFlag(
+    HostProfile host,
+    String sessionId, {
+    required bool favorite,
+  }) async {
+    final db = await SidemeshDb.instance;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (favorite) {
+      await db.rawInsert(
+        '''
+        INSERT INTO sessions (
+          host_id, session_id, title, preview, cwd, status,
+          created_at, updated_at, is_favorite, source, cached_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'favorite', ?)
+        ON CONFLICT(host_id, session_id) DO UPDATE SET
+          is_favorite = 1
+      ''',
+        [host.id, sessionId, 'Unknown', '', '', 'unknown', 0, 0, now],
+      );
+      return;
+    }
+    await db.update(
+      'sessions',
+      {'is_favorite': 0},
+      where: 'host_id = ? AND session_id = ?',
+      whereArgs: [host.id, sessionId],
+    );
+    await db.delete(
+      'sessions',
+      where: "host_id = ? AND session_id = ? AND source = 'favorite'",
+      whereArgs: [host.id, sessionId],
+    );
   }
 
   Future<List<SessionSummary>> getFavoriteSessions(HostProfile host) async {
@@ -230,7 +239,6 @@ class SessionLocalStore extends ChangeNotifier {
 
   // ─── Session cache (SQLite) ───
 
-
   Future<void> upsertSessions(
     HostProfile host,
     List<SessionSummary> sessions, {
@@ -279,6 +287,45 @@ class SessionLocalStore extends ChangeNotifier {
         ],
       );
     }
+    if (source == 'recent') {
+      final sessionIds = sessions
+          .map((session) => session.id)
+          .toSet()
+          .toList(growable: false);
+      if (sessionIds.isEmpty) {
+        batch.execute(
+          '''
+          UPDATE sessions
+          SET source = 'favorite', cached_at = ?
+          WHERE host_id = ? AND source = 'recent' AND is_favorite = 1
+        ''',
+          [now, host.id],
+        );
+        batch.delete(
+          'sessions',
+          where: "host_id = ? AND source = 'recent' AND is_favorite = 0",
+          whereArgs: [host.id],
+        );
+      } else {
+        final placeholders = List.filled(sessionIds.length, '?').join(', ');
+        batch.execute(
+          '''
+          UPDATE sessions
+          SET source = 'favorite', cached_at = ?
+          WHERE host_id = ? AND source = 'recent' AND is_favorite = 1
+            AND session_id NOT IN ($placeholders)
+        ''',
+          [now, host.id, ...sessionIds],
+        );
+        batch.delete(
+          'sessions',
+          where:
+              "host_id = ? AND source = 'recent' AND is_favorite = 0 "
+              "AND session_id NOT IN ($placeholders)",
+          whereArgs: [host.id, ...sessionIds],
+        );
+      }
+    }
     await batch.commit(noResult: true);
   }
 
@@ -295,10 +342,7 @@ class SessionLocalStore extends ChangeNotifier {
     return rows.map(_rowToSession).toList(growable: false);
   }
 
-  Future<SessionSummary?> getSession(
-    HostProfile host,
-    String sessionId,
-  ) async {
+  Future<SessionSummary?> getSession(HostProfile host, String sessionId) async {
     await _ensureMigrated();
     final db = await SidemeshDb.instance;
     final rows = await db.rawQuery(
@@ -312,11 +356,7 @@ class SessionLocalStore extends ChangeNotifier {
   Future<void> clearHost(HostProfile host) async {
     await _ensureMigrated();
     final db = await SidemeshDb.instance;
-    await db.delete(
-      'sessions',
-      where: 'host_id = ?',
-      whereArgs: [host.id],
-    );
+    await db.delete('sessions', where: 'host_id = ?', whereArgs: [host.id]);
     _favoriteKeys.removeWhere((key) => key.startsWith('${host.id}::'));
   }
 
@@ -499,8 +539,7 @@ class SessionLocalStore extends ChangeNotifier {
     final now = DateTime.now();
     final updated = index
         .map(
-          (entry) =>
-              entry.key == key ? entry.copyWith(lastUsedAt: now) : entry,
+          (entry) => entry.key == key ? entry.copyWith(lastUsedAt: now) : entry,
         )
         .toList(growable: false);
     await _pruneLogCache(prefs, updated);

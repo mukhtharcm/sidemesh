@@ -18,6 +18,21 @@ class RemoteSessionEntry {
   final SessionSummary session;
 }
 
+@immutable
+class _PendingRecentMutation {
+  const _PendingRecentMutation.upsert(this.session)
+    : sessionId = null,
+      isRemoval = false;
+
+  const _PendingRecentMutation.remove(this.sessionId)
+    : session = null,
+      isRemoval = true;
+
+  final SessionSummary? session;
+  final String? sessionId;
+  final bool isRemoval;
+}
+
 /// Cache-first recent sessions store with one lightweight live socket per host.
 ///
 /// HTTP remains the reconciliation path for reconnects and compatibility with
@@ -87,8 +102,8 @@ class RecentSessionsStore extends ChangeNotifier {
       return;
     }
 
-    unawaited(_hydrateCachedHosts(_hosts));
     if (hostsChanged || !_hasLoadedOnce) {
+      unawaited(_hydrateCachedHosts(_hosts));
       _scheduleInitialHttpFallback();
     }
   }
@@ -136,9 +151,7 @@ class RecentSessionsStore extends ChangeNotifier {
               .toList(growable: false);
           _hasLoadedOnce = true;
           _publishEntries();
-          unawaited(
-            SessionLocalStore.instance.upsertSessions(host, sessions),
-          );
+          unawaited(SessionLocalStore.instance.upsertSessions(host, sessions));
         } catch (error) {
           if (_disposed || gen != _loadGen) return;
           HostStatusStore.instance.markOffline(
@@ -196,7 +209,8 @@ class RecentSessionsStore extends ChangeNotifier {
           if (_disposed ||
               cached.isEmpty ||
               current == null ||
-              _hostSignature(current) != _hostSignature(host)) {
+              _hostSignature(current) != _hostSignature(host) ||
+              _confirmedHostIds.contains(host.id)) {
             return;
           }
           _replaceHostSessions(host, cached);
@@ -426,6 +440,9 @@ class _RecentHostLiveConnection {
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   bool _disposed = false;
+  bool _receivedSnapshot = false;
+  final List<_PendingRecentMutation> _pendingMutations =
+      <_PendingRecentMutation>[];
 
   bool matches(HostProfile next) =>
       host.id == next.id &&
@@ -434,6 +451,8 @@ class _RecentHostLiveConnection {
 
   void connect() {
     if (_disposed || !host.enabled) return;
+    _receivedSnapshot = false;
+    _pendingMutations.clear();
     try {
       final channel = api.openSessionsLive(host);
       _channel = channel;
@@ -471,29 +490,69 @@ class _RecentHostLiveConnection {
       final event = RecentSessionsLiveEvent.fromJson(
         (jsonDecode(raw) as Map).cast<String, dynamic>(),
       );
-      switch (event.type) {
-        case 'hello':
-          onOnline(host);
-        case 'snapshot':
-          onOnline(host);
-          onSnapshot(host, event.sessions ?? const <SessionSummary>[]);
-        case 'upsert':
-          onOnline(host);
-          final session = event.session;
-          if (session != null) {
-            onUpsert(host, session);
-          }
-        case 'remove':
-          onOnline(host);
-          final sessionId = event.sessionId;
-          if (sessionId != null && sessionId.isNotEmpty) {
-            onRemove(host, sessionId);
-          }
-        case 'error':
-          onOffline(host, event.message);
+      if (event.type == 'hello') {
+        onOnline(host);
+        return;
+      }
+      if (event.type == 'snapshot') {
+        onOnline(host);
+        _receivedSnapshot = true;
+        onSnapshot(host, event.sessions ?? const <SessionSummary>[]);
+        _flushPendingMutations();
+        return;
+      }
+      if (event.type == 'upsert') {
+        onOnline(host);
+        final session = event.session;
+        if (session == null) {
+          return;
+        }
+        if (!_receivedSnapshot) {
+          _pendingMutations.add(_PendingRecentMutation.upsert(session));
+          return;
+        }
+        onUpsert(host, session);
+        return;
+      }
+      if (event.type == 'remove') {
+        onOnline(host);
+        final sessionId = event.sessionId;
+        if (sessionId == null || sessionId.isEmpty) {
+          return;
+        }
+        if (!_receivedSnapshot) {
+          _pendingMutations.add(_PendingRecentMutation.remove(sessionId));
+          return;
+        }
+        onRemove(host, sessionId);
+        return;
+      }
+      if (event.type == 'error') {
+        onOffline(host, event.message);
       }
     } catch (error) {
       debugPrint('Ignored malformed recent sessions live event: $error');
+    }
+  }
+
+  void _flushPendingMutations() {
+    if (_pendingMutations.isEmpty) {
+      return;
+    }
+    final pending = List<_PendingRecentMutation>.from(_pendingMutations);
+    _pendingMutations.clear();
+    for (final mutation in pending) {
+      if (mutation.isRemoval) {
+        final sessionId = mutation.sessionId;
+        if (sessionId != null && sessionId.isNotEmpty) {
+          onRemove(host, sessionId);
+        }
+        continue;
+      }
+      final session = mutation.session;
+      if (session != null) {
+        onUpsert(host, session);
+      }
     }
   }
 

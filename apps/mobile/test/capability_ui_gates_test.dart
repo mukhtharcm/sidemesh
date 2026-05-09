@@ -2,10 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
-import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
 import 'package:sidemesh_mobile/src/create_session_defaults_store.dart';
 import 'package:sidemesh_mobile/src/db.dart';
@@ -22,21 +19,11 @@ import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-class _FakePathProvider extends PathProviderPlatform
-    with MockPlatformInterfaceMixin {
-  @override
-  Future<String?> getApplicationDocumentsPath() async => '/tmp/sidemesh_test';
-  @override
-  Future<String?> getApplicationSupportPath() async => '/tmp/sidemesh_test';
-  @override
-  Future<String?> getTemporaryPath() async => '/tmp/sidemesh_test';
-}
+import 'test_path_provider.dart';
 
 void main() {
   setUpAll(() {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfiNoIsolate;
-    PathProviderPlatform.instance = _FakePathProvider();
+    configureTestDatabaseFactory();
   });
 
   setUp(() async {

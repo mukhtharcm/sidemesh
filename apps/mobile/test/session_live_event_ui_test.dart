@@ -3,10 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
-import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
 import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
@@ -14,24 +11,14 @@ import 'package:sidemesh_mobile/src/screens/session_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:stream_channel/stream_channel.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
-class _FakePathProvider extends PathProviderPlatform
-    with MockPlatformInterfaceMixin {
-  @override
-  Future<String?> getApplicationDocumentsPath() async => '/tmp/sidemesh_test';
-  @override
-  Future<String?> getApplicationSupportPath() async => '/tmp/sidemesh_test';
-  @override
-  Future<String?> getTemporaryPath() async => '/tmp/sidemesh_test';
-}
+import 'test_path_provider.dart';
 
 void main() {
   setUpAll(() {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfiNoIsolate;
-    PathProviderPlatform.instance = _FakePathProvider();
+    configureTestDatabaseFactory();
   });
 
   setUp(() async {
@@ -41,69 +28,70 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  testWidgets('session screen renders warning, plan, queue, and retry live events', (
-    tester,
-  ) async {
-    final session = _session('rich-live-session');
-    final api = _RichEventFakeApi();
-    addTearDown(api.dispose);
+  testWidgets(
+    'session screen renders warning, plan, queue, and retry live events',
+    (tester) async {
+      final session = _session('rich-live-session');
+      final api = _RichEventFakeApi();
+      addTearDown(api.dispose);
 
-    await _pumpApp(
-      tester,
-      SessionScreen(
-        host: _host('rich-live'),
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
-      size: const Size(1180, 900),
-    );
-    await _pumpFrames(tester);
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('rich-live'),
+          session: session,
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
 
-    api.emit({
-      'type': 'provider_warning',
-      'sessionId': session.id,
-      'level': 'warning',
-      'code': 'warn-1',
-      'message': 'Heads up from the fake provider',
-      'source': 'fake/runtime',
-    });
-    api.emit({
-      'type': 'plan_updated',
-      'sessionId': session.id,
-      'turnId': 'turn-1',
-      'explanation': 'Follow the rollout plan.',
-      'plan': [
-        {'step': 'Review docs', 'status': 'completed'},
-        {'step': 'Ship the change', 'status': 'in_progress'},
-      ],
-    });
-    api.emit({
-      'type': 'queue_updated',
-      'sessionId': session.id,
-      'steeringCount': 1,
-      'followUpCount': 2,
-      'steeringPreview': ['Keep it provider-neutral'],
-      'followUpPreview': ['Add tests', 'Run analyze'],
-    });
-    api.emit({
-      'type': 'auto_retry_updated',
-      'sessionId': session.id,
-      'phase': 'started',
-      'attempt': 2,
-      'maxAttempts': 3,
-      'delayMs': 1500,
-      'errorMessage': 'Overloaded',
-    });
-    await _pumpFrames(tester);
+      api.emit({
+        'type': 'provider_warning',
+        'sessionId': session.id,
+        'level': 'warning',
+        'code': 'warn-1',
+        'message': 'Heads up from the fake provider',
+        'source': 'fake/runtime',
+      });
+      api.emit({
+        'type': 'plan_updated',
+        'sessionId': session.id,
+        'turnId': 'turn-1',
+        'explanation': 'Follow the rollout plan.',
+        'plan': [
+          {'step': 'Review docs', 'status': 'completed'},
+          {'step': 'Ship the change', 'status': 'in_progress'},
+        ],
+      });
+      api.emit({
+        'type': 'queue_updated',
+        'sessionId': session.id,
+        'steeringCount': 1,
+        'followUpCount': 2,
+        'steeringPreview': ['Keep it provider-neutral'],
+        'followUpPreview': ['Add tests', 'Run analyze'],
+      });
+      api.emit({
+        'type': 'auto_retry_updated',
+        'sessionId': session.id,
+        'phase': 'started',
+        'attempt': 2,
+        'maxAttempts': 3,
+        'delayMs': 1500,
+        'errorMessage': 'Overloaded',
+      });
+      await _pumpFrames(tester);
 
-    expect(find.text('Heads up from the fake provider'), findsOneWidget);
-    expect(find.text('Ship the change'), findsOneWidget);
-    expect(find.text('Queue · 1 steering · 2 follow-up'), findsOneWidget);
-    expect(find.text('Retry 2 / 3 in 1.5s'), findsOneWidget);
-    expect(find.textContaining('Keep it provider-neutral'), findsOneWidget);
-    expect(find.textContaining('Overloaded'), findsOneWidget);
-  });
+      expect(find.text('Heads up from the fake provider'), findsOneWidget);
+      expect(find.text('Ship the change'), findsOneWidget);
+      expect(find.text('Queue · 1 steering · 2 follow-up'), findsOneWidget);
+      expect(find.text('Retry 2 / 3 in 1.5s'), findsOneWidget);
+      expect(find.textContaining('Keep it provider-neutral'), findsOneWidget);
+      expect(find.textContaining('Overloaded'), findsOneWidget);
+    },
+  );
 
   testWidgets('session screen keeps only the latest plan update per session', (
     tester,
@@ -124,22 +112,26 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    api.emit(_planUpdatedEvent(
-      session.id,
-      turnId: 'turn-1',
-      explanation: 'Initial plan.',
-      plan: const [
-        {'step': 'Inspect the bug', 'status': 'completed'},
-      ],
-    ));
-    api.emit(_planUpdatedEvent(
-      session.id,
-      turnId: 'turn-2',
-      explanation: 'Revised plan.',
-      plan: const [
-        {'step': 'Ship the fix', 'status': 'in_progress'},
-      ],
-    ));
+    api.emit(
+      _planUpdatedEvent(
+        session.id,
+        turnId: 'turn-1',
+        explanation: 'Initial plan.',
+        plan: const [
+          {'step': 'Inspect the bug', 'status': 'completed'},
+        ],
+      ),
+    );
+    api.emit(
+      _planUpdatedEvent(
+        session.id,
+        turnId: 'turn-2',
+        explanation: 'Revised plan.',
+        plan: const [
+          {'step': 'Ship the fix', 'status': 'in_progress'},
+        ],
+      ),
+    );
     await _pumpFrames(tester);
 
     expect(find.text('Plan update'), findsOneWidget);
@@ -204,66 +196,63 @@ void main() {
     expect(find.text('Avoid duplicates on reopen'), findsOneWidget);
   });
 
-  testWidgets('session screen restores a missed plan update from delta replay', (
-    tester,
-  ) async {
-    final session = _session('plan-delta-replay');
-    final api = _RichEventFakeApi(
-      messages: [
-        _assistantMessage(
-          id: 'seed-message',
-          text: 'Existing transcript item.',
-          content: const [TextBlock('Existing transcript item.')],
-        ),
-      ],
-      eventsDelta: SessionEventsDelta(
-        sessionId: session.id,
-        since: 1,
-        nextSeq: 3,
-        messages: const [],
-        activities: const [],
-        latestPlanUpdate: LiveEvent.fromJson(
-          _planUpdatedEvent(
-            session.id,
-            turnId: 'turn-2',
-            explanation: 'Recovered from /events.',
-            plan: const [
-              {'step': 'Catch up missed plan state', 'status': 'in_progress'},
-            ],
-            seq: 2,
+  testWidgets(
+    'session screen restores a missed plan update from delta replay',
+    (tester) async {
+      final session = _session('plan-delta-replay');
+      final api = _RichEventFakeApi(
+        messages: [
+          _assistantMessage(
+            id: 'seed-message',
+            text: 'Existing transcript item.',
+            content: const [TextBlock('Existing transcript item.')],
           ),
+        ],
+        eventsDelta: SessionEventsDelta(
+          sessionId: session.id,
+          since: 1,
+          nextSeq: 3,
+          messages: const [],
+          activities: const [],
+          latestPlanUpdate: LiveEvent.fromJson(
+            _planUpdatedEvent(
+              session.id,
+              turnId: 'turn-2',
+              explanation: 'Recovered from /events.',
+              plan: const [
+                {'step': 'Catch up missed plan state', 'status': 'in_progress'},
+              ],
+              seq: 2,
+            ),
+          ),
+          pendingAction: null,
+          session: null,
         ),
-        pendingAction: null,
-        session: null,
-      ),
-    );
-    addTearDown(api.dispose);
+      );
+      addTearDown(api.dispose);
 
-    await _pumpApp(
-      tester,
-      SessionScreen(
-        host: _host('plan-delta-replay'),
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
-      size: const Size(1180, 900),
-    );
-    await _pumpFrames(tester);
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('plan-delta-replay'),
+          session: session,
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
 
-    expect(find.text('Catch up missed plan state'), findsNothing);
+      expect(find.text('Catch up missed plan state'), findsNothing);
 
-    api.emit({
-      'type': 'hello',
-      'sessionId': session.id,
-      'nextSeq': 3,
-    });
-    await _pumpFrames(tester);
+      api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 3});
+      await _pumpFrames(tester);
 
-    expect(find.text('Plan update'), findsOneWidget);
-    expect(find.text('Catch up missed plan state'), findsOneWidget);
-    expect(find.text('Recovered from /events.'), findsOneWidget);
-  });
+      expect(find.text('Plan update'), findsOneWidget);
+      expect(find.text('Catch up missed plan state'), findsOneWidget);
+      expect(find.text('Recovered from /events.'), findsOneWidget);
+    },
+  );
 
   testWidgets('completed assistant message keeps collapsed reasoning visible', (
     tester,
@@ -327,52 +316,53 @@ void main() {
     expect(find.text('Step one.'), findsOneWidget);
   });
 
-  testWidgets('persisted assistant reasoning starts collapsed and expands as text', (
-    tester,
-  ) async {
-    final session = _session('persisted-reasoning');
-    final api = _RichEventFakeApi(
-      messages: [
-        _assistantMessage(
-          id: 'answer-with-reasoning',
-          text: 'Visible answer.',
-          content: const [
-            ThinkingBlock(
-              '**Troubleshooting merge issues**\n\n'
-              'New reasoning should render as selectable text.',
-            ),
-            TextBlock('Visible answer.'),
-          ],
+  testWidgets(
+    'persisted assistant reasoning starts collapsed and expands as text',
+    (tester) async {
+      final session = _session('persisted-reasoning');
+      final api = _RichEventFakeApi(
+        messages: [
+          _assistantMessage(
+            id: 'answer-with-reasoning',
+            text: 'Visible answer.',
+            content: const [
+              ThinkingBlock(
+                '**Troubleshooting merge issues**\n\n'
+                'New reasoning should render as selectable text.',
+              ),
+              TextBlock('Visible answer.'),
+            ],
+          ),
+        ],
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('persisted-reasoning'),
+          session: session,
+          api: api,
+          desktopMode: true,
         ),
-      ],
-    );
-    addTearDown(api.dispose);
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
 
-    await _pumpApp(
-      tester,
-      SessionScreen(
-        host: _host('persisted-reasoning'),
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
-      size: const Size(1180, 900),
-    );
-    await _pumpFrames(tester);
+      expect(find.text('Visible answer.'), findsOneWidget);
+      expect(find.text('Reasoning'), findsOneWidget);
+      expect(find.textContaining('Troubleshooting'), findsNothing);
 
-    expect(find.text('Visible answer.'), findsOneWidget);
-    expect(find.text('Reasoning'), findsOneWidget);
-    expect(find.textContaining('Troubleshooting'), findsNothing);
+      await tester.tap(find.text('Reasoning'));
+      await _pumpFrames(tester);
 
-    await tester.tap(find.text('Reasoning'));
-    await _pumpFrames(tester);
-
-    expect(find.textContaining('Troubleshooting'), findsOneWidget);
-    expect(
-      find.textContaining('New reasoning should render as selectable text.'),
-      findsOneWidget,
-    );
-  });
+      expect(find.textContaining('Troubleshooting'), findsOneWidget);
+      expect(
+        find.textContaining('New reasoning should render as selectable text.'),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets(
     'session screen surfaces preview, terminal, and file actions from activities',
@@ -430,46 +420,47 @@ void main() {
     },
   );
 
-  testWidgets('mobile running session shows stop pill and stops after confirmation', (
-    tester,
-  ) async {
-    final session = _session('mobile-stop');
-    final api = _RichEventFakeApi(sessionSummary: session);
-    addTearDown(api.dispose);
+  testWidgets(
+    'mobile running session shows stop pill and stops after confirmation',
+    (tester) async {
+      final session = _session('mobile-stop');
+      final api = _RichEventFakeApi(sessionSummary: session);
+      addTearDown(api.dispose);
 
-    await _pumpApp(
-      tester,
-      SessionScreen(
-        host: _host('mobile-stop'),
-        session: session,
-        api: api,
-        desktopMode: false,
-      ),
-      size: const Size(430, 900),
-    );
-    await _pumpFrames(tester);
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('mobile-stop'),
+          session: session,
+          api: api,
+          desktopMode: false,
+        ),
+        size: const Size(430, 900),
+      );
+      await _pumpFrames(tester);
 
-    api.emit({
-      'type': 'thread_status_changed',
-      'sessionId': session.id,
-      'status': 'running',
-    });
-    await _pumpFrames(tester);
+      api.emit({
+        'type': 'thread_status_changed',
+        'sessionId': session.id,
+        'status': 'running',
+      });
+      await _pumpFrames(tester);
 
-    expect(find.text('Stop agent'), findsOneWidget);
+      expect(find.text('Stop agent'), findsOneWidget);
 
-    await tester.tap(find.text('Stop agent'));
-    await _pumpFrames(tester);
+      await tester.tap(find.text('Stop agent'));
+      await _pumpFrames(tester);
 
-    expect(find.text('Stop session?'), findsOneWidget);
+      expect(find.text('Stop session?'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Stop'));
-    await _pumpFrames(tester);
+      await tester.tap(find.widgetWithText(FilledButton, 'Stop'));
+      await _pumpFrames(tester);
 
-    expect(api.stopSessionCalls, 1);
-    expect(find.text('Stop agent'), findsNothing);
-    expect(find.text('Session stopped.'), findsOneWidget);
-  });
+      expect(api.stopSessionCalls, 1);
+      expect(find.text('Stop agent'), findsNothing);
+      expect(find.text('Session stopped.'), findsOneWidget);
+    },
+  );
 }
 
 Future<void> _pumpFrames(WidgetTester tester) async {
@@ -660,11 +651,7 @@ NodeInfo _nodeInfo({
       'localImage': false,
       'skills': false,
     },
-    'configuration': {
-      'models': false,
-      'profiles': false,
-      'skills': false,
-    },
+    'configuration': {'models': false, 'profiles': false, 'skills': false},
     'runtimeControls': {
       'model': false,
       'approvalPolicy': false,
@@ -686,11 +673,7 @@ NodeInfo _nodeInfo({
       'localImage': false,
       'skills': false,
     },
-    'configuration': {
-      'models': false,
-      'profiles': false,
-      'skills': false,
-    },
+    'configuration': {'models': false, 'profiles': false, 'skills': false},
     'runtimeControls': {
       'model': false,
       'approvalPolicy': false,
@@ -713,7 +696,8 @@ class _RichEventFakeApi extends ApiClient {
     this.sessionSummary,
   });
 
-  final _ControllableWebSocketChannel _channel = _ControllableWebSocketChannel();
+  final _ControllableWebSocketChannel _channel =
+      _ControllableWebSocketChannel();
   List<SessionMessage> messages;
   final List<SessionActivity> activities;
   final LiveEvent? latestPlanUpdate;
@@ -751,7 +735,8 @@ class _RichEventFakeApi extends ApiClient {
     HostProfile host,
     String sessionId, {
     required int since,
-  }) async => eventsDelta ??
+  }) async =>
+      eventsDelta ??
       SessionEventsDelta(
         sessionId: sessionId,
         since: since,
