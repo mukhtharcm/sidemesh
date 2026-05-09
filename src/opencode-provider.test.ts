@@ -502,6 +502,7 @@ sleep 10
               id: "big-pickle",
               name: "Big Pickle",
               providerID: "opencode",
+              variants: { high: {}, minimal: {} },
               capabilities: { reasoning: true, input: { text: true, image: true } },
             },
           },
@@ -537,10 +538,15 @@ sleep 10
     await provider.start();
 
     const models = await provider.listModels({ cwd: "/repo/app", profile: null, provider: null });
-    assert.equal(models.length, 2);
+    assert.equal(models.length, 4);
     assert.deepEqual(
       models.map((model) => model.id),
-      ["openai/gpt-4.1", "opencode/big-pickle"],
+      [
+        "openai/gpt-4.1",
+        "opencode/big-pickle",
+        "opencode/big-pickle/high",
+        "opencode/big-pickle/minimal",
+      ],
     );
     assert.deepEqual(
       models.filter((model) => model.isDefault).map((model) => model.id),
@@ -550,12 +556,21 @@ sleep 10
       models.find((model) => model.id === "opencode/big-pickle")
         ?.supportedReasoningEfforts.length,
     );
+    assert.equal(
+      models.find((model) => model.id === "opencode/big-pickle/high")
+        ?.defaultReasoningEffort,
+      "medium",
+    );
     const openAiOnly = await provider.listModels({
       cwd: "/repo/app",
       profile: null,
       provider: "openai",
     });
     assert.deepEqual(openAiOnly.map((model) => model.id), ["openai/gpt-4.1"]);
+    assert.equal(
+      models.find((model) => model.id === "opencode/big-pickle/high")?.displayName,
+      "OpenCode / Big Pickle (High)",
+    );
 
     const skills = await provider.listSkills({
       cwd: "/repo/app",
@@ -563,6 +578,79 @@ sleep 10
     });
     assert.equal(skills.skills[0]?.name, "release-checks");
     assert.equal(skills.skills[0]?.scope, "repo");
+  });
+
+  it("lists OpenCode provider-defined modes", async () => {
+    const client = new FakeOpenCodeClient();
+    client.agents = [
+      { name: "build", mode: "primary" },
+      { name: "plan", mode: "all" },
+      { name: "review", mode: "subagent" },
+      { name: "hidden", mode: "primary", hidden: true },
+    ];
+    const provider = createProvider(client);
+    await provider.start();
+
+    const modes = await provider.listModes({ cwd: "/repo/app" });
+    assert.deepEqual(modes, {
+      defaultMode: null,
+      modes: [
+        { id: "build", label: "Build" },
+        { id: "plan", label: "Plan" },
+      ],
+    });
+  });
+
+  it("serializes image inputs and model variants for prompt_async", async () => {
+    const client = new FakeOpenCodeClient();
+    const provider = createProvider(client);
+
+    await provider.start();
+    const created = await provider.createSession({
+      cwd: "/repo/app",
+      input: [
+        { type: "text", text: "Review these images", text_elements: [] },
+        { type: "image", url: "https://example.com/diagram.png" },
+        { type: "localImage", path: "/repo/app/assets/screenshot.jpg" },
+      ],
+      overrides: {
+        model: "opencode/big-pickle/high",
+        mode: "build",
+        reasoningEffort: null,
+        fastMode: null,
+        approvalPolicy: null,
+        sandboxMode: null,
+        networkAccess: null,
+        webSearch: null,
+        profile: null,
+      },
+    });
+
+    assert.ok(created.activeTurnId);
+    assert.deepEqual(client.promptInputs[0]?.input.model, {
+      providerID: "opencode",
+      modelID: "big-pickle",
+    });
+    assert.equal(client.promptInputs[0]?.input.variant, "high");
+    assert.deepEqual(client.promptInputs[0]?.input.parts.slice(1), [
+      {
+        type: "file",
+        mime: "image/png",
+        filename: "diagram.png",
+        url: "https://example.com/diagram.png",
+      },
+      {
+        type: "file",
+        mime: "image/jpeg",
+        filename: "screenshot.jpg",
+        url: "file:///repo/app/assets/screenshot.jpg",
+        source: {
+          type: "file",
+          path: "/repo/app/assets/screenshot.jpg",
+          text: { start: 0, end: 0, value: "" },
+        },
+      },
+    ]);
   });
 
   it("starts lazily when resuming a known session", async () => {
@@ -924,6 +1012,14 @@ class FakeOpenCodeClient {
     description: string;
     location: string;
   }> = [];
+  public agents: Array<{
+    name: string;
+    mode: "primary" | "subagent" | "all";
+    hidden?: boolean;
+  }> = [
+    { name: "build", mode: "primary" },
+    { name: "plan", mode: "primary" },
+  ];
 
   public readonly permissionReplies: Array<{
     directory: string;
@@ -942,6 +1038,7 @@ class FakeOpenCodeClient {
     input: {
       agent?: string;
       model?: { providerID: string; modelID: string };
+      variant?: string;
       parts: any[];
     };
   }> = [];
@@ -1060,17 +1157,15 @@ class FakeOpenCodeClient {
     return session;
   }
 
-  public async archiveSession(options: { sessionID: string; archivedAt: number }) {
-    const session = await this.getSession({ sessionID: options.sessionID });
-    session.time.archived = options.archivedAt;
-    session.time.updated = Date.now();
-    return session;
-  }
-
   public async promptAsync(options: {
     directory: string;
     sessionID: string;
-    input: { agent?: string; model?: { providerID: string; modelID: string }; parts: any[] };
+    input: {
+      agent?: string;
+      model?: { providerID: string; modelID: string };
+      variant?: string;
+      parts: any[];
+    };
   }) {
     this.promptInputs.push({
       directory: options.directory,
@@ -1090,7 +1185,10 @@ class FakeOpenCodeClient {
         role: "user" as const,
         time: { created: Date.now() },
         agent: options.input.agent ?? session.agent ?? "build",
-        model: options.input.model ?? session.model,
+        model: {
+          ...(options.input.model ?? session.model),
+          ...(options.input.variant ? { variant: options.input.variant } : {}),
+        },
       },
       parts: options.input.parts,
     };
@@ -1261,10 +1359,7 @@ class FakeOpenCodeClient {
   }
 
   public async listAgents(_directory: string) {
-    return [
-      { name: "build", mode: "primary" as const },
-      { name: "plan", mode: "primary" as const },
-    ];
+    return this.agents;
   }
 
   public async listSkills(_directory: string) {

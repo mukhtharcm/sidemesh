@@ -276,6 +276,44 @@ void main() {
     expect(find.text('Network'), findsOneWidget);
   });
 
+  testWidgets('session controls use provider-defined mode catalogs', (
+    tester,
+  ) async {
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      modes: const [
+        ProviderModeSummary(id: 'build', label: 'Build'),
+        ProviderModeSummary(id: 'review', label: 'Review'),
+      ],
+    );
+
+    await _pumpApp(
+      tester,
+      SessionControlsSheet(
+        api: api,
+        host: _host('controls-mode-catalog'),
+        session: _session('controls-mode-catalog-session'),
+        runtimeModel: null,
+        runtimeModelProvider: null,
+        runtimeMode: 'build',
+        runtimeServiceTier: null,
+        runtimeReasoningEffort: null,
+        runtimeApproval: null,
+        runtimeSandbox: null,
+        runtimeNetworkAccess: null,
+        policyStore: SessionPolicyStore.instance,
+        turnConfigStore: SessionTurnConfigStore.instance,
+      ),
+      size: const Size(840, 1100),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Build'), findsWidgets);
+    expect(find.text('Review'), findsOneWidget);
+    expect(find.text('Interactive'), findsNothing);
+    expect(find.text('Plan'), findsNothing);
+  });
+
   testWidgets('create session sheet hides unsupported launch controls', (
     tester,
   ) async {
@@ -915,11 +953,13 @@ class _CapabilityFakeApi extends ApiClient {
   _CapabilityFakeApi(
     this.node, {
     this.models = const <ModelCatalogEntry>[],
+    this.modes = const <ProviderModeSummary>[],
     this.profiles = const <ProviderProfileSummary>[],
   });
 
   final NodeInfo node;
   final List<ModelCatalogEntry> models;
+  final List<ProviderModeSummary> modes;
   final List<ProviderProfileSummary> profiles;
   final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
   _CapturedCreateSessionRequest? lastCreateRequest;
@@ -951,6 +991,13 @@ class _CapabilityFakeApi extends ApiClient {
     defaultProfile: profiles.isEmpty ? null : profiles.first.name,
     profiles: profiles,
   );
+
+  @override
+  Future<ProviderModeCatalog> fetchModes(
+    HostProfile host, {
+    String? cwd,
+    String? agentProvider,
+  }) async => ProviderModeCatalog(defaultMode: null, modes: modes);
 
   @override
   Future<SessionSummary> createSession(

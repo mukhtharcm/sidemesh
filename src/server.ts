@@ -2283,6 +2283,36 @@ export async function startServer(
   );
 
   app.get(
+    "/api/modes",
+    asyncRoute(async (request, response) => {
+      const query = request.query as Record<string, unknown>;
+      const agentProvider = asString(query.agentProvider) || null;
+      const selectedProvider = providerEntryForKind(agentProvider);
+      if (!selectedProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
+      if (
+        !requireProviderCapability(
+          response,
+          selectedProvider.provider,
+          selectedProvider.provider.capabilities.runtimeControls.mode,
+          "mode listing",
+          "listModes",
+        )
+      ) {
+        return;
+      }
+      if (!hasProviderMethod(selectedProvider.provider, "listModes")) {
+        response.status(501).json({ error: "mode listing not supported" });
+        return;
+      }
+      const cwd = asString(query.cwd) || null;
+      response.json(await selectedProvider.provider.listModes({ cwd }));
+    }),
+  );
+
+  app.get(
     "/api/models",
     asyncRoute(async (request, response) => {
       const query = request.query as Record<string, unknown>;
