@@ -2263,10 +2263,12 @@ class _SessionScreenState extends State<SessionScreen>
     final last = _lastEventSeq;
     if (last == null) return false;
     try {
+      final baseUpdatedAt = _session?.updatedAt.millisecondsSinceEpoch;
       final delta = await widget.api.fetchEvents(
         widget.host,
         widget.session.id,
         since: last,
+        baseUpdatedAt: baseUpdatedAt,
       );
       if (!mounted) return true;
       final latestPlanUpdate = delta.latestPlanUpdate;
@@ -2282,7 +2284,10 @@ class _SessionScreenState extends State<SessionScreen>
         return true;
       }
       setState(() {
+        final previousMessages = _messages;
+        final previousActivities = _activities;
         var mergedMessages = _messages;
+        var mergedActivities = _activities;
         var nextRunning = _running;
         if (delta.session != null) {
           _session = delta.session!;
@@ -2308,9 +2313,17 @@ class _SessionScreenState extends State<SessionScreen>
           for (final a in delta.activities) {
             byId[a.id] = a;
           }
-          _activities = _sortActivities(byId.values.toList());
+          mergedActivities = _sortActivities(byId.values.toList());
         }
         _messages = mergedMessages;
+        _activities = mergedActivities;
+        _history = _updatedHistoryAfterDelta(
+          previous: _history,
+          previousMessages: previousMessages,
+          mergedMessages: mergedMessages,
+          previousActivities: previousActivities,
+          mergedActivities: mergedActivities,
+        );
         _optimisticMessages = _reconcileOptimisticMessages(mergedMessages);
         final restoredPlanSeq = _restoreLatestPlanUpdate(
           latestPlanUpdate,
@@ -2374,6 +2387,42 @@ class _SessionScreenState extends State<SessionScreen>
       _sessionCachePersistTimer = null;
       _persistCurrentSessionLog();
     });
+  }
+
+  SessionLogHistorySummary? _updatedHistoryAfterDelta({
+    required SessionLogHistorySummary? previous,
+    required List<SessionMessage> previousMessages,
+    required List<SessionMessage> mergedMessages,
+    required List<SessionActivity> previousActivities,
+    required List<SessionActivity> mergedActivities,
+  }) {
+    if (previous == null) {
+      return null;
+    }
+    final previousMessageIds = previousMessages.map((m) => m.id).toSet();
+    final previousActivityIds = previousActivities.map((a) => a.id).toSet();
+    final mergedMessageIds = mergedMessages.map((m) => m.id).toSet();
+    final mergedActivityIds = mergedActivities.map((a) => a.id).toSet();
+    final newMessageCount = mergedMessageIds.length - previousMessageIds.length;
+    final newActivityCount =
+        mergedActivityIds.length - previousActivityIds.length;
+    final totalMessages = math.max(
+      previous.totalMessages + (newMessageCount > 0 ? newMessageCount : 0),
+      mergedMessages.length,
+    );
+    final totalActivities = math.max(
+      previous.totalActivities + (newActivityCount > 0 ? newActivityCount : 0),
+      mergedActivities.length,
+    );
+    return SessionLogHistorySummary(
+      isTruncated:
+          totalMessages > mergedMessages.length ||
+          totalActivities > mergedActivities.length,
+      totalMessages: totalMessages,
+      returnedMessages: mergedMessages.length,
+      totalActivities: totalActivities,
+      returnedActivities: mergedActivities.length,
+    );
   }
 
   Future<void> _loadOlderTranscript() async {
