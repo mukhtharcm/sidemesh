@@ -394,6 +394,10 @@ class RestartableFakeProvider
     return null;
   }
 
+  public respondToPendingAction(action: AgentPendingAction): boolean {
+    return action.id === this.actionId;
+  }
+
   private buildThread(includeTurns: boolean): ThreadRecord {
     return {
       id: this.sessionId,
@@ -2171,6 +2175,75 @@ describe("GET /api/sessions/:sessionId/status", () => {
       );
       assert.ok(listed);
       assert.equal(listed.status, "waiting_for_approval");
+    });
+  });
+
+  it("clears synthetic waiting status after an action response resumes the turn", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const createRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd: "/tmp/restart-test",
+          prompt: "start",
+        }),
+      });
+      assert.equal(createRes.statusCode, 201);
+      const sessionId = (createRes.body as any).session.id as string;
+
+      provider.emit("liveEvent", {
+        type: "thread_status_changed",
+        sessionId,
+        status: "waiting_for_approval",
+        pendingActionKind: "user_input",
+      });
+
+      const waitingStatus = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(waitingStatus.statusCode, 200);
+      assert.equal((waitingStatus.body as any).status, "waiting_for_approval");
+
+      const respondRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/actions/fake-restart-action/respond",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          answer: "yes",
+          wasFreeform: true,
+        }),
+      });
+      assert.equal(respondRes.statusCode, 200);
+
+      const resumedStatus = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(resumedStatus.statusCode, 200);
+      assert.equal((resumedStatus.body as any).status, "running");
+      assert.equal((resumedStatus.body as any).isRunning, true);
+      assert.equal((resumedStatus.body as any).pendingAction, null);
     });
   });
 });
