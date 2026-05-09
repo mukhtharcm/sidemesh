@@ -1983,6 +1983,10 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted || _disposed) {
       return;
     }
+    final needsSnapshotVerification =
+        _showingCachedSnapshot ||
+        _showingPossiblyStaleSnapshot ||
+        _messages.isNotEmpty;
     if (_messages.isNotEmpty && !_showingCachedSnapshot) {
       setState(() {
         _showingPossiblyStaleSnapshot = true;
@@ -1994,11 +1998,13 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted || _disposed) {
       return;
     }
-    final applied = await _resyncDelta();
+    final applied = await _resyncDelta(
+      markTranscriptFresh: !needsSnapshotVerification,
+    );
     if (!mounted || _disposed) {
       return;
     }
-    if (applied) {
+    if (applied && !needsSnapshotVerification) {
       setState(() {
         _showingPossiblyStaleSnapshot = false;
         _resumeSyncing = false;
@@ -2055,10 +2061,10 @@ class _SessionScreenState extends State<SessionScreen>
         _showingPossiblyStaleSnapshot = false;
         _resumeSyncing = false;
         _resumeSyncFailed = false;
-        // Prefer a live-delivered pendingAction over a stale snapshot "none".
-        // The server only exposes the most-recent action, so if live says one
-        // is open we trust it until action_resolved arrives.
-        _pendingAction = pendingAction ?? _pendingAction;
+        // Snapshot responses are authoritative for pending actions. If a live
+        // action_opened lands during this fetch, it is buffered and replayed
+        // after this state update.
+        _pendingAction = pendingAction;
         _running = log.session.isActive;
         _loading = false;
         if (!_running || livePersisted) {
@@ -2096,6 +2102,9 @@ class _SessionScreenState extends State<SessionScreen>
       unawaited(_localStore.updateGhost(widget.host, log.session));
       // Replay live events that landed during the fetch so action_opened /
       // activity_updated aren't silently dropped.
+      if (_snapshotInFlightRequestId == requestId) {
+        _snapshotInFlightRequestId = null;
+      }
       for (final event in bufferedEvents) {
         _handleEvent(event);
       }
@@ -2220,12 +2229,16 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _refreshSessionFreshness({bool scrollToBottom = true}) async {
+    final needsSnapshotVerification =
+        _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
     await _refreshCachedSessionStatus();
     if (!mounted || _disposed) {
       return;
     }
-    final applied = await _resyncDelta();
-    if (!mounted || _disposed || applied) {
+    final applied = await _resyncDelta(
+      markTranscriptFresh: !needsSnapshotVerification,
+    );
+    if (!mounted || _disposed || (applied && !needsSnapshotVerification)) {
       return;
     }
     await _loadSnapshot(
@@ -2259,7 +2272,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   /// Cheap catchup using the events endpoint. Returns true if the delta
   /// was applied; false if we should fall back to a full snapshot.
-  Future<bool> _resyncDelta() async {
+  Future<bool> _resyncDelta({bool markTranscriptFresh = true}) async {
     final last = _lastEventSeq;
     if (last == null) return false;
     try {
@@ -2277,7 +2290,8 @@ class _SessionScreenState extends State<SessionScreen>
           latestPlanUpdate == null &&
           delta.pendingAction == null &&
           delta.session == null) {
-        if (_showingCachedSnapshot || _showingPossiblyStaleSnapshot) {
+        if (markTranscriptFresh &&
+            (_showingCachedSnapshot || _showingPossiblyStaleSnapshot)) {
           setState(_markTranscriptFreshAfterDelta);
         }
         HostStatusStore.instance.markOnline(widget.host.id);
@@ -2345,7 +2359,9 @@ class _SessionScreenState extends State<SessionScreen>
         if (highestSeq > (_lastEventSeq ?? 0)) {
           _lastEventSeq = highestSeq;
         }
-        _markTranscriptFreshAfterDelta();
+        if (markTranscriptFresh) {
+          _markTranscriptFreshAfterDelta();
+        }
       });
       _refreshThinkingState();
       _syncSessionLiveActivity();
@@ -2553,8 +2569,12 @@ class _SessionScreenState extends State<SessionScreen>
         // We missed events while disconnected; try the cheap delta first,
         // fall back to a full snapshot if that fails.
         unawaited(() async {
-          final applied = await _resyncDelta();
-          if (!applied && mounted) {
+          final needsSnapshotVerification =
+              _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
+          final applied = await _resyncDelta(
+            markTranscriptFresh: !needsSnapshotVerification,
+          );
+          if (mounted && (!applied || needsSnapshotVerification)) {
             await _loadSnapshot(
               messageLimit: _messageLimit,
               activityLimit: _activityLimit,

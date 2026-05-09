@@ -656,6 +656,10 @@ class ActivityReplayFixtureProvider extends EventEmitter implements AgentProvide
     this.updatedAt += 1;
   }
 
+  public mutatePersistedActivityWithoutTimestampChange(output: string): void {
+    this.output = output;
+  }
+
   private buildThread(): ThreadRecord {
     return {
       id: this.sessionId,
@@ -749,6 +753,29 @@ async function openSessionLiveSocket(
         headers: { Authorization: `Bearer ${token}` },
       },
     );
+    ws.on("message", (data) => {
+      const raw = typeof data === "string" ? data : data.toString();
+      events.push(JSON.parse(raw));
+    });
+    const handleError = (error: Error) => reject(error);
+    ws.once("error", handleError);
+    ws.once("open", () => {
+      ws.off("error", handleError);
+      resolve(ws);
+    });
+  });
+  return { socket, events };
+}
+
+async function openRecentSessionsLiveSocket(
+  port: number,
+  token: string,
+): Promise<{ socket: WebSocket; events: any[] }> {
+  const events: any[] = [];
+  const socket = await new Promise<WebSocket>((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/sessions/live`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     ws.on("message", (data) => {
       const raw = typeof data === "string" ? data : data.toString();
       events.push(JSON.parse(raw));
@@ -1952,6 +1979,39 @@ describe("session live rich events", () => {
     });
   });
 
+  it("does not serve a stale full snapshot from the log cache when provider timestamps are coarse", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new ActivityReplayFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const logPath = `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`;
+
+      const initialLog = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: logPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(initialLog.statusCode, 200);
+      assert.equal((initialLog.body as any).session.updatedAt, 1000);
+      assert.equal((initialLog.body as any).activities[0].output, "before");
+
+      provider.mutatePersistedActivityWithoutTimestampChange("same second update");
+
+      const refreshedLog = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: logPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(refreshedLog.statusCode, 200);
+      assert.equal((refreshedLog.body as any).session.updatedAt, 1000);
+      assert.equal((refreshedLog.body as any).activities[0].output, "same second update");
+    });
+  });
+
   it("restores the latest plan update and replay cursor from persisted daemon state after restart", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const { runtime, provider } = makeSingleProviderRuntime({
@@ -2441,6 +2501,62 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
+  it("reconciles recent rows from per-session status reads", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const listedThread = {
+        ...created.thread,
+        status: { type: "idle" },
+      } as ThreadRecord;
+      const readThread = {
+        ...created.thread,
+        status: { type: "notLoaded" },
+      } as ThreadRecord;
+      provider.listSessionThreads = async () => [listedThread];
+      provider.readSessionThread = async () => readThread;
+
+      const initialSessionsRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions?limit=10",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(initialSessionsRes.statusCode, 200);
+      assert.equal((initialSessionsRes.body as any[])[0]?.status, "idle");
+
+      const statusRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(created.thread.id)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(statusRes.statusCode, 200);
+      assert.equal((statusRes.body as any).status, "closed");
+
+      const reconciledSessionsRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions?limit=10",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(reconciledSessionsRes.statusCode, 200);
+      assert.equal((reconciledSessionsRes.body as any[])[0]?.status, "closed");
+    });
+  });
+
   it("clears synthetic waiting status after an action response resumes the turn", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
     const provider = new RestartableFakeProvider();
@@ -2507,6 +2623,85 @@ describe("GET /api/sessions/:sessionId/status", () => {
       assert.equal((resumedStatus.body as any).status, "running");
       assert.equal((resumedStatus.body as any).isRunning, true);
       assert.equal((resumedStatus.body as any).pendingAction, null);
+    });
+  });
+
+  it("keeps recent session live rows aligned when action state changes without provider status events", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const recentLive = await openRecentSessionsLiveSocket(
+        server.port,
+        config.token,
+      );
+      try {
+        await waitFor(
+          () => recentLive.events.find((event) => event.type === "snapshot"),
+          "recent session live snapshot",
+        );
+
+        const createRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/sessions/create",
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            cwd: "/tmp/restart-test",
+            prompt: "start",
+          }),
+        });
+        assert.equal(createRes.statusCode, 201);
+        const sessionId = (createRes.body as any).session.id as string;
+
+        const waitingUpsert = await waitFor(
+          () =>
+            recentLive.events.find(
+              (event) =>
+                event.type === "upsert" &&
+                event.session?.id === sessionId &&
+                event.session?.status === "waiting_for_approval",
+            ),
+          "recent waiting approval upsert",
+        );
+        assert.equal(waitingUpsert.session.status, "waiting_for_approval");
+
+        const respondRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/actions/fake-restart-action/respond",
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            answer: "yes",
+            wasFreeform: true,
+          }),
+        });
+        assert.equal(respondRes.statusCode, 200);
+
+        const runningUpsert = await waitFor(
+          () =>
+            recentLive.events.find(
+              (event) =>
+                event.type === "upsert" &&
+                event.session?.id === sessionId &&
+                event.session?.status === "running" &&
+                recentLive.events.indexOf(event) >
+                  recentLive.events.indexOf(waitingUpsert),
+            ),
+          "recent running upsert after action response",
+        );
+        assert.equal(runningUpsert.session.status, "running");
+      } finally {
+        await closeSessionLiveSocket(recentLive.socket);
+      }
     });
   });
 });
