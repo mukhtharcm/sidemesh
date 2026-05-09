@@ -2566,8 +2566,12 @@ class _SessionScreenState extends State<SessionScreen>
         // We missed events while disconnected; try the cheap delta first,
         // fall back to a full snapshot if that fails.
         unawaited(() async {
-          final applied = await _resyncDelta();
-          if (!applied && mounted) {
+          final needsSnapshotVerification =
+              _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
+          final applied = await _resyncDelta(
+            markTranscriptFresh: !needsSnapshotVerification,
+          );
+          if (mounted && (!applied || needsSnapshotVerification)) {
             await _loadSnapshot(
               messageLimit: _messageLimit,
               activityLimit: _activityLimit,
