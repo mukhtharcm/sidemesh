@@ -2501,6 +2501,62 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
+  it("reconciles recent rows from per-session status reads", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const listedThread = {
+        ...created.thread,
+        status: { type: "idle" },
+      } as ThreadRecord;
+      const readThread = {
+        ...created.thread,
+        status: { type: "notLoaded" },
+      } as ThreadRecord;
+      provider.listSessionThreads = async () => [listedThread];
+      provider.readSessionThread = async () => readThread;
+
+      const initialSessionsRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions?limit=10",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(initialSessionsRes.statusCode, 200);
+      assert.equal((initialSessionsRes.body as any[])[0]?.status, "idle");
+
+      const statusRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(created.thread.id)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(statusRes.statusCode, 200);
+      assert.equal((statusRes.body as any).status, "closed");
+
+      const reconciledSessionsRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions?limit=10",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(reconciledSessionsRes.statusCode, 200);
+      assert.equal((reconciledSessionsRes.body as any[])[0]?.status, "closed");
+    });
+  });
+
   it("clears synthetic waiting status after an action response resumes the turn", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
     const provider = new RestartableFakeProvider();

@@ -424,6 +424,23 @@ export async function startServer(
     liveThreadStatuses.set(sessionId, status);
   }
 
+  function reconcileObservedThreadStatus(
+    sessionId: string,
+    observedStatus: LiveThreadStatus,
+  ): void {
+    const nextStatus = hasPendingActionForSession(pendingActions, sessionId)
+      ? "waiting_for_approval"
+      : activeTurns.has(sessionId)
+        ? "running"
+        : observedStatus;
+    const previousStatus = latestThreadStatusForSession(sessionId);
+    if (previousStatus === nextStatus) {
+      return;
+    }
+    setLatestThreadStatusForSession(sessionId, nextStatus);
+    scheduleRecentSessionUpsert(sessionId, 0);
+  }
+
   function persistSessionRuntimeSignalsEventually(): void {
     sessionRuntimeSignalsSaveChain = sessionRuntimeSignalsSaveChain
       .catch(() => undefined)
@@ -1775,6 +1792,7 @@ export async function startServer(
         activityLimit,
       );
       const session = await readSession(provider, sessionId, false);
+      reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
       const log = await provider.readSessionLog!(session, {
         messageLimit,
         activityLimit,
@@ -2089,12 +2107,14 @@ export async function startServer(
       ) {
         return;
       }
+      const liveStatus = latestThreadStatusForSession(sessionId);
       const state = await loadFastRunState(
         provider,
         sessionId,
         activeTurns,
-        latestThreadStatusForSession(sessionId),
+        isRunningThreadStatus(liveStatus) ? liveStatus : null,
       );
+      reconcileObservedThreadStatus(sessionId, state.status);
       response.json({
         sessionId,
         status: state.status,
