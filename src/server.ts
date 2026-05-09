@@ -1052,6 +1052,10 @@ export async function startServer(
         return;
       case "action_opened":
         pendingActions.set(event.action.id, event.action);
+        setLatestThreadStatusForSession(
+          event.action.sessionId,
+          "waiting_for_approval",
+        );
         const publicAction = toPublicPendingAction(event.action);
         broadcastLive(event.action.sessionId, {
           type: "action_opened",
@@ -2430,7 +2434,12 @@ export async function startServer(
           turnId: started.activeTurnId,
           startedAt: Date.now(),
         });
-        setLatestThreadStatusForSession(started.thread.id, "running");
+        setLatestThreadStatusForSession(
+          started.thread.id,
+          hasPendingActionForSession(pendingActions, started.thread.id)
+            ? "waiting_for_approval"
+            : "running",
+        );
       }
 
       const session = mapSession(
@@ -2546,7 +2555,12 @@ export async function startServer(
             turnId: submitted.turnId,
             startedAt: previousStartedAt ?? Date.now(),
           });
-          setLatestThreadStatusForSession(sessionId, "running");
+          setLatestThreadStatusForSession(
+            sessionId,
+            hasPendingActionForSession(pendingActions, sessionId)
+              ? "waiting_for_approval"
+              : "running",
+          );
         }
         broadcastLive(sessionId, {
           type: "user_message_submitted",
@@ -2826,6 +2840,7 @@ export async function startServer(
         action.sessionId,
         activeTurns.has(action.sessionId) ? "running" : null,
       );
+      scheduleRecentSessionUpsert(action.sessionId, 0);
       broadcastLive(action.sessionId, {
         type: "action_resolved",
         sessionId: action.sessionId,
@@ -4547,6 +4562,18 @@ function clearActionsForSession(
       actionId: action.id,
     });
   }
+}
+
+function hasPendingActionForSession(
+  pendingActions: Map<string, AgentPendingAction>,
+  sessionId: string,
+): boolean {
+  for (const action of pendingActions.values()) {
+    if (action.sessionId === sessionId) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function findPendingActionForSession(

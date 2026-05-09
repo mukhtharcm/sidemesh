@@ -2061,10 +2061,10 @@ class _SessionScreenState extends State<SessionScreen>
         _showingPossiblyStaleSnapshot = false;
         _resumeSyncing = false;
         _resumeSyncFailed = false;
-        // Prefer a live-delivered pendingAction over a stale snapshot "none".
-        // The server only exposes the most-recent action, so if live says one
-        // is open we trust it until action_resolved arrives.
-        _pendingAction = pendingAction ?? _pendingAction;
+        // Snapshot responses are authoritative for pending actions. If a live
+        // action_opened lands during this fetch, it is buffered and replayed
+        // after this state update.
+        _pendingAction = pendingAction;
         _running = log.session.isActive;
         _loading = false;
         if (!_running || livePersisted) {
@@ -2102,6 +2102,9 @@ class _SessionScreenState extends State<SessionScreen>
       unawaited(_localStore.updateGhost(widget.host, log.session));
       // Replay live events that landed during the fetch so action_opened /
       // activity_updated aren't silently dropped.
+      if (_snapshotInFlightRequestId == requestId) {
+        _snapshotInFlightRequestId = null;
+      }
       for (final event in bufferedEvents) {
         _handleEvent(event);
       }
