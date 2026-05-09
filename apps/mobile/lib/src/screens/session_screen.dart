@@ -4642,79 +4642,252 @@ class _SessionScreenState extends State<SessionScreen>
     final gitLabel = _supportsGitStatus
         ? _gitHeaderLabel(session, _gitStatus)
         : null;
+    final preview = session.preview.trim();
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: colors.surface,
       showDragHandle: true,
       useSafeArea: true,
       isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.86,
-          ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+      builder: (sheetContext) => SafeArea(
+        child: ListenableBuilder(
+          listenable: Listenable.merge([
+            SessionLocalStore.instance,
+            RelativeTimeTicker.minutes,
+          ]),
+          builder: (context, _) {
+            final favorite = _localStore.isFavorite(widget.host, session.id);
+            return ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.86,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        'Session details',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Session details',
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                         ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    MeshCard(
+                      tone: MeshCardTone.elevated,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            session.title,
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: colors.textPrimary,
+                              fontWeight: AppWeights.title,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '${widget.host.label} · ${_sessionDetailsFolder(session.cwd)}',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: colors.textSecondary,
+                              height: 1.35,
+                            ),
+                          ),
+                          if (preview.isNotEmpty && preview != session.title) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              preview,
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: colors.textSecondary,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              MeshPill(
+                                label: _running ? 'Running' : 'Idle',
+                                tone: _running
+                                    ? MeshPillTone.success
+                                    : MeshPillTone.neutral,
+                                icon: _running
+                                    ? Icons.play_arrow_rounded
+                                    : Icons.pause_circle_outline_rounded,
+                              ),
+                              MeshPill(
+                                label: _humanizeSessionSource(session.source),
+                                tone: MeshPillTone.neutral,
+                                icon: Icons.storage_rounded,
+                              ),
+                              if (session.isSubAgent)
+                                const MeshPill(
+                                  label: 'Sub-agent',
+                                  tone: MeshPillTone.info,
+                                  icon: Icons.fork_right_rounded,
+                                ),
+                              if (session.provider != null)
+                                AgentProviderBadge(
+                                  providerKind: session.provider,
+                                  compact: true,
+                                ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
-                    IconButton(
-                      tooltip: 'Close',
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: _toggleFavorite,
+                          icon: Icon(
+                            favorite
+                                ? Icons.star_rounded
+                                : Icons.star_outline_rounded,
+                          ),
+                          label: Text(
+                            favorite ? 'Unpin session' : 'Pin session',
+                          ),
+                        ),
+                        if (_supportsSessionRename)
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(sheetContext).pop();
+                              unawaited(_renameSession());
+                            },
+                            icon: const Icon(Icons.drive_file_rename_outline),
+                            label: const Text('Rename'),
+                          ),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            await Clipboard.setData(
+                              ClipboardData(text: session.id),
+                            );
+                            if (!sheetContext.mounted) return;
+                            showAppSnackBar(sheetContext, 'Copied session ID');
+                          },
+                          icon: const Icon(Icons.copy_rounded),
+                          label: const Text('Copy ID'),
+                        ),
+                        if (gitLabel != null)
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(sheetContext).pop();
+                              unawaited(_showGitSheet(session));
+                            },
+                            icon: const Icon(Icons.account_tree_rounded),
+                            label: const Text('Git details'),
+                          ),
+                      ],
                     ),
+                    const SizedBox(height: 14),
+                    MeshCard(
+                      tone: MeshCardTone.muted,
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _DetailRow(label: 'Host', value: widget.host.label),
+                          _DetailRow(label: 'Working dir', value: session.cwd),
+                          _DetailRow(label: 'Session ID', value: session.id),
+                          _DetailRow(
+                            label: 'Created',
+                            value:
+                                '${_formatSessionDetailsTimestamp(session.createdAt)} · ${_relativeSessionDetailsTime(session.createdAt)}',
+                          ),
+                          _DetailRow(
+                            label: 'Last update',
+                            value:
+                                '${_formatSessionDetailsTimestamp(session.updatedAt)} · ${_relativeSessionDetailsTime(session.updatedAt)}',
+                          ),
+                          if (gitLabel != null)
+                            _DetailRow(label: 'Git', value: gitLabel),
+                        ],
+                      ),
+                    ),
+                    if (session.runtime != null) ...[
+                      const SizedBox(height: 14),
+                      _SessionRuntimeDetails(runtime: session.runtime!),
+                    ],
                   ],
                 ),
-                const SizedBox(height: 8),
-                MeshCard(
-                  tone: MeshCardTone.muted,
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _DetailRow(label: 'Host', value: widget.host.label),
-                      _DetailRow(label: 'Working dir', value: session.cwd),
-                      _DetailRow(
-                        label: 'Status',
-                        value: _running ? 'Running' : 'Idle',
-                      ),
-                      _DetailRow(label: 'Source', value: session.source),
-                      if (gitLabel != null)
-                        _DetailRow(label: 'Git', value: gitLabel),
-                    ],
-                  ),
-                ),
-                if (gitLabel != null) ...[
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      unawaited(_showGitSheet(session));
-                    },
-                    icon: const Icon(Icons.account_tree_rounded, size: 18),
-                    label: const Text('Open Git details'),
-                  ),
-                ],
-                if (session.runtime != null) ...[
-                  const SizedBox(height: 14),
-                  _SessionRuntimeDetails(runtime: session.runtime!),
-                ],
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         ),
       ),
     );
+  }
+
+  String _humanizeSessionSource(String source) {
+    final trimmed = source.trim();
+    if (trimmed.isEmpty) return 'Unknown';
+    switch (trimmed) {
+      case 'appServer':
+        return 'Daemon';
+      case 'localCache':
+        return 'Cached copy';
+      case 'searchIndex':
+        return 'Search index';
+    }
+    final words = trimmed
+        .replaceAllMapped(RegExp(r'([a-z0-9])([A-Z])'), (m) => '${m[1]} ${m[2]}')
+        .replaceAll(RegExp(r'[_\-]+'), ' ')
+        .split(' ')
+        .where((part) => part.trim().isNotEmpty)
+        .map(
+          (part) =>
+              '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+        )
+        .toList(growable: false);
+    return words.isEmpty ? trimmed : words.join(' ');
+  }
+
+  String _sessionDetailsFolder(String cwd) {
+    final normalized = cwd.replaceAll('\\', '/');
+    if (normalized.isEmpty) return '~';
+    final trimmed = normalized.endsWith('/')
+        ? normalized.substring(0, normalized.length - 1)
+        : normalized;
+    final slash = trimmed.lastIndexOf('/');
+    if (slash < 0 || slash == trimmed.length - 1) return trimmed;
+    return trimmed.substring(slash + 1);
+  }
+
+  String _formatSessionDetailsTimestamp(DateTime time) {
+    final local = time.toLocal();
+    final yyyy = local.year.toString().padLeft(4, '0');
+    final mm = local.month.toString().padLeft(2, '0');
+    final dd = local.day.toString().padLeft(2, '0');
+    final hh = local.hour.toString().padLeft(2, '0');
+    final min = local.minute.toString().padLeft(2, '0');
+    return '$yyyy-$mm-$dd $hh:$min';
+  }
+
+  String _relativeSessionDetailsTime(DateTime time) {
+    final elapsed = DateTime.now().difference(time);
+    if (elapsed.inSeconds < 60) return 'just now';
+    if (elapsed.inMinutes < 60) return '${elapsed.inMinutes}m ago';
+    if (elapsed.inHours < 24) return '${elapsed.inHours}h ago';
+    if (elapsed.inDays < 7) return '${elapsed.inDays}d ago';
+    return '${(elapsed.inDays / 7).floor()}w ago';
   }
 
   Future<void> _showSessionPolicySheet(SessionSummary session) async {
