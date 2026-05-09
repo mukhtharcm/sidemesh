@@ -425,6 +425,47 @@ describe("codex provider resume runtime restore", () => {
 });
 
 describe("codex rich live event mappings", () => {
+  it("normalizes raw Codex thread phases for list and read APIs", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    provider.bridge = {
+      request: async (method: string) => {
+        if (method === "thread/list") {
+          return {
+            data: [
+              {
+                ...createThread(),
+                id: "thread-active",
+                status: { type: "active", activeFlags: ["waitingOnApproval"] },
+              },
+              {
+                ...createThread(),
+                id: "thread-unloaded",
+                status: { type: "notLoaded" },
+              },
+            ],
+          };
+        }
+        if (method === "thread/read") {
+          return {
+            thread: {
+              ...createThread(),
+              id: "thread-read",
+              status: { type: "systemError" },
+            },
+          };
+        }
+        throw new Error(`unexpected method ${method}`);
+      },
+    };
+
+    const listed = await provider.listSessionThreads({ limit: 10, archived: false });
+    const read = await provider.readSessionThread("thread-read", false);
+
+    assert.equal(listed[0]?.status.phase, "waiting_for_approval");
+    assert.equal(listed[1]?.status.phase, "closed");
+    assert.equal(read.status.phase, "errored");
+  });
+
   it("normalizes Codex thread status, plan, reasoning, and warning notifications", () => {
     const provider = new CodexAgentProvider("codex") as any;
     const events: unknown[] = [];
