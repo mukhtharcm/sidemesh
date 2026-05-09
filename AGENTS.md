@@ -239,6 +239,12 @@ specific agent provider.
   current session `updatedAt` but there are no replayable message/activity/plan
   deltas. Mobile session refresh paths should treat that as a signal to reload
   the full snapshot automatically.
+- **Cached session verification**: delta replay is a fast first pass, not a
+  proof that a cached or resume-stale transcript is fully fresh. When the
+  session screen is showing cached or possibly stale content, it should still
+  verify with a full snapshot after delta replay before clearing stale-state UI.
+  Provider `updatedAt` values can be coarse, and transcript rows can mutate in
+  place without producing replayable deltas.
 - **Workspace sandboxing**: `resolveWorkspacePath` uses `realpath` and prefix
   match against workspace roots. `WorkspaceAccessError` extends `Error` with
   a `status` field (default 403) that HTTP handlers can throw directly.

@@ -656,6 +656,10 @@ class ActivityReplayFixtureProvider extends EventEmitter implements AgentProvide
     this.updatedAt += 1;
   }
 
+  public mutatePersistedActivityWithoutTimestampChange(output: string): void {
+    this.output = output;
+  }
+
   private buildThread(): ThreadRecord {
     return {
       id: this.sessionId,
@@ -1949,6 +1953,39 @@ describe("session live rich events", () => {
       assert.equal(delta.statusCode, 409);
       assert.equal((delta.body as any).error, "stale_snapshot");
       assert.equal((delta.body as any).currentUpdatedAt, 2000);
+    });
+  });
+
+  it("does not serve a stale full snapshot from the log cache when provider timestamps are coarse", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new ActivityReplayFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const logPath = `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`;
+
+      const initialLog = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: logPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(initialLog.statusCode, 200);
+      assert.equal((initialLog.body as any).session.updatedAt, 1000);
+      assert.equal((initialLog.body as any).activities[0].output, "before");
+
+      provider.mutatePersistedActivityWithoutTimestampChange("same second update");
+
+      const refreshedLog = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: logPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(refreshedLog.statusCode, 200);
+      assert.equal((refreshedLog.body as any).session.updatedAt, 1000);
+      assert.equal((refreshedLog.body as any).activities[0].output, "same second update");
     });
   });
 
