@@ -93,18 +93,27 @@ class SessionRowCard extends StatelessWidget {
               children: [
                 Padding(
                   padding: const EdgeInsets.only(top: 5),
-                  child: running
-                      ? LivePulse(color: colors.success)
-                      : Container(
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? colors.accent
-                                : colors.textTertiary.withValues(alpha: 0.35),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
+                  // Status was conveyed by colour alone (live pulse vs grey
+                  // dot) which fails WCAG 1.4.1. Expose a textual status to
+                  // assistive tech without changing the visual.
+                  child: Semantics(
+                    label: running ? 'Running' : 'Idle',
+                    container: true,
+                    child: ExcludeSemantics(
+                      child: running
+                          ? LivePulse(color: colors.success)
+                          : Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? colors.accent
+                                    : colors.textTertiary.withValues(alpha: 0.35),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -187,7 +196,12 @@ class SessionRowCard extends StatelessWidget {
                   const SizedBox(width: 4),
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: _UnreadDot(color: colors.accent),
+                    child: Semantics(
+                      label: 'Unread updates',
+                      child: ExcludeSemantics(
+                        child: _UnreadDot(color: colors.accent),
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 2),
                 ],

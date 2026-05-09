@@ -966,47 +966,58 @@ class _MeshNavBar extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 3),
                 child: Material(
                   color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: AppShapes.input,
-                    onTap: () => onTap(index),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOut,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? colors.accentMuted
-                            : Colors.transparent,
-                        borderRadius: AppShapes.input,
-                        border: Border.all(
+                  child: Semantics(
+                    button: true,
+                    selected: selected,
+                    // Compose the announcement so VoiceOver/TalkBack reads
+                    // "Actions tab, 3 pending approvals" instead of just
+                    // "Button".
+                    label: badge > 0
+                        ? '${tab.title} tab, $badge pending'
+                        : '${tab.title} tab',
+                    hint: tab.subtitle,
+                    child: InkWell(
+                      borderRadius: AppShapes.input,
+                      onTap: () => onTap(index),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOut,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
                           color: selected
-                              ? colors.accent.withValues(alpha: 0.4)
+                              ? colors.accentMuted
                               : Colors.transparent,
+                          borderRadius: AppShapes.input,
+                          border: Border.all(
+                            color: selected
+                                ? colors.accent.withValues(alpha: 0.4)
+                                : Colors.transparent,
+                          ),
                         ),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _NavIconWithBadge(
-                            icon: selected ? tab.selectedIcon : tab.icon,
-                            selected: selected,
-                            badge: badge,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            tab.title,
-                            // Bottom-nav labels were 11pt; bumped to 12pt so
-                            // they meet the platform readability floor without
-                            // forcing a layout shift.
-                            style: monoStyle(
-                              color: selected
-                                  ? colors.accent
-                                  : colors.textSecondary,
-                              fontSize: 12,
-                              fontWeight: AppWeights.emphasis,
-                            ).copyWith(letterSpacing: 0.3),
-                          ),
-                        ],
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _NavIconWithBadge(
+                              icon: selected ? tab.selectedIcon : tab.icon,
+                              selected: selected,
+                              badge: badge,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              tab.title,
+                              // Bottom-nav labels were 11pt; bumped to 12pt so
+                              // they meet the platform readability floor without
+                              // forcing a layout shift.
+                              style: monoStyle(
+                                color: selected
+                                    ? colors.accent
+                                    : colors.textSecondary,
+                                fontSize: 12,
+                                fontWeight: AppWeights.emphasis,
+                              ).copyWith(letterSpacing: 0.3),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -1036,35 +1047,41 @@ class _NavIconWithBadge extends StatelessWidget {
     final colors = context.colors;
     final iconColor = selected ? colors.accent : colors.textSecondary;
     final label = badge > 99 ? '99+' : '$badge';
-    return Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.center,
-      children: [
-        Icon(icon, size: 22, color: iconColor),
-        if (badge > 0)
-          Positioned(
-            top: -6,
-            right: -10,
-            child: Container(
-              constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: colors.danger,
-                borderRadius: BorderRadius.circular(9),
-                border: Border.all(color: colors.canvas, width: 2),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                label,
-                style: monoStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: AppWeights.emphasis,
-                ).copyWith(height: 1.1),
+    // Excluded from semantics here — _MeshNavBar wraps each tab in a
+    // Semantics node that announces both the tab name and the badge count.
+    return ExcludeSemantics(
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          Icon(icon, size: 22, color: iconColor),
+          if (badge > 0)
+            Positioned(
+              top: -6,
+              right: -10,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: colors.danger,
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: colors.canvas, width: 2),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  label,
+                  // Badge text bumped 10pt -> 11pt for legibility while still
+                  // fitting in the 18pt minimum bubble.
+                  style: monoStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: AppWeights.emphasis,
+                  ).copyWith(height: 1.1),
+                ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
