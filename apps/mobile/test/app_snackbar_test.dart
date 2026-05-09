@@ -29,7 +29,7 @@ void main() {
     showAppSnackBar(context!, 'second toast');
     await tester.pump();
 
-    await tester.tap(find.byTooltip('Dismiss'));
+    await tester.tap(find.byTooltip('Dismiss notification'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 180));
     await tester.pump();
