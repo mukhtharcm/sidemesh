@@ -711,9 +711,11 @@ class SessionSummary {
   final String? matchSnippet;
   final num? matchRank;
 
-  /// Older Sidemesh builds used `running`, while Codex app-server reports
-  /// active threads as `active`.
-  bool get isActive => status == 'active' || status == 'running';
+  bool get isActive =>
+      status == 'active' ||
+      status == 'running' ||
+      status == 'waiting_for_input' ||
+      status == 'waiting_for_approval';
 
   SessionSummary copyWith({
     String? title,
@@ -2766,18 +2768,21 @@ class SessionLogHistorySummary {
 class SessionStatus {
   const SessionStatus({
     required this.sessionId,
+    required this.status,
     required this.isRunning,
     required this.activeTurnId,
     required this.pendingAction,
   });
 
   final String sessionId;
+  final String status;
   final bool isRunning;
   final String? activeTurnId;
   final PendingAction? pendingAction;
 
   factory SessionStatus.fromJson(Map<String, dynamic> json) => SessionStatus(
     sessionId: _stringValue(json['sessionId']),
+    status: _stringValue(json['status']),
     isRunning: _boolValue(json['isRunning']),
     activeTurnId: json['activeTurnId'] as String?,
     pendingAction: json['pendingAction'] == null

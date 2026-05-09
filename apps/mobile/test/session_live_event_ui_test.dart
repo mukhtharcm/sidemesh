@@ -265,6 +265,72 @@ void main() {
     expect(find.text('Recovered from /events.'), findsOneWidget);
   });
 
+  testWidgets('delta replay clears stale pending actions when the server has none', (
+    tester,
+  ) async {
+    final session = _session('pending-action-delta-clear');
+    final api = _RichEventFakeApi(
+      messages: [
+        _assistantMessage(
+          id: 'seed-message',
+          text: 'Existing transcript item.',
+          content: const [TextBlock('Existing transcript item.')],
+        ),
+      ],
+      eventsDelta: SessionEventsDelta(
+        sessionId: session.id,
+        since: 1,
+        nextSeq: 3,
+        messages: const [],
+        activities: const [],
+        latestPlanUpdate: null,
+        pendingAction: null,
+        session: _session(session.id, status: 'running'),
+      ),
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('pending-action-delta-clear'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'action_opened',
+      'sessionId': session.id,
+      'action': {
+        'id': 'action-1',
+        'sessionId': session.id,
+        'kind': 'permissions',
+        'title': 'Approve file edit',
+        'detail': 'Need approval before continuing.',
+        'requestedAt': DateTime(2026, 1, 1, 12, 1).millisecondsSinceEpoch,
+        'canApprove': true,
+        'canApproveForSession': true,
+        'canDecline': true,
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Approve file edit'), findsOneWidget);
+
+    api.emit({
+      'type': 'hello',
+      'sessionId': session.id,
+      'nextSeq': 3,
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Approve file edit'), findsNothing);
+  });
+
   testWidgets('completed assistant message keeps collapsed reasoning visible', (
     tester,
   ) async {

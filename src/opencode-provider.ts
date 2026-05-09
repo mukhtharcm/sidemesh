@@ -1373,6 +1373,7 @@ export class OpenCodeAgentProvider
       path: session.path ?? null,
       status: {
         type: status.type,
+        phase: statusToLiveThreadStatus(status),
         ...(activeFlags.length > 0 ? { activeFlags } : {}),
       },
       ...(includeTurns ? { turns: [] } : {}),

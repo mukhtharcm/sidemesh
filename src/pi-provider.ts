@@ -2435,8 +2435,13 @@ function isActivePiTurnStatus(status: string | null | undefined): boolean {
 }
 
 function isActivePiThreadStatus(status: ThreadRecord["status"] | null | undefined): boolean {
-  const type = status?.type;
-  return type === "running" || type === "active";
+  const type = status?.phase ?? status?.type;
+  return (
+    type === "running" ||
+    type === "active" ||
+    type === "waiting_for_input" ||
+    type === "waiting_for_approval"
+  );
 }
 
 function canReusePiHistoryState(
