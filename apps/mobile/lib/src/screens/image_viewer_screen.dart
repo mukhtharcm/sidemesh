@@ -247,6 +247,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                       child: Row(
                         children: [
                           IconButton(
+                            tooltip: 'Back',
                             onPressed: () => Navigator.of(context).maybePop(),
                             icon: const Icon(
                               Icons.arrow_back_rounded,

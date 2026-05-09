@@ -1085,6 +1085,7 @@ class _ManualHostSheetState extends State<_ManualHostSheet> {
                       const Spacer(),
                       MeshIconButton(
                         icon: Icons.close_rounded,
+                        tooltip: 'Close',
                         onTap: () => Navigator.of(context).pop(),
                       ),
                     ],
