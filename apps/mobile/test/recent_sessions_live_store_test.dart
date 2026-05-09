@@ -2,32 +2,20 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
-import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
+import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/recent_sessions_live_store.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
-import 'package:sidemesh_mobile/src/db.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-class _FakePathProvider extends PathProviderPlatform
-    with MockPlatformInterfaceMixin {
-  @override
-  Future<String?> getApplicationDocumentsPath() async => '/tmp/sidemesh_test';
-  @override
-  Future<String?> getApplicationSupportPath() async => '/tmp/sidemesh_test';
-  @override
-  Future<String?> getTemporaryPath() async => '/tmp/sidemesh_test';
-}
+
+import 'test_path_provider.dart';
 
 void main() {
-  setUpAll(() {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfiNoIsolate;
-    PathProviderPlatform.instance = _FakePathProvider();
+  setUpAll(() async {
+    await configureTestDatabaseFactory();
   });
 
   const host = HostProfile(
@@ -141,6 +129,46 @@ void main() {
     expect(store.entries.map((entry) => entry.session.id), {'session-2'});
   });
 
+  test('buffers live upserts until the first snapshot arrives', () async {
+    final stale = _session('session-stale', title: 'Cached stale');
+    final fresh = _session('session-fresh', title: 'Fresh snapshot');
+    await SessionLocalStore.instance.upsertSessions(host, [stale]);
+    final api = _FakeApiClient()
+      ..sessionsByHostId[host.id] = const <SessionSummary>[];
+    final store = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: const Duration(milliseconds: 100),
+    );
+    addTearDown(store.dispose);
+
+    store.configure(hosts: const [host], api: api);
+    await _settle();
+
+    final channel = api.liveChannelFor(host);
+    channel.addIncoming(
+      jsonEncode({
+        'type': 'upsert',
+        'session': _session('session-early', title: 'Early upsert').toJson(),
+      }),
+    );
+    channel.addIncoming(
+      jsonEncode({
+        'type': 'snapshot',
+        'sessions': [fresh.toJson()],
+      }),
+    );
+    await _settle();
+
+    expect(store.entries.map((entry) => entry.session.id), {
+      'session-fresh',
+      'session-early',
+    });
+    expect(
+      store.entries.any((entry) => entry.session.id == 'session-stale'),
+      false,
+    );
+  });
+
   test(
     'swallows websocket handshake failures and keeps HTTP fallback alive',
     () async {
@@ -252,6 +280,153 @@ void main() {
     expect(api.fetchSessionsCalls, 0);
     expect(store.entries, isEmpty);
   });
+
+  test(
+    'reconfigure does not rehydrate stale cache over confirmed live data',
+    () async {
+      final cached = _session('session-cached', title: 'Cached');
+      final live = _session('session-live', title: 'Live');
+      await SessionLocalStore.instance.upsertSessions(host, [cached]);
+      final api = _FakeApiClient()
+        ..sessionsByHostId[host.id] = const <SessionSummary>[];
+      final store = RecentSessionsStore(
+        pollInterval: const Duration(hours: 1),
+        initialHttpFallbackDelay: const Duration(milliseconds: 100),
+      );
+      addTearDown(store.dispose);
+
+      store.configure(hosts: const [host], api: api);
+      await _settle();
+      api
+          .liveChannelFor(host)
+          .addIncoming(
+            jsonEncode({
+              'type': 'snapshot',
+              'sessions': [live.toJson()],
+            }),
+          );
+      await _settle();
+      expect(store.entries.single.session.id, 'session-live');
+
+      await SessionLocalStore.instance.upsertSessions(host, [cached]);
+      store.configure(hosts: const [host], api: api);
+      await _settle();
+
+      expect(store.entries.single.session.id, 'session-live');
+    },
+  );
+
+  test(
+    'delayed cache hydration does not overwrite fresher live data after disconnect',
+    () async {
+      final cached = _session('session-cached', title: 'Cached stale');
+      final live = _session('session-live', title: 'Live fresh');
+      await SessionLocalStore.instance.upsertSessions(host, [cached]);
+      final db = await SidemeshDb.instance;
+      final releaseTransaction = Completer<void>();
+      final transactionStarted = Completer<void>();
+      unawaited(
+        db.transaction((txn) async {
+          transactionStarted.complete();
+          await releaseTransaction.future;
+        }),
+      );
+      await transactionStarted.future;
+
+      final api = _FakeApiClient()
+        ..sessionsByHostId[host.id] = const <SessionSummary>[];
+      final store = RecentSessionsStore(
+        pollInterval: const Duration(hours: 1),
+        initialHttpFallbackDelay: const Duration(milliseconds: 100),
+      );
+      addTearDown(store.dispose);
+
+      store.configure(hosts: const [host], api: api);
+      await _settle();
+      expect(store.entries, isEmpty);
+
+      final channel = api.liveChannelFor(host);
+      channel.addIncoming(
+        jsonEncode({
+          'type': 'snapshot',
+          'sessions': [live.toJson()],
+        }),
+      );
+      await _settle();
+      expect(store.entries.single.session.id, 'session-live');
+
+      await channel.closeFromServer();
+      await _settle();
+
+      releaseTransaction.complete();
+      await _settle();
+      await _settle();
+
+      expect(store.entries.single.session.id, 'session-live');
+    },
+  );
+
+  test('live upserts keep the recent cache capped at 40 sessions', () async {
+    final now = DateTime.now();
+    final snapshotSessions = List<SessionSummary>.generate(
+      40,
+      (index) => _session(
+        'snapshot-$index',
+        title: 'Snapshot $index',
+        updatedAt: now.subtract(Duration(minutes: index)),
+      ),
+      growable: false,
+    );
+    final api = _FakeApiClient()
+      ..sessionsByHostId[host.id] = const <SessionSummary>[];
+    final store = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: const Duration(milliseconds: 100),
+    );
+    addTearDown(store.dispose);
+
+    store.configure(hosts: const [host], api: api);
+    await _settle();
+
+    final channel = api.liveChannelFor(host);
+    channel.addIncoming(
+      jsonEncode({
+        'type': 'snapshot',
+        'sessions': snapshotSessions
+            .map((session) => session.toJson())
+            .toList(),
+      }),
+    );
+    await _settle();
+
+    for (var index = 0; index < 5; index++) {
+      channel.addIncoming(
+        jsonEncode({
+          'type': 'upsert',
+          'session': _session(
+            'live-$index',
+            title: 'Live $index',
+            updatedAt: now.add(Duration(minutes: index + 1)),
+          ).toJson(),
+        }),
+      );
+    }
+    await _settle();
+
+    expect(store.entries, hasLength(40));
+    expect(store.entries.map((entry) => entry.session.id), contains('live-4'));
+    expect(
+      store.entries.map((entry) => entry.session.id),
+      isNot(contains('snapshot-39')),
+    );
+
+    final db = await SidemeshDb.instance;
+    final rows = await db.rawQuery(
+      "SELECT COUNT(*) AS count FROM sessions WHERE host_id = ? AND source = 'recent'",
+      [host.id],
+    );
+    expect(rows.single['count'], 40);
+  });
 }
 
 class _FakeApiClient extends ApiClient {
@@ -348,15 +523,19 @@ class _FakeWebSocketSink implements WebSocketSink {
       _delegate.addError(error, stackTrace);
 }
 
-SessionSummary _session(String id, {required String title}) {
-  final now = DateTime.now();
+SessionSummary _session(
+  String id, {
+  required String title,
+  DateTime? updatedAt,
+}) {
+  final effectiveUpdatedAt = updatedAt ?? DateTime.now();
   return SessionSummary(
     id: id,
     title: title,
     preview: 'preview',
     cwd: '/repo',
-    createdAt: now.subtract(const Duration(minutes: 5)),
-    updatedAt: now,
+    createdAt: effectiveUpdatedAt.subtract(const Duration(minutes: 5)),
+    updatedAt: effectiveUpdatedAt,
     source: 'codex',
     provider: null,
     status: 'active',

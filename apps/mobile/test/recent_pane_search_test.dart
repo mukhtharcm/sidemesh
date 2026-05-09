@@ -3,38 +3,25 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
-import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
+import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/home_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
-import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-class _FakePathProvider extends PathProviderPlatform
-    with MockPlatformInterfaceMixin {
-  @override
-  Future<String?> getApplicationDocumentsPath() async => '/tmp/sidemesh_test';
-
-  @override
-  Future<String?> getApplicationSupportPath() async => '/tmp/sidemesh_test';
-
-  @override
-  Future<String?> getTemporaryPath() async => '/tmp/sidemesh_test';
-}
+import 'test_path_provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  sqfliteFfiInit();
-  databaseFactory = databaseFactoryFfiNoIsolate;
-  PathProviderPlatform.instance = _FakePathProvider();
+  setUpAll(() async {
+    await configureTestDatabaseFactory();
+  });
 
   const host = HostProfile(
     id: 'host-1',
@@ -56,88 +43,113 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  testWidgets('falls back to local filtering when query shrinks below two characters', (
+  testWidgets(
+    'falls back to local filtering when query shrinks below two characters',
+    (tester) async {
+      final now = DateTime(2026, 1, 1, 12);
+      final api = _FakeSearchApiClient(
+        sessions: <SessionSummary>[
+          _session(id: 'local-alpha', title: 'Alpha Local', updatedAt: now),
+        ],
+        searchResults: <String, List<SessionSummary>>{
+          'ab': <SessionSummary>[
+            _session(
+              id: 'remote-beta',
+              title: 'Remote Beta',
+              updatedAt: now.add(const Duration(minutes: 1)),
+              matchRank: 1,
+            ),
+          ],
+        },
+      );
+
+      await _pumpRecentPane(
+        tester,
+        api: api,
+        hosts: const <HostProfile>[host],
+        query: '',
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await _pumpRecentPane(
+        tester,
+        api: api,
+        hosts: const <HostProfile>[host],
+        query: 'ab',
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump();
+
+      expect(find.text('Remote Beta'), findsOneWidget);
+      expect(find.text('Alpha Local'), findsNothing);
+
+      await _pumpRecentPane(
+        tester,
+        api: api,
+        hosts: const <HostProfile>[host],
+        query: 'a',
+      );
+      await tester.pump();
+
+      expect(find.text('Alpha Local'), findsOneWidget);
+      expect(find.text('Remote Beta'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'keeps search relevance ahead of recency when rendering remote matches',
+    (tester) async {
+      final now = DateTime(2026, 1, 1, 12);
+      final api = _FakeSearchApiClient(
+        sessions: const <SessionSummary>[],
+        searchResults: <String, List<SessionSummary>>{
+          'ng': <SessionSummary>[
+            _session(
+              id: 'best',
+              title: 'Best Match',
+              updatedAt: now,
+              matchRank: 1,
+            ),
+            _session(
+              id: 'newer',
+              title: 'Newer Match',
+              updatedAt: now.add(const Duration(hours: 1)),
+              matchRank: 5,
+            ),
+          ],
+        },
+      );
+
+      await _pumpRecentPane(
+        tester,
+        api: api,
+        hosts: const <HostProfile>[host],
+        query: '',
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await _pumpRecentPane(
+        tester,
+        api: api,
+        hosts: const <HostProfile>[host],
+        query: 'ng',
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump();
+
+      final best = tester.getTopLeft(find.text('Best Match')).dy;
+      final newer = tester.getTopLeft(find.text('Newer Match')).dy;
+      expect(best, lessThan(newer));
+    },
+  );
+
+  testWidgets('shows a banner when one host fails during search', (
     tester,
   ) async {
-    final now = DateTime(2026, 1, 1, 12);
-    final api = _FakeSearchApiClient(
-      sessions: <SessionSummary>[
-        _session(
-          id: 'local-alpha',
-          title: 'Alpha Local',
-          updatedAt: now,
-        ),
-      ],
-      searchResults: <String, List<SessionSummary>>{
-        'ab': <SessionSummary>[
-          _session(
-            id: 'remote-beta',
-            title: 'Remote Beta',
-            updatedAt: now.add(const Duration(minutes: 1)),
-            matchRank: 1,
-          ),
-        ],
-      },
-    );
-
-    await _pumpRecentPane(tester, api: api, hosts: const <HostProfile>[host], query: '');
-    await tester.pump();
-    await tester.pump();
-
-    await _pumpRecentPane(tester, api: api, hosts: const <HostProfile>[host], query: 'ab');
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 350));
-    await tester.pump();
-
-    expect(find.text('Remote Beta'), findsOneWidget);
-    expect(find.text('Alpha Local'), findsNothing);
-
-    await _pumpRecentPane(tester, api: api, hosts: const <HostProfile>[host], query: 'a');
-    await tester.pump();
-
-    expect(find.text('Alpha Local'), findsOneWidget);
-    expect(find.text('Remote Beta'), findsNothing);
-  });
-
-  testWidgets('keeps search relevance ahead of recency when rendering remote matches', (
-    tester,
-  ) async {
-    final now = DateTime(2026, 1, 1, 12);
-    final api = _FakeSearchApiClient(
-      sessions: const <SessionSummary>[],
-      searchResults: <String, List<SessionSummary>>{
-        'ng': <SessionSummary>[
-          _session(
-            id: 'best',
-            title: 'Best Match',
-            updatedAt: now,
-            matchRank: 1,
-          ),
-          _session(
-            id: 'newer',
-            title: 'Newer Match',
-            updatedAt: now.add(const Duration(hours: 1)),
-            matchRank: 5,
-          ),
-        ],
-      },
-    );
-
-    await _pumpRecentPane(tester, api: api, hosts: const <HostProfile>[host], query: '');
-    await tester.pump();
-    await tester.pump();
-
-    await _pumpRecentPane(tester, api: api, hosts: const <HostProfile>[host], query: 'ng');
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 350));
-    await tester.pump();
-
-    final best = tester.getTopLeft(find.text('Best Match')).dy;
-    final newer = tester.getTopLeft(find.text('Newer Match')).dy;
-    expect(best, lessThan(newer));
-  });
-
-  testWidgets('shows a banner when one host fails during search', (tester) async {
     final now = DateTime(2026, 1, 1, 12);
     final api = _FakeSearchApiClient(
       sessions: const <SessionSummary>[],
@@ -151,9 +163,7 @@ void main() {
           ),
         ],
       },
-      searchFailures: <String, Object>{
-        'host-2::ng': StateError('offline'),
-      },
+      searchFailures: <String, Object>{'host-2::ng': StateError('offline')},
     );
 
     await _pumpRecentPane(

@@ -161,10 +161,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
 
   Future<void> _dismissRecommendedMobileClientNotice(String version) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _dismissedRecommendedMobileClientVersionKey,
-      version,
-    );
+    await prefs.setString(_dismissedRecommendedMobileClientVersionKey, version);
     if (!mounted) return;
     setState(() => _dismissedRecommendedMobileClientVersion = version);
   }
@@ -639,7 +636,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
             _tabIndex = index;
             final tab = _tabs[index];
             final showSearch = _searchVisibleForTab(tab, _enabledHosts.length);
-            if (!showSearch && (_query.isNotEmpty || _searchController.text.isNotEmpty)) {
+            if (!showSearch &&
+                (_query.isNotEmpty || _searchController.text.isNotEmpty)) {
               _query = '';
               _searchController.clear();
             }
@@ -1134,6 +1132,19 @@ class _SessionGroup {
   final List<RemoteSessionEntry> entries;
 }
 
+@immutable
+class _FlatSessionSection {
+  const _FlatSessionSection({
+    required this.title,
+    required this.icon,
+    required this.entries,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<RemoteSessionEntry> entries;
+}
+
 class _RecentPaneState extends State<RecentPane> {
   final SessionLocalStore _localStore = SessionLocalStore.instance;
   final RecentSessionsStore _store = RecentSessionsStore();
@@ -1148,7 +1159,7 @@ class _RecentPaneState extends State<RecentPane> {
   @override
   void initState() {
     super.initState();
-    
+
     _localStore.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
     _store.addListener(_handleStoreChanged);
@@ -1175,15 +1186,51 @@ class _RecentPaneState extends State<RecentPane> {
     for (final list in groups.values) {
       list.sort((a, b) => b.session.updatedAt.compareTo(a.session.updatedAt));
     }
-    final sortedKeys = groups.keys.toList()..sort((a, b) {
-      if (a == 'Unknown') return 1;
-      if (b == 'Unknown') return -1;
-      return a.compareTo(b);
-    });
-    return sortedKeys.map((k) => _SessionGroup(
-      title: k,
-      entries: groups[k]!,
-    )).toList();
+    final sortedKeys = groups.keys.toList()
+      ..sort((a, b) {
+        if (a == 'Unknown') return 1;
+        if (b == 'Unknown') return -1;
+        return a.compareTo(b);
+      });
+    return sortedKeys
+        .map((k) => _SessionGroup(title: k, entries: groups[k]!))
+        .toList();
+  }
+
+  List<_FlatSessionSection> _buildFlatSections(
+    List<RemoteSessionEntry> entries,
+  ) {
+    if (widget.viewMode != SessionViewMode.flat ||
+        widget.query.trim().isNotEmpty ||
+        _searchEntries != null) {
+      return const <_FlatSessionSection>[];
+    }
+
+    final favorites = <RemoteSessionEntry>[];
+    final recents = <RemoteSessionEntry>[];
+    for (final entry in entries) {
+      if (_localStore.isFavorite(entry.host, entry.session.id)) {
+        favorites.add(entry);
+      } else {
+        recents.add(entry);
+      }
+    }
+    if (favorites.isEmpty) {
+      return const <_FlatSessionSection>[];
+    }
+    return <_FlatSessionSection>[
+      _FlatSessionSection(
+        title: 'Favorites',
+        icon: Icons.star_rounded,
+        entries: favorites,
+      ),
+      if (recents.isNotEmpty)
+        _FlatSessionSection(
+          title: 'Recent',
+          icon: Icons.history_rounded,
+          entries: recents,
+        ),
+    ];
   }
 
   @override
@@ -1201,10 +1248,8 @@ class _RecentPaneState extends State<RecentPane> {
       _clearScreenAwakeSource(oldWidget.screenAwakeSourceKey);
       _syncScreenAwakeSource(_screenAwakeActiveEntryCount() > 0);
     }
-    if (
-      widget.query != oldWidget.query ||
-      !_sameHostList(widget.hosts, oldWidget.hosts)
-    ) {
+    if (widget.query != oldWidget.query ||
+        !_sameHostList(widget.hosts, oldWidget.hosts)) {
       _onQueryChanged(widget.query);
     }
     _store.configure(hosts: widget.hosts, api: widget.api);
@@ -1322,7 +1367,10 @@ class _RecentPaneState extends State<RecentPane> {
     });
   }
 
-  int _compareSearchEntryRank(RemoteSessionEntry left, RemoteSessionEntry right) {
+  int _compareSearchEntryRank(
+    RemoteSessionEntry left,
+    RemoteSessionEntry right,
+  ) {
     final leftRank = left.session.matchRank;
     final rightRank = right.session.matchRank;
     if (leftRank != null || rightRank != null) {
@@ -1334,7 +1382,9 @@ class _RecentPaneState extends State<RecentPane> {
       }
     }
 
-    final updatedCompare = right.session.updatedAt.compareTo(left.session.updatedAt);
+    final updatedCompare = right.session.updatedAt.compareTo(
+      left.session.updatedAt,
+    );
     if (updatedCompare != 0) {
       return updatedCompare;
     }
@@ -1375,7 +1425,10 @@ class _RecentPaneState extends State<RecentPane> {
     if (widget.viewMode == SessionViewMode.flat) {
       sorted.sort((left, right) {
         final leftFavorite = _localStore.isFavorite(left.host, left.session.id);
-        final rightFavorite = _localStore.isFavorite(right.host, right.session.id);
+        final rightFavorite = _localStore.isFavorite(
+          right.host,
+          right.session.id,
+        );
         if (leftFavorite != rightFavorite) {
           return leftFavorite ? -1 : 1;
         }
@@ -1399,7 +1452,8 @@ class _RecentPaneState extends State<RecentPane> {
                 const MeshEmptyState(
                   icon: Icons.schedule_rounded,
                   title: 'No sessions yet',
-                  body: 'Add a host to start controlling your coding agents from your phone.',
+                  body:
+                      'Add a host to start controlling your coding agents from your phone.',
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 FilledButton.icon(
@@ -1419,16 +1473,6 @@ class _RecentPaneState extends State<RecentPane> {
       );
     }
 
-    final stillLoadingInitial =
-        !_store.hasLoadedOnce &&
-        _store.entries.isEmpty &&
-        _store.failedHostLabels.isEmpty &&
-        _store.pendingHostIds.isNotEmpty;
-
-    if (stillLoadingInitial) {
-      return const MeshLoader();
-    }
-
     return ListenableBuilder(
       listenable: Listenable.merge([
         _store,
@@ -1437,9 +1481,19 @@ class _RecentPaneState extends State<RecentPane> {
         SessionOverridesStore.instance,
       ]),
       builder: (context, _) {
+        final stillLoadingInitial =
+            !_store.hasLoadedOnce &&
+            _store.entries.isEmpty &&
+            _store.failedHostLabels.isEmpty &&
+            _store.pendingHostIds.isNotEmpty;
+        if (stillLoadingInitial) {
+          return const MeshLoader();
+        }
         final sortedEntries = _sortEntries(_store.entries);
         final groups = _groupEntries(sortedEntries);
+        final flatSections = _buildFlatSections(sortedEntries);
         final isGrouped = groups.isNotEmpty;
+        final hasFlatSections = flatSections.isNotEmpty;
         final hasCachedEntries =
             _store.entries.isNotEmpty &&
             _store.confirmedHostIds.length < widget.hosts.length;
@@ -1491,8 +1545,8 @@ class _RecentPaneState extends State<RecentPane> {
                   body: widget.query.trim().isEmpty
                       ? 'Saved hosts look fine, but none returned recent sessions right now.'
                       : (_searchLoading
-                          ? 'Looking across all your sessions…'
-                          : 'No sessions match "${widget.query.trim()}". Clear the filter to see everything.'),
+                            ? 'Looking across all your sessions…'
+                            : 'No sessions match "${widget.query.trim()}". Clear the filter to see everything.'),
                 ),
               ],
             ),
@@ -1522,10 +1576,22 @@ class _RecentPaneState extends State<RecentPane> {
                         hasCachedEntries: hasCachedEntries,
                         handleRefresh: handleRefresh,
                       )
+                    : hasFlatSections
+                    ? _buildFlatSectionList(
+                        context,
+                        flatSections,
+                        padding: basePadding,
+                        isRefreshing: isRefreshing,
+                        hasFailures: hasFailures,
+                        failureLabels: failureLabels,
+                        hasCachedEntries: hasCachedEntries,
+                        handleRefresh: handleRefresh,
+                      )
                     : ListView.separated(
                         padding: basePadding,
                         itemCount: sortedEntries.length + leadingStrips,
-                        separatorBuilder: (_, _) => SizedBox(height: widget.dense ? 2 : AppSpacing.sm),
+                        separatorBuilder: (_, _) =>
+                            SizedBox(height: widget.dense ? 2 : AppSpacing.sm),
                         itemBuilder: (context, index) {
                           var offset = 0;
                           if (isRefreshing) {
@@ -1548,21 +1614,7 @@ class _RecentPaneState extends State<RecentPane> {
                             offset += 1;
                           }
                           final entry = sortedEntries[index - offset];
-                          return SessionRowCard(
-                            host: entry.host,
-                            session: entry.session,
-                            favorite: _localStore.isFavorite(entry.host, entry.session.id),
-                            selected: widget.selectedSessionId == entry.session.id,
-                            dense: widget.dense,
-                            query: widget.query,
-                            onTap: () {
-                              _localStore.updateGhost(entry.host, entry.session);
-                              widget.onOpenSession(entry.host, entry.session);
-                            },
-                            onToggleFavorite: () {
-                              _localStore.toggleFavorite(entry.host, entry.session.id);
-                            },
-                          );
+                          return _buildSessionRow(entry);
                         },
                       ),
               ),
@@ -1582,14 +1634,16 @@ class _RecentPaneState extends State<RecentPane> {
     required bool hasCachedEntries,
     required Future<void> Function() handleRefresh,
   }) {
-    final colors = context.colors;
-    final padding = widget.padding ??
+    final padding =
+        widget.padding ??
         (widget.dense
             ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
             : const EdgeInsets.fromLTRB(16, 8, 16, 32));
     return ListView.builder(
       padding: padding,
-      itemCount: (isRefreshing ? 1 : 0) + (hasFailures ? 1 : 0) +
+      itemCount:
+          (isRefreshing ? 1 : 0) +
+          (hasFailures ? 1 : 0) +
           groups.fold<int>(0, (sum, g) => sum + g.entries.length + 1),
       itemBuilder: (context, index) {
         var offset = 0;
@@ -1629,65 +1683,23 @@ class _RecentPaneState extends State<RecentPane> {
                 top: widget.dense ? 8 : 14,
                 bottom: widget.dense ? 4 : 8,
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    widget.viewMode == SessionViewMode.byCwd
-                        ? Icons.folder_rounded
-                        : Icons.hub_rounded,
-                    size: 14,
-                    color: colors.textSecondary,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      group.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: monoStyle(
-                        color: colors.textSecondary,
-                        fontSize: widget.dense ? 10 : 11,
-                        fontWeight: AppWeights.emphasis,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: colors.surfaceElevated,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: colors.border),
-                    ),
-                    child: Text(
-                      '${group.entries.length}',
-                      style: monoStyle(
-                        color: colors.textTertiary,
-                        fontSize: 10,
-                        fontWeight: AppWeights.emphasis,
-                      ),
-                    ),
-                  ),
-                ],
+              child: _buildSessionSectionHeader(
+                context,
+                title: group.title,
+                icon: widget.viewMode == SessionViewMode.byCwd
+                    ? Icons.folder_rounded
+                    : Icons.hub_rounded,
+                count: group.entries.length,
               ),
             );
           }
           if (index >= entriesStart && index < entriesEnd) {
             final entry = group.entries[index - entriesStart];
             return Padding(
-              padding: EdgeInsets.only(bottom: widget.dense ? 2 : AppSpacing.sm),
-              child: SessionRowCard(
-                host: entry.host,
-                session: entry.session,
-                favorite: _localStore.isFavorite(entry.host, entry.session.id),
-                selected: widget.selectedSessionId == entry.session.id,
-                dense: widget.dense,
-                query: widget.query,
-                onTap: () => widget.onOpenSession(entry.host, entry.session),
-                onToggleFavorite: () {
-                  _localStore.toggleFavorite(entry.host, entry.session.id);
-                },
+              padding: EdgeInsets.only(
+                bottom: widget.dense ? 2 : AppSpacing.sm,
               ),
+              child: _buildSessionRow(entry),
             );
           }
           current = entriesEnd;
@@ -1696,8 +1708,151 @@ class _RecentPaneState extends State<RecentPane> {
       },
     );
   }
-}
 
+  Widget _buildFlatSectionList(
+    BuildContext context,
+    List<_FlatSessionSection> sections, {
+    required EdgeInsets padding,
+    required bool isRefreshing,
+    required bool hasFailures,
+    required List<String> failureLabels,
+    required bool hasCachedEntries,
+    required Future<void> Function() handleRefresh,
+  }) {
+    return ListView.builder(
+      padding: padding,
+      itemCount:
+          (isRefreshing ? 1 : 0) +
+          (hasFailures ? 1 : 0) +
+          sections.fold<int>(
+            0,
+            (sum, section) => sum + section.entries.length + 1,
+          ),
+      itemBuilder: (context, index) {
+        var offset = 0;
+        if (isRefreshing) {
+          if (index == offset) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: widget.dense ? 6 : 10),
+              child: _RecentProgressStrip(
+                remaining: _store.pendingHostIds.length,
+                total: widget.hosts.length,
+                showingCached: hasCachedEntries,
+              ),
+            );
+          }
+          offset += 1;
+        }
+        if (hasFailures) {
+          if (index == offset) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: widget.dense ? 6 : 10),
+              child: _RecentErrorBanner(
+                hostLabels: failureLabels,
+                onRetry: handleRefresh,
+              ),
+            );
+          }
+          offset += 1;
+        }
+
+        var current = offset;
+        for (final section in sections) {
+          final headerIndex = current;
+          final entriesStart = headerIndex + 1;
+          final entriesEnd = entriesStart + section.entries.length;
+          if (index == headerIndex) {
+            return Padding(
+              padding: EdgeInsets.only(
+                top: widget.dense ? 8 : 14,
+                bottom: widget.dense ? 4 : 8,
+              ),
+              child: _buildSessionSectionHeader(
+                context,
+                title: section.title,
+                icon: section.icon,
+                count: section.entries.length,
+              ),
+            );
+          }
+          if (index >= entriesStart && index < entriesEnd) {
+            final entry = section.entries[index - entriesStart];
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: widget.dense ? 2 : AppSpacing.sm,
+              ),
+              child: _buildSessionRow(entry),
+            );
+          }
+          current = entriesEnd;
+        }
+        return const SizedBox.shrink();
+      },
+    );
+  }
+
+  Widget _buildSessionSectionHeader(
+    BuildContext context, {
+    required String title,
+    required IconData icon,
+    required int count,
+  }) {
+    final colors = context.colors;
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: colors.textSecondary),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: widget.dense ? 10 : 11,
+              fontWeight: AppWeights.emphasis,
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          decoration: BoxDecoration(
+            color: colors.surfaceElevated,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: colors.border),
+          ),
+          child: Text(
+            '$count',
+            style: monoStyle(
+              color: colors.textTertiary,
+              fontSize: 10,
+              fontWeight: AppWeights.emphasis,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSessionRow(RemoteSessionEntry entry) {
+    return SessionRowCard(
+      host: entry.host,
+      session: entry.session,
+      favorite: _localStore.isFavorite(entry.host, entry.session.id),
+      selected: widget.selectedSessionId == entry.session.id,
+      dense: widget.dense,
+      query: widget.query,
+      onTap: () {
+        _localStore.updateGhost(entry.host, entry.session);
+        widget.onOpenSession(entry.host, entry.session);
+      },
+      onToggleFavorite: () {
+        _localStore.toggleFavorite(entry.host, entry.session.id);
+      },
+    );
+  }
+}
 
 typedef OpenPendingSessionCallback =
     Future<void> Function(
@@ -2126,7 +2281,9 @@ class _InboxPaneState extends State<InboxPane> {
         icon: widget.hasSavedHosts
             ? Icons.notifications_paused_rounded
             : Icons.checklist_rounded,
-        title: widget.hasSavedHosts ? 'No enabled hosts' : 'Nothing needs attention',
+        title: widget.hasSavedHosts
+            ? 'No enabled hosts'
+            : 'Nothing needs attention',
         body: widget.hasSavedHosts
             ? 'Enable a saved host from Hosts to receive pending approvals.'
             : 'Add a host first. Pending approvals from every machine will show up here.',
@@ -3155,9 +3312,7 @@ class HostsPane extends StatelessWidget {
     final visibleHosts = q.isEmpty
         ? hosts
         : hosts
-              .where(
-                (h) => matchesSearchQuery('${h.label}\n${h.baseUrl}', q),
-              )
+              .where((h) => matchesSearchQuery('${h.label}\n${h.baseUrl}', q))
               .toList();
     if (visibleHosts.isEmpty) {
       return MeshEmptyState(
@@ -3890,7 +4045,9 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                           ? const SizedBox(
                               width: 14,
                               height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 1.5),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1.5,
+                              ),
                             )
                           : const Icon(Icons.wifi_tethering_rounded, size: 18),
                       label: const Text('Test connection'),
@@ -4399,9 +4556,7 @@ class _MobileClientUpdateBanner extends StatelessWidget {
         ? 'Update this app to keep using some hosts'
         : 'A newer Sidemesh mobile build is recommended';
     final count = notice.affectedHostCount;
-    final hostSummary = count == 1
-        ? notice.primaryHost.label
-        : '$count hosts';
+    final hostSummary = count == 1 ? notice.primaryHost.label : '$count hosts';
     final verb = count == 1
         ? (requiresUpdate ? 'requires' : 'recommends')
         : (requiresUpdate ? 'require' : 'recommend');
@@ -4409,13 +4564,16 @@ class _MobileClientUpdateBanner extends StatelessWidget {
     final installedVersion = mobileClientVersionLabel(notice.installedVersion);
     late final String body;
     if (count == 1) {
-      body = '$hostSummary $verb Sidemesh mobile $targetVersion or newer. '
+      body =
+          '$hostSummary $verb Sidemesh mobile $targetVersion or newer. '
           'You are on $installedVersion.';
     } else if (requiresUpdate) {
-      body = 'Update to Sidemesh mobile $targetVersion or newer to keep using '
+      body =
+          'Update to Sidemesh mobile $targetVersion or newer to keep using '
           '$count hosts. You are on $installedVersion.';
     } else {
-      body = 'Update to Sidemesh mobile $targetVersion or newer to satisfy '
+      body =
+          'Update to Sidemesh mobile $targetVersion or newer to satisfy '
           'recommendations from $count hosts. You are on $installedVersion.';
     }
 
@@ -4476,7 +4634,9 @@ class _MobileClientUpdateBanner extends StatelessWidget {
                           visualDensity: VisualDensity.compact,
                         ),
                         icon: const Icon(Icons.visibility_rounded, size: 16),
-                        label: Text(count == 1 ? 'Review host' : 'Review hosts'),
+                        label: Text(
+                          count == 1 ? 'Review host' : 'Review hosts',
+                        ),
                       ),
                       if (onDismiss != null)
                         OutlinedButton(

@@ -3462,7 +3462,11 @@ export async function mergeRecentUnindexedThreads(
   }
 
   return [...threadsById.values()]
-    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .sort(
+      (left, right) =>
+        threadTimestampMillis(right.updatedAt) -
+        threadTimestampMillis(left.updatedAt),
+    )
     .slice(0, limit);
 }
 

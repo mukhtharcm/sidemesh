@@ -1,23 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
-import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-class _FakePathProvider extends PathProviderPlatform
-    with MockPlatformInterfaceMixin {
-  @override
-  Future<String?> getApplicationDocumentsPath() async => '/tmp/sidemesh_test';
-
-  @override
-  Future<String?> getApplicationSupportPath() async => '/tmp/sidemesh_test';
-
-  @override
-  Future<String?> getTemporaryPath() async => '/tmp/sidemesh_test';
-}
+import 'test_path_provider.dart';
 
 void main() {
   const host = HostProfile(
@@ -27,10 +14,8 @@ void main() {
     token: 'secret',
   );
 
-  setUpAll(() {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfiNoIsolate;
-    PathProviderPlatform.instance = _FakePathProvider();
+  setUpAll(() async {
+    await configureTestDatabaseFactory();
   });
 
   tearDownAll(() async {
@@ -38,6 +23,7 @@ void main() {
   });
 
   setUp(() async {
+    SessionLocalStore.instance.resetMigrationState();
     SharedPreferences.setMockInitialValues(<String, Object>{});
     // Wipe DB before each test
     final db = await SidemeshDb.instance;
@@ -46,7 +32,11 @@ void main() {
 
   test('upsert and getRecentSessions', () async {
     final store = SessionLocalStore.instance;
-    final s1 = _summary('s1', updatedAt: DateTime.now().subtract(const Duration(seconds: 1)), title: 'First');
+    final s1 = _summary(
+      's1',
+      updatedAt: DateTime.now().subtract(const Duration(seconds: 1)),
+      title: 'First',
+    );
     final s2 = _summary('s2', updatedAt: DateTime.now(), title: 'Second');
 
     await store.upsertSessions(host, [s1, s2]);
@@ -59,7 +49,11 @@ void main() {
 
   test('first-load database work is safe under concurrent callers', () async {
     final store = SessionLocalStore.instance;
-    final session = _summary('race-1', updatedAt: DateTime.now(), title: 'Race');
+    final session = _summary(
+      'race-1',
+      updatedAt: DateTime.now(),
+      title: 'Race',
+    );
 
     await Future.wait([
       store.ensureLoaded(),
@@ -77,7 +71,8 @@ void main() {
     final store = SessionLocalStore.instance;
     final sessions = List.generate(
       50,
-      (i) => _summary("s$i", updatedAt: DateTime.now().add(Duration(seconds: i))),
+      (i) =>
+          _summary("s$i", updatedAt: DateTime.now().add(Duration(seconds: i))),
     );
 
     await store.upsertSessions(host, sessions);
@@ -88,7 +83,11 @@ void main() {
 
   test('upsert updates existing row', () async {
     final store = SessionLocalStore.instance;
-    final s1 = _summary('s1', updatedAt: DateTime.now().subtract(const Duration(seconds: 1)), title: 'Original');
+    final s1 = _summary(
+      's1',
+      updatedAt: DateTime.now().subtract(const Duration(seconds: 1)),
+      title: 'Original',
+    );
     await store.upsertSessions(host, [s1]);
 
     final updated = s1.copyWith(title: 'Updated');
@@ -98,9 +97,49 @@ void main() {
     expect(recents.first.title, 'Updated');
   });
 
+  test('upsertSessions replaces stale recent rows', () async {
+    final store = SessionLocalStore.instance;
+    final first = _summary('s1', updatedAt: DateTime.now(), title: 'First');
+    final second = _summary(
+      's2',
+      updatedAt: DateTime.now().add(const Duration(seconds: 1)),
+      title: 'Second',
+    );
+
+    await store.upsertSessions(host, [first, second]);
+    await store.upsertSessions(host, [second]);
+
+    final recents = await store.getRecentSessions(host);
+    expect(recents.map((session) => session.id), ['s2']);
+  });
+
+  test('favorites survive when a session drops out of recents', () async {
+    final store = SessionLocalStore.instance;
+    final favorite = _summary('favorite', updatedAt: DateTime.now());
+    final recent = _summary(
+      'recent',
+      updatedAt: DateTime.now().add(const Duration(seconds: 1)),
+    );
+
+    await store.upsertSessions(host, [favorite, recent]);
+    await store.toggleFavorite(host, 'favorite');
+    await store.upsertSessions(host, [recent]);
+
+    final recents = await store.getRecentSessions(host);
+    final favorites = await store.getFavoriteSessions(host);
+    final ghosts = await store.ghostsForHost(host);
+
+    expect(recents.map((session) => session.id), ['recent']);
+    expect(favorites.map((session) => session.id), contains('favorite'));
+    expect(ghosts.map((session) => session.id), ['favorite']);
+  });
+
   test('toggleFavorite and isFavorite', () async {
     final store = SessionLocalStore.instance;
-    final s1 = _summary('s1', updatedAt: DateTime.now().subtract(const Duration(seconds: 1)));
+    final s1 = _summary(
+      's1',
+      updatedAt: DateTime.now().subtract(const Duration(seconds: 1)),
+    );
     await store.upsertSessions(host, [s1]);
 
     expect(store.isFavorite(host, 's1'), false);
@@ -116,7 +155,10 @@ void main() {
 
   test('getFavoriteSessions returns only favorites', () async {
     final store = SessionLocalStore.instance;
-    final s1 = _summary('s1', updatedAt: DateTime.now().subtract(const Duration(seconds: 1)));
+    final s1 = _summary(
+      's1',
+      updatedAt: DateTime.now().subtract(const Duration(seconds: 1)),
+    );
     final s2 = _summary('s2', updatedAt: DateTime.now());
     await store.upsertSessions(host, [s1, s2]);
 
@@ -126,6 +168,42 @@ void main() {
     expect(favorites.length, 1);
     expect(favorites.first.id, 's1');
   });
+
+  test('removing a favorite persists to the local store', () async {
+    final store = SessionLocalStore.instance;
+    final session = _summary('s1', updatedAt: DateTime.now());
+    await store.upsertSessions(host, [session]);
+
+    await store.toggleFavorite(host, 's1');
+    await store.toggleFavorite(host, 's1');
+
+    final favorites = await store.getFavoriteSessions(host);
+    expect(favorites, isEmpty);
+  });
+
+  test(
+    'ensureLoaded notifies listeners when persisted favorites are restored',
+    () async {
+      final store = SessionLocalStore.instance;
+      final session = _summary('s1', updatedAt: DateTime.now());
+      await store.upsertSessions(host, [session]);
+      await store.toggleFavorite(host, 's1');
+
+      store.resetMigrationState();
+      var notifications = 0;
+      void listener() {
+        notifications += 1;
+      }
+
+      store.addListener(listener);
+      addTearDown(() => store.removeListener(listener));
+
+      await store.ensureLoaded();
+
+      expect(store.isFavorite(host, 's1'), true);
+      expect(notifications, 1);
+    },
+  );
 
   test('ghost favorite survives without recent', () async {
     final store = SessionLocalStore.instance;
@@ -139,7 +217,12 @@ void main() {
 
   test('clearHost removes all rows for host', () async {
     final store = SessionLocalStore.instance;
-    await store.upsertSessions(host, [_summary('s1', updatedAt: DateTime.now().subtract(const Duration(seconds: 1)))]);
+    await store.upsertSessions(host, [
+      _summary(
+        's1',
+        updatedAt: DateTime.now().subtract(const Duration(seconds: 1)),
+      ),
+    ]);
     await store.toggleFavorite(host, 's1');
 
     await store.clearHost(host);
@@ -184,7 +267,11 @@ void main() {
 
   test('getSession returns matching row or null', () async {
     final store = SessionLocalStore.instance;
-    final s1 = _summary('s1', updatedAt: DateTime.now().subtract(const Duration(seconds: 1)), title: 'Target');
+    final s1 = _summary(
+      's1',
+      updatedAt: DateTime.now().subtract(const Duration(seconds: 1)),
+      title: 'Target',
+    );
     await store.upsertSessions(host, [s1]);
 
     final found = await store.getSession(host, 's1');
@@ -196,7 +283,8 @@ void main() {
 
   test('migration from old SharedPreferences', () async {
     SharedPreferences.setMockInitialValues({
-      'sidemesh_cached_recent_sessions_v1:host-1': '[{"id":"old-s1","title":"Old","preview":"p","cwd":"/","createdAt":1700000000000,"updatedAt":1700000000000,"source":"codex","provider":null,"status":"complete","runtime":null,"gitInfo":null}]',
+      'sidemesh_cached_recent_sessions_v1:host-1':
+          '[{"id":"old-s1","title":"Old","preview":"p","cwd":"/","createdAt":1700000000000,"updatedAt":1700000000000,"source":"codex","provider":null,"status":"complete","runtime":null,"gitInfo":null}]',
       'sidemesh_session_favorites_v1': ['host-1::old-fav'],
     });
 
@@ -216,7 +304,12 @@ void main() {
 
   test('clearAll wipes sessions and logs', () async {
     final store = SessionLocalStore.instance;
-    await store.upsertSessions(host, [_summary('s1', updatedAt: DateTime.now().subtract(const Duration(seconds: 1)))]);
+    await store.upsertSessions(host, [
+      _summary(
+        's1',
+        updatedAt: DateTime.now().subtract(const Duration(seconds: 1)),
+      ),
+    ]);
     await store.saveSessionLog(host, _log('s1'));
 
     await store.clearAll();

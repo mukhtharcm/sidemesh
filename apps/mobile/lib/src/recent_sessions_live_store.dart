@@ -18,11 +18,28 @@ class RemoteSessionEntry {
   final SessionSummary session;
 }
 
+@immutable
+class _PendingRecentMutation {
+  const _PendingRecentMutation.upsert(this.session)
+    : sessionId = null,
+      isRemoval = false;
+
+  const _PendingRecentMutation.remove(this.sessionId)
+    : session = null,
+      isRemoval = true;
+
+  final SessionSummary? session;
+  final String? sessionId;
+  final bool isRemoval;
+}
+
 /// Cache-first recent sessions store with one lightweight live socket per host.
 ///
 /// HTTP remains the reconciliation path for reconnects and compatibility with
 /// older servers, while the websocket path keeps the list fresh between polls.
 class RecentSessionsStore extends ChangeNotifier {
+  static const int _maxSessionsPerHost = 40;
+
   RecentSessionsStore({
     Duration pollInterval = const Duration(seconds: 90),
     Duration initialHttpFallbackDelay = const Duration(milliseconds: 1600),
@@ -37,6 +54,7 @@ class RecentSessionsStore extends ChangeNotifier {
   List<RemoteSessionEntry> _entries = const [];
   final Map<String, HostProfile> _hostsById = {};
   final Map<String, Map<String, SessionSummary>> _sessionsByHostId = {};
+  final Map<String, int> _hostFreshnessById = {};
   final Map<String, _RecentHostLiveConnection> _liveConnections = {};
   final Set<String> _confirmedHostIds = <String>{};
   final Set<String> _liveHostIds = <String>{};
@@ -78,6 +96,7 @@ class RecentSessionsStore extends ChangeNotifier {
     if (_hosts.isEmpty) {
       _entries = const [];
       _sessionsByHostId.clear();
+      _hostFreshnessById.clear();
       _confirmedHostIds.clear();
       _liveHostIds.clear();
       _pendingHostIds = <String>{};
@@ -87,8 +106,8 @@ class RecentSessionsStore extends ChangeNotifier {
       return;
     }
 
-    unawaited(_hydrateCachedHosts(_hosts));
     if (hostsChanged || !_hasLoadedOnce) {
+      unawaited(_hydrateCachedHosts(_hosts));
       _scheduleInitialHttpFallback();
     }
   }
@@ -104,6 +123,7 @@ class RecentSessionsStore extends ChangeNotifier {
     if (hosts.isEmpty) {
       _entries = const [];
       _sessionsByHostId.clear();
+      _hostFreshnessById.clear();
       _confirmedHostIds.clear();
       _liveHostIds.clear();
       _pendingHostIds = <String>{};
@@ -129,6 +149,7 @@ class RecentSessionsStore extends ChangeNotifier {
           final sessions = await api.fetchSessions(host, limit: 40);
           if (_disposed || gen != _loadGen) return;
           HostStatusStore.instance.markOnline(host.id);
+          _markHostFresh(host.id);
           _confirmedHostIds.add(host.id);
           _replaceHostSessions(host, sessions);
           _failedHostLabels = _failedHostLabels
@@ -136,9 +157,7 @@ class RecentSessionsStore extends ChangeNotifier {
               .toList(growable: false);
           _hasLoadedOnce = true;
           _publishEntries();
-          unawaited(
-            SessionLocalStore.instance.upsertSessions(host, sessions),
-          );
+          unawaited(SessionLocalStore.instance.upsertSessions(host, sessions));
         } catch (error) {
           if (_disposed || gen != _loadGen) return;
           HostStatusStore.instance.markOffline(
@@ -188,6 +207,7 @@ class RecentSessionsStore extends ChangeNotifier {
   Future<void> _hydrateCachedHosts(List<HostProfile> hosts) async {
     await Future.wait(
       hosts.map((host) async {
+        final freshnessAtStart = _hostFreshnessById[host.id] ?? 0;
         try {
           final cached = await SessionLocalStore.instance.getRecentSessions(
             host,
@@ -196,7 +216,9 @@ class RecentSessionsStore extends ChangeNotifier {
           if (_disposed ||
               cached.isEmpty ||
               current == null ||
-              _hostSignature(current) != _hostSignature(host)) {
+              _hostSignature(current) != _hostSignature(host) ||
+              (_hostFreshnessById[host.id] ?? 0) != freshnessAtStart ||
+              _confirmedHostIds.contains(host.id)) {
             return;
           }
           _replaceHostSessions(host, cached);
@@ -292,7 +314,7 @@ class RecentSessionsStore extends ChangeNotifier {
       _sessionsByHostId[host.id] ?? const <String, SessionSummary>{},
     );
     next[session.id] = session;
-    _sessionsByHostId[host.id] = next;
+    _sessionsByHostId[host.id] = _toBoundedSessionMap(next.values);
     _hasLoadedOnce = true;
     _publishEntries();
     notifyListeners();
@@ -317,6 +339,7 @@ class RecentSessionsStore extends ChangeNotifier {
   }
 
   void _markHostFreshFromLive(HostProfile host) {
+    _markHostFresh(host.id);
     _confirmedHostIds.add(host.id);
     _liveHostIds.add(host.id);
     _pendingHostIds = {..._pendingHostIds}..remove(host.id);
@@ -331,11 +354,7 @@ class RecentSessionsStore extends ChangeNotifier {
   }
 
   void _replaceHostSessions(HostProfile host, List<SessionSummary> sessions) {
-    final sorted = sessions.toList(growable: false)
-      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
-    _sessionsByHostId[host.id] = {
-      for (final session in sorted.take(40)) session.id: session,
-    };
+    _sessionsByHostId[host.id] = _toBoundedSessionMap(sessions);
   }
 
   void _publishEntries() {
@@ -343,9 +362,7 @@ class RecentSessionsStore extends ChangeNotifier {
     for (final host in _hosts) {
       final sessions = _sessionsByHostId[host.id];
       if (sessions == null) continue;
-      final sorted = sessions.values.toList(growable: false)
-        ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
-      for (final session in sorted.take(40)) {
+      for (final session in _sortedSessionWindow(sessions.values)) {
         flattened.add(RemoteSessionEntry(host: host, session: session));
       }
     }
@@ -358,9 +375,12 @@ class RecentSessionsStore extends ChangeNotifier {
       unawaited(SessionLocalStore.instance.upsertSessions(host, const []));
       return;
     }
-    final sorted = sessions.values.toList(growable: false)
-      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
-    unawaited(SessionLocalStore.instance.upsertSessions(host, sorted));
+    unawaited(
+      SessionLocalStore.instance.upsertSessions(
+        host,
+        _sortedSessionWindow(sessions.values),
+      ),
+    );
   }
 
   void _removeEntriesForMissingHosts() {
@@ -368,10 +388,15 @@ class RecentSessionsStore extends ChangeNotifier {
     for (final id in _sessionsByHostId.keys.toList(growable: false)) {
       if (activeIds.contains(id)) continue;
       _sessionsByHostId.remove(id);
+      _hostFreshnessById.remove(id);
       _confirmedHostIds.remove(id);
       _liveHostIds.remove(id);
     }
     _publishEntries();
+  }
+
+  void _markHostFresh(String hostId) {
+    _hostFreshnessById[hostId] = (_hostFreshnessById[hostId] ?? 0) + 1;
   }
 
   String _hostSignature(HostProfile host) =>
@@ -391,6 +416,20 @@ class RecentSessionsStore extends ChangeNotifier {
     _liveConnections.clear();
     _liveHostIds.clear();
     super.dispose();
+  }
+
+  Map<String, SessionSummary> _toBoundedSessionMap(
+    Iterable<SessionSummary> sessions,
+  ) {
+    return {
+      for (final session in _sortedSessionWindow(sessions)) session.id: session,
+    };
+  }
+
+  List<SessionSummary> _sortedSessionWindow(Iterable<SessionSummary> sessions) {
+    final sorted = sessions.toList(growable: false)
+      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    return sorted.take(_maxSessionsPerHost).toList(growable: false);
   }
 }
 
@@ -426,6 +465,9 @@ class _RecentHostLiveConnection {
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   bool _disposed = false;
+  bool _receivedSnapshot = false;
+  final List<_PendingRecentMutation> _pendingMutations =
+      <_PendingRecentMutation>[];
 
   bool matches(HostProfile next) =>
       host.id == next.id &&
@@ -434,6 +476,8 @@ class _RecentHostLiveConnection {
 
   void connect() {
     if (_disposed || !host.enabled) return;
+    _receivedSnapshot = false;
+    _pendingMutations.clear();
     try {
       final channel = api.openSessionsLive(host);
       _channel = channel;
@@ -471,29 +515,69 @@ class _RecentHostLiveConnection {
       final event = RecentSessionsLiveEvent.fromJson(
         (jsonDecode(raw) as Map).cast<String, dynamic>(),
       );
-      switch (event.type) {
-        case 'hello':
-          onOnline(host);
-        case 'snapshot':
-          onOnline(host);
-          onSnapshot(host, event.sessions ?? const <SessionSummary>[]);
-        case 'upsert':
-          onOnline(host);
-          final session = event.session;
-          if (session != null) {
-            onUpsert(host, session);
-          }
-        case 'remove':
-          onOnline(host);
-          final sessionId = event.sessionId;
-          if (sessionId != null && sessionId.isNotEmpty) {
-            onRemove(host, sessionId);
-          }
-        case 'error':
-          onOffline(host, event.message);
+      if (event.type == 'hello') {
+        onOnline(host);
+        return;
+      }
+      if (event.type == 'snapshot') {
+        onOnline(host);
+        _receivedSnapshot = true;
+        onSnapshot(host, event.sessions ?? const <SessionSummary>[]);
+        _flushPendingMutations();
+        return;
+      }
+      if (event.type == 'upsert') {
+        onOnline(host);
+        final session = event.session;
+        if (session == null) {
+          return;
+        }
+        if (!_receivedSnapshot) {
+          _pendingMutations.add(_PendingRecentMutation.upsert(session));
+          return;
+        }
+        onUpsert(host, session);
+        return;
+      }
+      if (event.type == 'remove') {
+        onOnline(host);
+        final sessionId = event.sessionId;
+        if (sessionId == null || sessionId.isEmpty) {
+          return;
+        }
+        if (!_receivedSnapshot) {
+          _pendingMutations.add(_PendingRecentMutation.remove(sessionId));
+          return;
+        }
+        onRemove(host, sessionId);
+        return;
+      }
+      if (event.type == 'error') {
+        onOffline(host, event.message);
       }
     } catch (error) {
       debugPrint('Ignored malformed recent sessions live event: $error');
+    }
+  }
+
+  void _flushPendingMutations() {
+    if (_pendingMutations.isEmpty) {
+      return;
+    }
+    final pending = List<_PendingRecentMutation>.from(_pendingMutations);
+    _pendingMutations.clear();
+    for (final mutation in pending) {
+      if (mutation.isRemoval) {
+        final sessionId = mutation.sessionId;
+        if (sessionId != null && sessionId.isNotEmpty) {
+          onRemove(host, sessionId);
+        }
+        continue;
+      }
+      final session = mutation.session;
+      if (session != null) {
+        onUpsert(host, session);
+      }
     }
   }
 
