@@ -109,6 +109,10 @@ class MeshCard extends StatelessWidget {
     this.onTap,
     this.tone = MeshCardTone.surface,
     this.borderColor,
+    @Deprecated(
+      'accentStrip produced an unexplained 3 px left-edge stripe. '
+      'Prefer a coloured borderColor or an inline status indicator instead.'
+    )
     this.accentStrip,
   });
 
@@ -117,6 +121,7 @@ class MeshCard extends StatelessWidget {
   final VoidCallback? onTap;
   final MeshCardTone tone;
   final Color? borderColor;
+  // ignore: deprecated_member_use_from_same_package
   final Color? accentStrip;
 
   @override

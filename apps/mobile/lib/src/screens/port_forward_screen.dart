@@ -933,7 +933,7 @@ class _PortForwardCard extends StatelessWidget {
     final running = port.isRunning;
     return MeshCard(
       tone: MeshCardTone.surface,
-      accentStrip: running ? colors.success : colors.textTertiary,
+      borderColor: running ? colors.success.withValues(alpha: 0.5) : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1100,7 +1100,7 @@ class _BrowserPreviewCard extends StatelessWidget {
     final running = preview.status == 'running' || preview.status == 'starting';
     return MeshCard(
       tone: MeshCardTone.surface,
-      accentStrip: running ? colors.success : colors.textTertiary,
+      borderColor: running ? colors.success.withValues(alpha: 0.5) : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

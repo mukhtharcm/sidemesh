@@ -226,11 +226,6 @@ class SessionRowCard extends StatelessWidget {
     return MeshCard(
       onTap: onTap,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      accentStrip: running
-          ? colors.success
-          : (selected
-              ? colors.accent
-              : (unread ? colors.accent.withValues(alpha: 0.45) : null)),
       borderColor: selected ? colors.accent : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
