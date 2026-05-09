@@ -2305,7 +2305,9 @@ class _SessionScreenState extends State<SessionScreen>
           latestPlanUpdate,
           fallbackCreatedAt: delta.session?.updatedAt ?? DateTime.now(),
         );
-        _pendingAction = delta.pendingAction ?? _pendingAction;
+        // The events endpoint returns the server's current pending-action
+        // snapshot, so a null here means any previously shown action is gone.
+        _pendingAction = delta.pendingAction;
         _running = nextRunning;
         if (!nextRunning || _hasPersistedLiveAssistant(mergedMessages)) {
           _clearLiveAssistantMessage();
