@@ -1414,33 +1414,47 @@ class _RecentPaneState extends State<RecentPane> {
   Widget build(BuildContext context) {
     if (widget.hosts.isEmpty) {
       if (!widget.hasSavedHosts) {
-        // No hosts at all — show a clear call-to-action to add one
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.xl),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const MeshEmptyState(
-                  icon: Icons.schedule_rounded,
-                  title: 'No sessions yet',
-                  body: 'Add a host to start controlling your coding agents from your phone.',
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                FilledButton.icon(
-                  onPressed: widget.onAddHost,
-                  icon: const Icon(Icons.add_link_rounded),
-                  label: const Text('Add your first host'),
-                ),
-              ],
+        // First-run empty state — use it as a feature tour. The original
+        // version was a single "Add your first host" button which made it
+        // look like a single-host tool. Surface the actual product
+        // capabilities so users understand why they'd add more than one
+        // host.
+        return MeshEmptyState(
+          icon: Icons.hub_rounded,
+          title: 'Pair your first host',
+          body:
+              'Sidemesh runs your coding agents wherever you need them — your laptop, a remote VPS, anywhere over Tailscale — and brings them all into one inbox on your phone.',
+          tips: const [
+            MeshEmptyStateTip(
+              icon: Icons.qr_code_scanner_rounded,
+              label:
+                  'Scan the QR code from `sidemesh pair` to add a host in seconds.',
             ),
-          ),
+            MeshEmptyStateTip(
+              icon: Icons.notifications_active_rounded,
+              label:
+                  'Get notified the moment an agent needs your approval, even when the app is closed.',
+            ),
+            MeshEmptyStateTip(
+              icon: Icons.bolt_rounded,
+              label:
+                  'Switch between Codex, Copilot CLI, and other providers from a single chat surface.',
+            ),
+          ],
+          primaryAction: widget.onAddHost == null
+              ? null
+              : MeshEmptyStateAction(
+                  label: 'Pair a host',
+                  icon: Icons.add_link_rounded,
+                  onPressed: widget.onAddHost!,
+                ),
         );
       }
       return const MeshEmptyState(
         icon: Icons.pause_circle_outline_rounded,
         title: 'No enabled hosts',
-        body: 'Enable a saved host from Hosts to load recent sessions.',
+        body:
+            'All your saved hosts are paused. Re-enable one from the Hosts tab to load recent sessions.',
       );
     }
 
@@ -3152,26 +3166,32 @@ class HostsPane extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (hosts.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.all(20),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const MeshEmptyState(
-                icon: Icons.route_rounded,
-                title: 'No hosts yet',
-                body:
-                    'Add a MacBook or VPS node by pasting its Tailscale address and shared token.',
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: onAddHost,
-                icon: const Icon(Icons.add_link_rounded),
-                label: const Text('Add your first host'),
-              ),
-            ],
+      return MeshEmptyState(
+        icon: Icons.hub_rounded,
+        title: 'Add your first host',
+        body:
+            'Hosts are the machines running your coding agents. Pair as many as you want — they all show up in one feed.',
+        tips: const [
+          MeshEmptyStateTip(
+            icon: Icons.laptop_mac_rounded,
+            label:
+                'Run `sidemesh pair` on a Mac, Linux box, or VPS to get a one-time QR code.',
           ),
+          MeshEmptyStateTip(
+            icon: Icons.lock_rounded,
+            label:
+                'Pairing exchanges a per-host token over Tailscale — nothing is exposed to the public internet.',
+          ),
+          MeshEmptyStateTip(
+            icon: Icons.swap_horiz_rounded,
+            label:
+                'Switch between hosts from any session screen without losing context.',
+          ),
+        ],
+        primaryAction: MeshEmptyStateAction(
+          label: 'Pair a host',
+          icon: Icons.qr_code_scanner_rounded,
+          onPressed: onAddHost,
         ),
       );
     }
