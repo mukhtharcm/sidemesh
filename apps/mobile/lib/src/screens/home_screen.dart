@@ -820,78 +820,21 @@ class _HomeSearchField extends StatelessWidget {
             hintText: hintText,
             hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
             prefixIcon: viewMode != null && onViewModeChanged != null
-                ? ConstrainedBox(
-                    constraints: const BoxConstraints.tightFor(
-                      width: 32,
-                      height: 32,
-                    ),
-                    child: PopupMenuButton<SessionViewMode>(
-                      padding: EdgeInsets.zero,
-                      icon: Icon(
-                        switch (viewMode!) {
-                          SessionViewMode.flat => Icons.view_list_rounded,
-                          SessionViewMode.byCwd => Icons.folder_rounded,
-                          SessionViewMode.byHost => Icons.hub_rounded,
-                        },
-                        size: 18,
-                        color: colors.textSecondary,
-                      ),
-                      tooltip: 'View mode',
-                      onSelected: onViewModeChanged,
-                      itemBuilder: (context) => [
-                        PopupMenuItem(
-                          value: SessionViewMode.flat,
-                          child: Row(
-                            children: [
-                              const Icon(Icons.view_list_rounded, size: 18),
-                              const SizedBox(width: 10),
-                              const Text('Flat list'),
-                              if (viewMode == SessionViewMode.flat) ...[
-                                const SizedBox(width: 8),
-                                const Icon(Icons.check_rounded, size: 16),
-                              ],
-                            ],
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: SessionViewMode.byCwd,
-                          child: Row(
-                            children: [
-                              const Icon(Icons.folder_rounded, size: 18),
-                              const SizedBox(width: 10),
-                              const Text('By working dir'),
-                              if (viewMode == SessionViewMode.byCwd) ...[
-                                const SizedBox(width: 8),
-                                const Icon(Icons.check_rounded, size: 16),
-                              ],
-                            ],
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: SessionViewMode.byHost,
-                          child: Row(
-                            children: [
-                              const Icon(Icons.hub_rounded, size: 18),
-                              const SizedBox(width: 10),
-                              const Text('By host'),
-                              if (viewMode == SessionViewMode.byHost) ...[
-                                const SizedBox(width: 8),
-                                const Icon(Icons.check_rounded, size: 16),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                ? _ViewModePicker(
+                    viewMode: viewMode!,
+                    onViewModeChanged: onViewModeChanged!,
                   )
-                : Icon(
-                    Icons.search_rounded,
-                    size: 18,
-                    color: colors.textSecondary,
+                : Padding(
+                    padding: const EdgeInsets.only(left: 12, right: 4),
+                    child: Icon(
+                      Icons.search_rounded,
+                      size: 18,
+                      color: colors.textSecondary,
+                    ),
                   ),
             prefixIconConstraints: const BoxConstraints(
-              minWidth: 36,
-              minHeight: 36,
+              minWidth: 44,
+              minHeight: 44,
             ),
             suffixIcon: hasQuery
                 ? IconButton(
@@ -928,6 +871,97 @@ class _HomeSearchField extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// View-mode picker shown as the search field's prefix.
+///
+/// Was previously a 32x32 icon-only PopupMenuButton with the tooltip
+/// 'View mode' — discoverable for nobody. The current state of the
+/// switcher (Flat / By dir / By host) was completely invisible until you
+/// tapped it. We now render the active mode as `<icon> Flat ▾` so users
+/// can see (1) that this is a switcher, (2) what mode they are in, and
+/// (3) what their other choices are.
+class _ViewModePicker extends StatelessWidget {
+  const _ViewModePicker({
+    required this.viewMode,
+    required this.onViewModeChanged,
+  });
+
+  final SessionViewMode viewMode;
+  final ValueChanged<SessionViewMode> onViewModeChanged;
+
+  static const _options = <SessionViewMode, ({IconData icon, String label})>{
+    SessionViewMode.flat: (icon: Icons.view_list_rounded, label: 'Flat'),
+    SessionViewMode.byCwd: (icon: Icons.folder_rounded, label: 'By dir'),
+    SessionViewMode.byHost: (icon: Icons.hub_rounded, label: 'By host'),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final option = _options[viewMode]!;
+    return Padding(
+      padding: const EdgeInsets.only(left: 6, right: 4, top: 4, bottom: 4),
+      child: PopupMenuButton<SessionViewMode>(
+        padding: EdgeInsets.zero,
+        tooltip: 'Group sessions',
+        onSelected: onViewModeChanged,
+        itemBuilder: (context) => [
+          for (final entry in _options.entries)
+            PopupMenuItem(
+              value: entry.key,
+              child: Row(
+                children: [
+                  Icon(entry.value.icon, size: 18),
+                  const SizedBox(width: 10),
+                  Text(entry.value.label),
+                  if (entry.key == viewMode) ...[
+                    const SizedBox(width: 8),
+                    const Icon(Icons.check_rounded, size: 16),
+                  ],
+                ],
+              ),
+            ),
+        ],
+        child: Container(
+          // 36 high keeps it inside the dense search field but the parent
+          // prefixIconConstraints of 44x44 still gives a comfortable tap
+          // surface around the visual chip.
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: colors.accentMuted,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: colors.accent.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(option.icon, size: 16, color: colors.accent),
+              const SizedBox(width: 6),
+              Text(
+                option.label,
+                style: TextStyle(
+                  color: colors.accent,
+                  fontSize: 12,
+                  fontWeight: AppWeights.emphasis,
+                  letterSpacing: 0.2,
+                ),
+              ),
+              const SizedBox(width: 2),
+              Icon(
+                Icons.expand_more_rounded,
+                size: 16,
+                color: colors.accent,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
