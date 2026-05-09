@@ -85,6 +85,7 @@ class SessionLocalStore extends ChangeNotifier {
         _favoriteKeys.add(_favoriteKey(hostId, sessionId));
       }
       _favoritesLoaded = true;
+      notifyListeners();
     }();
     _favoritesLoadFuture = future;
     try {

@@ -181,6 +181,30 @@ void main() {
     expect(favorites, isEmpty);
   });
 
+  test(
+    'ensureLoaded notifies listeners when persisted favorites are restored',
+    () async {
+      final store = SessionLocalStore.instance;
+      final session = _summary('s1', updatedAt: DateTime.now());
+      await store.upsertSessions(host, [session]);
+      await store.toggleFavorite(host, 's1');
+
+      store.resetMigrationState();
+      var notifications = 0;
+      void listener() {
+        notifications += 1;
+      }
+
+      store.addListener(listener);
+      addTearDown(() => store.removeListener(listener));
+
+      await store.ensureLoaded();
+
+      expect(store.isFavorite(host, 's1'), true);
+      expect(notifications, 1);
+    },
+  );
+
   test('ghost favorite survives without recent', () async {
     final store = SessionLocalStore.instance;
     await store.toggleFavorite(host, 'ghost-1');
