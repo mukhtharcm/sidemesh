@@ -767,6 +767,29 @@ async function openSessionLiveSocket(
   return { socket, events };
 }
 
+async function openRecentSessionsLiveSocket(
+  port: number,
+  token: string,
+): Promise<{ socket: WebSocket; events: any[] }> {
+  const events: any[] = [];
+  const socket = await new Promise<WebSocket>((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/sessions/live`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    ws.on("message", (data) => {
+      const raw = typeof data === "string" ? data : data.toString();
+      events.push(JSON.parse(raw));
+    });
+    const handleError = (error: Error) => reject(error);
+    ws.once("error", handleError);
+    ws.once("open", () => {
+      ws.off("error", handleError);
+      resolve(ws);
+    });
+  });
+  return { socket, events };
+}
+
 async function closeSessionLiveSocket(socket: WebSocket): Promise<void> {
   if (socket.readyState === socket.CLOSED) {
     return;
@@ -2544,6 +2567,85 @@ describe("GET /api/sessions/:sessionId/status", () => {
       assert.equal((resumedStatus.body as any).status, "running");
       assert.equal((resumedStatus.body as any).isRunning, true);
       assert.equal((resumedStatus.body as any).pendingAction, null);
+    });
+  });
+
+  it("keeps recent session live rows aligned when action state changes without provider status events", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const recentLive = await openRecentSessionsLiveSocket(
+        server.port,
+        config.token,
+      );
+      try {
+        await waitFor(
+          () => recentLive.events.find((event) => event.type === "snapshot"),
+          "recent session live snapshot",
+        );
+
+        const createRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/sessions/create",
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            cwd: "/tmp/restart-test",
+            prompt: "start",
+          }),
+        });
+        assert.equal(createRes.statusCode, 201);
+        const sessionId = (createRes.body as any).session.id as string;
+
+        const waitingUpsert = await waitFor(
+          () =>
+            recentLive.events.find(
+              (event) =>
+                event.type === "upsert" &&
+                event.session?.id === sessionId &&
+                event.session?.status === "waiting_for_approval",
+            ),
+          "recent waiting approval upsert",
+        );
+        assert.equal(waitingUpsert.session.status, "waiting_for_approval");
+
+        const respondRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/actions/fake-restart-action/respond",
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            answer: "yes",
+            wasFreeform: true,
+          }),
+        });
+        assert.equal(respondRes.statusCode, 200);
+
+        const runningUpsert = await waitFor(
+          () =>
+            recentLive.events.find(
+              (event) =>
+                event.type === "upsert" &&
+                event.session?.id === sessionId &&
+                event.session?.status === "running" &&
+                recentLive.events.indexOf(event) >
+                  recentLive.events.indexOf(waitingUpsert),
+            ),
+          "recent running upsert after action response",
+        );
+        assert.equal(runningUpsert.session.status, "running");
+      } finally {
+        await closeSessionLiveSocket(recentLive.socket);
+      }
     });
   });
 });

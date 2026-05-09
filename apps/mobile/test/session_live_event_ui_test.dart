@@ -396,6 +396,115 @@ void main() {
     expect(find.text('Approve file edit'), findsNothing);
   });
 
+  testWidgets('manual snapshot reload clears stale pending actions', (
+    tester,
+  ) async {
+    final session = _session('pending-action-snapshot-clear');
+    final api = _RichEventFakeApi(
+      messages: [
+        _assistantMessage(
+          id: 'seed-message',
+          text: 'Existing transcript item.',
+          content: const [TextBlock('Existing transcript item.')],
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('pending-action-snapshot-clear'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'action_opened',
+      'sessionId': session.id,
+      'action': {
+        'id': 'action-1',
+        'sessionId': session.id,
+        'kind': 'permissions',
+        'title': 'Approve file edit',
+        'detail': 'Need approval before continuing.',
+        'requestedAt': DateTime(2026, 1, 1, 12, 1).millisecondsSinceEpoch,
+        'canApprove': true,
+        'canApproveForSession': true,
+        'canDecline': true,
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Approve file edit'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Reload session'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Approve file edit'), findsNothing);
+  });
+
+  testWidgets('snapshot reload preserves action opened while fetch is in flight', (
+    tester,
+  ) async {
+    final session = _session('pending-action-snapshot-buffered-open');
+    final snapshotReady = Completer<void>();
+    final api = _RichEventFakeApi(
+      messages: [
+        _assistantMessage(
+          id: 'seed-message',
+          text: 'Existing transcript item.',
+          content: const [TextBlock('Existing transcript item.')],
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('pending-action-snapshot-buffered-open'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.fetchLogBlocker = snapshotReady.future;
+    await tester.tap(find.byTooltip('Reload session'));
+    await tester.pump();
+
+    api.emit({
+      'type': 'action_opened',
+      'sessionId': session.id,
+      'action': {
+        'id': 'action-1',
+        'sessionId': session.id,
+        'kind': 'permissions',
+        'title': 'Approve file edit',
+        'detail': 'Need approval before continuing.',
+        'requestedAt': DateTime(2026, 1, 1, 12, 1).millisecondsSinceEpoch,
+        'canApprove': true,
+        'canApproveForSession': true,
+        'canDecline': true,
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Approve file edit'), findsNothing);
+
+    snapshotReady.complete();
+    await _pumpFrames(tester);
+
+    expect(find.text('Approve file edit'), findsOneWidget);
+  });
+
   testWidgets('cached activity details refresh from delta replay without manual reload', (
     tester,
   ) async {
@@ -1214,7 +1323,7 @@ class _RichEventFakeApi extends ApiClient {
   final LiveEvent? latestPlanUpdate;
   final SessionEventsDelta? eventsDelta;
   final Object? eventsError;
-  final Future<void>? fetchLogBlocker;
+  Future<void>? fetchLogBlocker;
   final NodeInfo? nodeInfo;
   final SessionSummary? sessionSummary;
   final SessionStatus? sessionStatus;
