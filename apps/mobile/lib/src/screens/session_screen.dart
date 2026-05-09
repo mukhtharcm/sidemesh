@@ -6421,7 +6421,12 @@ class _SessionScreenState extends State<SessionScreen>
                       children: [
                         Icon(Icons.flag_rounded, size: 18),
                         SizedBox(width: 10),
-                        Text('Flag for follow-up'),
+                        Expanded(
+                          child: Text(
+                            'Flag for follow-up',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -6465,7 +6470,12 @@ class _SessionScreenState extends State<SessionScreen>
                         children: [
                           Icon(Icons.open_in_browser_rounded, size: 18),
                           SizedBox(width: 10),
-                          Text('Open browser preview'),
+                          Expanded(
+                            child: Text(
+                              'Open browser preview',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -6476,7 +6486,12 @@ class _SessionScreenState extends State<SessionScreen>
                         children: [
                           Icon(Icons.open_in_browser_rounded, size: 18),
                           SizedBox(width: 10),
-                          Text('Manage browser previews'),
+                          Expanded(
+                            child: Text(
+                              'Manage browser previews',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -6488,7 +6503,12 @@ class _SessionScreenState extends State<SessionScreen>
                         children: [
                           Icon(Icons.open_in_new_rounded, size: 18),
                           SizedBox(width: 10),
-                          Text('Open in new window'),
+                          Expanded(
+                            child: Text(
+                              'Open in new window',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ],
                       ),
                     ),
