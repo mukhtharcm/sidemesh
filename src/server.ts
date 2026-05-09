@@ -424,6 +424,23 @@ export async function startServer(
     liveThreadStatuses.set(sessionId, status);
   }
 
+  function reconcileObservedThreadStatus(
+    sessionId: string,
+    observedStatus: LiveThreadStatus,
+  ): void {
+    const nextStatus = hasPendingActionForSession(pendingActions, sessionId)
+      ? "waiting_for_approval"
+      : activeTurns.has(sessionId)
+        ? "running"
+        : observedStatus;
+    const previousStatus = latestThreadStatusForSession(sessionId);
+    if (previousStatus === nextStatus) {
+      return;
+    }
+    setLatestThreadStatusForSession(sessionId, nextStatus);
+    scheduleRecentSessionUpsert(sessionId, 0);
+  }
+
   function persistSessionRuntimeSignalsEventually(): void {
     sessionRuntimeSignalsSaveChain = sessionRuntimeSignalsSaveChain
       .catch(() => undefined)
@@ -1052,6 +1069,10 @@ export async function startServer(
         return;
       case "action_opened":
         pendingActions.set(event.action.id, event.action);
+        setLatestThreadStatusForSession(
+          event.action.sessionId,
+          "waiting_for_approval",
+        );
         const publicAction = toPublicPendingAction(event.action);
         broadcastLive(event.action.sessionId, {
           type: "action_opened",
@@ -1770,47 +1791,8 @@ export async function startServer(
         messageLimit,
         activityLimit,
       );
-      const cached = logCache.get(cacheKey);
-
-      if (cached) {
-        const session = await readSession(provider, sessionId, false);
-        if (cached.threadUpdatedAt === session.updatedAt) {
-          const latestPlanUpdate = mergeLatestPlanUpdate(
-            sessionId,
-            cached.latestPlanUpdate,
-            latestPlanUpdateForSession(sessionId),
-          );
-          ensureSeqCursor(
-            sessionId,
-            nextSeqForLatestPlanUpdate(cached.nextSeq, latestPlanUpdate),
-          );
-          runtimeCache.set(session.id, {
-            threadUpdatedAt: session.updatedAt,
-            runtime: cached.runtime,
-          });
-          response.json({
-            session: mapSession(
-              session,
-              cached.runtime,
-              latestThreadStatusForSession(session.id),
-            ),
-            messages: cached.messages,
-            activities: mergeSessionActivities(
-              cached.activities,
-              liveActivityValues(liveActivities.get(sessionId)),
-            ),
-            pendingAction: findPendingActionForSession(
-              pendingActions,
-              sessionId,
-            ),
-            history: cached.history,
-            latestPlanUpdate,
-          });
-          return;
-        }
-      }
-
       const session = await readSession(provider, sessionId, false);
+      reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
       const log = await provider.readSessionLog!(session, {
         messageLimit,
         activityLimit,
@@ -2125,12 +2107,14 @@ export async function startServer(
       ) {
         return;
       }
+      const liveStatus = latestThreadStatusForSession(sessionId);
       const state = await loadFastRunState(
         provider,
         sessionId,
         activeTurns,
-        latestThreadStatusForSession(sessionId),
+        isRunningThreadStatus(liveStatus) ? liveStatus : null,
       );
+      reconcileObservedThreadStatus(sessionId, state.status);
       response.json({
         sessionId,
         status: state.status,
@@ -2470,7 +2454,12 @@ export async function startServer(
           turnId: started.activeTurnId,
           startedAt: Date.now(),
         });
-        setLatestThreadStatusForSession(started.thread.id, "running");
+        setLatestThreadStatusForSession(
+          started.thread.id,
+          hasPendingActionForSession(pendingActions, started.thread.id)
+            ? "waiting_for_approval"
+            : "running",
+        );
       }
 
       const session = mapSession(
@@ -2586,7 +2575,12 @@ export async function startServer(
             turnId: submitted.turnId,
             startedAt: previousStartedAt ?? Date.now(),
           });
-          setLatestThreadStatusForSession(sessionId, "running");
+          setLatestThreadStatusForSession(
+            sessionId,
+            hasPendingActionForSession(pendingActions, sessionId)
+              ? "waiting_for_approval"
+              : "running",
+          );
         }
         broadcastLive(sessionId, {
           type: "user_message_submitted",
@@ -2866,6 +2860,7 @@ export async function startServer(
         action.sessionId,
         activeTurns.has(action.sessionId) ? "running" : null,
       );
+      scheduleRecentSessionUpsert(action.sessionId, 0);
       broadcastLive(action.sessionId, {
         type: "action_resolved",
         sessionId: action.sessionId,
@@ -4587,6 +4582,18 @@ function clearActionsForSession(
       actionId: action.id,
     });
   }
+}
+
+function hasPendingActionForSession(
+  pendingActions: Map<string, AgentPendingAction>,
+  sessionId: string,
+): boolean {
+  for (const action of pendingActions.values()) {
+    if (action.sessionId === sessionId) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function findPendingActionForSession(
