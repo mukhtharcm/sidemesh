@@ -574,6 +574,103 @@ class SearchFixtureProvider extends EventEmitter implements AgentProvider {
   }
 }
 
+class ActivityReplayFixtureProvider extends EventEmitter implements AgentProvider {
+  public readonly kind = "fake";
+  public readonly displayName = "Activity Replay Fixture Provider";
+  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
+  public readonly sessionId = "fake-activity-replay-session";
+  private updatedAt = 1;
+  private output = "before";
+
+  public async start(): Promise<void> {}
+
+  public async close(): Promise<void> {}
+
+  public async getVersion(): Promise<string> {
+    return "activity-replay-fixture";
+  }
+
+  public async listSessionThreads(
+    options: AgentSessionListOptions,
+  ): Promise<ThreadRecord[]> {
+    if (options.archived) {
+      return [];
+    }
+    return [this.buildThread()].slice(0, options.limit);
+  }
+
+  public async readSessionThread(
+    threadId: string,
+    _includeTurns: boolean,
+  ): Promise<ThreadRecord> {
+    assert.equal(threadId, this.sessionId);
+    return this.buildThread();
+  }
+
+  public async listRecentUnindexedSessionThreads(
+    limit: number,
+  ): Promise<ThreadRecord[]> {
+    return [this.buildThread()].slice(0, limit);
+  }
+
+  public async readSessionLog(
+    thread: ThreadRecord,
+    _options?: AgentSessionLogOptions,
+  ): Promise<SessionLogSnapshot> {
+    assert.equal(thread.id, this.sessionId);
+    return {
+      messages: [],
+      activities: [
+        {
+          id: "cmd-1",
+          type: "command",
+          turnId: "turn-1",
+          createdAt: 1,
+          seq: 1,
+          status: "completed",
+          command: "npm test",
+          cwd: "/repo",
+          output: this.output,
+          exitCode: 0,
+          durationMs: 1,
+          source: "agent",
+          processId: "proc-1",
+          commandActions: [],
+          terminalStatus: null,
+          terminalInput: null,
+        },
+      ],
+      runtime: null,
+      totalMessages: 0,
+      totalActivities: 1,
+      nextSeq: 2,
+    };
+  }
+
+  public async readSessionRuntime(): Promise<null> {
+    return null;
+  }
+
+  public mutatePersistedActivity(output: string): void {
+    this.output = output;
+    this.updatedAt += 1;
+  }
+
+  private buildThread(): ThreadRecord {
+    return {
+      id: this.sessionId,
+      name: "Activity replay fixture",
+      preview: "Activity replay fixture",
+      createdAt: 1,
+      updatedAt: this.updatedAt,
+      cwd: "/repo",
+      source: "fake",
+      path: null,
+      status: { type: "idle" },
+    };
+  }
+}
+
 function secondsForIso(value: string): number {
   return Math.trunc(Date.parse(value) / 1000);
 }
@@ -1754,6 +1851,104 @@ describe("session live rich events", () => {
       });
       assert.equal(upToDate.statusCode, 200);
       assert.equal((upToDate.body as any).latestPlanUpdate, null);
+    });
+  });
+
+  it("replays updated activities through the events delta route even when the transcript seq is unchanged", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new ActivityReplayFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const logPath = `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`;
+      const eventsPath = `/api/sessions/${encodeURIComponent(provider.sessionId)}/events?since=1`;
+
+      const initialLog = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: logPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(initialLog.statusCode, 200);
+      assert.equal((initialLog.body as any).activities[0].output, "before");
+
+      provider.emit("liveEvent", {
+        type: "activity_updated",
+        sessionId: provider.sessionId,
+        turnId: "turn-1",
+        activity: {
+          id: "cmd-1",
+          type: "command",
+          turnId: "turn-1",
+          status: "completed",
+          command: "npm test",
+          cwd: "/repo",
+          output: "before\nafter",
+          exitCode: 0,
+          durationMs: 2,
+          source: "agent",
+          processId: "proc-1",
+          commandActions: [],
+          terminalStatus: null,
+          terminalInput: null,
+        },
+      });
+
+      const delta = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: eventsPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(delta.statusCode, 200);
+      assert.equal((delta.body as any).activities.length, 1);
+      assert.equal((delta.body as any).activities[0].id, "cmd-1");
+      assert.equal((delta.body as any).activities[0].output, "before\nafter");
+      assert.ok(((delta.body as any).nextSeq as number) > 1);
+
+      const refreshedLog = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: logPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(refreshedLog.statusCode, 200);
+      assert.equal((refreshedLog.body as any).activities[0].output, "before\nafter");
+    });
+  });
+
+  it("forces snapshot fallback when persisted session state changed without replayable seq deltas", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new ActivityReplayFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const logPath = `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`;
+
+      const initialLog = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: logPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(initialLog.statusCode, 200);
+      assert.equal((initialLog.body as any).session.updatedAt, 1000);
+
+      provider.mutatePersistedActivity("after restart");
+
+      const delta = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path:
+          `/api/sessions/${encodeURIComponent(provider.sessionId)}/events?since=1&baseUpdatedAt=1000`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(delta.statusCode, 409);
+      assert.equal((delta.body as any).error, "stale_snapshot");
+      assert.equal((delta.body as any).currentUpdatedAt, 2000);
     });
   });
 

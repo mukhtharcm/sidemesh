@@ -485,11 +485,15 @@ class ApiClient {
     HostProfile host,
     String sessionId, {
     required int since,
+    int? baseUpdatedAt,
   }) async {
     final response = await _get(
       host,
       '/api/sessions/$sessionId/events',
-      queryParameters: {'since': '$since'},
+      queryParameters: {
+        'since': '$since',
+        if (baseUpdatedAt != null) 'baseUpdatedAt': '$baseUpdatedAt',
+      },
       operation: 'catch up session events',
     );
     return SessionEventsDelta.fromJson(_decodeObject(response));

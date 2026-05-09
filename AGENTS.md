@@ -222,6 +222,23 @@ specific agent provider.
 - **No formatter**: No Prettier, Biome, or ESLint. Follow file-local style.
 - **WebSocket `hello`**: The server sends `{"type":"hello"}` on every WS
   connection.
+- **Session replay freshness**: live activity updates must not be replay-filtered
+  only by the activity's original `seq`. Activities keep their transcript order
+  stable while replay freshness is tracked separately in `src/server.ts`, so
+  delta sync should use the replay cursor rather than assuming updated
+  activities get a newer transcript `seq`.
+- **Mobile delta parity**: `SessionEventsDelta` does not include a full
+  `history` summary. When replaying deltas into a cached session,
+  `apps/mobile/lib/src/screens/session_screen.dart` must keep
+  `SessionLogHistorySummary` in sync locally or the “older history” UI can stay
+  stale until a full snapshot reload.
+- **Delta staleness fallback**: some providers can expose newer session state
+  without any replayable `seq` bump (for example, persisted activity details
+  changing in place). `GET /api/sessions/:id/events` can therefore return a
+  `stale_snapshot` error when the caller's `baseUpdatedAt` is older than the
+  current session `updatedAt` but there are no replayable message/activity/plan
+  deltas. Mobile session refresh paths should treat that as a signal to reload
+  the full snapshot automatically.
 - **Workspace sandboxing**: `resolveWorkspacePath` uses `realpath` and prefix
   match against workspace roots. `WorkspaceAccessError` extends `Error` with
   a `status` field (default 403) that HTTP handlers can throw directly.
