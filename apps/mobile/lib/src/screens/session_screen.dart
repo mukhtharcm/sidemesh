@@ -1852,17 +1852,21 @@ class _SessionScreenState extends State<SessionScreen>
 
     final displayName = skill.displayName.toLowerCase();
     final canonicalName = skill.name.toLowerCase();
+    final summaryDescription = skill.summaryDescription.toLowerCase();
     if (displayName.startsWith(query)) {
       return 0;
     }
     if (canonicalName.startsWith(query)) {
       return 1;
     }
-    if (displayName.contains(query)) {
+    if (matchesSearchQuery(displayName, query)) {
       return 2;
     }
-    if (canonicalName.contains(query)) {
+    if (matchesSearchQuery(canonicalName, query)) {
       return 3;
+    }
+    if (matchesSearchQuery(summaryDescription, query)) {
+      return 4;
     }
     return 100;
   }

@@ -515,9 +515,8 @@ class _SnippetText extends StatelessWidget {
       color: colors.textSecondary,
       height: 1.3,
     );
-    final lowerBody = body.toLowerCase();
-    final lowerQuery = query.toLowerCase();
-    if (query.isEmpty || !lowerBody.contains(lowerQuery)) {
+    final matches = searchQueryMatchRanges(body, query);
+    if (matches.isEmpty) {
       final oneLine = body.replaceAll('\n', ' ').trim();
       final clipped = oneLine.length > 140
           ? '${oneLine.substring(0, 140)}…'
@@ -529,34 +528,52 @@ class _SnippetText extends StatelessWidget {
         style: baseStyle,
       );
     }
-    final idx = lowerBody.indexOf(lowerQuery);
+    final focus = matches.first;
     const radius = 70;
-    final start = (idx - radius).clamp(0, body.length);
-    final end = (idx + query.length + radius).clamp(0, body.length);
-    final leading = start > 0 ? '…' : '';
-    final trailing = end < body.length ? '…' : '';
-    final before = body.substring(start, idx).replaceAll('\n', ' ');
-    final match = body.substring(idx, idx + query.length);
-    final after = body
-        .substring(idx + query.length, end)
-        .replaceAll('\n', ' ');
+    final start = (focus.start - radius).clamp(0, body.length);
+    final end = (focus.end + radius).clamp(0, body.length);
+    final snippet = body.substring(start, end).replaceAll('\n', ' ');
+    final visibleMatches = matches
+        .where((match) => match.end > start && match.start < end)
+        .map((match) => SearchQueryMatchRange(
+              (match.start - start).clamp(0, snippet.length),
+              (match.end - start).clamp(0, snippet.length),
+            ))
+        .where((match) => match.end > match.start)
+        .toList(growable: false);
+    final spans = <TextSpan>[];
+    if (start > 0) {
+      spans.add(const TextSpan(text: '…'));
+    }
+    var cursor = 0;
+    for (final match in visibleMatches) {
+      if (match.start > cursor) {
+        spans.add(TextSpan(text: snippet.substring(cursor, match.start)));
+      }
+      spans.add(
+        TextSpan(
+          text: snippet.substring(match.start, match.end),
+          style: baseStyle?.copyWith(
+            color: colors.textPrimary,
+            fontWeight: AppWeights.title,
+            backgroundColor: colors.accent.withValues(alpha: 0.25),
+          ),
+        ),
+      );
+      cursor = match.end;
+    }
+    if (cursor < snippet.length) {
+      spans.add(TextSpan(text: snippet.substring(cursor)));
+    }
+    if (end < body.length) {
+      spans.add(const TextSpan(text: '…'));
+    }
     return RichText(
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       text: TextSpan(
         style: baseStyle,
-        children: [
-          TextSpan(text: '$leading$before'),
-          TextSpan(
-            text: match,
-            style: baseStyle?.copyWith(
-              color: colors.textPrimary,
-              fontWeight: AppWeights.title,
-              backgroundColor: colors.accent.withValues(alpha: 0.25),
-            ),
-          ),
-          TextSpan(text: '$after$trailing'),
-        ],
+        children: spans,
       ),
     );
   }
