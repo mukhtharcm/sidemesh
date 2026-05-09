@@ -20,7 +20,7 @@ InspectorSurface buildInspectorPortsSurface({
       supportsBrowserPreview: supportsBrowserPreview,
       supportsPortForwarding: supportsPortForwarding,
     ),
-    icon: Icons.cable_rounded,
+    icon: Icons.open_in_browser_rounded,
     bodyBuilder: (context) => PortForwardPane(
       key: ValueKey('ports:${host.id}:${session.id}:${session.cwd}'),
       host: host,

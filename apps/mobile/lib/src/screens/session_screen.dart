@@ -747,8 +747,9 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsBrowserPreview =>
       _supportsHostCapability('workspace', 'browserPreview');
 
-  bool get _supportsConnections =>
-      _supportsPortForwarding || _supportsBrowserPreview;
+  // TCP / local tunnel UI is intentionally hidden for now. Keep the server
+  // capability intact, but only surface the browser-preview path in the app.
+  bool get _supportsConnections => _supportsBrowserPreview;
 
   bool get _supportsProviderRestart =>
       _supportsProviderCapability('lifecycle', 'restart');
@@ -1213,7 +1214,7 @@ class _SessionScreenState extends State<SessionScreen>
           if (!_supportsConnections) {
             showAppSnackBar(
               context,
-              'Port forwarding / browser preview not available on this host.',
+              'Browser previews are not available on this host.',
             );
             return;
           }
@@ -4897,7 +4898,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (!_supportsConnections) {
       showAppSnackBar(
         context,
-        'This host does not expose previews or tunnels.',
+        'This host does not expose browser previews.',
       );
       return;
     }
@@ -5605,12 +5606,12 @@ class _SessionScreenState extends State<SessionScreen>
         ],
       ),
       _SessionActionGroup(
-        label: 'Preview & connections',
+        label: 'Browser preview',
         actions: [
           if (_supportsBrowserPreview)
             const _SessionActionSpec(
               value: 'preview',
-              label: 'Preview web app',
+              label: 'Open browser preview',
               detail: 'Open a streamed browser preview for a localhost app.',
               icon: Icons.open_in_browser_rounded,
               tone: _SessionActionTone.accent,
@@ -5618,11 +5619,11 @@ class _SessionScreenState extends State<SessionScreen>
           if (_supportsConnections)
             _SessionActionSpec(
               value: 'connections',
-              label: portsOpen ? 'Connections are open' : 'Manage connections',
-              detail: _supportsPortForwarding
-                  ? 'Inspect browser previews, TCP tunnels, and local URLs.'
-                  : 'Inspect active browser previews for this session.',
-              icon: Icons.cable_rounded,
+              label: portsOpen
+                  ? 'Browser previews are open'
+                  : 'Manage browser previews',
+              detail: 'Inspect active browser previews for this session.',
+              icon: Icons.open_in_browser_rounded,
               tone: portsOpen
                   ? _SessionActionTone.accent
                   : _SessionActionTone.neutral,
@@ -6202,10 +6203,10 @@ class _SessionScreenState extends State<SessionScreen>
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
-                icon: Icons.cable_rounded,
+                icon: Icons.open_in_browser_rounded,
                 tooltip: portsOpenInInspector
-                    ? 'Connections are open'
-                    : 'Manage connections',
+                    ? 'Browser previews are open'
+                    : 'Manage browser previews',
                 color: portsOpenInInspector
                     ? colors.accent
                     : colors.textSecondary,
@@ -6444,7 +6445,7 @@ class _SessionScreenState extends State<SessionScreen>
                         children: [
                           Icon(Icons.open_in_browser_rounded, size: 18),
                           SizedBox(width: 10),
-                          Text('Preview web app'),
+                          Text('Open browser preview'),
                         ],
                       ),
                     ),
@@ -6453,9 +6454,9 @@ class _SessionScreenState extends State<SessionScreen>
                       value: 'connections',
                       child: Row(
                         children: [
-                          Icon(Icons.cable_rounded, size: 18),
+                          Icon(Icons.open_in_browser_rounded, size: 18),
                           SizedBox(width: 10),
-                          Text('Manage connections'),
+                          Text('Manage browser previews'),
                         ],
                       ),
                     ),
