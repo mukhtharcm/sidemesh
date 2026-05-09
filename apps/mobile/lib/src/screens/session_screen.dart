@@ -35,6 +35,7 @@ import 'inspector/inspector_pinned.dart';
 import 'inspector/inspector_ports.dart';
 import 'inspector/inspector_resources.dart';
 import 'inspector/inspector_search.dart';
+import 'inspector/inspector_session_hub.dart';
 import 'inspector/inspector_terminal.dart';
 import 'port_forward_screen.dart';
 import '../session_message_seed_store.dart';
@@ -1079,6 +1080,10 @@ class _SessionScreenState extends State<SessionScreen>
 
     if (kind == null) {
       closeOrphan();
+      // No saved surface — open the hub so pane 3 is immediately useful
+      // rather than blank. The hub itself is never persisted, so next open
+      // will again check for a real saved surface first.
+      _openDefaultInspectorHub(controller, ownerKey);
       return;
     }
     // If something else has already opened a surface for this owner
@@ -1163,7 +1168,59 @@ class _SessionScreenState extends State<SessionScreen>
       case InspectorSurfaceKind.sessionDetails:
         // Not persisted / not owned by the session screen yet.
         break;
+      case InspectorSurfaceKind.sessionHub:
+        // Hub is the default; treat a persisted hub as if nothing was saved.
+        closeOrphan();
+        _openDefaultInspectorHub(controller, ownerKey);
+        break;
     }
+  }
+
+  /// Opens the inspector hub for this session.
+  ///
+  /// Each callback handles its own capability check and shows a snackbar when
+  /// the tool is not available on the current host, so the hub doesn't need
+  /// to know about capability flags at construction time.
+  void _openDefaultInspectorHub(
+    InspectorController controller,
+    String ownerKey,
+  ) {
+    final session = _session ?? widget.session;
+    controller.show(
+      buildInspectorSessionHubSurface(
+        ownerKey: ownerKey,
+        onOpenSearch: _toggleSearchPanel,
+        onOpenPinned: _openPinnedPanel,
+        onOpenFiles: () {
+          if (!_supportsFilesystem) {
+            showAppSnackBar(
+              context,
+              'File browser not available on this host.',
+            );
+            return;
+          }
+          _browseWorkspacePath(session.cwd);
+        },
+        onOpenTerminal: () {
+          if (!_supportsTerminal) {
+            showAppSnackBar(context, 'Terminal not available on this host.');
+            return;
+          }
+          unawaited(_openTerminal());
+        },
+        onOpenPorts: () {
+          if (!_supportsConnections) {
+            showAppSnackBar(
+              context,
+              'Port forwarding / browser preview not available on this host.',
+            );
+            return;
+          }
+          unawaited(_openConnections());
+        },
+        onOpenResources: _openResourcesPanel,
+      ),
+    );
   }
 
   void _onInspectorChanged() {
@@ -1174,7 +1231,11 @@ class _SessionScreenState extends State<SessionScreen>
     final cur = controller.current;
     if (cur != null && cur.ownerKey == ownerKey) {
       _inspectorSawOurSurface = true;
-      unawaited(InspectorPersistence.save(ownerKey, cur.kind));
+      // Don't persist the hub — it's the default, not a deliberate user
+      // choice. A real surface opened next will replace it in persistence.
+      if (cur.kind != InspectorSurfaceKind.sessionHub) {
+        unawaited(InspectorPersistence.save(ownerKey, cur.kind));
+      }
       return;
     }
     // cur is null or belongs to a different owner. We only persist "closed"
