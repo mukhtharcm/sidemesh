@@ -96,6 +96,7 @@ interface PiSessionState {
   activities: Map<string, SessionActivity>;
   turns: TurnRecord[];
   runtime: SessionRuntimeSummary | null;
+  historyFingerprint: string | null;
   archived: boolean;
   nextSeq: number;
   draftAssistantMessage?: PiDraftAssistantMessage | null;
@@ -566,6 +567,7 @@ export class PiAgentProvider
       activities: new Map(),
       turns: [],
       runtime: runtimeFromLoadedSession(session, null, null),
+      historyFingerprint: null,
       archived: false,
       nextSeq: 0,
       draftAssistantMessage: null,
@@ -653,12 +655,19 @@ export class PiAgentProvider
     threadId: string,
   ): Promise<PiSessionState> {
     const summary = await this.findPiSessionSummary(threadId);
+    const summaryFingerprint =
+      summary ? (this.sessionSummaryFingerprints.get(summary.path) ?? null) : null;
     const existing = this.sessions.get(threadId);
     if (!summary) {
       if (existing) {
         return existing;
       }
       throw new Error(`Unknown Pi session: ${threadId}`);
+    }
+    if (existing && canReusePiHistoryState(existing, summary, summaryFingerprint)) {
+      existing.archived = this.isArchived(threadId);
+      normalizeInactivePiSessionState(existing);
+      return existing;
     }
     const manager = SessionManager.open(
       summary.path,
@@ -672,6 +681,7 @@ export class PiAgentProvider
       activities: new Map(),
       turns: [],
       runtime: null,
+      historyFingerprint: null,
       archived: this.isArchived(threadId),
       nextSeq: 0,
       draftAssistantMessage: null,
@@ -714,6 +724,7 @@ export class PiAgentProvider
     state.thread.preview = parsed.preview || state.thread.preview;
     state.thread.path = summary.path;
     state.thread.updatedAt = summary.updatedAt;
+    state.historyFingerprint = summaryFingerprint;
     state.archived = this.isArchived(threadId);
     normalizeInactivePiSessionState(state);
     this.sessions.set(threadId, state);
@@ -1508,6 +1519,7 @@ export class PiAgentProvider
           ),
           turns: item.turns ?? [],
           runtime: item.runtime ?? null,
+          historyFingerprint: null,
           archived: item.archived === true,
           nextSeq:
             item.nextSeq ??
@@ -2425,6 +2437,23 @@ function isActivePiTurnStatus(status: string | null | undefined): boolean {
 function isActivePiThreadStatus(status: ThreadRecord["status"] | null | undefined): boolean {
   const type = status?.type;
   return type === "running" || type === "active";
+}
+
+function canReusePiHistoryState(
+  state: PiSessionState,
+  summary: PiSessionSummary,
+  summaryFingerprint: string | null,
+): boolean {
+  return (
+    state.session == null &&
+    state.historyFingerprint !== null &&
+    state.historyFingerprint === summaryFingerprint &&
+    state.thread.path === summary.path &&
+    state.thread.cwd === summary.cwd &&
+    state.thread.createdAt === summary.createdAt &&
+    state.thread.updatedAt === summary.updatedAt &&
+    state.thread.name === summary.name
+  );
 }
 
 function buildThreadFromSummary(
