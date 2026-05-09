@@ -254,6 +254,75 @@ void main() {
     },
   );
 
+  testWidgets('cached-transcript strip clears after delta sync succeeds', (
+    tester,
+  ) async {
+    final host = _host('cached-strip-clear');
+    final session = _session('cached-strip-clear', status: 'running');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      sessionStatus: SessionStatus(
+        sessionId: session.id,
+        status: 'running',
+        isRunning: true,
+        activeTurnId: 'turn-1',
+        pendingAction: null,
+      ),
+      eventsDelta: SessionEventsDelta(
+        sessionId: session.id,
+        since: 1,
+        nextSeq: 1,
+        messages: const [],
+        activities: const [],
+        latestPlanUpdate: null,
+        pendingAction: null,
+        session: session,
+      ),
+    );
+    addTearDown(api.dispose);
+
+    await SessionLocalStore.instance.saveSessionLog(
+      host,
+      SessionLog(
+        session: session,
+        messages: [
+          _assistantMessage(
+            id: 'cached-msg',
+            text: 'Cached transcript item.',
+            content: const [TextBlock('Cached transcript item.')],
+          ),
+        ],
+        activities: const [],
+        pendingAction: null,
+        history: SessionLogHistorySummary(
+          isTruncated: false,
+          totalMessages: 1,
+          returnedMessages: 1,
+          totalActivities: 0,
+          returnedActivities: 0,
+        ),
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Cached transcript item.'), findsOneWidget);
+    expect(
+      find.text('Cached transcript · waiting for latest host snapshot'),
+      findsNothing,
+    );
+  });
+
   testWidgets('delta replay clears stale pending actions when the server has none', (
     tester,
   ) async {
@@ -760,6 +829,7 @@ class _RichEventFakeApi extends ApiClient {
     this.eventsDelta,
     this.nodeInfo,
     this.sessionSummary,
+    this.sessionStatus,
   });
 
   final _ControllableWebSocketChannel _channel =
@@ -770,6 +840,7 @@ class _RichEventFakeApi extends ApiClient {
   final SessionEventsDelta? eventsDelta;
   final NodeInfo? nodeInfo;
   final SessionSummary? sessionSummary;
+  final SessionStatus? sessionStatus;
   int stopSessionCalls = 0;
 
   @override
@@ -813,6 +884,19 @@ class _RichEventFakeApi extends ApiClient {
         pendingAction: null,
         session: null,
       );
+
+  @override
+  Future<SessionStatus> fetchStatus(HostProfile host, String sessionId) async {
+    final summary = sessionSummary ?? _session(sessionId);
+    return sessionStatus ??
+        SessionStatus(
+          sessionId: sessionId,
+          status: summary.status,
+          isRunning: summary.isActive,
+          activeTurnId: summary.isActive ? 'turn-1' : null,
+          pendingAction: null,
+        );
+  }
 
   @override
   Future<SkillCatalog> fetchSkills(
