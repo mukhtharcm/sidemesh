@@ -7,6 +7,7 @@ import '../api_client.dart';
 import '../create_session_defaults_store.dart';
 import '../fs_models.dart';
 import '../models.dart';
+import '../search_query.dart';
 import '../session_local_store.dart';
 import '../session_message_seed_store.dart';
 import '../session_policy_store.dart';
@@ -2586,7 +2587,7 @@ class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
             profile.modelProviderBaseUrl ?? '',
             _describeProviderProfile(profile),
           ].join('\n').toLowerCase();
-          return haystack.contains(query);
+          return matchesSearchQuery(haystack, query);
         })
         .toList(growable: false);
 
@@ -2743,7 +2744,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
             model.model,
             model.description,
           ].join('\n').toLowerCase();
-          return haystack.contains(query);
+          return matchesSearchQuery(haystack, query);
         })
         .toList(growable: false);
 

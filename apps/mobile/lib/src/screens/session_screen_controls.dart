@@ -1296,7 +1296,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
             model.model,
             model.description,
           ].join('\n').toLowerCase();
-          return haystack.contains(query);
+          return matchesSearchQuery(haystack, query);
         })
         .toList(growable: false);
 

@@ -4,7 +4,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it, beforeEach, afterEach } from "node:test";
 
-import { searchFiles, fuzzyScore } from "./fs-search.js";
+import { clearFsSearchCache, searchFiles, fuzzyScore } from "./fs-search.js";
 
 describe("fuzzyScore", () => {
   it("returns 1 for empty query", () => {
@@ -56,6 +56,7 @@ describe("searchFiles", () => {
   });
 
   afterEach(async () => {
+    clearFsSearchCache();
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -124,11 +125,11 @@ describe("searchFiles", () => {
     assert.deepStrictEqual(results, []);
   });
 
-  it("returns all files when query is empty", async () => {
+  it("returns empty array when query is empty", async () => {
     await writeFile(path.join(tmpDir, "a.ts"), "");
     await writeFile(path.join(tmpDir, "b.ts"), "");
     const results = await searchFiles("", [tmpDir]);
-    assert.strictEqual(results.length, 2);
+    assert.deepStrictEqual(results, []);
   });
 
   it("limits results", async () => {
@@ -155,6 +156,28 @@ describe("searchFiles", () => {
     // Cached call should return same result without reading disk again
     const second = await searchFiles("cached", [tmpDir]);
     assert.strictEqual(second.length, 1);
+  });
+
+  it("includes matching directories in results", async () => {
+    const nested = path.join(tmpDir, "src", "components");
+    await mkdir(nested, { recursive: true });
+    const results = await searchFiles("comp", [tmpDir]);
+    assert.ok(results.some((r) => r.path === path.join("src", "components") + "/"));
+    assert.ok(results.some((r) => r.isDirectory));
+  });
+
+  it("clears cached entries when the cache is invalidated", async () => {
+    await writeFile(path.join(tmpDir, "cached.ts"), "");
+    const first = await searchFiles("second", [tmpDir]);
+    assert.deepStrictEqual(first, []);
+
+    await writeFile(path.join(tmpDir, "second.ts"), "");
+    const cached = await searchFiles("second", [tmpDir]);
+    assert.deepStrictEqual(cached, []);
+
+    clearFsSearchCache();
+    const refreshed = await searchFiles("second", [tmpDir]);
+    assert.ok(refreshed.some((r) => r.path === "second.ts"));
   });
 
   it("returns empty array for empty roots", async () => {

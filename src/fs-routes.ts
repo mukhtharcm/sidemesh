@@ -25,7 +25,7 @@ import {
   resolveWorkspacePath,
   WorkspaceAccessError,
 } from "./workspace-scope.js";
-import { searchFiles } from "./fs-search.js";
+import { clearFsSearchCache, searchFiles } from "./fs-search.js";
 import type { SessionSummary } from "./types.js";
 import {
   buildJsonRouteRequest,
@@ -190,6 +190,7 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
         return;
       }
       await writeFile(target, buffer);
+      clearFsSearchCache();
       response.json({ path: target, bytes: buffer.byteLength });
     }),
   );
@@ -211,6 +212,7 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
       );
       const recursive = request.body?.recursive !== false;
       await mkdir(target, { recursive });
+      clearFsSearchCache();
       response.json({ path: target });
     }),
   );
@@ -230,6 +232,7 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
       const recursive = request.body?.recursive !== false;
       const force = request.body?.force !== false;
       await rm(target, { recursive, force });
+      clearFsSearchCache();
       response.json({ path: target });
     }),
   );
@@ -264,6 +267,7 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
       } else {
         await copyFile(source, destination);
       }
+      clearFsSearchCache();
       response.json({ sourcePath: source, destinationPath: destination });
     }),
   );

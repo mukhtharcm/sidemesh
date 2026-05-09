@@ -233,7 +233,7 @@ function buildFts5MatchQuery(query: string): string {
   if (terms.length === 0) {
     return "";
   }
-  return terms.map((t) => `"${t}"`).join(" AND ");
+  return terms.map((t) => `"${t}"*`).join(" AND ");
 }
 
 export class SessionSearchIndex {

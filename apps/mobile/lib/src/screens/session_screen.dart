@@ -20,6 +20,7 @@ import '../live_activity_service.dart';
 import '../models.dart';
 import '../fs_models.dart';
 import '../pending_send_recovery.dart';
+import '../search_query.dart';
 import 'browser_preview_screen.dart';
 import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
@@ -1506,6 +1507,23 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _loadFileSuggestions() async {
+    final activeQuery = _activeFileQuery?.query.trim() ?? '';
+    if (activeQuery.isEmpty) {
+      _fileSearchRequestId += 1;
+      if (mounted) {
+        setState(() {
+          _fileSuggestions = const <FsSearchResult>[];
+          _loadingFileSearch = false;
+          _fileSearchError = null;
+        });
+      } else {
+        _fileSuggestions = const <FsSearchResult>[];
+        _loadingFileSearch = false;
+        _fileSearchError = null;
+      }
+      return;
+    }
+
     final requestId = ++_fileSearchRequestId;
     if (mounted) {
       setState(() {
@@ -1520,7 +1538,7 @@ class _SessionScreenState extends State<SessionScreen>
     try {
       final results = await widget.api.searchFiles(
         widget.host,
-        query: _activeFileQuery?.query ?? '',
+        query: activeQuery,
         sessionId: widget.session.id,
       );
       if (!mounted || requestId != _fileSearchRequestId) {
@@ -1644,14 +1662,28 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted) {
         _activeFileQuery = nextFileQuery;
         _draftFileMentions = nextDraftFileMentions;
+        if (nextFileQuery == null || nextFileQuery.query.trim().isEmpty) {
+          _fileSearchRequestId += 1;
+          _fileSuggestions = const <FsSearchResult>[];
+          _loadingFileSearch = false;
+          _fileSearchError = null;
+        }
       } else {
         setState(() {
           _activeFileQuery = nextFileQuery;
           _draftFileMentions = nextDraftFileMentions;
+          if (nextFileQuery == null || nextFileQuery.query.trim().isEmpty) {
+            _fileSearchRequestId += 1;
+            _fileSuggestions = const <FsSearchResult>[];
+            _loadingFileSearch = false;
+            _fileSearchError = null;
+          }
         });
       }
     }
-    if (nextFileQuery != null && !_loadingFileSearch) {
+    if (nextFileQuery != null &&
+        nextFileQuery.query.trim().isNotEmpty &&
+        !_loadingFileSearch) {
       unawaited(_loadFileSuggestions());
     }
   }
@@ -1820,17 +1852,21 @@ class _SessionScreenState extends State<SessionScreen>
 
     final displayName = skill.displayName.toLowerCase();
     final canonicalName = skill.name.toLowerCase();
+    final summaryDescription = skill.summaryDescription.toLowerCase();
     if (displayName.startsWith(query)) {
       return 0;
     }
     if (canonicalName.startsWith(query)) {
       return 1;
     }
-    if (displayName.contains(query)) {
+    if (matchesSearchQuery(displayName, query)) {
       return 2;
     }
-    if (canonicalName.contains(query)) {
+    if (matchesSearchQuery(canonicalName, query)) {
       return 3;
+    }
+    if (matchesSearchQuery(summaryDescription, query)) {
+      return 4;
     }
     return 100;
   }

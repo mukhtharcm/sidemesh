@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../relative_time_ticker.dart';
+import '../search_query.dart';
 import '../session_read_store.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
@@ -433,7 +434,8 @@ class _HighlightedSnippet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    if (query.trim().isEmpty) {
+    final matches = searchQueryMatchRanges(text, query);
+    if (matches.isEmpty) {
       return Text(
         text,
         style: style,
@@ -443,26 +445,23 @@ class _HighlightedSnippet extends StatelessWidget {
     }
 
     final spans = <TextSpan>[];
-    final lowerText = text.toLowerCase();
-    final lowerQuery = query.toLowerCase().trim();
     var start = 0;
-
-    while (true) {
-      final idx = lowerText.indexOf(lowerQuery, start);
-      if (idx == -1) break;
-      if (idx > start) {
-        spans.add(TextSpan(text: text.substring(start, idx), style: style));
+    for (final match in matches) {
+      if (match.start > start) {
+        spans.add(
+          TextSpan(text: text.substring(start, match.start), style: style),
+        );
       }
       spans.add(
         TextSpan(
-          text: text.substring(idx, idx + lowerQuery.length),
+          text: text.substring(match.start, match.end),
           style: style.copyWith(
             color: colors.accent,
             fontWeight: FontWeight.w600,
           ),
         ),
       );
-      start = idx + lowerQuery.length;
+      start = match.end;
     }
 
     if (start < text.length) {

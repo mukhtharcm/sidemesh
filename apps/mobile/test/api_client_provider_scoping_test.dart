@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -110,5 +111,28 @@ void main() {
     for (final uri in requests) {
       expect(uri.queryParameters.containsKey('agentProvider'), isFalse);
     }
+  });
+
+  test('ApiClient sends file search sessionId and limit in the JSON body', () async {
+    late Map<String, dynamic> body;
+    final api = ApiClient(
+      client: MockClient((request) async {
+        expect(request.url.path, '/api/fs/search');
+        body = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          '{"files":[]}',
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+
+    await api.searchFiles(host, query: 'server', sessionId: 'session-1', limit: 25);
+
+    expect(body['query'], 'server');
+    expect(body['sessionId'], 'session-1');
+    expect(body['limit'], 25);
+    expect(body.containsKey('sessionId?'), isFalse);
+    expect(body.containsKey('limit?'), isFalse);
   });
 }
