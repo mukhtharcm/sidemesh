@@ -38,6 +38,8 @@ class _PendingRecentMutation {
 /// HTTP remains the reconciliation path for reconnects and compatibility with
 /// older servers, while the websocket path keeps the list fresh between polls.
 class RecentSessionsStore extends ChangeNotifier {
+  static const int _maxSessionsPerHost = 40;
+
   RecentSessionsStore({
     Duration pollInterval = const Duration(seconds: 90),
     Duration initialHttpFallbackDelay = const Duration(milliseconds: 1600),
@@ -52,6 +54,7 @@ class RecentSessionsStore extends ChangeNotifier {
   List<RemoteSessionEntry> _entries = const [];
   final Map<String, HostProfile> _hostsById = {};
   final Map<String, Map<String, SessionSummary>> _sessionsByHostId = {};
+  final Map<String, int> _hostFreshnessById = {};
   final Map<String, _RecentHostLiveConnection> _liveConnections = {};
   final Set<String> _confirmedHostIds = <String>{};
   final Set<String> _liveHostIds = <String>{};
@@ -93,6 +96,7 @@ class RecentSessionsStore extends ChangeNotifier {
     if (_hosts.isEmpty) {
       _entries = const [];
       _sessionsByHostId.clear();
+      _hostFreshnessById.clear();
       _confirmedHostIds.clear();
       _liveHostIds.clear();
       _pendingHostIds = <String>{};
@@ -119,6 +123,7 @@ class RecentSessionsStore extends ChangeNotifier {
     if (hosts.isEmpty) {
       _entries = const [];
       _sessionsByHostId.clear();
+      _hostFreshnessById.clear();
       _confirmedHostIds.clear();
       _liveHostIds.clear();
       _pendingHostIds = <String>{};
@@ -144,6 +149,7 @@ class RecentSessionsStore extends ChangeNotifier {
           final sessions = await api.fetchSessions(host, limit: 40);
           if (_disposed || gen != _loadGen) return;
           HostStatusStore.instance.markOnline(host.id);
+          _markHostFresh(host.id);
           _confirmedHostIds.add(host.id);
           _replaceHostSessions(host, sessions);
           _failedHostLabels = _failedHostLabels
@@ -201,6 +207,7 @@ class RecentSessionsStore extends ChangeNotifier {
   Future<void> _hydrateCachedHosts(List<HostProfile> hosts) async {
     await Future.wait(
       hosts.map((host) async {
+        final freshnessAtStart = _hostFreshnessById[host.id] ?? 0;
         try {
           final cached = await SessionLocalStore.instance.getRecentSessions(
             host,
@@ -210,6 +217,7 @@ class RecentSessionsStore extends ChangeNotifier {
               cached.isEmpty ||
               current == null ||
               _hostSignature(current) != _hostSignature(host) ||
+              (_hostFreshnessById[host.id] ?? 0) != freshnessAtStart ||
               _confirmedHostIds.contains(host.id)) {
             return;
           }
@@ -306,7 +314,7 @@ class RecentSessionsStore extends ChangeNotifier {
       _sessionsByHostId[host.id] ?? const <String, SessionSummary>{},
     );
     next[session.id] = session;
-    _sessionsByHostId[host.id] = next;
+    _sessionsByHostId[host.id] = _toBoundedSessionMap(next.values);
     _hasLoadedOnce = true;
     _publishEntries();
     notifyListeners();
@@ -331,6 +339,7 @@ class RecentSessionsStore extends ChangeNotifier {
   }
 
   void _markHostFreshFromLive(HostProfile host) {
+    _markHostFresh(host.id);
     _confirmedHostIds.add(host.id);
     _liveHostIds.add(host.id);
     _pendingHostIds = {..._pendingHostIds}..remove(host.id);
@@ -345,11 +354,7 @@ class RecentSessionsStore extends ChangeNotifier {
   }
 
   void _replaceHostSessions(HostProfile host, List<SessionSummary> sessions) {
-    final sorted = sessions.toList(growable: false)
-      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
-    _sessionsByHostId[host.id] = {
-      for (final session in sorted.take(40)) session.id: session,
-    };
+    _sessionsByHostId[host.id] = _toBoundedSessionMap(sessions);
   }
 
   void _publishEntries() {
@@ -357,9 +362,7 @@ class RecentSessionsStore extends ChangeNotifier {
     for (final host in _hosts) {
       final sessions = _sessionsByHostId[host.id];
       if (sessions == null) continue;
-      final sorted = sessions.values.toList(growable: false)
-        ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
-      for (final session in sorted.take(40)) {
+      for (final session in _sortedSessionWindow(sessions.values)) {
         flattened.add(RemoteSessionEntry(host: host, session: session));
       }
     }
@@ -372,9 +375,12 @@ class RecentSessionsStore extends ChangeNotifier {
       unawaited(SessionLocalStore.instance.upsertSessions(host, const []));
       return;
     }
-    final sorted = sessions.values.toList(growable: false)
-      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
-    unawaited(SessionLocalStore.instance.upsertSessions(host, sorted));
+    unawaited(
+      SessionLocalStore.instance.upsertSessions(
+        host,
+        _sortedSessionWindow(sessions.values),
+      ),
+    );
   }
 
   void _removeEntriesForMissingHosts() {
@@ -382,10 +388,15 @@ class RecentSessionsStore extends ChangeNotifier {
     for (final id in _sessionsByHostId.keys.toList(growable: false)) {
       if (activeIds.contains(id)) continue;
       _sessionsByHostId.remove(id);
+      _hostFreshnessById.remove(id);
       _confirmedHostIds.remove(id);
       _liveHostIds.remove(id);
     }
     _publishEntries();
+  }
+
+  void _markHostFresh(String hostId) {
+    _hostFreshnessById[hostId] = (_hostFreshnessById[hostId] ?? 0) + 1;
   }
 
   String _hostSignature(HostProfile host) =>
@@ -405,6 +416,20 @@ class RecentSessionsStore extends ChangeNotifier {
     _liveConnections.clear();
     _liveHostIds.clear();
     super.dispose();
+  }
+
+  Map<String, SessionSummary> _toBoundedSessionMap(
+    Iterable<SessionSummary> sessions,
+  ) {
+    return {
+      for (final session in _sortedSessionWindow(sessions)) session.id: session,
+    };
+  }
+
+  List<SessionSummary> _sortedSessionWindow(Iterable<SessionSummary> sessions) {
+    final sorted = sessions.toList(growable: false)
+      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    return sorted.take(_maxSessionsPerHost).toList(growable: false);
   }
 }
 

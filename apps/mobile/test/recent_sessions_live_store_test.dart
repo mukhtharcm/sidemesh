@@ -315,6 +315,118 @@ void main() {
       expect(store.entries.single.session.id, 'session-live');
     },
   );
+
+  test(
+    'delayed cache hydration does not overwrite fresher live data after disconnect',
+    () async {
+      final cached = _session('session-cached', title: 'Cached stale');
+      final live = _session('session-live', title: 'Live fresh');
+      await SessionLocalStore.instance.upsertSessions(host, [cached]);
+      final db = await SidemeshDb.instance;
+      final releaseTransaction = Completer<void>();
+      final transactionStarted = Completer<void>();
+      unawaited(
+        db.transaction((txn) async {
+          transactionStarted.complete();
+          await releaseTransaction.future;
+        }),
+      );
+      await transactionStarted.future;
+
+      final api = _FakeApiClient()
+        ..sessionsByHostId[host.id] = const <SessionSummary>[];
+      final store = RecentSessionsStore(
+        pollInterval: const Duration(hours: 1),
+        initialHttpFallbackDelay: const Duration(milliseconds: 100),
+      );
+      addTearDown(store.dispose);
+
+      store.configure(hosts: const [host], api: api);
+      await _settle();
+      expect(store.entries, isEmpty);
+
+      final channel = api.liveChannelFor(host);
+      channel.addIncoming(
+        jsonEncode({
+          'type': 'snapshot',
+          'sessions': [live.toJson()],
+        }),
+      );
+      await _settle();
+      expect(store.entries.single.session.id, 'session-live');
+
+      await channel.closeFromServer();
+      await _settle();
+
+      releaseTransaction.complete();
+      await _settle();
+      await _settle();
+
+      expect(store.entries.single.session.id, 'session-live');
+    },
+  );
+
+  test('live upserts keep the recent cache capped at 40 sessions', () async {
+    final now = DateTime.now();
+    final snapshotSessions = List<SessionSummary>.generate(
+      40,
+      (index) => _session(
+        'snapshot-$index',
+        title: 'Snapshot $index',
+        updatedAt: now.subtract(Duration(minutes: index)),
+      ),
+      growable: false,
+    );
+    final api = _FakeApiClient()
+      ..sessionsByHostId[host.id] = const <SessionSummary>[];
+    final store = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: const Duration(milliseconds: 100),
+    );
+    addTearDown(store.dispose);
+
+    store.configure(hosts: const [host], api: api);
+    await _settle();
+
+    final channel = api.liveChannelFor(host);
+    channel.addIncoming(
+      jsonEncode({
+        'type': 'snapshot',
+        'sessions': snapshotSessions
+            .map((session) => session.toJson())
+            .toList(),
+      }),
+    );
+    await _settle();
+
+    for (var index = 0; index < 5; index++) {
+      channel.addIncoming(
+        jsonEncode({
+          'type': 'upsert',
+          'session': _session(
+            'live-$index',
+            title: 'Live $index',
+            updatedAt: now.add(Duration(minutes: index + 1)),
+          ).toJson(),
+        }),
+      );
+    }
+    await _settle();
+
+    expect(store.entries, hasLength(40));
+    expect(store.entries.map((entry) => entry.session.id), contains('live-4'));
+    expect(
+      store.entries.map((entry) => entry.session.id),
+      isNot(contains('snapshot-39')),
+    );
+
+    final db = await SidemeshDb.instance;
+    final rows = await db.rawQuery(
+      "SELECT COUNT(*) AS count FROM sessions WHERE host_id = ? AND source = 'recent'",
+      [host.id],
+    );
+    expect(rows.single['count'], 40);
+  });
 }
 
 class _FakeApiClient extends ApiClient {
@@ -411,15 +523,19 @@ class _FakeWebSocketSink implements WebSocketSink {
       _delegate.addError(error, stackTrace);
 }
 
-SessionSummary _session(String id, {required String title}) {
-  final now = DateTime.now();
+SessionSummary _session(
+  String id, {
+  required String title,
+  DateTime? updatedAt,
+}) {
+  final effectiveUpdatedAt = updatedAt ?? DateTime.now();
   return SessionSummary(
     id: id,
     title: title,
     preview: 'preview',
     cwd: '/repo',
-    createdAt: now.subtract(const Duration(minutes: 5)),
-    updatedAt: now,
+    createdAt: effectiveUpdatedAt.subtract(const Duration(minutes: 5)),
+    updatedAt: effectiveUpdatedAt,
     source: 'codex',
     provider: null,
     status: 'active',
