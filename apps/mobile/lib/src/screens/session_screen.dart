@@ -5517,9 +5517,6 @@ class _SessionScreenState extends State<SessionScreen>
       case 'favorite':
         _toggleFavorite();
         break;
-      case 'controls':
-        _showSessionPolicySheet(session);
-        break;
       case 'unread':
         unawaited(_markSessionUnread());
         break;
@@ -5554,7 +5551,6 @@ class _SessionScreenState extends State<SessionScreen>
     required bool portsOpen,
     required bool searchOpen,
     required bool resourcesOpen,
-    required bool sessionControlsCustomized,
   }) {
     return [
       // When the agent is running, surface the interrupt action at the top so
@@ -5667,18 +5663,6 @@ class _SessionScreenState extends State<SessionScreen>
       _SessionActionGroup(
         label: 'Session',
         actions: [
-          _SessionActionSpec(
-            value: 'controls',
-            label: 'Session controls',
-            detail: sessionControlsCustomized
-                ? 'Overrides are active for this session.'
-                : 'Adjust approvals, sandboxing, and turn settings.',
-            icon: Icons.tune_rounded,
-            tone: sessionControlsCustomized
-                ? _SessionActionTone.accent
-                : _SessionActionTone.neutral,
-            active: sessionControlsCustomized,
-          ),
           const _SessionActionSpec(
             value: 'new',
             label: 'New session',
@@ -5767,7 +5751,6 @@ class _SessionScreenState extends State<SessionScreen>
     required bool portsOpen,
     required bool searchOpen,
     required bool resourcesOpen,
-    required bool sessionControlsCustomized,
   }) async {
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -5786,7 +5769,6 @@ class _SessionScreenState extends State<SessionScreen>
           portsOpen: portsOpen,
           searchOpen: searchOpen,
           resourcesOpen: resourcesOpen,
-          sessionControlsCustomized: sessionControlsCustomized,
         ),
       ),
     );
@@ -6335,6 +6317,14 @@ class _SessionScreenState extends State<SessionScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     MeshIconButton(
+                      icon: Icons.tune_rounded,
+                      tooltip: 'Session controls',
+                      color: sessionControlsCustomized
+                          ? colors.accent
+                          : colors.textSecondary,
+                      onTap: () => _showSessionPolicySheet(session),
+                    ),
+                    MeshIconButton(
                       icon: favorite
                           ? Icons.star_rounded
                           : Icons.star_outline_rounded,
@@ -6344,7 +6334,7 @@ class _SessionScreenState extends State<SessionScreen>
                       onTap: _toggleFavorite,
                     ),
                     MeshIconButton(
-                      icon: Icons.more_horiz_rounded,
+                      icon: Icons.more_vert_rounded,
                       tooltip: _running
                           ? 'Session actions (agent running)'
                           : 'Session actions',
@@ -6360,8 +6350,6 @@ class _SessionScreenState extends State<SessionScreen>
                           portsOpen: portsOpenInInspector,
                           searchOpen: searchOpenInInspector,
                           resourcesOpen: resourcesOpenInInspector,
-                          sessionControlsCustomized:
-                              sessionControlsCustomized,
                         ),
                       ),
                     ),
