@@ -127,6 +127,25 @@ class ApiClient {
     return ProviderProfileCatalog.fromJson(_decodeObject(response));
   }
 
+  Future<ProviderModeCatalog> fetchModes(
+    HostProfile host, {
+    String? cwd,
+    String? agentProvider,
+  }) async {
+    final queryParameters = <String, String>{
+      if ((cwd ?? '').isNotEmpty) 'cwd': cwd!,
+      if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
+    };
+    final response = await _get(
+      host,
+      '/api/modes',
+      queryParameters: queryParameters.isEmpty ? null : queryParameters,
+      timeout: _standardReadTimeout,
+      operation: 'load modes',
+    );
+    return ProviderModeCatalog.fromJson(_decodeObject(response));
+  }
+
   Future<List<SessionSummary>> fetchSessions(
     HostProfile host, {
     int? limit,

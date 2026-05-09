@@ -14,6 +14,7 @@ import type {
   AgentCreateSessionRequest,
   AgentCreateSessionResult,
   AgentModelListOptions,
+  AgentModeListOptions,
   AgentPendingAction,
   AgentProvider,
   AgentProviderCapabilities,
@@ -39,6 +40,7 @@ import type {
   PendingActionApproval,
   PendingActionApprovalTarget,
   PendingActionElicitationField,
+  ProviderModeCatalog,
   SessionActivity,
   SessionLogSnapshot,
   SessionMessage,
@@ -60,6 +62,7 @@ const READY_LINE_PREFIX = "opencode server listening on ";
 interface OpenCodeModelRef {
   providerID: string;
   modelID: string;
+  variant?: string;
 }
 
 interface OpenCodeSessionInfo {
@@ -220,9 +223,9 @@ interface OpenCodePromptPartFile {
   filename?: string;
   url: string;
   source?: {
-    type: "file";
-    path: string;
-    text: { start: number; end: number; value: string };
+    type?: "file";
+    path?: string;
+    text?: { start: number; end: number; value: string };
   };
 }
 
@@ -233,6 +236,7 @@ type OpenCodeHeaders = Record<string, string>;
 interface OpenCodePromptInput {
   agent?: string;
   model?: OpenCodeModelRef;
+  variant?: string;
   parts: OpenCodePromptPart[];
 }
 
@@ -268,6 +272,7 @@ interface OpenCodeProviderModel {
   id: string;
   name: string;
   providerID: string;
+  variants?: Record<string, Record<string, unknown>>;
   capabilities?: {
     reasoning?: boolean;
     input?: {
@@ -342,7 +347,7 @@ interface OpenCodeClient {
   archiveSession(options: {
     directory: string;
     sessionID: string;
-    archivedAt: number;
+    archivedAt: number | null;
   }): Promise<OpenCodeSessionInfo>;
   promptAsync(options: {
     directory: string;
@@ -444,12 +449,18 @@ const REASONING_EFFORTS = [
   },
 ] as const;
 
+const GENERIC_MODE_LABELS: Record<string, string> = {
+  interactive: "Interactive",
+  plan: "Plan",
+  autopilot: "Autopilot",
+};
+
 export const OPENCODE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   sessions: {
     create: true,
     resume: true,
     rename: true,
-    archive: false,
+    archive: true,
     compact: false,
     interrupt: true,
     history: true,
@@ -459,8 +470,8 @@ export const OPENCODE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   input: {
     text: true,
-    imageUrl: false,
-    localImage: false,
+    imageUrl: true,
+    localImage: true,
     skills: true,
     fileMentions: true,
   },
@@ -706,6 +717,30 @@ export class OpenCodeAgentProvider
     return { renamed: true };
   }
 
+  public async archiveSession(threadId: string): Promise<unknown> {
+    await this.start();
+    const info = await this.ensureSessionInfo(threadId);
+    const updated = await this.requireClient().archiveSession({
+      directory: info.directory,
+      sessionID: threadId,
+      archivedAt: Date.now(),
+    });
+    this.touchCache(updated);
+    return { archived: true };
+  }
+
+  public async unarchiveSession(threadId: string): Promise<unknown> {
+    await this.start();
+    const info = await this.ensureSessionInfo(threadId);
+    const updated = await this.requireClient().archiveSession({
+      directory: info.directory,
+      sessionID: threadId,
+      archivedAt: null,
+    });
+    this.touchCache(updated);
+    return { unarchived: true };
+  }
+
   public async createSession(
     request: AgentCreateSessionRequest,
   ): Promise<AgentCreateSessionResult> {
@@ -866,26 +901,23 @@ export class OpenCodeAgentProvider
         if (providerFilter && providerId !== providerFilter) {
           continue;
         }
-        models.push({
-          id: encodeModelRef({
+        models.push(
+          buildModelSummary(provider.name, model, {
             providerID: providerId,
             modelID: model.id,
+          }, {
+            isDefault: result.default[provider.id] === model.id,
           }),
-          model: model.id,
-          displayName: `${provider.name} / ${model.name}`,
-          description: buildModelDescription(provider.name, model),
-          defaultReasoningEffort: "medium",
-          supportedReasoningEfforts:
-            model.capabilities?.reasoning === true
-              ? [...REASONING_EFFORTS]
-              : [],
-          reasoningEffortControl: "provider",
-          supportsPersonality: false,
-          additionalSpeedTiers: [],
-          inputModalities: buildInputModalities(model),
-          isDefault: result.default[provider.id] === model.id,
-          source: providerId,
-        });
+        );
+        for (const variant of Object.keys(model.variants ?? {})) {
+          models.push(
+            buildModelSummary(provider.name, model, {
+              providerID: providerId,
+              modelID: model.id,
+              variant,
+            }),
+          );
+        }
       }
     }
     models.sort((left, right) => {
@@ -895,6 +927,23 @@ export class OpenCodeAgentProvider
       return left.displayName.localeCompare(right.displayName);
     });
     return models;
+  }
+
+  public async listModes(options: AgentModeListOptions): Promise<ProviderModeCatalog> {
+    await this.start();
+    const agents = await this.requireClient().listAgents(
+      options.cwd ?? this.defaultDirectory,
+    );
+    return {
+      defaultMode: null,
+      modes: agents
+        .filter((agent) => agent.hidden !== true && agent.mode !== "subagent")
+        .map((agent) => ({
+          id: agent.name,
+          label: prettifyModeName(agent.name),
+        }))
+        .sort((left, right) => left.label.localeCompare(right.label)),
+    };
   }
 
   public async listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry> {
@@ -957,7 +1006,13 @@ export class OpenCodeAgentProvider
     }
     const model = parseModelRef(input.overrides.model);
     if (model) {
-      promptInput.model = model;
+      promptInput.model = {
+        providerID: model.providerID,
+        modelID: model.modelID,
+      };
+      if (model.variant) {
+        promptInput.variant = model.variant;
+      }
     }
 
     const baseline = await this.requireClient().listMessages({
@@ -1583,7 +1638,7 @@ class HttpOpenCodeClient implements OpenCodeClient {
   public archiveSession(options: {
     directory: string;
     sessionID: string;
-    archivedAt: number;
+    archivedAt: number | null;
   }): Promise<OpenCodeSessionInfo> {
     return this.requestJson(`/session/${encodeURIComponent(options.sessionID)}`, {
       method: "PATCH",
@@ -1955,14 +2010,25 @@ function preparePromptInput(input: AgentSessionInputItem[]): {
         });
         break;
       case "image":
-        warnings.push(
-          `OpenCode provider does not yet support remote image inputs; ignored ${item.url}.`,
-        );
+        parts.push({
+          type: "file",
+          mime: mimeTypeFromRemoteUrl(item.url),
+          filename: filenameFromUrl(item.url),
+          url: item.url,
+        });
         break;
       case "localImage":
-        warnings.push(
-          `OpenCode provider does not yet support local image inputs; ignored ${item.path}.`,
-        );
+        parts.push({
+          type: "file",
+          mime: mimeTypeFromPath(item.path),
+          filename: basename(item.path),
+          url: pathToFileURL(item.path).href,
+          source: {
+            type: "file",
+            path: item.path,
+            text: { start: 0, end: 0, value: "" },
+          },
+        });
         break;
       default:
         warnings.push("OpenCode provider ignored an unsupported input item.");
@@ -2561,9 +2627,40 @@ function buildQuestionAnswersFromElicitation(
   return answers;
 }
 
+function buildModelSummary(
+  providerName: string,
+  model: OpenCodeProviderModel,
+  ref: OpenCodeModelRef,
+  options: {
+    isDefault?: boolean;
+  } = {},
+): ModelSummary {
+  const variant = normalizeVariantName(ref.variant);
+  const variantSuffix = variant ? ` (${prettifyModeName(variant)})` : "";
+  return {
+    id: encodeModelRef(ref),
+    model: encodeModelRef(ref),
+    displayName: `${providerName} / ${model.name}${variantSuffix}`,
+    description: buildModelDescription(providerName, model, variant),
+    defaultReasoningEffort: "medium",
+    supportedReasoningEfforts:
+      model.capabilities?.reasoning === true
+        ? [...REASONING_EFFORTS]
+        : [],
+    reasoningEffortControl: "provider",
+    supportsPersonality: false,
+    additionalSpeedTiers: [],
+    inputModalities: buildInputModalities(model),
+    isDefault: options.isDefault ?? false,
+    sortOrder: variant ? 100 : 0,
+    source: ref.providerID,
+  };
+}
+
 function buildModelDescription(
   providerName: string,
   model: OpenCodeProviderModel,
+  variant?: string | null,
 ): string {
   const capabilities: string[] = [];
   if (model.capabilities?.reasoning) {
@@ -2572,9 +2669,13 @@ function buildModelDescription(
   if (model.capabilities?.input?.image) {
     capabilities.push("image input");
   }
-  return capabilities.length > 0
+  const detail = capabilities.length > 0
     ? `${providerName} model with ${capabilities.join(", ")}`
     : `${providerName} model`;
+  if (!variant) {
+    return detail;
+  }
+  return `${detail}. Variant: ${prettifyModeName(variant)}.`;
 }
 
 function buildInputModalities(model: OpenCodeProviderModel): string[] {
@@ -2613,7 +2714,9 @@ function normalizeAgentName(value: string | null | undefined): string | null {
 }
 
 function encodeModelRef(model: OpenCodeModelRef): string {
-  return `${model.providerID}/${model.modelID}`;
+  return model.variant
+    ? `${model.providerID}/${model.modelID}/${model.variant}`
+    : `${model.providerID}/${model.modelID}`;
 }
 
 function parseModelRef(value: string | null | undefined): OpenCodeModelRef | null {
@@ -2621,13 +2724,19 @@ function parseModelRef(value: string | null | undefined): OpenCodeModelRef | nul
   if (!trimmed) {
     return null;
   }
-  const slash = trimmed.indexOf("/");
-  if (slash <= 0 || slash === trimmed.length - 1) {
+  const parts = trimmed.split("/");
+  if (parts.length < 2) {
     return null;
   }
+  const [providerID, modelID, ...variantParts] = parts;
+  if (!providerID || !modelID) {
+    return null;
+  }
+  const variant = normalizeVariantName(variantParts.join("/"));
   return {
-    providerID: trimmed.slice(0, slash),
-    modelID: trimmed.slice(slash + 1),
+    providerID,
+    modelID,
+    ...(variant ? { variant } : {}),
   };
 }
 
@@ -2652,8 +2761,76 @@ function looksLikeFilesystemPermission(permission: string): boolean {
   );
 }
 
+function normalizeVariantName(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function prettifyModeName(value: string): string {
+  const generic = value.trim();
+  if (!generic) {
+    return value;
+  }
+  const builtin = GENERIC_MODE_LABELS[generic];
+  if (builtin) {
+    return builtin;
+  }
+  return generic
+    .split(/[-_]+/g)
+    .filter(Boolean)
+    .map((part) => part[0]!.toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function filenameFromUrl(value: string): string | undefined {
+  const dataUrlMime = mimeTypeFromDataUrl(value);
+  if (dataUrlMime) {
+    return `image${extensionForMimeType(dataUrlMime)}`;
+  }
+  try {
+    const parsed = new URL(value);
+    const name = basename(parsed.pathname);
+    return name || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function mimeTypeFromRemoteUrl(value: string): string {
+  const dataUrlMime = mimeTypeFromDataUrl(value);
+  if (dataUrlMime) {
+    return dataUrlMime;
+  }
+  const filename = filenameFromUrl(value);
+  if (filename) {
+    const inferred = mimeTypeFromPath(filename);
+    if (inferred !== "application/octet-stream") {
+      return inferred;
+    }
+  }
+  return "image/*";
+}
+
+function mimeTypeFromDataUrl(value: string): string | null {
+  const match = /^data:([^;,]+)[;,]/i.exec(value);
+  return match?.[1]?.trim() || null;
+}
+
 function mimeTypeFromPath(path: string): string {
   switch (extname(path).toLowerCase()) {
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    case ".bmp":
+      return "image/bmp";
+    case ".svg":
+      return "image/svg+xml";
     case ".ts":
     case ".tsx":
     case ".js":
@@ -2681,6 +2858,25 @@ function mimeTypeFromPath(path: string): string {
       return "text/plain";
     default:
       return "application/octet-stream";
+  }
+}
+
+function extensionForMimeType(mime: string): string {
+  switch (mime.toLowerCase()) {
+    case "image/png":
+      return ".png";
+    case "image/jpeg":
+      return ".jpg";
+    case "image/gif":
+      return ".gif";
+    case "image/webp":
+      return ".webp";
+    case "image/bmp":
+      return ".bmp";
+    case "image/svg+xml":
+      return ".svg";
+    default:
+      return "";
   }
 }
 

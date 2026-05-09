@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../models.dart' show kSessionModes, sessionModeLabel;
+import '../models.dart'
+    show
+        ProviderModeSummary,
+        kDefaultProviderModes,
+        providerModeLabel;
 import '../session_policy_store.dart';
 import '../theme/app_tokens.dart';
 import 'launch_controls.dart';
@@ -101,6 +105,7 @@ class LaunchOptionsForm extends StatelessWidget {
     this.onWebSearchChanged,
     this.onSessionModeChanged,
     this.capabilities = const LaunchOptionsCapabilities(),
+    this.sessionModes = kDefaultProviderModes,
     this.brainExtras,
     this.permissionsTrailing,
     this.dense = false,
@@ -124,6 +129,7 @@ class LaunchOptionsForm extends StatelessWidget {
   final ValueChanged<String?>? onSessionModeChanged;
 
   final LaunchOptionsCapabilities capabilities;
+  final List<ProviderModeSummary> sessionModes;
 
   /// Optional widgets rendered above the [ApprovalPolicy] / [SandboxMode]
   /// controls. Used to inject provider profile / model / reasoning UI in
@@ -189,9 +195,9 @@ class LaunchOptionsForm extends StatelessWidget {
             icon: Icons.alt_route_rounded,
             label: 'Mode',
             value: value.sessionMode,
-            options: const <String?>[null, ...kSessionModes],
+            options: <String?>[null, ...sessionModes.map((mode) => mode.id)],
             optionLabel: (mode) =>
-                mode == null ? 'Default' : sessionModeLabel(mode),
+                mode == null ? 'Default' : providerModeLabel(mode, sessionModes),
             isDefault: (mode) => mode == null,
             onChanged: (mode) {
               onSessionModeChanged?.call(mode);
