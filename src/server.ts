@@ -36,6 +36,7 @@ import type {
   HostCapabilities,
   LatestPlanUpdate,
   LiveEvent,
+  LiveThreadStatus,
   SessionActivity,
   NodeConfig,
   PendingAction,
@@ -249,6 +250,7 @@ export async function startServer(
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, SessionActivity>>();
+  const liveThreadStatuses = new Map<string, LiveThreadStatus>();
   const replayIndex = new SessionReplayIndex();
   const searchIndex = new SessionSearchIndex(
     nodePath.join(config.stateDir, "search-index-v1.db"),
@@ -400,6 +402,21 @@ export async function startServer(
 
   function latestPlanUpdateForSession(sessionId: string): LatestPlanUpdate | null {
     return sessionRuntimeSignals.get(sessionId)?.latestPlanUpdate ?? null;
+  }
+
+  function latestThreadStatusForSession(sessionId: string): LiveThreadStatus | null {
+    return liveThreadStatuses.get(sessionId) ?? null;
+  }
+
+  function setLatestThreadStatusForSession(
+    sessionId: string,
+    status: LiveThreadStatus | null,
+  ): void {
+    if (status == null) {
+      liveThreadStatuses.delete(sessionId);
+      return;
+    }
+    liveThreadStatuses.set(sessionId, status);
   }
 
   function persistSessionRuntimeSignalsEventually(): void {
@@ -554,6 +571,7 @@ export async function startServer(
         broadcastApprovalLive,
       );
       if (sessionIdsNeedingIdleBroadcast.has(sessionId)) {
+        setLatestThreadStatusForSession(sessionId, "idle");
         broadcastLive(sessionId, {
           type: "thread_status_changed",
           sessionId,
@@ -696,7 +714,13 @@ export async function startServer(
       }
     }
 
-    const promise = listSessions(provider, runtimeCache, limit, runtimeMode);
+    const promise = listSessions(
+      provider,
+      runtimeCache,
+      limit,
+      runtimeMode,
+      latestThreadStatusForSession,
+    );
     recentSessionsCache.set(cacheKey, {
       limit,
       runtimeMode,
@@ -736,6 +760,7 @@ export async function startServer(
       const session = mapSession(
         thread,
         await loadCachedSessionRuntime(provider, thread, runtimeCache, "active"),
+        latestThreadStatusForSession(thread.id),
       );
       broadcastRecentSessionsLive({ type: "upsert", session });
     } catch {
@@ -798,6 +823,7 @@ export async function startServer(
           turnId: event.turnId,
           startedAt: Date.now(),
         });
+        setLatestThreadStatusForSession(event.sessionId, "running");
         broadcastLive(event.sessionId, {
           type: "turn_started",
           sessionId: event.sessionId,
@@ -915,6 +941,7 @@ export async function startServer(
         return;
       }
       case "thread_status_changed": {
+        setLatestThreadStatusForSession(event.sessionId, event.status);
         broadcastLive(event.sessionId, {
           type: "thread_status_changed",
           sessionId: event.sessionId,
@@ -1003,6 +1030,10 @@ export async function startServer(
           broadcastApprovalLive,
         );
         activeTurns.delete(event.sessionId);
+        setLatestThreadStatusForSession(
+          event.sessionId,
+          event.status === "errored" ? "errored" : "idle",
+        );
         liveActivities.delete(event.sessionId);
         clearSessionLogCache(logCache, event.sessionId);
         scheduleRecentSessionUpsert(event.sessionId, 0);
@@ -1447,7 +1478,11 @@ export async function startServer(
             return null;
           }
           const runtime = await loadCachedSessionRuntime(provider, thread, runtimeCache, "active");
-          const session = mapSession(thread, runtime);
+          const session = mapSession(
+            thread,
+            runtime,
+            latestThreadStatusForSession(thread.id),
+          );
           const summary: SessionSummary = {
             ...session,
             matchSnippet: result.snippet ?? null,
@@ -1480,7 +1515,14 @@ export async function startServer(
   );
 
   registerFsRoutes(app, {
-    listSessions: () => listSessions(provider, runtimeCache, null, "none"),
+        listSessions: () =>
+          listSessions(
+            provider,
+            runtimeCache,
+            null,
+            "none",
+            latestThreadStatusForSession,
+          ),
     getSessionCwd,
   });
 
@@ -1739,7 +1781,11 @@ export async function startServer(
             runtime: cached.runtime,
           });
           response.json({
-            session: mapSession(session, cached.runtime),
+            session: mapSession(
+              session,
+              cached.runtime,
+              latestThreadStatusForSession(session.id),
+            ),
             messages: cached.messages,
             activities: mergeSessionActivities(
               cached.activities,
@@ -1795,7 +1841,11 @@ export async function startServer(
         runtime: log.runtime,
       });
       response.json({
-        session: mapSession(session, log.runtime),
+        session: mapSession(
+          session,
+          log.runtime,
+          latestThreadStatusForSession(session.id),
+        ),
         messages: log.messages,
         activities,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
@@ -1973,7 +2023,11 @@ export async function startServer(
         activities: newActivities,
         latestPlanUpdate,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
-        session: mapSession(session, logRuntime),
+        session: mapSession(
+          session,
+          logRuntime,
+          latestThreadStatusForSession(session.id),
+        ),
       });
     }),
   );
@@ -2031,9 +2085,15 @@ export async function startServer(
       ) {
         return;
       }
-      const state = await loadFastRunState(provider, sessionId, activeTurns);
+      const state = await loadFastRunState(
+        provider,
+        sessionId,
+        activeTurns,
+        latestThreadStatusForSession(sessionId),
+      );
       response.json({
         sessionId,
+        status: state.status,
         isRunning: state.isRunning,
         activeTurnId: state.turnId,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
@@ -2340,9 +2400,14 @@ export async function startServer(
           turnId: started.activeTurnId,
           startedAt: Date.now(),
         });
+        setLatestThreadStatusForSession(started.thread.id, "running");
       }
 
-      const session = mapSession(started.thread, started.runtime);
+      const session = mapSession(
+        started.thread,
+        started.runtime,
+        latestThreadStatusForSession(started.thread.id),
+      );
       response.status(201).json({
         session,
         activeTurnId: started.activeTurnId,
@@ -2451,6 +2516,7 @@ export async function startServer(
             turnId: submitted.turnId,
             startedAt: previousStartedAt ?? Date.now(),
           });
+          setLatestThreadStatusForSession(sessionId, "running");
         }
         broadcastLive(sessionId, {
           type: "user_message_submitted",
@@ -2627,7 +2693,7 @@ export async function startServer(
       }
       await provider.setSessionName!(sessionId, name);
       const thread = await readSession(provider, sessionId, false);
-      const session = mapSession(thread);
+      const session = mapSession(thread, null, latestThreadStatusForSession(thread.id));
       response.json({ session });
       broadcastRecentSessionsLive({ type: "upsert", session });
       void indexSessionForSearch(searchIndex, provider, sessionId).catch(() => {});
@@ -2656,6 +2722,7 @@ export async function startServer(
       }
       await provider.archiveSession!(sessionId);
       activeTurns.delete(sessionId);
+      liveThreadStatuses.delete(sessionId);
       liveActivities.delete(sessionId);
       clearSessionLogCache(logCache, sessionId);
       sessionSeqCursor.delete(sessionId);
@@ -2725,6 +2792,10 @@ export async function startServer(
       }
 
       pendingActions.delete(actionId);
+      setLatestThreadStatusForSession(
+        action.sessionId,
+        activeTurns.has(action.sessionId) ? "running" : null,
+      );
       broadcastLive(action.sessionId, {
         type: "action_resolved",
         sessionId: action.sessionId,
@@ -2805,7 +2876,14 @@ export async function startServer(
           /* noop */
         }
         attachFsLiveSocket(ws, fsWatchRegistry, {
-          listSessions: () => listSessions(provider, runtimeCache, null, "none"),
+          listSessions: () =>
+            listSessions(
+              provider,
+              runtimeCache,
+              null,
+              "none",
+              latestThreadStatusForSession,
+            ),
           getSessionCwd,
           sessionId: params.get("sessionId"),
         });
@@ -3272,6 +3350,7 @@ async function listSessions(
   runtimeCache: Map<string, SessionRuntimeCacheEntry>,
   limitOverride: number | null = null,
   runtimeMode: SessionRuntimeListMode = "active",
+  statusOverrideForSession?: (sessionId: string) => LiveThreadStatus | null,
 ): Promise<SessionSummary[]> {
   const limit = normalizedSessionListLimit(limitOverride);
   if (
@@ -3293,6 +3372,7 @@ async function listSessions(
             runtimeCache,
             runtimeMode,
           ),
+          statusOverrideForSession?.(thread.id) ?? null,
       ),
     );
   }
@@ -3322,6 +3402,7 @@ async function listSessions(
           runtimeCache,
           runtimeMode,
         ),
+        statusOverrideForSession?.(thread.id) ?? null,
       ),
   );
 }
@@ -3672,17 +3753,26 @@ async function loadFastRunState(
   provider: AgentProvider,
   sessionId: string,
   activeTurns: Map<string, ActiveTurnState>,
-): Promise<{ isRunning: boolean; turnId: string | null }> {
+  liveStatusOverride: LiveThreadStatus | null = null,
+): Promise<{ status: LiveThreadStatus; isRunning: boolean; turnId: string | null }> {
+  if (liveStatusOverride != null) {
+    return {
+      status: liveStatusOverride,
+      isRunning: isRunningThreadStatus(liveStatusOverride),
+      turnId: activeTurns.get(sessionId)?.turnId ?? null,
+    };
+  }
   const known = activeTurns.get(sessionId);
   if (known) {
-    return { isRunning: true, turnId: known.turnId };
+    return { status: "running", isRunning: true, turnId: known.turnId };
   }
   if (!hasProviderMethod(provider, "readSessionThread")) {
-    return { isRunning: false, turnId: null };
+    return { status: "unknown", isRunning: false, turnId: null };
   }
   const session = await readSession(provider, sessionId, false);
-  if (isActiveThread(session)) {
-    return { isRunning: true, turnId: null };
+  const status = threadStatusPhase(session);
+  if (isRunningThreadStatus(status)) {
+    return { status, isRunning: true, turnId: null };
   }
   try {
     const sessionWithTurns = await readSession(provider, sessionId, true);
@@ -3690,7 +3780,7 @@ async function loadFastRunState(
     for (let index = turns.length - 1; index >= 0; index -= 1) {
       const turn = turns[index] as TurnRecord;
       if (isActiveTurnStatus(turn.status)) {
-        return { isRunning: true, turnId: turn.id };
+        return { status: "running", isRunning: true, turnId: turn.id };
       }
     }
   } catch (error) {
@@ -3698,11 +3788,11 @@ async function loadFastRunState(
     if (
       message.includes("includeTurns is unavailable before first user message")
     ) {
-      return { isRunning: false, turnId: null };
+      return { status, isRunning: false, turnId: null };
     }
     throw error;
   }
-  return { isRunning: false, turnId: null };
+  return { status, isRunning: false, turnId: null };
 }
 
 async function isThreadLoaded(
@@ -3803,6 +3893,7 @@ function updateLiveCommandTerminalInteraction(
 function mapSession(
   thread: ThreadRecord,
   runtime: SessionRuntimeSummary | null = null,
+  statusOverride: LiveThreadStatus | null = null,
 ): SessionSummary {
   const provider = providerKindForThread(thread);
   return {
@@ -3817,7 +3908,7 @@ function mapSession(
         ? thread.source
         : JSON.stringify(thread.source),
     provider,
-    status: thread.status?.type || "notLoaded",
+    status: resolvedSessionStatus(thread, statusOverride),
     rolloutPath: thread.path,
     runtime,
     gitInfo: mapGitInfo(thread.gitInfo),
@@ -4038,8 +4129,48 @@ function isActiveTurnStatus(status: string | null | undefined): boolean {
 }
 
 function isActiveThread(thread: ThreadRecord): boolean {
-  const type = thread.status?.type;
-  return type === "active" || type === "running";
+  return isRunningThreadStatus(threadStatusPhase(thread));
+}
+
+function resolvedSessionStatus(
+  thread: ThreadRecord,
+  statusOverride: LiveThreadStatus | null = null,
+): string {
+  return statusOverride ?? threadStatusPhase(thread);
+}
+
+function threadStatusPhase(thread: ThreadRecord): LiveThreadStatus {
+  return normalizeThreadStatusPhase(thread.status?.phase ?? thread.status?.type);
+}
+
+function isRunningThreadStatus(status: LiveThreadStatus | null | undefined): boolean {
+  return (
+    status === "running" ||
+    status === "waiting_for_input" ||
+    status === "waiting_for_approval"
+  );
+}
+
+function normalizeThreadStatusPhase(status: string | null | undefined): LiveThreadStatus {
+  switch (status) {
+    case "idle":
+      return "idle";
+    case "running":
+    case "active":
+      return "running";
+    case "waiting_for_input":
+      return "waiting_for_input";
+    case "waiting_for_approval":
+      return "waiting_for_approval";
+    case "errored":
+    case "systemError":
+      return "errored";
+    case "closed":
+    case "notLoaded":
+      return "closed";
+    default:
+      return "unknown";
+  }
 }
 
 async function mapWithConcurrency<T, R>(
