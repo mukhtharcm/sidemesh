@@ -1132,19 +1132,6 @@ class _SessionGroup {
   final List<RemoteSessionEntry> entries;
 }
 
-@immutable
-class _FlatSessionSection {
-  const _FlatSessionSection({
-    required this.title,
-    required this.icon,
-    required this.entries,
-  });
-
-  final String title;
-  final IconData icon;
-  final List<RemoteSessionEntry> entries;
-}
-
 class _RecentPaneState extends State<RecentPane> {
   final SessionLocalStore _localStore = SessionLocalStore.instance;
   final RecentSessionsStore _store = RecentSessionsStore();
@@ -1195,42 +1182,6 @@ class _RecentPaneState extends State<RecentPane> {
     return sortedKeys
         .map((k) => _SessionGroup(title: k, entries: groups[k]!))
         .toList();
-  }
-
-  List<_FlatSessionSection> _buildFlatSections(
-    List<RemoteSessionEntry> entries,
-  ) {
-    if (widget.viewMode != SessionViewMode.flat ||
-        widget.query.trim().isNotEmpty ||
-        _searchEntries != null) {
-      return const <_FlatSessionSection>[];
-    }
-
-    final favorites = <RemoteSessionEntry>[];
-    final recents = <RemoteSessionEntry>[];
-    for (final entry in entries) {
-      if (_localStore.isFavorite(entry.host, entry.session.id)) {
-        favorites.add(entry);
-      } else {
-        recents.add(entry);
-      }
-    }
-    if (favorites.isEmpty) {
-      return const <_FlatSessionSection>[];
-    }
-    return <_FlatSessionSection>[
-      _FlatSessionSection(
-        title: 'Favorites',
-        icon: Icons.star_rounded,
-        entries: favorites,
-      ),
-      if (recents.isNotEmpty)
-        _FlatSessionSection(
-          title: 'Recent',
-          icon: Icons.history_rounded,
-          entries: recents,
-        ),
-    ];
   }
 
   @override
@@ -1422,18 +1373,12 @@ class _RecentPaneState extends State<RecentPane> {
       });
     }
     final sorted = visible.toList();
+    // Sort by recency only — the pinned shelf handles favourite ordering.
     if (widget.viewMode == SessionViewMode.flat) {
-      sorted.sort((left, right) {
-        final leftFavorite = _localStore.isFavorite(left.host, left.session.id);
-        final rightFavorite = _localStore.isFavorite(
-          right.host,
-          right.session.id,
-        );
-        if (leftFavorite != rightFavorite) {
-          return leftFavorite ? -1 : 1;
-        }
-        return right.session.updatedAt.compareTo(left.session.updatedAt);
-      });
+      sorted.sort(
+        (left, right) =>
+            right.session.updatedAt.compareTo(left.session.updatedAt),
+      );
     }
     return sorted;
   }
@@ -1491,9 +1436,19 @@ class _RecentPaneState extends State<RecentPane> {
         }
         final sortedEntries = _sortEntries(_store.entries);
         final groups = _groupEntries(sortedEntries);
-        final flatSections = _buildFlatSections(sortedEntries);
         final isGrouped = groups.isNotEmpty;
-        final hasFlatSections = flatSections.isNotEmpty;
+        // Pinned shelf: shown in flat mode when no search is active.
+        final showPinnedShelf = !isGrouped &&
+            widget.viewMode == SessionViewMode.flat &&
+            widget.query.trim().isEmpty &&
+            _searchEntries == null;
+        final pinnedEntries = showPinnedShelf
+            ? sortedEntries
+                .where(
+                  (e) => _localStore.isFavorite(e.host, e.session.id),
+                )
+                .toList(growable: false)
+            : const <RemoteSessionEntry>[];
         final hasCachedEntries =
             _store.entries.isNotEmpty &&
             _store.confirmedHostIds.length < widget.hosts.length;
@@ -1561,6 +1516,15 @@ class _RecentPaneState extends State<RecentPane> {
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
               ),
+            // Pinned shelf — fixed height, never pushes recents below fold.
+            if (showPinnedShelf && (pinnedEntries.isNotEmpty || !widget.dense))
+              _FavoritesShelf(
+                entries: pinnedEntries,
+                onOpen: widget.onOpenSession,
+                onUnpin: (host, sessionId) =>
+                    _localStore.toggleFavorite(host, sessionId),
+                dense: widget.dense,
+              ),
             SizedBox(height: widget.dense ? 4 : 8),
             Expanded(
               child: RefreshIndicator(
@@ -1570,17 +1534,6 @@ class _RecentPaneState extends State<RecentPane> {
                     ? _buildGroupedList(
                         context,
                         groups,
-                        isRefreshing: isRefreshing,
-                        hasFailures: hasFailures,
-                        failureLabels: failureLabels,
-                        hasCachedEntries: hasCachedEntries,
-                        handleRefresh: handleRefresh,
-                      )
-                    : hasFlatSections
-                    ? _buildFlatSectionList(
-                        context,
-                        flatSections,
-                        padding: basePadding,
                         isRefreshing: isRefreshing,
                         hasFailures: hasFailures,
                         failureLabels: failureLabels,
@@ -1709,88 +1662,6 @@ class _RecentPaneState extends State<RecentPane> {
     );
   }
 
-  Widget _buildFlatSectionList(
-    BuildContext context,
-    List<_FlatSessionSection> sections, {
-    required EdgeInsets padding,
-    required bool isRefreshing,
-    required bool hasFailures,
-    required List<String> failureLabels,
-    required bool hasCachedEntries,
-    required Future<void> Function() handleRefresh,
-  }) {
-    return ListView.builder(
-      padding: padding,
-      itemCount:
-          (isRefreshing ? 1 : 0) +
-          (hasFailures ? 1 : 0) +
-          sections.fold<int>(
-            0,
-            (sum, section) => sum + section.entries.length + 1,
-          ),
-      itemBuilder: (context, index) {
-        var offset = 0;
-        if (isRefreshing) {
-          if (index == offset) {
-            return Padding(
-              padding: EdgeInsets.only(bottom: widget.dense ? 6 : 10),
-              child: _RecentProgressStrip(
-                remaining: _store.pendingHostIds.length,
-                total: widget.hosts.length,
-                showingCached: hasCachedEntries,
-              ),
-            );
-          }
-          offset += 1;
-        }
-        if (hasFailures) {
-          if (index == offset) {
-            return Padding(
-              padding: EdgeInsets.only(bottom: widget.dense ? 6 : 10),
-              child: _RecentErrorBanner(
-                hostLabels: failureLabels,
-                onRetry: handleRefresh,
-              ),
-            );
-          }
-          offset += 1;
-        }
-
-        var current = offset;
-        for (final section in sections) {
-          final headerIndex = current;
-          final entriesStart = headerIndex + 1;
-          final entriesEnd = entriesStart + section.entries.length;
-          if (index == headerIndex) {
-            return Padding(
-              padding: EdgeInsets.only(
-                top: widget.dense ? 8 : 14,
-                bottom: widget.dense ? 4 : 8,
-              ),
-              child: _buildSessionSectionHeader(
-                context,
-                title: section.title,
-                icon: section.icon,
-                count: section.entries.length,
-              ),
-            );
-          }
-          if (index >= entriesStart && index < entriesEnd) {
-            final entry = section.entries[index - entriesStart];
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: widget.dense ? 2 : AppSpacing.sm,
-              ),
-              child: _buildSessionRow(entry),
-            );
-          }
-          current = entriesEnd;
-        }
-        return const SizedBox.shrink();
-      },
-    );
-  }
-
   Widget _buildSessionSectionHeader(
     BuildContext context, {
     required String title,
@@ -1850,6 +1721,276 @@ class _RecentPaneState extends State<RecentPane> {
       onToggleFavorite: () {
         _localStore.toggleFavorite(entry.host, entry.session.id);
       },
+    );
+  }
+}
+
+// ── Pinned / Favourites Shelf ────────────────────────────────────────────────
+
+/// Compact horizontal strip of pinned sessions rendered above the recents
+/// list. Takes a fixed vertical footprint regardless of how many sessions
+/// are pinned, so the recents list is never pushed below the fold.
+///
+/// * On mobile ([dense] = false) it is always shown when in flat/unfiltered
+///   mode — even with zero pins — so new users discover the feature.
+/// * On desktop ([dense] = true) it only appears when at least one session
+///   is pinned, keeping the narrow sidebar tidy.
+/// * Long-pressing a chip calls [onUnpin] for quick removal.
+class _FavoritesShelf extends StatelessWidget {
+  const _FavoritesShelf({
+    required this.entries,
+    required this.onOpen,
+    required this.onUnpin,
+    this.dense = false,
+  });
+
+  final List<RemoteSessionEntry> entries;
+  final void Function(HostProfile, SessionSummary) onOpen;
+  final void Function(HostProfile host, String sessionId) onUnpin;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final chipSize = dense ? 56.0 : 64.0;
+    final listHeight = chipSize + (dense ? 22.0 : 26.0);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Header row.
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            dense ? 10 : 16,
+            dense ? 6 : 10,
+            dense ? 10 : 16,
+            4,
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.push_pin_rounded,
+                size: 11,
+                color: colors.textTertiary,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                'Pinned',
+                style: monoStyle(
+                  color: colors.textTertiary,
+                  fontSize: dense ? 9.5 : 10.5,
+                  fontWeight: AppWeights.emphasis,
+                ),
+              ),
+              if (entries.isNotEmpty) ...[const SizedBox(width: 5),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceElevated,
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: colors.border),
+                  ),
+                  child: Text(
+                    '${entries.length}',
+                    style: monoStyle(
+                      color: colors.textTertiary,
+                      fontSize: 9,
+                      fontWeight: AppWeights.emphasis,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        // Horizontal chip row.
+        SizedBox(
+          height: listHeight,
+          child: entries.isEmpty
+              ? ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: EdgeInsets.fromLTRB(
+                    dense ? 10 : 16,
+                    0,
+                    dense ? 10 : 16,
+                    dense ? 6 : 8,
+                  ),
+                  children: [
+                    _FavoritesEmptyChip(chipSize: chipSize),
+                  ],
+                )
+              : ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: EdgeInsets.fromLTRB(
+                    dense ? 10 : 16,
+                    0,
+                    dense ? 10 : 16,
+                    dense ? 6 : 8,
+                  ),
+                  itemCount: entries.length,
+                  separatorBuilder: (_, _) =>
+                      SizedBox(width: dense ? 6 : 8),
+                  itemBuilder: (context, index) {
+                    final entry = entries[index];
+                    return _FavoriteChip(
+                      entry: entry,
+                      chipSize: chipSize,
+                      onTap: () => onOpen(entry.host, entry.session),
+                      onUnpin: () =>
+                          onUnpin(entry.host, entry.session.id),
+                    );
+                  },
+                ),
+        ),
+        Divider(height: 1, color: colors.border),
+      ],
+    );
+  }
+}
+
+class _FavoriteChip extends StatelessWidget {
+  const _FavoriteChip({
+    required this.entry,
+    required this.chipSize,
+    required this.onTap,
+    required this.onUnpin,
+  });
+
+  final RemoteSessionEntry entry;
+  final double chipSize;
+  final VoidCallback onTap;
+  final VoidCallback onUnpin;
+
+  static String _initials(String title) {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) return '?';
+    final parts = trimmed.split(RegExp(r'[\s\-_/]+'));
+    if (parts.length >= 2 &&
+        parts[0].isNotEmpty &&
+        parts[1].isNotEmpty) {
+      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    }
+    return trimmed
+        .substring(0, min(2, trimmed.length))
+        .toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final running = entry.session.isActive;
+    final initials = _initials(entry.session.title);
+    return GestureDetector(
+      onTap: onTap,
+      onLongPress: onUnpin,
+      child: Tooltip(
+        message:
+            '${entry.session.title}\n${entry.host.label}\n'
+            'Long-press to unpin',
+        child: SizedBox(
+          width: chipSize,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    width: chipSize,
+                    height: chipSize,
+                    decoration: BoxDecoration(
+                      color: running
+                          ? colors.successMuted
+                          : colors.surfaceMuted,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: running
+                            ? colors.success.withValues(alpha: 0.5)
+                            : colors.border,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      initials,
+                      style: monoStyle(
+                        color: running
+                            ? colors.success
+                            : colors.textSecondary,
+                        fontSize: chipSize * 0.22,
+                        fontWeight: AppWeights.title,
+                      ),
+                    ),
+                  ),
+                  if (running)
+                    Positioned(
+                      top: -1,
+                      right: -1,
+                      child: LivePulse(color: colors.success),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                entry.session.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textTertiary,
+                  fontSize: 9.5,
+                  height: 1.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoritesEmptyChip extends StatelessWidget {
+  const _FavoritesEmptyChip({required this.chipSize});
+
+  final double chipSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: 'Tap ★ on any session to pin it here',
+      child: Container(
+        width: chipSize,
+        height: chipSize,
+        decoration: BoxDecoration(
+          color: colors.surfaceMuted,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: colors.border),
+        ),
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.push_pin_outlined,
+              size: 16,
+              color: colors.textTertiary,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Pin one',
+              style: monoStyle(
+                color: colors.textTertiary,
+                fontSize: 8.5,
+                fontWeight: AppWeights.emphasis,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
