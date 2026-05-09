@@ -36,7 +36,6 @@ import 'inspector/inspector_resources.dart';
 import 'inspector/inspector_search.dart';
 import 'inspector/inspector_terminal.dart';
 import 'port_forward_screen.dart';
-import 'workspace_browser_dialog.dart';
 import '../session_message_seed_store.dart';
 import '../session_overrides_store.dart';
 import '../session_pins_store.dart';
@@ -47,6 +46,7 @@ import '../session_send_outbox_worker.dart';
 import '../session_local_store.dart';
 import '../session_send_overrides.dart';
 import '../session_turn_config_store.dart';
+import '../session_preview_candidates.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -66,6 +66,7 @@ part 'session_screen_header.dart';
 part 'session_screen_composer.dart';
 part 'session_screen_timeline.dart';
 part 'session_screen_controls.dart';
+part 'session_screen_preview.dart';
 
 enum _TranscriptFreshnessMode { cached, reconnecting, offline }
 
@@ -111,22 +112,20 @@ class SessionComposerSeed {
 
 class _DockedBrowserPreview {
   const _DockedBrowserPreview({
-    required this.forward,
     required this.preview,
     this.expanded = true,
   });
 
-  final HostPortForwardInfo forward;
   final HostBrowserPreviewInfo preview;
   final bool expanded;
 
+  String get target => '${preview.targetHost}:${preview.targetPort}';
+
   _DockedBrowserPreview copyWith({
-    HostPortForwardInfo? forward,
     HostBrowserPreviewInfo? preview,
     bool? expanded,
   }) {
     return _DockedBrowserPreview(
-      forward: forward ?? this.forward,
       preview: preview ?? this.preview,
       expanded: expanded ?? this.expanded,
     );
@@ -159,8 +158,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final target =
-        '${dockedPreview.forward.targetHost}:${dockedPreview.forward.targetPort}';
+    final target = dockedPreview.target;
     if (!dockedPreview.expanded) {
       return _BrowserDockShell(
         compact: true,
@@ -744,6 +742,12 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsPortForwarding =>
       _supportsHostCapability('workspace', 'portForwarding');
 
+  bool get _supportsBrowserPreview =>
+      _supportsHostCapability('workspace', 'browserPreview');
+
+  bool get _supportsConnections =>
+      _supportsPortForwarding || _supportsBrowserPreview;
+
   bool get _supportsProviderRestart =>
       _supportsProviderCapability('lifecycle', 'restart');
 
@@ -918,7 +922,7 @@ class _SessionScreenState extends State<SessionScreen>
     final unsupportedTerminal =
         current.kind == InspectorSurfaceKind.terminal && !_supportsTerminal;
     final unsupportedPorts =
-        current.kind == InspectorSurfaceKind.ports && !_supportsPortForwarding;
+        current.kind == InspectorSurfaceKind.ports && !_supportsConnections;
     if (unsupportedResources ||
         unsupportedFiles ||
         unsupportedTerminal ||
@@ -1147,13 +1151,15 @@ class _SessionScreenState extends State<SessionScreen>
         );
         break;
       case InspectorSurfaceKind.ports:
-        if (!_supportsPortForwarding) return;
+        if (!_supportsConnections) return;
         controller.show(
           buildInspectorPortsSurface(
             ownerKey: ownerKey,
             host: widget.host,
             api: widget.api,
             session: _session ?? widget.session,
+            supportsBrowserPreview: _supportsBrowserPreview,
+            supportsPortForwarding: _supportsPortForwarding,
           ),
         );
         break;
@@ -4547,12 +4553,13 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
-  Future<void> _openTerminal() async {
+  Future<void> _openTerminal({String? cwdOverride}) async {
     if (!_supportsTerminal) {
       showAppSnackBar(context, 'This host does not expose terminals.');
       return;
     }
     final session = _session ?? widget.session;
+    final resolvedCwd = (cwdOverride ?? session.cwd).trim();
     final scope = InspectorScope.maybeOf(context);
     if (widget.desktopMode && scope != null) {
       scope.show(
@@ -4570,7 +4577,7 @@ class _SessionScreenState extends State<SessionScreen>
         builder: (_) => TerminalScreen(
           host: widget.host,
           api: widget.api,
-          cwd: session.cwd,
+          cwd: resolvedCwd.isEmpty ? session.cwd : resolvedCwd,
           sessionId: session.id,
           title: session.title,
         ),
@@ -4578,9 +4585,84 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
-  Future<void> _openPorts() async {
-    if (!_supportsPortForwarding) {
-      showAppSnackBar(context, 'This host does not expose port forwarding.');
+  List<BrowserPreviewTargetCandidate> get _browserPreviewCandidates {
+    return collectBrowserPreviewCandidates(_activities);
+  }
+
+  Future<void> _openBrowserPreviewLauncher() async {
+    if (!_supportsBrowserPreview) {
+      showAppSnackBar(context, 'This host does not expose browser previews.');
+      return;
+    }
+    final suggestions = _browserPreviewCandidates;
+    if (suggestions.length == 1) {
+      await _openBrowserPreviewTarget(suggestions.first);
+      return;
+    }
+    final selected = await showModalBottomSheet<BrowserPreviewTargetCandidate>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => _PreviewTargetPickerSheet(
+        suggestions: suggestions,
+      ),
+    );
+    if (!mounted || selected == null) {
+      return;
+    }
+    await _openBrowserPreviewTarget(selected);
+  }
+
+  Future<void> _openBrowserPreviewTarget(
+    BrowserPreviewTargetCandidate candidate,
+  ) async {
+    if (!_supportsBrowserPreview) {
+      showAppSnackBar(context, 'This host does not expose browser previews.');
+      return;
+    }
+    final session = _session ?? widget.session;
+    final viewport = MediaQuery.sizeOf(context);
+    try {
+      final previews = await widget.api.fetchBrowserPreviews(widget.host);
+      final existing = findReusableBrowserPreview(
+        previews,
+        candidate,
+        sessionId: session.id,
+        cwd: session.cwd,
+      );
+      final preview =
+          existing ??
+          await widget.api.createBrowserPreview(
+            widget.host,
+            targetPort: candidate.port,
+            targetHost: candidate.host,
+            scheme: candidate.scheme,
+            label: candidate.sourceLabel,
+            cwd: candidate.cwd ?? session.cwd,
+            sessionId: session.id,
+            width: viewport.width.round().clamp(320, 1200),
+            height: viewport.height.round().clamp(480, 1400),
+            profileMode: 'sidemesh',
+          );
+      if (!mounted) return;
+      _showDockedBrowserPreview(preview: preview);
+      showAppSnackBar(context, 'Opened preview for ${candidate.endpointLabel}.');
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        'Could not start browser preview: ${friendlyError(error)}',
+      );
+    }
+  }
+
+  Future<void> _openConnections() async {
+    if (!_supportsConnections) {
+      showAppSnackBar(
+        context,
+        'This host does not expose previews or tunnels.',
+      );
       return;
     }
     final session = _session ?? widget.session;
@@ -4592,6 +4674,8 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           api: widget.api,
           session: session,
+          supportsBrowserPreview: _supportsBrowserPreview,
+          supportsPortForwarding: _supportsPortForwarding,
         ),
       );
       return;
@@ -4604,8 +4688,10 @@ class _SessionScreenState extends State<SessionScreen>
           cwd: session.cwd,
           sessionId: session.id,
           sessionTitle: session.title,
-          onBrowserPreviewOpened: (forward, preview) {
-            _showDockedBrowserPreview(forward: forward, preview: preview);
+          supportsBrowserPreview: _supportsBrowserPreview,
+          supportsPortForwarding: _supportsPortForwarding,
+          onBrowserPreviewOpened: (preview) {
+            _showDockedBrowserPreview(preview: preview);
             Navigator.of(context).maybePop();
           },
         ),
@@ -4614,7 +4700,6 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _showDockedBrowserPreview({
-    required HostPortForwardInfo forward,
     required HostBrowserPreviewInfo preview,
   }) {
     if (!mounted || _disposed) return;
@@ -4631,10 +4716,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     setState(() {
-      _dockedBrowserPreview = _DockedBrowserPreview(
-        forward: forward,
-        preview: preview,
-      );
+      _dockedBrowserPreview = _DockedBrowserPreview(preview: preview);
     });
   }
 
@@ -4733,6 +4815,56 @@ class _SessionScreenState extends State<SessionScreen>
         ),
       ),
     );
+  }
+
+  void _browseWorkspacePath(String path) {
+    if (!_supportsFilesystem) {
+      showAppSnackBar(context, 'This host does not expose workspace files.');
+      return;
+    }
+    final session = _session ?? widget.session;
+    final scope = InspectorScope.maybeOf(context);
+    final browserRoot = _workspaceBrowserRootForPath(path, session.cwd);
+    if (widget.desktopMode && scope != null) {
+      scope.show(
+        buildInspectorWorkspaceBrowserSurface(
+          ownerKey: _inspectorOwnerKey(),
+          host: widget.host,
+          api: widget.api,
+          root: session.cwd,
+          agentProvider: session.provider,
+          sessionId: session.id,
+          selectedPath: path,
+        ),
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => FileBrowserScreen(
+          host: widget.host,
+          api: widget.api,
+          root: browserRoot,
+          agentProvider: session.provider,
+          sessionId: session.id,
+        ),
+      ),
+    );
+  }
+
+  String _workspaceBrowserRootForPath(String path, String sessionCwd) {
+    final trimmed = path.trim();
+    if (trimmed.isEmpty || trimmed == sessionCwd) {
+      return sessionCwd;
+    }
+    if (trimmed.endsWith('/')) {
+      return trimmed;
+    }
+    final slash = trimmed.lastIndexOf('/');
+    if (slash <= 0) {
+      return sessionCwd;
+    }
+    return trimmed.substring(0, slash);
   }
 
   bool _hasPersistedLiveAssistant(Iterable<SessionMessage> messages) {
@@ -5128,9 +5260,14 @@ class _SessionScreenState extends State<SessionScreen>
           unawaited(_openTerminal());
         }
         break;
-      case 'ports':
-        if (_supportsPortForwarding) {
-          unawaited(_openPorts());
+      case 'preview':
+        if (_supportsBrowserPreview) {
+          unawaited(_openBrowserPreviewLauncher());
+        }
+        break;
+      case 'connections':
+        if (_supportsConnections) {
+          unawaited(_openConnections());
         }
         break;
       case 'search':
@@ -5154,43 +5291,8 @@ class _SessionScreenState extends State<SessionScreen>
         unawaited(_compactSession());
         break;
       case 'browse':
-        if (!_supportsFilesystem) {
-          break;
-        }
-        final isDesktop = widget.desktopMode;
-        final scope = InspectorScope.maybeOf(context);
-        if (isDesktop && scope != null) {
-          scope.show(
-            buildInspectorWorkspaceBrowserSurface(
-              ownerKey: _inspectorOwnerKey(),
-              host: widget.host,
-              api: widget.api,
-              root: session.cwd,
-              agentProvider: session.provider,
-              sessionId: session.id,
-            ),
-          );
-        } else if (isDesktop) {
-          showWorkspaceBrowserDialog(
-            context,
-            host: widget.host,
-            api: widget.api,
-            root: session.cwd,
-            agentProvider: session.provider,
-            sessionId: session.id,
-          );
-        } else {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => FileBrowserScreen(
-                host: widget.host,
-                api: widget.api,
-                root: session.cwd,
-                agentProvider: session.provider,
-                sessionId: session.id,
-              ),
-            ),
-          );
+        if (_supportsFilesystem) {
+          _browseWorkspacePath(session.cwd);
         }
         break;
       case 'popout':
@@ -5216,36 +5318,8 @@ class _SessionScreenState extends State<SessionScreen>
   }) {
     return [
       _SessionActionGroup(
-        label: 'Quick moves',
+        label: 'Workspace',
         actions: [
-          if (_running && _supportsSessionInterrupt)
-            const _SessionActionSpec(
-              value: 'stop',
-              label: 'Stop agent',
-              detail: 'Interrupt the current turn immediately.',
-              icon: Icons.stop_circle_rounded,
-              tone: _SessionActionTone.danger,
-            ),
-          const _SessionActionSpec(
-            value: 'reload',
-            label: 'Reload',
-            detail: 'Refresh this transcript from the host.',
-            icon: Icons.refresh_rounded,
-          ),
-          const _SessionActionSpec(
-            value: 'new',
-            label: 'New session',
-            detail: 'Start beside this working directory.',
-            icon: Icons.add_circle_outline_rounded,
-          ),
-          if (_supportsProviderRestart)
-            const _SessionActionSpec(
-              value: 'restart_provider',
-              label: 'Restart provider',
-              detail: 'Restart the agent process on this host.',
-              icon: Icons.restart_alt_rounded,
-              tone: _SessionActionTone.warning,
-            ),
           if (_supportsTerminal)
             _SessionActionSpec(
               value: 'terminal',
@@ -5259,19 +5333,55 @@ class _SessionScreenState extends State<SessionScreen>
                   : _SessionActionTone.neutral,
               active: terminalOpen,
             ),
-          if (_supportsPortForwarding)
+          if (_supportsFilesystem)
+            const _SessionActionSpec(
+              value: 'browse',
+              label: 'Browse files',
+              detail: 'Open the workspace file browser.',
+              icon: Icons.folder_rounded,
+            ),
+          if (_supportsSessionResources)
             _SessionActionSpec(
-              value: 'ports',
-              label: portsOpen ? 'Ports are open' : 'Forward port',
-              detail: portsOpen
-                  ? 'Jump back to forwarded previews.'
-                  : 'Preview a localhost service from this host.',
+              value: 'resources',
+              label: resourcesOpen ? 'Resources are open' : 'Open resources',
+              detail: 'View generated images and session assets.',
+              icon: Icons.perm_media_rounded,
+              tone: resourcesOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: resourcesOpen,
+            ),
+        ],
+      ),
+      _SessionActionGroup(
+        label: 'Preview & connections',
+        actions: [
+          if (_supportsBrowserPreview)
+            const _SessionActionSpec(
+              value: 'preview',
+              label: 'Preview web app',
+              detail: 'Open a streamed browser preview for a localhost app.',
+              icon: Icons.open_in_browser_rounded,
+              tone: _SessionActionTone.accent,
+            ),
+          if (_supportsConnections)
+            _SessionActionSpec(
+              value: 'connections',
+              label: portsOpen ? 'Connections are open' : 'Manage connections',
+              detail: _supportsPortForwarding
+                  ? 'Inspect browser previews, TCP tunnels, and local URLs.'
+                  : 'Inspect active browser previews for this session.',
               icon: Icons.cable_rounded,
               tone: portsOpen
                   ? _SessionActionTone.accent
                   : _SessionActionTone.neutral,
               active: portsOpen,
             ),
+        ],
+      ),
+      _SessionActionGroup(
+        label: 'Transcript',
+        actions: [
           _SessionActionSpec(
             value: 'search',
             label: searchOpen ? 'Close search' : 'Search transcript',
@@ -5284,24 +5394,44 @@ class _SessionScreenState extends State<SessionScreen>
                 : _SessionActionTone.neutral,
             active: searchOpen,
           ),
-          if (_supportsSessionResources)
+          if (gitAvailable)
             _SessionActionSpec(
-              value: 'resources',
-              label: resourcesOpen ? 'Resources are open' : 'Open resources',
-              detail: 'View generated images and session assets.',
-              icon: resourcesOpen
-                  ? Icons.perm_media_rounded
-                  : Icons.perm_media_rounded,
-              tone: resourcesOpen
-                  ? _SessionActionTone.accent
+              value: 'git',
+              label: 'Git details',
+              detail: gitDirty
+                  ? 'Working tree has changes.'
+                  : 'Branch, upstream, and diff shortcuts.',
+              icon: Icons.account_tree_rounded,
+              tone: gitDirty
+                  ? _SessionActionTone.warning
                   : _SessionActionTone.neutral,
-              active: resourcesOpen,
+              active: gitDirty,
             ),
         ],
       ),
       _SessionActionGroup(
         label: 'Session',
         actions: [
+          if (_running && _supportsSessionInterrupt)
+            const _SessionActionSpec(
+              value: 'stop',
+              label: 'Stop agent',
+              detail: 'Interrupt the current turn immediately.',
+              icon: Icons.stop_circle_rounded,
+              tone: _SessionActionTone.danger,
+            ),
+          const _SessionActionSpec(
+            value: 'new',
+            label: 'New session',
+            detail: 'Start beside this working directory.',
+            icon: Icons.add_circle_outline_rounded,
+          ),
+          const _SessionActionSpec(
+            value: 'reload',
+            label: 'Reload',
+            detail: 'Refresh this transcript from the host.',
+            icon: Icons.refresh_rounded,
+          ),
           _SessionActionSpec(
             value: 'favorite',
             label: favorite ? 'Remove favorite' : 'Add favorite',
@@ -5320,32 +5450,12 @@ class _SessionScreenState extends State<SessionScreen>
             detail: 'Adds a blue dot to this session in your recents list.',
             icon: Icons.flag_rounded,
           ),
-          if (gitAvailable)
-            _SessionActionSpec(
-              value: 'git',
-              label: 'Git details',
-              detail: gitDirty
-                  ? 'Working tree has changes.'
-                  : 'Branch, upstream, and diff shortcuts.',
-              icon: Icons.account_tree_rounded,
-              tone: gitDirty
-                  ? _SessionActionTone.warning
-                  : _SessionActionTone.neutral,
-              active: gitDirty,
-            ),
           if (_supportsSessionCompact)
             const _SessionActionSpec(
               value: 'compact',
               label: 'Compact context',
               detail: 'Ask the provider to compress this conversation.',
               icon: Icons.compress_rounded,
-            ),
-          if (_supportsFilesystem)
-            const _SessionActionSpec(
-              value: 'browse',
-              label: 'Browse files',
-              detail: 'Open the workspace file browser.',
-              icon: Icons.folder_rounded,
             ),
           if (widget.topPadding != null &&
               SidemeshSessionWindowManager.instance.isSupported)
@@ -5357,10 +5467,18 @@ class _SessionScreenState extends State<SessionScreen>
             ),
         ],
       ),
-      if (_supportsSessionRename || _supportsSessionArchive)
+      if (_supportsProviderRestart || _supportsSessionRename || _supportsSessionArchive)
         _SessionActionGroup(
           label: 'Manage',
           actions: [
+            if (_supportsProviderRestart)
+              const _SessionActionSpec(
+                value: 'restart_provider',
+                label: 'Restart provider',
+                detail: 'Restart the agent process on this host.',
+                icon: Icons.restart_alt_rounded,
+                tone: _SessionActionTone.warning,
+              ),
             if (_supportsSessionRename)
               const _SessionActionSpec(
                 value: 'rename',
@@ -5431,6 +5549,8 @@ class _SessionScreenState extends State<SessionScreen>
     final freshnessMode = _transcriptFreshnessMode;
     final showHistoryBanner =
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
+    final showStopPill =
+        isCompact && _running && _supportsSessionInterrupt;
     final bodyContent = Column(
       children: [
         if (!isCompact)
@@ -5555,6 +5675,19 @@ class _SessionScreenState extends State<SessionScreen>
                                       entry.activity!.type !=
                                       'image_generation',
                                   onOpenFile: _openWorkspaceFile,
+                                  onBrowsePath: _supportsFilesystem
+                                      ? _browseWorkspacePath
+                                      : null,
+                                  onOpenBrowserPreview: _supportsBrowserPreview
+                                      ? (target) => unawaited(
+                                          _openBrowserPreviewTarget(target),
+                                        )
+                                      : null,
+                                  onOpenTerminal: _supportsTerminal
+                                      ? (cwd) => unawaited(
+                                          _openTerminal(cwdOverride: cwd),
+                                        )
+                                      : null,
                                 ),
                                 _TimelineEntryKind.providerWarning =>
                                   _ProviderWarningRow(
@@ -5587,6 +5720,12 @@ class _SessionScreenState extends State<SessionScreen>
                         ),
                       ),
                     ),
+                    if (showStopPill)
+                      Positioned(
+                        left: 16,
+                        bottom: 12,
+                        child: _StopAgentPill(onTap: _stopSession),
+                      ),
                     Positioned(
                       right: 16,
                       bottom: 12,
@@ -5801,18 +5940,18 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: () => unawaited(_openTerminal()),
               ),
             ),
-          if (!isCompact && _supportsPortForwarding)
+          if (!isCompact && _supportsConnections)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
                 icon: Icons.cable_rounded,
                 tooltip: portsOpenInInspector
-                    ? 'Ports are open'
-                    : 'Forward port',
+                    ? 'Connections are open'
+                    : 'Manage connections',
                 color: portsOpenInInspector
                     ? colors.accent
                     : colors.textSecondary,
-                onTap: () => unawaited(_openPorts()),
+                onTap: () => unawaited(_openConnections()),
               ),
             ),
           if (!isCompact &&
@@ -5992,14 +6131,25 @@ class _SessionScreenState extends State<SessionScreen>
                         ],
                       ),
                     ),
-                  if (_supportsPortForwarding)
+                  if (_supportsBrowserPreview)
                     const PopupMenuItem<String>(
-                      value: 'ports',
+                      value: 'preview',
+                      child: Row(
+                        children: [
+                          Icon(Icons.open_in_browser_rounded, size: 18),
+                          SizedBox(width: 10),
+                          Text('Preview web app'),
+                        ],
+                      ),
+                    ),
+                  if (_supportsConnections)
+                    const PopupMenuItem<String>(
+                      value: 'connections',
                       child: Row(
                         children: [
                           Icon(Icons.cable_rounded, size: 18),
                           SizedBox(width: 10),
-                          Text('Ports'),
+                          Text('Manage connections'),
                         ],
                       ),
                     ),

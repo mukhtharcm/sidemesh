@@ -380,7 +380,7 @@ class _ComposerContextShelf extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         itemCount: chips.length,
-        separatorBuilder: (_, _x) => const SizedBox(width: 8),
+        separatorBuilder: (context, index) => const SizedBox(width: 8),
         itemBuilder: (ctx, i) => chips[i],
       ),
     );
