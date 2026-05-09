@@ -701,6 +701,267 @@ describe("PiAgentProvider", () => {
     assert.equal(activity?.type, "tool");
   });
 
+  it("completes Pi turns on terminal assistant message_end even without agent_end", async () => {
+    const liveEvents: Array<{ type: string; [key: string]: unknown }> = [];
+    const listeners = new Set<(event: unknown) => void>();
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const fakeSession = {
+      sessionId: "pi-terminal-stop-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe(listener: (event: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt(_text: string) {
+        for (const listener of listeners) {
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "Done." }],
+              provider: "anthropic",
+              model: "claude-sonnet-4-5",
+              usage: {
+                input: 5,
+                output: 10,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 15,
+                cost: {
+                  input: 0,
+                  output: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  total: 0,
+                },
+              },
+              stopReason: "stop",
+              timestamp: 1_777_770_010_000,
+            },
+          });
+        }
+      },
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    provider.on("liveEvent", (event) => liveEvents.push(event as never));
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "Finish", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    assert.ok(created.activeTurnId);
+
+    await delay(0);
+
+    const thread = await provider.readSessionThread(created.thread.id, true);
+    assert.equal(thread.status.type, "idle");
+    assert.equal(thread.turns?.at(-1)?.status, "completed");
+
+    const runtime = await provider.readSessionRuntime(created.thread);
+    assert.equal(runtime?.turnId, undefined);
+    assert.ok(
+      liveEvents.some(
+        (event) =>
+          event.type === "turn_completed" &&
+          event.turnId === created.activeTurnId &&
+          event.status === "completed",
+      ),
+    );
+
+    const log = await provider.readSessionLog(created.thread);
+    assert.equal(log.messages.at(-1)?.text, "Done.");
+  });
+
+  it("materializes draft assistant output when terminal message_end has no final content", async () => {
+    const liveEvents: Array<{ type: string; [key: string]: unknown }> = [];
+    const listeners = new Set<(event: unknown) => void>();
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const partialAssistant = {
+      role: "assistant",
+      content: [{ type: "text", text: "Done from draft." }],
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      usage: {
+        input: 5,
+        output: 10,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 15,
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0,
+        },
+      },
+      timestamp: 1_777_770_010_000,
+    };
+    const fakeSession = {
+      sessionId: "pi-terminal-draft-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe(listener: (event: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt(_text: string) {
+        for (const listener of listeners) {
+          listener({
+            type: "message_update",
+            message: partialAssistant,
+            assistantMessageEvent: {
+              type: "text_delta",
+              contentIndex: 0,
+              delta: "Done from draft.",
+              partial: partialAssistant,
+            },
+          });
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [],
+              provider: "anthropic",
+              model: "claude-sonnet-4-5",
+              usage: partialAssistant.usage,
+              stopReason: "stop",
+              timestamp: 1_777_770_011_000,
+            },
+          });
+        }
+      },
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    provider.on("liveEvent", (event) => liveEvents.push(event as never));
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "Finish", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    assert.ok(created.activeTurnId);
+
+    await delay(0);
+
+    const log = await provider.readSessionLog(created.thread);
+    assert.equal(log.messages.at(-1)?.text, "Done from draft.");
+
+    const completedMessageEvent = liveEvents.find(
+      (event) => event.type === "assistant_message_completed",
+    );
+    assert.equal(
+      (
+        completedMessageEvent?.message as { text?: string } | undefined
+      )?.text,
+      "Done from draft.",
+    );
+
+    const thread = await provider.readSessionThread(created.thread.id, true);
+    assert.equal(thread.status.type, "idle");
+    assert.equal(thread.turns?.at(-1)?.status, "completed");
+  });
+
   it("emits provider warnings when Pi auto-retry gives up", async () => {
     const listeners = new Set<(event: unknown) => void>();
     const fakeModel = {
