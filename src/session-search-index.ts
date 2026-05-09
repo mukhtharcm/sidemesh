@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { parseJsonLine } from "./codex-history.js";
 import type { SessionActivity, SessionMessage } from "./types.js";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export interface SessionSearchResult {
   sessionId: string;
@@ -320,6 +320,18 @@ export class SessionSearchIndex {
 
       // Clear stale manifest tables so next backfill repopulates them.
       this.db.exec(`DELETE FROM session_manifest;`);
+    }
+
+    if (version < 3) {
+      // Provider-backed rows in older caches may have incorrect archived flags
+      // or second-based timestamps. Clear derived search data so backfill
+      // rebuilds it with the corrected semantics.
+      this.db.exec(`
+        DELETE FROM manifest;
+        DELETE FROM session_manifest;
+        DELETE FROM session_search_documents;
+        DELETE FROM session_fts;
+      `);
     }
 
     const setVersion = this.db.prepare(

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { SessionSearchIndex } from "./session-search-index.js";
@@ -551,6 +552,112 @@ describe("SessionSearchIndex", () => {
     assert.equal(results[0].sessionId, "migrate-a");
 
     await index2.close();
+  });
+
+  it("schema v3 migration clears stale derived search data", async () => {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE session_search_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE session_search_documents (
+        session_id TEXT PRIMARY KEY,
+        provider_kind TEXT,
+        title TEXT,
+        preview TEXT,
+        cwd TEXT,
+        created_at INTEGER,
+        updated_at INTEGER,
+        archived INTEGER NOT NULL DEFAULT 0,
+        fingerprint TEXT NOT NULL,
+        indexed_at INTEGER NOT NULL
+      );
+      CREATE TABLE manifest (
+        rollout_path TEXT PRIMARY KEY,
+        size INTEGER NOT NULL,
+        mtime_ms INTEGER NOT NULL,
+        indexed_at INTEGER NOT NULL
+      );
+      CREATE TABLE session_manifest (
+        session_key TEXT PRIMARY KEY,
+        fingerprint TEXT NOT NULL,
+        indexed_at INTEGER NOT NULL
+      );
+      CREATE VIRTUAL TABLE session_fts USING fts5(
+        session_id UNINDEXED,
+        content,
+        tokenize = 'unicode61'
+      );
+    `);
+    db.prepare(
+      `INSERT INTO session_search_meta (key, value) VALUES ('schema_version', '2')`
+    ).run();
+    db.prepare(`
+      INSERT INTO session_search_documents (
+        session_id,
+        provider_kind,
+        title,
+        preview,
+        cwd,
+        created_at,
+        updated_at,
+        archived,
+        fingerprint,
+        indexed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "stale-session",
+      "fake",
+      "Stale Session",
+      "stale preview",
+      "/tmp",
+      NOW,
+      NOW,
+      0,
+      "stale-fingerprint",
+      NOW,
+    );
+    db.prepare(
+      `INSERT INTO manifest (rollout_path, size, mtime_ms, indexed_at) VALUES (?, ?, ?, ?)`
+    ).run("/tmp/rollout.jsonl", 128, NOW, NOW);
+    db.prepare(
+      `INSERT INTO session_manifest (session_key, fingerprint, indexed_at) VALUES (?, ?, ?)`
+    ).run("stale-session", "stale-fingerprint", NOW);
+    db.prepare(`INSERT INTO session_fts (session_id, content) VALUES (?, ?)`).run(
+      "stale-session",
+      "stale migration keyword",
+    );
+    db.close();
+
+    const index = new SessionSearchIndex(dbPath);
+    await index.open();
+
+    assert.equal(index.getStats().indexedSessions, 0);
+    const results = await index.search("stale", 10);
+    assert.equal(results.length, 0);
+
+    await index.close();
+
+    const reopened = new DatabaseSync(dbPath);
+    const counts = reopened.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM session_search_documents) AS documentCount,
+        (SELECT COUNT(*) FROM manifest) AS manifestCount,
+        (SELECT COUNT(*) FROM session_manifest) AS sessionManifestCount,
+        (SELECT COUNT(*) FROM session_fts) AS ftsCount
+    `).get() as {
+      documentCount: number;
+      manifestCount: number;
+      sessionManifestCount: number;
+      ftsCount: number;
+    };
+    reopened.close();
+
+    assert.equal(counts.documentCount, 0);
+    assert.equal(counts.manifestCount, 0);
+    assert.equal(counts.sessionManifestCount, 0);
+    assert.equal(counts.ftsCount, 0);
   });
   it("rollout-indexed sessions support filter queries", async () => {
     const index = new SessionSearchIndex(dbPath);

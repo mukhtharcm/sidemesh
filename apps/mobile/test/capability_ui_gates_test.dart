@@ -9,6 +9,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
 import 'package:sidemesh_mobile/src/create_session_defaults_store.dart';
 import 'package:sidemesh_mobile/src/db.dart';
+import 'package:sidemesh_mobile/src/fs_models.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/create_session_sheet.dart';
 import 'package:sidemesh_mobile/src/screens/host_detail_screen.dart';
@@ -151,6 +152,64 @@ void main() {
 
       expect(find.text('Preview web app'), findsNothing);
       expect(find.text('Manage connections'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'session screen ignores stale file search results when the mention query changes',
+    (tester) async {
+      final api = _FileSearchRaceApi(
+        _nodeForCapabilities(_fileMentionCapabilities),
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('session-file-mentions'),
+          session: _session('file-mention-session'),
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      final composer = find.byType(TextField).first;
+      await tester.enterText(composer, '@a');
+      await tester.pump();
+
+      expect(api.queries, <String>['a']);
+
+      await tester.enterText(composer, '@ab');
+      await tester.pump();
+
+      expect(api.queries, <String>['a', 'ab']);
+
+      api.pendingSearch('ab').complete(const <FsSearchResult>[
+        FsSearchResult(
+          path: '/repo/ab.txt',
+          name: 'ab.txt',
+          isDirectory: false,
+          score: 120,
+        ),
+      ]);
+      await tester.pump();
+
+      expect(find.text('/repo/ab.txt'), findsOneWidget);
+
+      api.pendingSearch('a').complete(const <FsSearchResult>[
+        FsSearchResult(
+          path: '/repo/a.txt',
+          name: 'a.txt',
+          isDirectory: false,
+          score: 90,
+        ),
+      ]);
+      await tester.pump();
+
+      expect(find.text('/repo/ab.txt'), findsOneWidget);
+      expect(find.text('/repo/a.txt'), findsNothing);
     },
   );
 
@@ -743,6 +802,35 @@ const Map<String, Object?> _minimalCapabilities = {
   'workspace': {'remoteGitDiff': false},
 };
 
+const Map<String, Object?> _fileMentionCapabilities = {
+  'sessions': {
+    'create': true,
+    'history': true,
+    'interrupt': false,
+    'rename': false,
+    'archive': false,
+  },
+  'input': {
+    'text': true,
+    'imageUrl': false,
+    'localImage': false,
+    'skills': false,
+    'fileMentions': true,
+  },
+  'configuration': {'models': false, 'profiles': false, 'skills': false},
+  'runtimeControls': {
+    'model': false,
+    'mode': false,
+    'reasoningEffort': false,
+    'fastMode': false,
+    'approvalPolicy': false,
+    'sandboxMode': false,
+    'networkAccess': false,
+    'webSearch': false,
+  },
+  'workspace': {'remoteGitDiff': false},
+};
+
 const Map<String, Object?> _copilotApprovalCapabilities = {
   'sessions': {
     'create': true,
@@ -941,6 +1029,31 @@ class _CapabilityFakeApi extends ApiClient {
   WebSocketChannel openLive(HostProfile host, String sessionId) => _channel;
 
   void dispose() => _channel.dispose();
+}
+
+class _FileSearchRaceApi extends _CapabilityFakeApi {
+  _FileSearchRaceApi(super.node);
+
+  final List<String> queries = <String>[];
+  final Map<String, Completer<List<FsSearchResult>>> _pendingSearches =
+      <String, Completer<List<FsSearchResult>>>{};
+
+  Completer<List<FsSearchResult>> pendingSearch(String query) =>
+      _pendingSearches.putIfAbsent(
+        query,
+        () => Completer<List<FsSearchResult>>(),
+      );
+
+  @override
+  Future<List<FsSearchResult>> searchFiles(
+    HostProfile host, {
+    required String query,
+    String? sessionId,
+    int? limit,
+  }) {
+    queries.add(query);
+    return pendingSearch(query).future;
+  }
 }
 
 class _IdleWebSocketChannel extends StreamChannelMixin<dynamic>
