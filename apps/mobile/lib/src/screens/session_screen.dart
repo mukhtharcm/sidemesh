@@ -1161,6 +1161,16 @@ class _SessionScreenState extends State<SessionScreen>
             session: _session ?? widget.session,
             supportsBrowserPreview: _supportsBrowserPreview,
             supportsPortForwarding: _supportsPortForwarding,
+            onBrowserPreviewOpened: (preview) {
+              controller.show(
+                buildInspectorBrowserPreviewSurface(
+                  ownerKey: ownerKey,
+                  host: widget.host,
+                  api: widget.api,
+                  preview: preview,
+                ),
+              );
+            },
           ),
         );
         break;
@@ -4913,6 +4923,16 @@ class _SessionScreenState extends State<SessionScreen>
           session: session,
           supportsBrowserPreview: _supportsBrowserPreview,
           supportsPortForwarding: _supportsPortForwarding,
+          onBrowserPreviewOpened: (preview) {
+            scope.show(
+              buildInspectorBrowserPreviewSurface(
+                ownerKey: _inspectorOwnerKey(),
+                host: widget.host,
+                api: widget.api,
+                preview: preview,
+              ),
+            );
+          },
         ),
       );
       return;
