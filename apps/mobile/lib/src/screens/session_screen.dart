@@ -766,6 +766,7 @@ class _SessionScreenState extends State<SessionScreen>
   InspectorController? _inspectorController;
   bool _inspectorRestoreAttempted = false;
   bool _inspectorSawOurSurface = false;
+  InspectorSurfaceKind? _lastInspectorSurfaceKind;
 
   // Ticks whenever the timeline inputs change so pane-3 surfaces
   // (currently the search panel) can rebuild with fresh records. A
@@ -1231,6 +1232,7 @@ class _SessionScreenState extends State<SessionScreen>
     final cur = controller.current;
     if (cur != null && cur.ownerKey == ownerKey) {
       _inspectorSawOurSurface = true;
+      _lastInspectorSurfaceKind = cur.kind;
       // Don't persist the hub — it's the default, not a deliberate user
       // choice. A real surface opened next will replace it in persistence.
       if (cur.kind != InspectorSurfaceKind.sessionHub) {
@@ -1245,9 +1247,23 @@ class _SessionScreenState extends State<SessionScreen>
     if (cur == null &&
         _inspectorSawOurSurface &&
         controller.lastCloseWasUserInitiated) {
+      final lastKind = _lastInspectorSurfaceKind;
       unawaited(InspectorPersistence.save(ownerKey, null));
+      if (lastKind != null &&
+          lastKind != InspectorSurfaceKind.sessionHub &&
+          MediaQuery.of(context).size.width >= 900) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _disposed) return;
+          final nextController = _inspectorController;
+          if (nextController == null || nextController.current != null) return;
+          _openDefaultInspectorHub(nextController, ownerKey);
+        });
+      }
     }
     _inspectorSawOurSurface = false;
+    if (cur == null) {
+      _lastInspectorSurfaceKind = null;
+    }
   }
 
   @override
@@ -5501,6 +5517,9 @@ class _SessionScreenState extends State<SessionScreen>
       case 'favorite':
         _toggleFavorite();
         break;
+      case 'controls':
+        _showSessionPolicySheet(session);
+        break;
       case 'unread':
         unawaited(_markSessionUnread());
         break;
@@ -5535,6 +5554,7 @@ class _SessionScreenState extends State<SessionScreen>
     required bool portsOpen,
     required bool searchOpen,
     required bool resourcesOpen,
+    required bool sessionControlsCustomized,
   }) {
     return [
       // When the agent is running, surface the interrupt action at the top so
@@ -5647,6 +5667,18 @@ class _SessionScreenState extends State<SessionScreen>
       _SessionActionGroup(
         label: 'Session',
         actions: [
+          _SessionActionSpec(
+            value: 'controls',
+            label: 'Session controls',
+            detail: sessionControlsCustomized
+                ? 'Overrides are active for this session.'
+                : 'Adjust approvals, sandboxing, and turn settings.',
+            icon: Icons.tune_rounded,
+            tone: sessionControlsCustomized
+                ? _SessionActionTone.accent
+                : _SessionActionTone.neutral,
+            active: sessionControlsCustomized,
+          ),
           const _SessionActionSpec(
             value: 'new',
             label: 'New session',
@@ -5735,6 +5767,7 @@ class _SessionScreenState extends State<SessionScreen>
     required bool portsOpen,
     required bool searchOpen,
     required bool resourcesOpen,
+    required bool sessionControlsCustomized,
   }) async {
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -5753,6 +5786,7 @@ class _SessionScreenState extends State<SessionScreen>
           portsOpen: portsOpen,
           searchOpen: searchOpen,
           resourcesOpen: resourcesOpen,
+          sessionControlsCustomized: sessionControlsCustomized,
         ),
       ),
     );
@@ -6097,7 +6131,7 @@ class _SessionScreenState extends State<SessionScreen>
           children: [
             if (_running) ...[const LivePulse(), const SizedBox(width: 10)],
             Expanded(
-              child: _supportsSessionRename
+              child: _supportsSessionRename && !isCompact
                   ? GestureDetector(
                       onTap: () => unawaited(_renameSession()),
                       behavior: HitTestBehavior.opaque,
@@ -6239,68 +6273,75 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: _openResourcesPanel,
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: ListenableBuilder(
-              listenable: Listenable.merge([_policyStore, _turnConfigStore]),
-              builder: (context, _) {
-                final policy = _policyStore.policyFor(widget.host, session.id);
-                final turnConfig = _turnConfigStore.configFor(
-                  widget.host,
-                  session.id,
-                );
-                final runtime = session.runtime;
-                final runtimeLoosened = SessionPolicy.runtimeIsLoosened(
-                  approvalPolicy: runtime?.approvalPolicy,
-                  sandboxMode: runtime?.sandboxMode,
-                  networkAccess: runtime?.networkAccess,
-                );
-                final customised =
-                    !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
-                return MeshIconButton(
-                  icon: customised ? Icons.tune_rounded : Icons.tune_rounded,
-                  tooltip: 'Session controls',
-                  color: customised ? colors.accent : colors.textSecondary,
-                  onTap: () => _showSessionPolicySheet(session),
-                );
-              },
+          if (!isCompact)
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: ListenableBuilder(
+                listenable: Listenable.merge([_policyStore, _turnConfigStore]),
+                builder: (context, _) {
+                  final policy = _policyStore.policyFor(widget.host, session.id);
+                  final turnConfig = _turnConfigStore.configFor(
+                    widget.host,
+                    session.id,
+                  );
+                  final runtime = session.runtime;
+                  final runtimeLoosened = SessionPolicy.runtimeIsLoosened(
+                    approvalPolicy: runtime?.approvalPolicy,
+                    sandboxMode: runtime?.sandboxMode,
+                    networkAccess: runtime?.networkAccess,
+                  );
+                  final customised =
+                      !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
+                  return MeshIconButton(
+                    icon: customised ? Icons.tune_rounded : Icons.tune_rounded,
+                    tooltip: 'Session controls',
+                    color: customised ? colors.accent : colors.textSecondary,
+                    onTap: () => _showSessionPolicySheet(session),
+                  );
+                },
+              ),
             ),
-          ),
           ListenableBuilder(
-            listenable: SessionLocalStore.instance,
+            listenable: Listenable.merge([
+              SessionLocalStore.instance,
+              _policyStore,
+              _turnConfigStore,
+            ]),
             builder: (context, _) {
               final favorite = _localStore.isFavorite(widget.host, session.id);
               final gitAvailable =
                   _supportsGitStatus &&
                   _gitHeaderLabel(session, _gitStatus) != null;
               final gitDirty = _gitStatus?.dirty ?? false;
+              final policy = _policyStore.policyFor(widget.host, session.id);
+              final turnConfig = _turnConfigStore.configFor(
+                widget.host,
+                session.id,
+              );
+              final runtime = session.runtime;
+              final runtimeLoosened = SessionPolicy.runtimeIsLoosened(
+                approvalPolicy: runtime?.approvalPolicy,
+                sandboxMode: runtime?.sandboxMode,
+                networkAccess: runtime?.networkAccess,
+              );
+              final sessionControlsCustomized =
+                  !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
               // Hide the 'Git details' menu item when it's already a visible
               // icon (dirty state). Keep it hidden entirely if there is no
               // git info to show.
               final showGitInMenu = gitAvailable && !gitDirty;
               if (isCompact) {
-                // One-tap star — surfaced directly in the AppBar on mobile so
-                // users don't have to open the overflow sheet to pin/unpin.
                 return Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    IconButton(
-                      icon: Icon(
-                        favorite
-                            ? Icons.star_rounded
-                            : Icons.star_outline_rounded,
-                        color:
-                            favorite ? colors.warning : colors.textSecondary,
-                        size: 20,
-                      ),
-                      tooltip:
-                          favorite ? 'Unpin session' : 'Pin session',
-                      padding: const EdgeInsets.all(8),
-                      constraints: const BoxConstraints(
-                        minWidth: 40,
-                        minHeight: 40,
-                      ),
-                      onPressed: _toggleFavorite,
+                    MeshIconButton(
+                      icon: favorite
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
+                      tooltip: favorite ? 'Unpin session' : 'Pin session',
+                      color:
+                          favorite ? colors.warning : colors.textSecondary,
+                      onTap: _toggleFavorite,
                     ),
                     MeshIconButton(
                       icon: Icons.more_horiz_rounded,
@@ -6319,6 +6360,8 @@ class _SessionScreenState extends State<SessionScreen>
                           portsOpen: portsOpenInInspector,
                           searchOpen: searchOpenInInspector,
                           resourcesOpen: resourcesOpenInInspector,
+                          sessionControlsCustomized:
+                              sessionControlsCustomized,
                         ),
                       ),
                     ),
