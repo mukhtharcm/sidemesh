@@ -2792,6 +2792,10 @@ export async function startServer(
       }
 
       pendingActions.delete(actionId);
+      setLatestThreadStatusForSession(
+        action.sessionId,
+        activeTurns.has(action.sessionId) ? "running" : null,
+      );
       broadcastLive(action.sessionId, {
         type: "action_resolved",
         sessionId: action.sessionId,
