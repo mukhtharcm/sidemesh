@@ -4173,22 +4173,22 @@ class _SessionScreenState extends State<SessionScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Stop session?'),
+        title: const Text('Interrupt agent?'),
         content: const Text(
-          'The running task will be interrupted. In-flight tool calls may not complete cleanly.',
+          'The current task will stop. Any tools mid-run may not finish cleanly.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Keep running'),
+            child: const Text('Cancel'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: context.colors.danger,
-              foregroundColor: context.colors.accentOn,
+              foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Stop'),
+            child: const Text('Interrupt'),
           ),
         ],
       ),
@@ -4210,7 +4210,7 @@ class _SessionScreenState extends State<SessionScreen>
       _syncSessionLiveActivity();
       showAppSnackBar(
         context,
-        'Session stopped.',
+        'Agent interrupted.',
         duration: const Duration(seconds: 2),
       );
     } catch (error) {
@@ -4219,7 +4219,7 @@ class _SessionScreenState extends State<SessionScreen>
       }
       showAppSnackBar(
         context,
-        "Failed to stop session: ${friendlyError(error)}",
+        'Failed to interrupt agent: ${friendlyError(error)}',
       );
     }
   }
@@ -5476,6 +5476,21 @@ class _SessionScreenState extends State<SessionScreen>
     required bool resourcesOpen,
   }) {
     return [
+      // When the agent is running, surface the interrupt action at the top so
+      // it's immediately reachable without scrolling the sheet.
+      if (_running && _supportsSessionInterrupt)
+        const _SessionActionGroup(
+          label: 'LIVE',
+          actions: [
+            _SessionActionSpec(
+              value: 'stop',
+              label: 'Interrupt agent',
+              detail: 'Stop the current task immediately.',
+              icon: Icons.stop_circle_rounded,
+              tone: _SessionActionTone.danger,
+            ),
+          ],
+        ),
       _SessionActionGroup(
         label: 'Workspace',
         actions: [
@@ -5571,14 +5586,6 @@ class _SessionScreenState extends State<SessionScreen>
       _SessionActionGroup(
         label: 'Session',
         actions: [
-          if (_running && _supportsSessionInterrupt)
-            const _SessionActionSpec(
-              value: 'stop',
-              label: 'Stop agent',
-              detail: 'Interrupt the current turn immediately.',
-              icon: Icons.stop_circle_rounded,
-              tone: _SessionActionTone.danger,
-            ),
           const _SessionActionSpec(
             value: 'new',
             label: 'New session',
@@ -5768,7 +5775,13 @@ class _SessionScreenState extends State<SessionScreen>
               : Stack(
                   children: [
                     if (showWaitingState)
-                      const Positioned.fill(child: _SessionWaitingState())
+                      Positioned.fill(
+                        child: _SessionWaitingState(
+                          onStop: _supportsSessionInterrupt
+                              ? _stopSession
+                              : null,
+                        ),
+                      )
                     else
                       RefreshIndicator(
                         onRefresh: () => _loadSnapshot(scrollToBottom: false),
@@ -6054,18 +6067,23 @@ class _SessionScreenState extends State<SessionScreen>
           ],
         ),
         actions: [
-          if (_running && _supportsSessionInterrupt && !isCompact)
+          // Reserve a permanent slot for interrupt — this prevents all other
+          // action buttons from jumping left/right when the agent starts/stops.
+          if (!isCompact && _supportsSessionInterrupt)
             Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: TextButton.icon(
-                onPressed: _stopSession,
-                icon: Icon(
-                  Icons.stop_circle_rounded,
-                  color: colors.danger,
-                ),
-                label: Text(
-                  'Stop',
-                  style: TextStyle(color: colors.danger),
+              padding: const EdgeInsets.only(right: 4),
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 200),
+                opacity: _running ? 1.0 : 0.3,
+                child: IgnorePointer(
+                  ignoring: !_running,
+                  child: MeshIconButton(
+                    icon: Icons.stop_circle_rounded,
+                    tooltip: 'Interrupt agent',
+                    color: colors.danger,
+                    onTap: _stopSession,
+                    semanticLabel: 'Interrupt agent',
+                  ),
                 ),
               ),
             ),
