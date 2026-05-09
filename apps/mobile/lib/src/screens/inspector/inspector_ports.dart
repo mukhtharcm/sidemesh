@@ -12,6 +12,7 @@ InspectorSurface buildInspectorPortsSurface({
   required SessionSummary session,
   required bool supportsBrowserPreview,
   required bool supportsPortForwarding,
+  PortForwardBrowserPreviewOpened? onBrowserPreviewOpened,
 }) {
   return InspectorSurface(
     kind: InspectorSurfaceKind.ports,
@@ -31,6 +32,7 @@ InspectorSurface buildInspectorPortsSurface({
       supportsBrowserPreview: supportsBrowserPreview,
       supportsPortForwarding: supportsPortForwarding,
       previewPresentation: PortForwardPreviewPresentation.inline,
+      onBrowserPreviewOpened: onBrowserPreviewOpened,
     ),
   );
 }

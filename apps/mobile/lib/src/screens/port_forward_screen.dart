@@ -105,6 +105,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   bool _loading = true;
   bool _creatingPreview = false;
   bool _rememberBrowserLogins = true;
+  bool _showAdvancedLauncherOptions = false;
   String _scheme = 'http';
   String? _error;
 
@@ -309,6 +310,8 @@ class _PortForwardPaneState extends State<PortForwardPane> {
 
     final browserPreviews = _browserPreviews;
     final colors = context.colors;
+    final inlineManager =
+        widget.previewPresentation == PortForwardPreviewPresentation.inline;
     return RefreshIndicator(
       onRefresh: _loadBrowserPreviews,
       child: ListView(
@@ -343,101 +346,174 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                           ),
                         ),
                       ),
+                      TextButton.icon(
+                        onPressed: () => setState(
+                          () => _showAdvancedLauncherOptions =
+                              !_showAdvancedLauncherOptions,
+                        ),
+                        icon: Icon(
+                          _showAdvancedLauncherOptions
+                              ? Icons.expand_less_rounded
+                              : Icons.tune_rounded,
+                          size: 16,
+                        ),
+                        label: Text(
+                          _showAdvancedLauncherOptions
+                              ? 'Less'
+                              : 'Advanced',
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Open a live preview for a localhost web app running on ${widget.host.label}.',
+                    inlineManager
+                        ? 'Open a live preview for a localhost app from this workspace.'
+                        : 'Open a live preview for a localhost web app running on ${widget.host.label}.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colors.textSecondary,
                       height: 1.35,
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 110,
-                        child: TextField(
-                          controller: _portController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Port',
-                            hintText: '3000',
-                          ),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 150,
-                        child: TextField(
-                          controller: _hostController,
-                          decoration: const InputDecoration(
-                            labelText: 'Host',
-                            hintText: '127.0.0.1',
-                          ),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 120,
-                        child: DropdownButtonFormField<String>(
-                          initialValue: _scheme,
-                          isExpanded: true,
-                          decoration: const InputDecoration(labelText: 'Scheme'),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'http',
-                              child: Text('HTTP'),
+                  if (inlineManager)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        SizedBox(
+                          width: 120,
+                          child: TextField(
+                            controller: _portController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Port',
+                              hintText: '3000',
                             ),
-                            DropdownMenuItem(
-                              value: 'https',
-                              child: Text('HTTPS'),
-                            ),
-                          ],
-                          onChanged: (value) =>
-                              setState(() => _scheme = value ?? 'http'),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 180,
-                        child: TextField(
-                          controller: _labelController,
-                          decoration: const InputDecoration(
-                            labelText: 'Label',
-                            hintText: 'Vite app',
                           ),
                         ),
-                      ),
-                      FilterChip(
-                        selected: _rememberBrowserLogins,
-                        avatar: Icon(
-                          _rememberBrowserLogins
-                              ? Icons.lock_clock_rounded
-                              : Icons.lock_reset_rounded,
-                          size: 17,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _creatingPreview
+                                ? null
+                                : _createBrowserPreviewFromInputs,
+                            icon: _creatingPreview
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.open_in_browser_rounded),
+                            label: const Text('Open preview'),
+                          ),
                         ),
-                        label: const Text('Remember browser logins'),
-                        onSelected: (selected) =>
-                            setState(() => _rememberBrowserLogins = selected),
+                      ],
+                    )
+                  else
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      crossAxisAlignment: WrapCrossAlignment.end,
+                      children: [
+                        SizedBox(
+                          width: 110,
+                          child: TextField(
+                            controller: _portController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Port',
+                              hintText: '3000',
+                            ),
+                          ),
+                        ),
+                        FilledButton.icon(
+                          onPressed: _creatingPreview
+                              ? null
+                              : _createBrowserPreviewFromInputs,
+                          icon: _creatingPreview
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.open_in_browser_rounded),
+                          label: const Text('Open preview'),
+                        ),
+                      ],
+                    ),
+                  AnimatedCrossFade(
+                    crossFadeState: _showAdvancedLauncherOptions
+                        ? CrossFadeState.showSecond
+                        : CrossFadeState.showFirst,
+                    duration: const Duration(milliseconds: 180),
+                    firstChild: const SizedBox.shrink(),
+                    secondChild: Padding(
+                      padding: const EdgeInsets.only(top: 14),
+                      child: Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 150,
+                            child: TextField(
+                              controller: _hostController,
+                              decoration: const InputDecoration(
+                                labelText: 'Host',
+                                hintText: '127.0.0.1',
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 120,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _scheme,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Scheme',
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'http',
+                                  child: Text('HTTP'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'https',
+                                  child: Text('HTTPS'),
+                                ),
+                              ],
+                              onChanged: (value) =>
+                                  setState(() => _scheme = value ?? 'http'),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 180,
+                            child: TextField(
+                              controller: _labelController,
+                              decoration: const InputDecoration(
+                                labelText: 'Label',
+                                hintText: 'Vite app',
+                              ),
+                            ),
+                          ),
+                          FilterChip(
+                            selected: _rememberBrowserLogins,
+                            avatar: Icon(
+                              _rememberBrowserLogins
+                                  ? Icons.lock_clock_rounded
+                                  : Icons.lock_reset_rounded,
+                              size: 17,
+                            ),
+                            label: const Text('Remember browser logins'),
+                            onSelected: (selected) =>
+                                setState(() => _rememberBrowserLogins = selected),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: FilledButton.icon(
-                      onPressed:
-                          _creatingPreview ? null : _createBrowserPreviewFromInputs,
-                      icon: _creatingPreview
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.open_in_browser_rounded),
-                      label: const Text('Open preview'),
                     ),
                   ),
                 ],
