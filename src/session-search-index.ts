@@ -323,14 +323,22 @@ export class SessionSearchIndex {
     }
 
     if (version < 3) {
-      // Provider-backed rows in older caches may have incorrect archived flags
-      // or second-based timestamps. Clear derived search data so backfill
-      // rebuilds it with the corrected semantics.
+      // Older generic session rows stored second-based timestamps. Normalize
+      // those in place so date filters keep working, then clear the generic
+      // manifest so startup backfill refreshes archived flags and any rows
+      // whose fingerprints were computed before the timestamp fix.
       this.db.exec(`
-        DELETE FROM manifest;
+        UPDATE session_search_documents
+        SET
+          created_at = CASE
+            WHEN ABS(created_at) < 1000000000000 THEN created_at * 1000
+            ELSE created_at
+          END,
+          updated_at = CASE
+            WHEN ABS(updated_at) < 1000000000000 THEN updated_at * 1000
+            ELSE updated_at
+          END;
         DELETE FROM session_manifest;
-        DELETE FROM session_search_documents;
-        DELETE FROM session_fts;
       `);
     }
 
