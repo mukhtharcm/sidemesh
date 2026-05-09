@@ -268,17 +268,21 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   late final TextEditingController _profileController;
 
   List<ModelCatalogEntry> _models = const <ModelCatalogEntry>[];
+  List<ProviderModeSummary> _providerModes = const <ProviderModeSummary>[];
   List<ProviderProfileSummary> _profiles = const <ProviderProfileSummary>[];
   ModelCatalogEntry? _selectedModel;
   String? _mode;
   String? _reasoningEffort;
   String? _modelsError;
+  String? _providerModesError;
   String? _profilesError;
   String? _defaultProfileName;
   ApprovalPolicy _approval = ApprovalPolicy.onRequest;
   SandboxMode _sandbox = SandboxMode.workspaceWrite;
   bool _loadingModels = false;
+  bool _loadingProviderModes = false;
   bool _loadingProfiles = false;
+  bool _providerModesUseFallback = false;
   bool _fastMode = false;
   bool _webSearch = false;
   bool _reasoningTouched = false;
@@ -294,6 +298,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   NodeInfo? _nodeInfo;
   String? _modelsLoadedForCwd;
   String? _modelsLoadedForProfile;
+  String? _providerModesLoadedForCwd;
+  String? _providerModesLoadedForProvider;
   String? _profilesLoadedForCwd;
   String? _selectedProviderKind;
 
@@ -352,6 +358,24 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   bool get _fastSupported =>
       _supportsFastMode && (_controlModel?.supportsFastMode ?? false);
+
+  List<ProviderModeSummary> get _availableModeChoices {
+    final base = _providerModesUseFallback
+        ? kDefaultProviderModes
+        : _providerModes;
+    final result = <ProviderModeSummary>[...base];
+    final selectedMode = _trimmedOrNull(_modeToSubmit);
+    if (selectedMode != null &&
+        !result.any((candidate) => candidate.id == selectedMode)) {
+      result.add(
+        ProviderModeSummary(
+          id: selectedMode,
+          label: sessionModeLabel(selectedMode),
+        ),
+      );
+    }
+    return result;
+  }
 
   List<ProviderDefinitionSummary> get _availableProviders {
     final node = _nodeInfo;
@@ -674,6 +698,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         _nodeError = null;
         _coerceForProviderCapabilities();
       });
+      if (_supportsMode) {
+        unawaited(_loadProviderModes());
+      }
       if (_supportsProfiles && _currentCwd != null) {
         unawaited(_loadProfiles());
       }
@@ -751,6 +778,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     }
     if (!_supportsMode) {
       _mode = null;
+      _providerModes = const <ProviderModeSummary>[];
+      _providerModesError = null;
+      _providerModesLoadedForCwd = null;
+      _providerModesLoadedForProvider = null;
+      _providerModesUseFallback = false;
     }
     if (!_supportsFastMode) {
       _fastMode = false;
@@ -785,6 +817,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     _profiles = const <ProviderProfileSummary>[];
     _modelsError = null;
     _profilesError = null;
+    _providerModes = const <ProviderModeSummary>[];
+    _providerModesError = null;
+    _providerModesLoadedForCwd = null;
+    _providerModesLoadedForProvider = null;
+    _providerModesUseFallback = false;
     _defaultProfileName = null;
     _modelsLoadedForCwd = null;
     _modelsLoadedForProfile = null;
@@ -813,6 +850,17 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         unawaited(_loadModels());
       }
     }
+    if (_providerModesLoadedForCwd != cwd) {
+      setState(() {
+        _providerModes = const <ProviderModeSummary>[];
+        _providerModesError = null;
+        _providerModesLoadedForCwd = null;
+        _providerModesUseFallback = false;
+      });
+      if (_supportsMode && !_loadingProviderModes) {
+        unawaited(_loadProviderModes());
+      }
+    }
     if (cwd == _profilesLoadedForCwd) {
       return;
     }
@@ -832,6 +880,69 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       unawaited(_loadProfiles());
     }
   }
+
+  Future<void> _loadProviderModes({bool force = false}) async {
+    if (!_supportsMode) {
+      setState(() {
+        _providerModes = const <ProviderModeSummary>[];
+        _providerModesError = null;
+        _providerModesLoadedForCwd = _currentCwd;
+        _providerModesLoadedForProvider = _selectedProviderKindOrDefault;
+        _providerModesUseFallback = false;
+      });
+      return;
+    }
+    final cwd = _currentCwd;
+    final providerKind = _selectedProviderKindOrDefault;
+    if (_loadingProviderModes) return;
+    if (!force &&
+        _providerModesLoadedForCwd == cwd &&
+        _providerModesLoadedForProvider == providerKind &&
+        _providerModesError == null) {
+      return;
+    }
+    setState(() {
+      _loadingProviderModes = true;
+      _providerModesError = null;
+    });
+
+    try {
+      final catalog = await widget.api.fetchModes(
+        widget.host,
+        cwd: cwd,
+        agentProvider: providerKind,
+      );
+      if (!mounted) return;
+      setState(() {
+        _providerModes = catalog.modes;
+        _providerModesError = null;
+        _providerModesLoadedForCwd = cwd;
+        _providerModesLoadedForProvider = providerKind;
+        _providerModesUseFallback = false;
+        _loadingProviderModes = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingProviderModes = false;
+        _providerModesLoadedForCwd = cwd;
+        _providerModesLoadedForProvider = providerKind;
+        if (_shouldUseModeFallback(error)) {
+          _providerModes = kDefaultProviderModes;
+          _providerModesError = null;
+          _providerModesUseFallback = true;
+        } else {
+          _providerModes = const <ProviderModeSummary>[];
+          _providerModesError = friendlyError(error);
+          _providerModesUseFallback = false;
+        }
+      });
+    }
+  }
+
+  bool _shouldUseModeFallback(Object error) =>
+      error is ApiException &&
+      (error.statusCode == 404 || error.statusCode == 501);
 
   Future<void> _loadModels({bool force = false}) async {
     if (!_supportsModels || !_supportsModelOverride) {
@@ -1088,6 +1199,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     });
     if (_supportsProfiles && _currentCwd != null) {
       unawaited(_loadProfiles(force: true));
+    }
+    if (_supportsMode) {
+      unawaited(_loadProviderModes(force: true));
     }
     if (_showAdvanced) {
       unawaited(_loadModels(force: true));
@@ -1500,6 +1614,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               supportsSessionMode: _supportsMode,
               approvalOptions: _approvalOptions,
             ),
+            sessionModes: _availableModeChoices,
             value: LaunchOptionsValue(
               approval: _effectiveApproval,
               sandbox: _effectiveSandbox,
@@ -1781,7 +1896,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         ),
       if (_supportsMode)
         MeshPill(
-          label: _sessionModeChoiceLabel(_modeToSubmit),
+          label: _sessionModeChoiceLabel(_modeToSubmit, _availableModeChoices),
           icon: Icons.alt_route_rounded,
           tone: _modeToSubmit == null
               ? MeshPillTone.neutral
@@ -2987,11 +3102,14 @@ String _reasoningEffortLabel(String value) {
   };
 }
 
-String _sessionModeChoiceLabel(String? value) {
+String _sessionModeChoiceLabel(
+  String? value,
+  Iterable<ProviderModeSummary> modes,
+) {
   if (value == null || value.trim().isEmpty) {
     return 'provider default';
   }
-  return sessionModeLabel(value);
+  return providerModeLabel(value, modes);
 }
 
 String _describeProviderProfile(ProviderProfileSummary profile) {

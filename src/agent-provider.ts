@@ -9,6 +9,7 @@ import type {
   LivePlanStep,
   LiveThreadStatus,
   ModelSummary,
+  ProviderModeCatalog,
   PendingAction,
   PendingActionKind,
   ProviderProfileCatalog,
@@ -148,6 +149,10 @@ export interface AgentModelListOptions {
 }
 
 export interface AgentProfileListOptions {
+  cwd: string | null;
+}
+
+export interface AgentModeListOptions {
   cwd: string | null;
 }
 
@@ -385,6 +390,7 @@ export interface AgentConfigurationProvider {
   writeSkillConfig(request: AgentSkillConfigWriteRequest): Promise<unknown>;
   listModels(options: AgentModelListOptions): Promise<ModelSummary[]>;
   listProfiles(options: AgentProfileListOptions): Promise<ProviderProfileCatalog>;
+  listModes(options: AgentModeListOptions): Promise<ProviderModeCatalog>;
 }
 
 export interface AgentUsageProvider {

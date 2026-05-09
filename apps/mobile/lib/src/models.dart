@@ -1116,6 +1116,31 @@ class SessionCompactionSummary {
 
 const List<String> kSessionModes = <String>['interactive', 'plan', 'autopilot'];
 
+const List<ProviderModeSummary> kDefaultProviderModes = <ProviderModeSummary>[
+  ProviderModeSummary(
+    id: 'interactive',
+    label: 'Interactive',
+    description: 'Interactive keeps the agent conversational and approval-oriented.',
+  ),
+  ProviderModeSummary(
+    id: 'plan',
+    label: 'Plan',
+    description:
+        'Plan focuses on outlining or analyzing before it starts making changes.',
+  ),
+  ProviderModeSummary(
+    id: 'autopilot',
+    label: 'Autopilot',
+    description:
+        'Autopilot lets the provider run with its most self-directed execution mode.',
+  ),
+];
+
+const ProviderModeCatalog kDefaultProviderModeCatalog = ProviderModeCatalog(
+  defaultMode: null,
+  modes: kDefaultProviderModes,
+);
+
 String sessionModeLabel(String value) {
   return switch (value) {
     'interactive' => 'Interactive',
@@ -1123,6 +1148,28 @@ String sessionModeLabel(String value) {
     'autopilot' => 'Autopilot',
     _ => value,
   };
+}
+
+ProviderModeSummary? findProviderModeSummary(
+  Iterable<ProviderModeSummary> modes,
+  String? value,
+) {
+  final target = _stringOrNull(value);
+  if (target == null) return null;
+  for (final mode in modes) {
+    if (mode.id == target) {
+      return mode;
+    }
+  }
+  return null;
+}
+
+String providerModeLabel(String value, Iterable<ProviderModeSummary> modes) {
+  final summary = findProviderModeSummary(modes, value);
+  if (summary != null && summary.label.isNotEmpty) {
+    return summary.label;
+  }
+  return sessionModeLabel(value);
 }
 
 class SessionGitFileStatus {
@@ -1503,6 +1550,41 @@ class ProviderProfileCatalog {
             .whereType<Map<String, dynamic>>()
             .map(ProviderProfileSummary.fromJson)
             .toList(),
+      );
+}
+
+class ProviderModeCatalog {
+  const ProviderModeCatalog({required this.defaultMode, required this.modes});
+
+  final String? defaultMode;
+  final List<ProviderModeSummary> modes;
+
+  factory ProviderModeCatalog.fromJson(Map<String, dynamic> json) =>
+      ProviderModeCatalog(
+        defaultMode: _stringOrNull(json['defaultMode']),
+        modes: (json['modes'] as List<dynamic>? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(ProviderModeSummary.fromJson)
+            .toList(),
+      );
+}
+
+class ProviderModeSummary {
+  const ProviderModeSummary({
+    required this.id,
+    required this.label,
+    this.description,
+  });
+
+  final String id;
+  final String label;
+  final String? description;
+
+  factory ProviderModeSummary.fromJson(Map<String, dynamic> json) =>
+      ProviderModeSummary(
+        id: _stringValue(json['id']),
+        label: _stringValue(json['label']),
+        description: _stringOrNull(json['description']),
       );
 }
 

@@ -27,13 +27,18 @@ import type {
   AgentCreateSessionResult,
   AgentPendingAction,
   AgentProvider,
+  AgentProviderCore,
   AgentProviderCapabilities,
   AgentSessionListOptions,
   AgentSessionLogOptions,
   AgentSubmitInputRequest,
   AgentSubmitInputResult,
 } from "./agent-provider.js";
-import type { SessionLogSnapshot, ThreadRecord } from "./types.js";
+import type {
+  ProviderModeCatalog,
+  SessionLogSnapshot,
+  ThreadRecord,
+} from "./types.js";
 
 const EMPTY_OVERRIDES = {
   model: null,
@@ -250,6 +255,37 @@ function makeCustomSingleProviderRuntime(provider: AgentProvider): AgentProvider
       return entry;
     },
   };
+}
+
+class ModeCatalogOnlyProvider
+  extends EventEmitter
+  implements AgentProviderCore, Pick<AgentProvider, "listModes">
+{
+  public readonly kind = "fake";
+  public readonly displayName = "Mode Catalog Provider";
+  public readonly capabilities: AgentProviderCapabilities = {
+    ...FAKE_PROVIDER_CAPABILITIES,
+    runtimeControls: {
+      ...FAKE_PROVIDER_CAPABILITIES.runtimeControls,
+      mode: true,
+    },
+  };
+
+  public async start(): Promise<void> {}
+
+  public async getVersion(): Promise<string> {
+    return "test-provider 1.0.0";
+  }
+
+  public async listModes(): Promise<ProviderModeCatalog> {
+    return {
+      defaultMode: null,
+      modes: [
+        { id: "build", label: "Build" },
+        { id: "review", label: "Review" },
+      ],
+    };
+  }
 }
 
 const RESTARTABLE_FAKE_CAPABILITIES: AgentProviderCapabilities = {
@@ -1940,6 +1976,10 @@ describe("provider-scoped catalog routes", () => {
       };
 
       assert.equal(
+        (await request({ ...baseRequest, path: "/api/modes", method: "GET" })).statusCode,
+        501,
+      );
+      assert.equal(
         (await request({ ...baseRequest, path: "/api/models", method: "GET" })).statusCode,
         200,
       );
@@ -1984,6 +2024,7 @@ describe("provider-scoped catalog routes", () => {
       };
 
       for (const path of [
+        "/api/modes?agentProvider=unknown",
         "/api/models?agentProvider=unknown",
         "/api/profiles?agentProvider=unknown",
         `/api/skills?agentProvider=unknown&cwd=${encodeURIComponent("/tmp")}`,
@@ -2024,6 +2065,7 @@ describe("provider-scoped catalog routes", () => {
         };
 
         for (const path of [
+          "/api/modes",
           "/api/models",
           "/api/profiles",
           `/api/skills?cwd=${encodeURIComponent("/tmp")}`,
@@ -2046,6 +2088,32 @@ describe("provider-scoped catalog routes", () => {
           }),
         });
         assert.equal(writeRes.statusCode, 501);
+      },
+    );
+  });
+
+  it("returns provider-defined mode catalogs when the provider exposes them", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    await withServerRuntime(
+      config,
+      makeCustomSingleProviderRuntime(new ModeCatalogOnlyProvider()),
+      async (server, runtimeConfig) => {
+        const res = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/modes?cwd=${encodeURIComponent("/repo/app")}`,
+          method: "GET",
+          headers: { Authorization: "Bearer " + runtimeConfig.token },
+        });
+        assert.equal(res.statusCode, 200);
+        assert.deepEqual(res.body, {
+          defaultMode: null,
+          modes: [
+            { id: "build", label: "Build" },
+            { id: "review", label: "Review" },
+          ],
+        });
       },
     );
   });
