@@ -2211,6 +2211,14 @@ class _SessionScreenState extends State<SessionScreen>
     _awaitingAssistantReply = false;
   }
 
+  void _markTranscriptFreshAfterDelta() {
+    _showingCachedSnapshot = false;
+    _showingPossiblyStaleSnapshot = false;
+    _resumeSyncing = false;
+    _resumeSyncFailed = false;
+    _snapshotRefreshing = false;
+  }
+
   Future<void> _refreshSessionFreshness({bool scrollToBottom = true}) async {
     await _refreshCachedSessionStatus();
     if (!mounted || _disposed) {
@@ -2267,6 +2275,9 @@ class _SessionScreenState extends State<SessionScreen>
           latestPlanUpdate == null &&
           delta.pendingAction == null &&
           delta.session == null) {
+        if (_showingCachedSnapshot || _showingPossiblyStaleSnapshot) {
+          setState(_markTranscriptFreshAfterDelta);
+        }
         HostStatusStore.instance.markOnline(widget.host.id);
         return true;
       }
@@ -2321,6 +2332,7 @@ class _SessionScreenState extends State<SessionScreen>
         if (highestSeq > (_lastEventSeq ?? 0)) {
           _lastEventSeq = highestSeq;
         }
+        _markTranscriptFreshAfterDelta();
       });
       _refreshThinkingState();
       _syncSessionLiveActivity();
