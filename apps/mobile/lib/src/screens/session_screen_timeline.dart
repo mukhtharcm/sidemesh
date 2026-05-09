@@ -3748,7 +3748,11 @@ class _DaySeparator extends StatelessWidget {
 /// messages yet — typically the first 0.5-5 s of a newly created session
 /// while the agent initialises.
 class _SessionWaitingState extends StatelessWidget {
-  const _SessionWaitingState();
+  const _SessionWaitingState({this.onStop});
+
+  /// Called when the user wants to interrupt the agent while it is starting.
+  /// Pass null when the provider does not support interrupt.
+  final VoidCallback? onStop;
 
   @override
   Widget build(BuildContext context) {
@@ -3773,6 +3777,19 @@ class _SessionWaitingState extends StatelessWidget {
               color: colors.textTertiary,
             ),
           ),
+          if (onStop != null) ...[            const SizedBox(height: AppSpacing.lg),
+            OutlinedButton.icon(
+              onPressed: onStop,
+              icon: const Icon(Icons.stop_circle_rounded, size: 17),
+              label: const Text('Interrupt agent'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: colors.danger,
+                side: BorderSide(
+                  color: colors.danger.withValues(alpha: 0.4),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
