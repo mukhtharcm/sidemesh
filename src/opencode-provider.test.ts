@@ -674,6 +674,26 @@ sleep 10
     assert.equal(thread.turns?.[0]?.completedAt, null);
   });
 
+  it("normalizes busy OpenCode sessions to a generic running phase", async () => {
+    const client = new FakeOpenCodeClient();
+    const session = await client.createSession({
+      directory: "/repo/app",
+      title: "Busy session",
+      agent: "build",
+      model: { providerID: "opencode", modelID: "big-pickle" },
+    });
+    client.statusesByDirectory.set("/repo/app", {
+      [session.id]: { type: "busy" },
+    });
+
+    const provider = createProvider(client);
+    await provider.start();
+    const thread = await provider.readSessionThread(session.id, false);
+
+    assert.equal(thread.status.type, "busy");
+    assert.equal(thread.status.phase, "running");
+  });
+
   it("marks incomplete assistant turns interrupted once OpenCode reports idle", async () => {
     const client = new FakeOpenCodeClient();
     const session = await client.createSession({

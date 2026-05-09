@@ -2072,6 +2072,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         headers: { Authorization: "Bearer " + config.token },
       });
       assert.equal(statusRes.statusCode, 200);
+      assert.equal((statusRes.body as any).status, "running");
       assert.equal((statusRes.body as any).isRunning, true);
       assert.ok((statusRes.body as any).activeTurnId);
     });
@@ -2117,11 +2118,59 @@ describe("GET /api/sessions/:sessionId/status", () => {
           headers: { Authorization: "Bearer " + config.token },
         });
         assert.equal(statusRes.statusCode, 200);
+        assert.equal((statusRes.body as any).status, "running");
         assert.equal((statusRes.body as any).isRunning, true);
         assert.ok((statusRes.body as any).activeTurnId);
       } finally {
         (FakeAgentProvider.prototype as any).readSessionThread = original;
       }
+    });
+  });
+
+  it("surfaces live waiting status in both /status and recent session rows", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const session = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      provider.emit("liveEvent", {
+        type: "thread_status_changed",
+        sessionId: session.thread.id,
+        status: "waiting_for_approval",
+        pendingActionKind: "permissions",
+      });
+
+      const statusRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(session.thread.id)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(statusRes.statusCode, 200);
+      assert.equal((statusRes.body as any).status, "waiting_for_approval");
+      assert.equal((statusRes.body as any).isRunning, true);
+
+      const sessionsRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions?limit=10",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(sessionsRes.statusCode, 200);
+      const listed = (sessionsRes.body as any[]).find(
+        (item) => item.id === session.thread.id,
+      );
+      assert.ok(listed);
+      assert.equal(listed.status, "waiting_for_approval");
     });
   });
 });

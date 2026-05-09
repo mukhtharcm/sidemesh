@@ -885,6 +885,7 @@ export interface JsonRpcMessage {
 
 export interface ThreadStatus {
   type: string;
+  phase?: LiveThreadStatus;
   activeFlags?: Array<string>;
 }
 

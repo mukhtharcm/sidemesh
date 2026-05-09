@@ -176,7 +176,9 @@ public async health(): Promise<boolean> {
       sourceKinds: CODEX_THREAD_SOURCES,
       archived: options.archived,
     })) as { data?: unknown[] };
-    return Array.isArray(result.data) ? (result.data as ThreadRecord[]) : [];
+    return Array.isArray(result.data)
+      ? (result.data as ThreadRecord[]).map(normalizeCodexThreadRecord)
+      : [];
   }
 
   public async readSessionThread(
@@ -190,7 +192,7 @@ public async health(): Promise<boolean> {
     if (!result.thread || typeof result.thread !== "object") {
       throw new Error("thread/read did not return a thread");
     }
-    return result.thread as ThreadRecord;
+    return normalizeCodexThreadRecord(result.thread as ThreadRecord);
   }
 
   public async listLoadedSessionIds(): Promise<string[]> {
@@ -2045,6 +2047,17 @@ function normalizeCodexThreadStatus(status: unknown): {
     return { status: "waiting_for_input" };
   }
   return { status: "running" };
+}
+
+function normalizeCodexThreadRecord(thread: ThreadRecord): ThreadRecord {
+  const normalized = normalizeCodexThreadStatus(thread.status);
+  return {
+    ...thread,
+    status: {
+      ...thread.status,
+      phase: normalized.status,
+    },
+  };
 }
 
 function buildCodexPlanSteps(plan: unknown): LivePlanStep[] {

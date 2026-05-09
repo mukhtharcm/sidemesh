@@ -819,13 +819,7 @@ class _SessionScreenState extends State<SessionScreen>
       _reconnectSlotId,
       ReconnectPriority.foregroundSession,
       () {
-        unawaited(
-          _loadSnapshot(
-            messageLimit: _messageLimit,
-            activityLimit: _activityLimit,
-            scrollToBottom: false,
-          ),
-        );
+        unawaited(_refreshSessionFreshness(scrollToBottom: false));
         _connectLive();
       },
     );
@@ -838,8 +832,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     if (loadedCache) {
-      unawaited(_loadSnapshot());
-      unawaited(_refreshCachedSessionStatus());
+      unawaited(_refreshSessionFreshness());
       return;
     }
     await _loadSnapshot();
@@ -1997,6 +1990,10 @@ class _SessionScreenState extends State<SessionScreen>
         _resumeSyncFailed = false;
       });
     }
+    await _refreshCachedSessionStatus();
+    if (!mounted || _disposed) {
+      return;
+    }
     final applied = await _resyncDelta();
     if (!mounted || _disposed) {
       return;
@@ -2190,24 +2187,59 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
+  void _applyFetchedSessionStatus(SessionStatus status) {
+    _running = status.isRunning;
+    _pendingAction = status.pendingAction;
+    if (status.status == 'waiting_for_input' ||
+        status.status == 'waiting_for_approval' ||
+        status.status == 'errored' ||
+        status.status == 'closed') {
+      _latestThreadStatus = LiveEvent(
+        type: 'thread_status_changed',
+        sessionId: status.sessionId,
+        status: status.status,
+        pendingActionKind: status.pendingAction?.kind,
+      );
+    } else {
+      _latestThreadStatus = null;
+    }
+    if (status.status == 'running') {
+      _awaitingAssistantReply =
+          _liveAssistantText.isEmpty && status.pendingAction == null;
+      return;
+    }
+    _awaitingAssistantReply = false;
+  }
+
+  Future<void> _refreshSessionFreshness({bool scrollToBottom = true}) async {
+    await _refreshCachedSessionStatus();
+    if (!mounted || _disposed) {
+      return;
+    }
+    final applied = await _resyncDelta();
+    if (!mounted || _disposed || applied) {
+      return;
+    }
+    await _loadSnapshot(
+      messageLimit: _messageLimit,
+      activityLimit: _activityLimit,
+      scrollToBottom: scrollToBottom,
+    );
+  }
+
   Future<void> _refreshCachedSessionStatus() async {
     try {
       final status = await widget.api.fetchStatus(
         widget.host,
         widget.session.id,
       );
-      if (!mounted || !_showingCachedSnapshot) {
+      if (!mounted || _disposed) {
         return;
       }
       setState(() {
-        _running = status.isRunning;
-        _pendingAction = status.pendingAction;
+        _applyFetchedSessionStatus(status);
         _snapshotRefreshing = _snapshotInFlight;
         _loading = false;
-        _awaitingAssistantReply =
-            status.isRunning &&
-            _liveAssistantText.isEmpty &&
-            status.pendingAction == null;
       });
       HostStatusStore.instance.markOnline(widget.host.id);
       _refreshThinkingState();

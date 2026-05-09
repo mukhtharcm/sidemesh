@@ -195,4 +195,31 @@ void main() {
     expect(parsed.latestPlanUpdate?.plan, hasLength(2));
     expect(parsed.latestPlanUpdate?.plan?.last.step, 'Restore the plan');
   });
+
+  test('Session status models treat waiting states as active', () {
+    final summary = SessionSummary(
+      id: 'session-1',
+      title: 'Session',
+      preview: '',
+      cwd: '/repo',
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1, 0, 1),
+      source: 'fake',
+      provider: null,
+      status: 'waiting_for_approval',
+      runtime: null,
+      gitInfo: null,
+    );
+    expect(summary.isActive, isTrue);
+
+    final status = SessionStatus.fromJson({
+      'sessionId': 'session-1',
+      'status': 'waiting_for_approval',
+      'isRunning': true,
+      'activeTurnId': 'turn-1',
+      'pendingAction': null,
+    });
+    expect(status.status, 'waiting_for_approval');
+    expect(status.isRunning, isTrue);
+  });
 }
