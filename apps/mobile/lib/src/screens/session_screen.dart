@@ -6313,47 +6313,52 @@ class _SessionScreenState extends State<SessionScreen>
               // git info to show.
               final showGitInMenu = gitAvailable && !gitDirty;
               if (isCompact) {
-                return Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    MeshIconButton(
-                      icon: Icons.tune_rounded,
-                      tooltip: 'Session controls',
-                      color: sessionControlsCustomized
-                          ? colors.accent
-                          : colors.textSecondary,
-                      onTap: () => _showSessionPolicySheet(session),
-                    ),
-                    MeshIconButton(
-                      icon: favorite
-                          ? Icons.star_rounded
-                          : Icons.star_outline_rounded,
-                      tooltip: favorite ? 'Unpin session' : 'Pin session',
-                      color:
-                          favorite ? colors.warning : colors.textSecondary,
-                      onTap: _toggleFavorite,
-                    ),
-                    MeshIconButton(
-                      icon: Icons.more_vert_rounded,
-                      tooltip: _running
-                          ? 'Session actions (agent running)'
-                          : 'Session actions',
-                      color:
-                          _running ? colors.warning : colors.textPrimary,
-                      onTap: () => unawaited(
-                        _showSessionActionsSheet(
-                          session: session,
-                          favorite: favorite,
-                          gitAvailable: gitAvailable,
-                          gitDirty: gitDirty,
-                          terminalOpen: terminalOpenInInspector,
-                          portsOpen: portsOpenInInspector,
-                          searchOpen: searchOpenInInspector,
-                          resourcesOpen: resourcesOpenInInspector,
+                return Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.sm),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      MeshIconButton(
+                        icon: Icons.tune_rounded,
+                        tooltip: 'Session controls',
+                        color: sessionControlsCustomized
+                            ? colors.accent
+                            : colors.textSecondary,
+                        onTap: () => _showSessionPolicySheet(session),
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      MeshIconButton(
+                        icon: favorite
+                            ? Icons.star_rounded
+                            : Icons.star_outline_rounded,
+                        tooltip: favorite ? 'Unpin session' : 'Pin session',
+                        color:
+                            favorite ? colors.warning : colors.textSecondary,
+                        onTap: _toggleFavorite,
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      MeshIconButton(
+                        icon: Icons.more_vert_rounded,
+                        tooltip: _running
+                            ? 'Session actions (agent running)'
+                            : 'Session actions',
+                        color:
+                            _running ? colors.warning : colors.textPrimary,
+                        onTap: () => unawaited(
+                          _showSessionActionsSheet(
+                            session: session,
+                            favorite: favorite,
+                            gitAvailable: gitAvailable,
+                            gitDirty: gitDirty,
+                            terminalOpen: terminalOpenInInspector,
+                            portsOpen: portsOpenInInspector,
+                            searchOpen: searchOpenInInspector,
+                            resourcesOpen: resourcesOpenInInspector,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 );
               }
               return PopupMenuButton<String>(
