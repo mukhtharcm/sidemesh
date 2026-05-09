@@ -387,6 +387,23 @@ describe("SessionSearchIndex", () => {
     await index.close();
   });
 
+  it("matches prefix queries for partial words", async () => {
+    const index = new SessionSearchIndex(dbPath);
+    await index.open();
+
+    await index.indexDocument(makeDoc("prefix-session", {
+      messages: [
+        { id: "m1", role: "user" as const, text: "how do I configure nginx reverse proxy", content: [], attachments: [], createdAt: Date.now(), seq: 1 },
+      ],
+    }));
+
+    const results = await index.search("config prox", 10);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].sessionId, "prefix-session");
+
+    await index.close();
+  });
+
   it("returns empty results for queries with no searchable terms", async () => {
     const index = new SessionSearchIndex(dbPath);
     await index.open();

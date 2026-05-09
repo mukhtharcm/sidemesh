@@ -2030,6 +2030,21 @@ describe("GET /api/sessions/search", () => {
     });
   });
 
+  it("rejects padded one-character queries without filters", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-short-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const searchRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        headers: { Authorization: "Bearer " + config.token },
+        path: `/api/sessions/search?q=${encodeURIComponent(" n ")}`,
+        method: "GET",
+      });
+      assert.equal(searchRes.statusCode, 400);
+      assert.deepEqual(searchRes.body, { error: "Query must be at least 2 characters" });
+    });
+  });
+
   it("returns namespaced IDs in multi-provider mode", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-multi-test-"));
     const runtime = makeMultiProviderRuntime(

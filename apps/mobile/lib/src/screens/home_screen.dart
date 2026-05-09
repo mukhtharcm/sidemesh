@@ -18,6 +18,7 @@ import '../pending_send_recovery.dart';
 import '../recent_sessions_live_store.dart';
 import '../recent_session_filter.dart';
 import '../screen_awake_controller.dart';
+import '../search_query.dart';
 import '../session_local_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../session_overrides_store.dart';
@@ -1107,6 +1108,15 @@ bool _sameHostList(List<HostProfile> a, List<HostProfile> b) {
   return true;
 }
 
+List<String> _mergeHostLabels(List<String> a, List<String> b) {
+  final labels = <String>{
+    ...a.where((label) => label.trim().isNotEmpty),
+    ...b.where((label) => label.trim().isNotEmpty),
+  }.toList();
+  labels.sort();
+  return labels;
+}
+
 String _hostListSignature(HostProfile host) {
   return [
     host.id,
@@ -1130,8 +1140,10 @@ class _RecentPaneState extends State<RecentPane> {
 
   // Search mode state
   List<RemoteSessionEntry>? _searchEntries;
+  List<String> _searchFailedHostLabels = const <String>[];
   bool _searchLoading = false;
   Timer? _searchDebounce;
+  int _searchRequestId = 0;
 
   @override
   void initState() {
@@ -1189,7 +1201,10 @@ class _RecentPaneState extends State<RecentPane> {
       _clearScreenAwakeSource(oldWidget.screenAwakeSourceKey);
       _syncScreenAwakeSource(_screenAwakeActiveEntryCount() > 0);
     }
-    if (widget.query != oldWidget.query) {
+    if (
+      widget.query != oldWidget.query ||
+      !_sameHostList(widget.hosts, oldWidget.hosts)
+    ) {
       _onQueryChanged(widget.query);
     }
     _store.configure(hosts: widget.hosts, api: widget.api);
@@ -1238,32 +1253,35 @@ class _RecentPaneState extends State<RecentPane> {
 
   void _onQueryChanged(String query) {
     _searchDebounce?.cancel();
+    _searchRequestId++;
     final trimmed = query.trim();
-    if (trimmed.isEmpty) {
+    if (trimmed.isEmpty || trimmed.length < 2) {
       if (mounted) {
         setState(() {
           _searchEntries = null;
+          _searchFailedHostLabels = const <String>[];
           _searchLoading = false;
         });
       }
       return;
     }
-    if (trimmed.length < 2) return;
+    final requestId = _searchRequestId;
     if (mounted) {
       setState(() => _searchLoading = true);
     }
     _searchDebounce = Timer(const Duration(milliseconds: 300), () {
-      _performSearch(trimmed);
+      _performSearch(trimmed, requestId);
     });
   }
 
-  Future<void> _performSearch(String query) async {
+  Future<void> _performSearch(String query, int requestId) async {
     if (!mounted) return;
     final hosts = widget.hosts.where((h) => h.enabled).toList();
     if (hosts.isEmpty) {
-      if (mounted) {
+      if (mounted && requestId == _searchRequestId) {
         setState(() {
           _searchEntries = [];
+          _searchFailedHostLabels = const <String>[];
           _searchLoading = false;
         });
       }
@@ -1271,6 +1289,7 @@ class _RecentPaneState extends State<RecentPane> {
     }
 
     final results = <RemoteSessionEntry>[];
+    final failedHostLabels = <String>[];
     await Future.wait(
       hosts.map((host) async {
         try {
@@ -1283,19 +1302,43 @@ class _RecentPaneState extends State<RecentPane> {
             results.add(RemoteSessionEntry(host: host, session: session));
           }
         } catch (_) {
-          // Silently ignore per-host failures
+          failedHostLabels.add(host.label);
         }
       }),
       eagerError: false,
     );
 
-    if (!mounted) return;
-    results.sort((a, b) => b.session.updatedAt.compareTo(a.session.updatedAt));
+    if (!mounted ||
+        requestId != _searchRequestId ||
+        widget.query.trim() != query) {
+      return;
+    }
+    results.sort(_compareSearchEntryRank);
 
     setState(() {
       _searchEntries = results;
+      _searchFailedHostLabels = failedHostLabels.toSet().toList()..sort();
       _searchLoading = false;
     });
+  }
+
+  int _compareSearchEntryRank(RemoteSessionEntry left, RemoteSessionEntry right) {
+    final leftRank = left.session.matchRank;
+    final rightRank = right.session.matchRank;
+    if (leftRank != null || rightRank != null) {
+      if (leftRank == null) return 1;
+      if (rightRank == null) return -1;
+      final rankCompare = leftRank.toDouble().compareTo(rightRank.toDouble());
+      if (rankCompare != 0) {
+        return rankCompare;
+      }
+    }
+
+    final updatedCompare = right.session.updatedAt.compareTo(left.session.updatedAt);
+    if (updatedCompare != 0) {
+      return updatedCompare;
+    }
+    return left.session.id.compareTo(right.session.id);
   }
 
   List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
@@ -1401,7 +1444,11 @@ class _RecentPaneState extends State<RecentPane> {
             _store.entries.isNotEmpty &&
             _store.confirmedHostIds.length < widget.hosts.length;
         final isRefreshing = _store.pendingHostIds.isNotEmpty;
-        final hasFailures = _store.failedHostLabels.isNotEmpty;
+        final failureLabels = _mergeHostLabels(
+          _store.failedHostLabels,
+          _searchFailedHostLabels,
+        );
+        final hasFailures = failureLabels.isNotEmpty;
         final noResults = sortedEntries.isEmpty;
         final basePadding =
             widget.padding ??
@@ -1410,6 +1457,9 @@ class _RecentPaneState extends State<RecentPane> {
                 : const EdgeInsets.fromLTRB(16, 8, 16, 32));
         Future<void> handleRefresh() async {
           await _store.refresh();
+          if (widget.query.trim().length >= 2) {
+            _onQueryChanged(widget.query);
+          }
         }
 
         if (noResults) {
@@ -1427,7 +1477,7 @@ class _RecentPaneState extends State<RecentPane> {
                   ),
                 if (hasFailures)
                   _RecentErrorBanner(
-                    hostLabels: _store.failedHostLabels,
+                    hostLabels: failureLabels,
                     onRetry: handleRefresh,
                   ),
                 const SizedBox(height: 80),
@@ -1468,6 +1518,7 @@ class _RecentPaneState extends State<RecentPane> {
                         groups,
                         isRefreshing: isRefreshing,
                         hasFailures: hasFailures,
+                        failureLabels: failureLabels,
                         hasCachedEntries: hasCachedEntries,
                         handleRefresh: handleRefresh,
                       )
@@ -1490,7 +1541,7 @@ class _RecentPaneState extends State<RecentPane> {
                           if (hasFailures) {
                             if (index == offset) {
                               return _RecentErrorBanner(
-                                hostLabels: _store.failedHostLabels,
+                                hostLabels: failureLabels,
                                 onRetry: handleRefresh,
                               );
                             }
@@ -1527,6 +1578,7 @@ class _RecentPaneState extends State<RecentPane> {
     List<_SessionGroup> groups, {
     required bool isRefreshing,
     required bool hasFailures,
+    required List<String> failureLabels,
     required bool hasCachedEntries,
     required Future<void> Function() handleRefresh,
   }) {
@@ -1559,7 +1611,7 @@ class _RecentPaneState extends State<RecentPane> {
             return Padding(
               padding: EdgeInsets.only(bottom: widget.dense ? 6 : 10),
               child: _RecentErrorBanner(
-                hostLabels: _store.failedHostLabels,
+                hostLabels: failureLabels,
                 onRetry: handleRefresh,
               ),
             );
@@ -2051,22 +2103,21 @@ class _InboxPaneState extends State<InboxPane> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final query = widget.query.trim().toLowerCase();
+    final query = widget.query.trim();
     final allPending = _pendingSends;
     final pending = query.isEmpty
         ? allPending
         : allPending
               .where((send) {
                 final analysis = _analyzePendingSend(send);
-                return _pendingSendPreview(
-                      send,
-                    ).toLowerCase().contains(query) ||
-                    send.sessionId.toLowerCase().contains(query) ||
-                    (send.lastError ?? '').toLowerCase().contains(query) ||
-                    analysis.hostLabel.toLowerCase().contains(query) ||
-                    (_pendingSendIssueLabel(analysis.issue) ?? '')
-                        .toLowerCase()
-                        .contains(query);
+                final haystack = [
+                  _pendingSendPreview(send),
+                  send.sessionId,
+                  send.lastError ?? '',
+                  analysis.hostLabel,
+                  _pendingSendIssueLabel(analysis.issue) ?? '',
+                ].join('\n');
+                return matchesSearchQuery(haystack, query);
               })
               .toList(growable: false);
 
@@ -2092,10 +2143,13 @@ class _InboxPaneState extends State<InboxPane> {
         ? allEntries
         : allEntries.where((entry) {
             final a = entry.action;
-            return (a.sessionTitle ?? '').toLowerCase().contains(query) ||
-                a.detail.toLowerCase().contains(query) ||
-                (a.cwd ?? '').toLowerCase().contains(query) ||
-                entry.host.label.toLowerCase().contains(query);
+            final haystack = [
+              a.sessionTitle ?? '',
+              a.detail,
+              a.cwd ?? '',
+              entry.host.label,
+            ].join('\n');
+            return matchesSearchQuery(haystack, query);
           }).toList();
 
     final isRefreshing = _store.isLoading;
@@ -3097,14 +3151,12 @@ class HostsPane extends StatelessWidget {
       );
     }
 
-    final q = query.trim().toLowerCase();
+    final q = query.trim();
     final visibleHosts = q.isEmpty
         ? hosts
         : hosts
               .where(
-                (h) =>
-                    h.label.toLowerCase().contains(q) ||
-                    h.baseUrl.toLowerCase().contains(q),
+                (h) => matchesSearchQuery('${h.label}\n${h.baseUrl}', q),
               )
               .toList();
     if (visibleHosts.isEmpty) {

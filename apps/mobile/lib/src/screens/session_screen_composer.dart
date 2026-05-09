@@ -380,7 +380,7 @@ class _ComposerContextShelf extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         itemCount: chips.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 8),
+        separatorBuilder: (_, index) => const SizedBox(width: 8),
         itemBuilder: (ctx, i) => chips[i],
       ),
     );
@@ -1012,7 +1012,9 @@ class _ComposerFileSuggestionTrayState
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'No files match "@${widget.query}".',
+                widget.query.trim().isEmpty
+                    ? 'Type after "@" to search files.'
+                    : 'No files match "@${widget.query}".',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colors.textSecondary,
                 ),

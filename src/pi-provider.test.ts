@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -271,6 +271,113 @@ describe("PiAgentProvider", () => {
         ? reloadedFileChange.changes[0]?.diff
         : null,
       "@@ -1 +1 @@\n-Old\n+New",
+    );
+  });
+
+  it("reuses cached idle history without persisting state again", async () => {
+    const cwd = nodePath.join(tempDir, "repo");
+    const sessionDir = piSessionDirForCwd(cwd, agentDir);
+    await mkdir(sessionDir, { recursive: true });
+    const sessionPath = nodePath.join(sessionDir, "2026-05-01_session-1.jsonl");
+    await writePiSessionHistory(
+      sessionPath,
+      minimalPiHistoryLines(cwd),
+      "2026-05-01T10:00:02.100Z",
+    );
+
+    const provider = new PiAgentProvider({ agentDir, stateDir });
+    await provider.start();
+
+    const threads = await provider.listSessionThreads({
+      limit: 10,
+      archived: false,
+    });
+    const thread = threads[0];
+    assert.ok(thread);
+
+    const firstLog = await provider.readSessionLog(thread);
+    assert.equal(firstLog.messages.length, 2);
+    assert.equal(firstLog.activities.length, 0);
+
+    let saveStateCalls = 0;
+    const providerWithInternals = provider as unknown as {
+      saveState: () => Promise<void>;
+    };
+    const originalSaveState = providerWithInternals.saveState.bind(provider);
+    providerWithInternals.saveState = async () => {
+      saveStateCalls += 1;
+      await originalSaveState();
+    };
+
+    const secondLog = await provider.readSessionLog(thread);
+    assert.equal(secondLog.messages.length, 2);
+    assert.equal(saveStateCalls, 0);
+    assert.equal(thread.path, sessionPath);
+  });
+
+  it("reloads idle history when the file changes within the same second", async () => {
+    const cwd = nodePath.join(tempDir, "repo");
+    const sessionDir = piSessionDirForCwd(cwd, agentDir);
+    await mkdir(sessionDir, { recursive: true });
+    const sessionPath = nodePath.join(sessionDir, "2026-05-01_session-1.jsonl");
+    const baseLines = minimalPiHistoryLines(cwd);
+    await writePiSessionHistory(
+      sessionPath,
+      baseLines,
+      "2026-05-01T10:00:02.100Z",
+    );
+
+    const provider = new PiAgentProvider({ agentDir, stateDir });
+    await provider.start();
+
+    const threads = await provider.listSessionThreads({
+      limit: 10,
+      archived: false,
+    });
+    const thread = threads[0];
+    assert.ok(thread);
+
+    const firstLog = await provider.readSessionLog(thread);
+    assert.equal(firstLog.messages.length, 2);
+
+    let saveStateCalls = 0;
+    const providerWithInternals = provider as unknown as {
+      saveState: () => Promise<void>;
+    };
+    const originalSaveState = providerWithInternals.saveState.bind(provider);
+    providerWithInternals.saveState = async () => {
+      saveStateCalls += 1;
+      await originalSaveState();
+    };
+
+    await writePiSessionHistory(
+      sessionPath,
+      [
+        ...baseLines,
+        JSON.stringify(
+          minimalPiAssistantMessage(
+            "m3",
+            "m2",
+            "2026-05-01T10:00:02.900Z",
+            "Still working.",
+            12,
+            24,
+            36,
+          ),
+        ),
+      ],
+      "2026-05-01T10:00:02.900Z",
+    );
+
+    const secondLog = await provider.readSessionLog(thread);
+    assert.equal(secondLog.messages.length, 3);
+    assert.equal(saveStateCalls, 1);
+    assert.equal(secondLog.messages[2]?.content[0]?.type, "text");
+    assert.equal(
+      secondLog.messages[2]?.content[0]?.type === "text"
+        ? secondLog.messages[2].content[0].text
+        : null,
+      "Still working.",
     );
   });
 
@@ -1891,6 +1998,89 @@ describe("PiAgentProvider", () => {
 function piSessionDirForCwd(cwd: string, agentDir: string): string {
   const safePath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
   return nodePath.join(agentDir, "sessions", safePath);
+}
+
+async function writePiSessionHistory(
+  sessionPath: string,
+  lines: string[],
+  modifiedAt: string,
+): Promise<void> {
+  await writeFile(sessionPath, lines.join("\n") + "\n");
+  const timestamp = new Date(modifiedAt);
+  await utimes(sessionPath, timestamp, timestamp);
+}
+
+function minimalPiHistoryLines(cwd: string): string[] {
+  return [
+    JSON.stringify({
+      type: "session",
+      version: 3,
+      id: "session-1",
+      timestamp: "2026-05-01T10:00:00.000Z",
+      cwd,
+    }),
+    JSON.stringify({
+      type: "message",
+      id: "m1",
+      parentId: null,
+      timestamp: "2026-05-01T10:00:01.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "Inspect README" }],
+        timestamp: 1_777_770_001_000,
+      },
+    }),
+    JSON.stringify(
+      minimalPiAssistantMessage(
+        "m2",
+        "m1",
+        "2026-05-01T10:00:02.000Z",
+        "Done.",
+        10,
+        20,
+        30,
+      ),
+    ),
+  ];
+}
+
+function minimalPiAssistantMessage(
+  id: string,
+  parentId: string,
+  timestamp: string,
+  text: string,
+  inputTokens: number,
+  outputTokens: number,
+  totalTokens: number,
+): Record<string, unknown> {
+  return {
+    type: "message",
+    id,
+    parentId,
+    timestamp,
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      usage: {
+        input: inputTokens,
+        output: outputTokens,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens,
+        cost: {
+          input: 0.001,
+          output: 0.002,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0.003,
+        },
+      },
+      stopReason: "stop",
+      timestamp: Date.parse(timestamp),
+    },
+  };
 }
 
 function emptyOverrides(): AgentCreateSessionRequest["overrides"] {

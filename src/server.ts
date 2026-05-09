@@ -1394,11 +1394,12 @@ export async function startServer(
         return;
       }
       const rawQuery = asString((request.query as Record<string, unknown>)?.q);
+      const normalizedQuery = rawQuery?.trim() ?? "";
       const limit = Math.min(
         asInteger((request.query as Record<string, unknown>)?.limit) ?? 20,
         100,
       );
-      if (!rawQuery || rawQuery.length < 2) {
+      if (normalizedQuery.length < 2) {
         const hasFilters =
           asString((request.query as Record<string, unknown>)?.provider) ||
           asString((request.query as Record<string, unknown>)?.cwd) ||
@@ -1435,17 +1436,26 @@ export async function startServer(
       if (updatedBefore != null) {
         filter.updatedBefore = updatedBefore;
       }
-      const searchResults = await searchIndex.search(rawQuery ?? "", limit, filter);
-      const sessions: SessionSummary[] = [];
-      for (const result of searchResults) {
-        const sessionProvider = providerEntryForSessionId(result.sessionId);
-        if (!sessionProvider) continue;
-        const thread = await readSession(provider, result.sessionId, false).catch(() => null);
-        if (!thread) continue;
-        const runtime = await loadCachedSessionRuntime(provider, thread, runtimeCache, "active");
-        const session = mapSession(thread, runtime);
-        sessions.push({ ...session, matchSnippet: result.snippet ?? undefined });
-      }
+      const searchResults = await searchIndex.search(normalizedQuery, limit, filter);
+      const sessions = (await Promise.all(
+        searchResults.map(async (result) => {
+          if (!providerEntryForSessionId(result.sessionId)) {
+            return null;
+          }
+          const thread = await readSession(provider, result.sessionId, false).catch(() => null);
+          if (!thread) {
+            return null;
+          }
+          const runtime = await loadCachedSessionRuntime(provider, thread, runtimeCache, "active");
+          const session = mapSession(thread, runtime);
+          const summary: SessionSummary = {
+            ...session,
+            matchSnippet: result.snippet ?? null,
+            matchRank: result.rank,
+          };
+          return summary;
+        }),
+      )).filter((session): session is SessionSummary => session != null);
       response.json(sessions);
     }),
   );
