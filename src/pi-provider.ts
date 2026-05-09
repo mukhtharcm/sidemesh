@@ -1069,11 +1069,12 @@ export class PiAgentProvider
       const content = extractPiMessageContentBlocks(message);
       const errorMessage = stringValue(message.errorMessage);
       const phase = detectPiAssistantPhase(message);
+      let completedMessage: SessionMessage | null = null;
       if (text || errorMessage || content.length > 0) {
         const blocks = content.length > 0
           ? content
           : [{ type: "text" as const, text: text || errorMessage || "" }];
-        this.appendAssistantMessage(session, {
+        completedMessage = this.appendAssistantMessage(session, {
           text: text || errorMessage || "",
           content: blocks,
           phase,
@@ -1091,6 +1092,27 @@ export class PiAgentProvider
         session,
         runtimeFromLoadedSession(session.session ?? null, assistantRuntime, active?.turnId ?? null),
       );
+      if (active && isTerminalPiAssistantStopReason(stopReason)) {
+        if (
+          !completedMessage &&
+          session.draftAssistantMessage?.turnId === active.turnId
+        ) {
+          completedMessage = materializeInterruptedPiDraftAssistantMessage(session);
+          if (completedMessage) {
+            this.emit("liveEvent", {
+              type: "assistant_message_completed",
+              sessionId: session.thread.id,
+              turnId: active.turnId,
+              message: {
+                id: completedMessage.id,
+                text: completedMessage.text,
+                phase: completedMessage.phase,
+              },
+            });
+          }
+        }
+        this.completeActiveTurn(session.thread.id, active.status ?? "completed");
+      }
       this.persistEventually();
       return;
     }
@@ -1218,7 +1240,7 @@ export class PiAgentProvider
       phase?: SessionMessage["phase"];
       createdAt: number;
     },
-  ): void {
+  ): SessionMessage {
     const blocks = options.content && options.content.length > 0
       ? options.content
       : [{ type: "text", text: options.text }] as SessionMessageContentBlock[];
@@ -1244,6 +1266,7 @@ export class PiAgentProvider
         phase: message.phase,
       },
     });
+    return message;
   }
 
   private syncDraftAssistantMessage(
@@ -2441,6 +2464,16 @@ function isActivePiThreadStatus(status: ThreadRecord["status"] | null | undefine
     type === "active" ||
     type === "waiting_for_input" ||
     type === "waiting_for_approval"
+  );
+}
+
+function isTerminalPiAssistantStopReason(
+  stopReason: string | null | undefined,
+): boolean {
+  return (
+    stopReason === "stop" ||
+    stopReason === "error" ||
+    stopReason === "aborted"
   );
 }
 
