@@ -255,6 +255,41 @@ describe("MultiAgentProvider", () => {
       true,
     );
   });
+
+  it("sorts recent threads by normalized timestamps across providers", async () => {
+    const codex = new StubProvider("codex", "Codex");
+    const opencode = new StubProvider("opencode", "OpenCode");
+    codex.seedThread("codex-thread", "/repo/codex", { updatedAt: 1778310387 });
+    opencode.seedThread("opencode-thread", "/repo/opencode", {
+      createdAt: 1778306839641,
+      updatedAt: 1778306873039,
+    });
+
+    const provider = new MultiAgentProvider(
+      [
+        {
+          kind: "codex",
+          config: { kind: "codex", bin: "codex" },
+          provider: codex,
+        },
+        {
+          kind: "opencode",
+          config: { kind: "opencode", bin: "opencode", stateDir: null },
+          provider: opencode,
+        },
+      ],
+      "codex",
+    );
+
+    const threads = await provider.listSessionThreads({
+      limit: 10,
+      archived: false,
+    });
+    assert.deepEqual(
+      threads.map((thread) => thread.source),
+      ["codex", "opencode"],
+    );
+  });
 });
 
 class StubProvider
@@ -333,8 +368,12 @@ class StubProvider
     super();
   }
 
-  public seedThread(id: string, cwd: string): void {
-    this.threads.set(id, stubThread(id, cwd, this.kind));
+  public seedThread(
+    id: string,
+    cwd: string,
+    overrides: Partial<ReturnType<typeof stubThread>> = {},
+  ): void {
+    this.threads.set(id, stubThread(id, cwd, this.kind, overrides));
   }
 
   public async start(): Promise<void> {}
@@ -436,13 +475,21 @@ class StubProvider
   }
 }
 
-function stubThread(id: string, cwd: string, source: string) {
+function stubThread(
+  id: string,
+  cwd: string,
+  source: string,
+  overrides: Partial<{
+    createdAt: number;
+    updatedAt: number;
+  }> = {},
+) {
   return {
     id,
     name: id,
     preview: id,
-    createdAt: 10,
-    updatedAt: source == "codex" ? 10 : 20,
+    createdAt: overrides.createdAt ?? 10,
+    updatedAt: overrides.updatedAt ?? (source == "codex" ? 10 : 20),
     cwd,
     source,
     path: null,

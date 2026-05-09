@@ -163,7 +163,10 @@ export class MultiAgentProvider
     );
     return threads
       .flat()
-      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .sort((left, right) =>
+        normalizeThreadTimestamp(right.updatedAt) -
+        normalizeThreadTimestamp(left.updatedAt),
+      )
       .slice(0, options.limit);
   }
 
@@ -198,7 +201,10 @@ export class MultiAgentProvider
     );
     return threads
       .flat()
-      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .sort((left, right) =>
+        normalizeThreadTimestamp(right.updatedAt) -
+        normalizeThreadTimestamp(left.updatedAt),
+      )
       .slice(0, limit);
   }
 
@@ -473,4 +479,9 @@ function unwrapProviderScopedId(
   } catch {
     return null;
   }
+}
+
+function normalizeThreadTimestamp(value: number): number {
+  const timestamp = Math.trunc(value);
+  return timestamp >= 1_000_000_000_000 ? timestamp : timestamp * 1000;
 }
