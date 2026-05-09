@@ -1822,6 +1822,9 @@ class _ActivityCard extends StatefulWidget {
     required this.sessionCwd,
     this.defaultCollapsed = true,
     this.onOpenFile,
+    this.onBrowsePath,
+    this.onOpenBrowserPreview,
+    this.onOpenTerminal,
   });
 
   final HostProfile host;
@@ -1830,6 +1833,9 @@ class _ActivityCard extends StatefulWidget {
   final String sessionCwd;
   final bool defaultCollapsed;
   final void Function(String path)? onOpenFile;
+  final void Function(String path)? onBrowsePath;
+  final void Function(BrowserPreviewTargetCandidate target)? onOpenBrowserPreview;
+  final void Function(String? cwd)? onOpenTerminal;
 
   @override
   State<_ActivityCard> createState() => _ActivityCardState();
@@ -1871,6 +1877,109 @@ class _ActivityCardState extends State<_ActivityCard> {
   }
 
   void _openWorkspaceFile(String path) => widget.onOpenFile?.call(path);
+
+  String? get _primaryFilePath {
+    final activity = widget.activity;
+    if (activity.isImageGeneration) {
+      final savedPath = (activity.savedPath ?? '').trim();
+      return savedPath.isEmpty ? null : savedPath;
+    }
+    if (activity.isFileChange && activity.changes.length == 1) {
+      return activity.changes.first.path;
+    }
+    if (activity.isTool) {
+      final target = (activity.toolTarget ?? '').trim();
+      if ((activity.toolCategory == 'filesystem' ||
+              activity.toolCategory == 'command') &&
+          target.isNotEmpty &&
+          !target.startsWith('http://') &&
+          !target.startsWith('https://')) {
+        return target;
+      }
+    }
+    return null;
+  }
+
+  String? get _browsePath {
+    final activity = widget.activity;
+    if (activity.isImageGeneration) {
+      return _primaryFilePath;
+    }
+    if (activity.isFileChange) {
+      if (activity.changes.length == 1) {
+        return activity.changes.first.path;
+      }
+      if (activity.changes.isNotEmpty) {
+        return activity.changes.first.path;
+      }
+    }
+    if (activity.isTool) {
+      final target = (activity.toolTarget ?? '').trim();
+      if (target.isNotEmpty &&
+          !target.startsWith('http://') &&
+          !target.startsWith('https://')) {
+        return target;
+      }
+    }
+    return null;
+  }
+
+  BrowserPreviewTargetCandidate? get _browserPreviewTarget {
+    final callback = widget.onOpenBrowserPreview;
+    if (callback == null) {
+      return null;
+    }
+    final candidates = browserPreviewCandidatesForActivity(widget.activity);
+    if (candidates.isEmpty) {
+      return null;
+    }
+    return candidates.first;
+  }
+
+  List<_ActivityActionSpec> _buildContextActions() {
+    final actions = <_ActivityActionSpec>[];
+    final previewTarget = _browserPreviewTarget;
+    if (previewTarget != null) {
+      actions.add(
+        _ActivityActionSpec(
+          label: previewTarget.previewLabel,
+          icon: Icons.open_in_browser_rounded,
+          tone: _ActivityActionTone.accent,
+          onTap: () => widget.onOpenBrowserPreview!(previewTarget),
+        ),
+      );
+    }
+    final browsePath = _browsePath;
+    if (browsePath != null && widget.onBrowsePath != null) {
+      actions.add(
+        _ActivityActionSpec(
+          label: 'Browse files',
+          icon: Icons.folder_open_rounded,
+          onTap: () => widget.onBrowsePath!(browsePath),
+        ),
+      );
+    }
+    final openFilePath = _primaryFilePath;
+    if (openFilePath != null && widget.onOpenFile != null) {
+      actions.add(
+        _ActivityActionSpec(
+          label: 'Open file',
+          icon: Icons.description_rounded,
+          onTap: () => widget.onOpenFile!(openFilePath),
+        ),
+      );
+    }
+    if (widget.activity.isCommand && widget.onOpenTerminal != null) {
+      actions.add(
+        _ActivityActionSpec(
+          label: 'Open terminal',
+          icon: Icons.terminal_rounded,
+          onTap: () => widget.onOpenTerminal!(widget.activity.cwd),
+        ),
+      );
+    }
+    return actions;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1947,6 +2056,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'declined' => Icons.block_rounded,
       _ => Icons.bolt_rounded,
     };
+    final contextActions = _buildContextActions();
 
     return Align(
       alignment: Alignment.centerLeft,
@@ -2177,6 +2287,10 @@ class _ActivityCardState extends State<_ActivityCard> {
                       changes: activity.changes,
                       sessionCwd: sessionCwd,
                     ),
+                  ],
+                  if (contextActions.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _ActivityActionRow(actions: contextActions),
                   ],
                 ],
               ],
@@ -2876,6 +2990,84 @@ class _ActivityCardState extends State<_ActivityCard> {
       label: label,
       expandedLabel: 'Hide diffs',
       onToggle: () => setState(() => _diffExpanded = true),
+    );
+  }
+}
+
+enum _ActivityActionTone { neutral, accent }
+
+class _ActivityActionSpec {
+  const _ActivityActionSpec({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.tone = _ActivityActionTone.neutral,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final _ActivityActionTone tone;
+}
+
+class _ActivityActionRow extends StatelessWidget {
+  const _ActivityActionRow({required this.actions});
+
+  final List<_ActivityActionSpec> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: actions
+          .map((action) => _ActivityActionChip(action: action))
+          .toList(growable: false),
+    );
+  }
+}
+
+class _ActivityActionChip extends StatelessWidget {
+  const _ActivityActionChip({required this.action});
+
+  final _ActivityActionSpec action;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final tone = action.tone == _ActivityActionTone.accent
+        ? colors.accent
+        : colors.textSecondary;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: action.onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: tone.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: tone.withValues(alpha: 0.18)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(action.icon, size: 16, color: tone),
+              const SizedBox(width: 6),
+              Text(
+                action.label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: action.tone == _ActivityActionTone.accent
+                      ? colors.accent
+                      : colors.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
