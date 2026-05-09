@@ -425,6 +425,137 @@ class RestartableFakeProvider
   }
 }
 
+class SearchFixtureProvider extends EventEmitter implements AgentProvider {
+  public readonly kind = "fake";
+  public readonly displayName = "Search Fixture Provider";
+  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
+
+  private readonly archivedIds: Set<string>;
+  private readonly logsById: Map<string, SessionLogSnapshot>;
+  private readonly threads: ThreadRecord[];
+  private readonly threadsById: Map<string, ThreadRecord>;
+
+  constructor(
+    fixtures: Array<{
+      thread: ThreadRecord;
+      archived: boolean;
+      searchText: string;
+    }>,
+  ) {
+    super();
+    this.threads = fixtures.map((fixture) => ({
+      ...fixture.thread,
+      status: { ...fixture.thread.status },
+    }));
+    this.threadsById = new Map(this.threads.map((thread) => [thread.id, thread]));
+    this.archivedIds = new Set(
+      fixtures.filter((fixture) => fixture.archived).map((fixture) => fixture.thread.id),
+    );
+    this.logsById = new Map(
+      fixtures.map((fixture) => [
+        fixture.thread.id,
+        {
+          messages: [
+            {
+              id: `${fixture.thread.id}-msg-1`,
+              role: "user",
+              text: fixture.searchText,
+              content: [],
+              attachments: [],
+              createdAt: Date.now(),
+              seq: 1,
+            },
+          ],
+          activities: [],
+          runtime: null,
+          totalMessages: 1,
+          totalActivities: 0,
+          nextSeq: 2,
+        } satisfies SessionLogSnapshot,
+      ]),
+    );
+  }
+
+  public async start(): Promise<void> {}
+
+  public async close(): Promise<void> {}
+
+  public async getVersion(): Promise<string> {
+    return "search-fixture";
+  }
+
+  public async listSessionThreads(
+    options: AgentSessionListOptions,
+  ): Promise<ThreadRecord[]> {
+    return this.threads
+      .filter((thread) => this.archivedIds.has(thread.id) === options.archived)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, options.limit)
+      .map((thread) => ({ ...thread, status: { ...thread.status } }));
+  }
+
+  public async readSessionThread(
+    threadId: string,
+    _includeTurns: boolean,
+  ): Promise<ThreadRecord> {
+    const thread = this.threadsById.get(threadId);
+    if (!thread) {
+      throw new Error(`Unknown fixture session: ${threadId}`);
+    }
+    return { ...thread, status: { ...thread.status } };
+  }
+
+  public async listRecentUnindexedSessionThreads(
+    limit: number,
+  ): Promise<ThreadRecord[]> {
+    return this.listSessionThreads({ limit, archived: false });
+  }
+
+  public async readSessionLog(
+    thread: ThreadRecord,
+    _options?: AgentSessionLogOptions,
+  ): Promise<SessionLogSnapshot> {
+    const snapshot = this.logsById.get(thread.id);
+    if (!snapshot) {
+      throw new Error(`Missing fixture log for session: ${thread.id}`);
+    }
+    return {
+      messages: snapshot.messages.map((message) => ({ ...message })),
+      activities: snapshot.activities.map((activity) => ({ ...activity })),
+      runtime: snapshot.runtime,
+      totalMessages: snapshot.totalMessages,
+      totalActivities: snapshot.totalActivities,
+      nextSeq: snapshot.nextSeq,
+    };
+  }
+
+  public async readSessionRuntime(): Promise<null> {
+    return null;
+  }
+}
+
+function secondsForIso(value: string): number {
+  return Math.trunc(Date.parse(value) / 1000);
+}
+
+function makeSearchFixtureThread(
+  id: string,
+  updatedAt: number,
+  preview: string,
+): ThreadRecord {
+  return {
+    id,
+    name: preview,
+    preview,
+    createdAt: updatedAt - 60,
+    updatedAt,
+    cwd: "/repo",
+    source: "fake",
+    path: null,
+    status: { type: "idle" },
+  };
+}
+
 function makeSingleProviderRuntime(
   fakeOptions: FakeAgentProviderOptions,
 ): { runtime: AgentProviderRuntime; provider: FakeAgentProvider } {
@@ -2125,5 +2256,111 @@ describe("GET /api/sessions/search", () => {
       results = searchRes.body as any[];
       assert.ok(!results.some((s) => s.id === sessionId), "expected session hidden after archive");
     });
+  });
+
+  it("returns archived provider sessions from startup backfill when requested", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-startup-archive-test-"));
+    const provider = new SearchFixtureProvider([
+      {
+        thread: makeSearchFixtureThread(
+          "fixture-active",
+          secondsForIso("2026-01-02T11:45:00.000Z"),
+          "Active fixture session",
+        ),
+        archived: false,
+        searchText: "shared fixture search active",
+      },
+      {
+        thread: makeSearchFixtureThread(
+          "fixture-archived",
+          secondsForIso("2026-01-02T12:00:00.000Z"),
+          "Archived fixture session",
+        ),
+        archived: true,
+        searchText: "shared fixture search archived",
+      },
+    ]);
+    await withServerRuntime(
+      makeConfig(stateDir),
+      makeCustomSingleProviderRuntime(provider),
+      async (server, config) => {
+        await new Promise((r) => setTimeout(r, 300));
+
+        const searchRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          headers: { Authorization: "Bearer " + config.token },
+          path:
+            `/api/sessions/search?q=${encodeURIComponent("shared fixture search")}` +
+            "&archived=true",
+          method: "GET",
+        });
+        assert.equal(searchRes.statusCode, 200);
+        const results = searchRes.body as any[];
+        assert.ok(
+          results.some((session) => session.id === "fixture-archived"),
+          "expected archived startup-backfilled session in archived search",
+        );
+        assert.ok(
+          !results.some((session) => session.id === "fixture-active"),
+          "expected active session excluded from archived-only search",
+        );
+      },
+    );
+  });
+
+  it("applies updatedAfter filters to provider-backed search results using millisecond timestamps", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-date-filter-test-"));
+    const updatedAtSeconds = secondsForIso("2026-01-02T12:00:00.000Z");
+    const provider = new SearchFixtureProvider([
+      {
+        thread: makeSearchFixtureThread(
+          "fixture-filter",
+          updatedAtSeconds,
+          "Filter fixture session",
+        ),
+        archived: false,
+        searchText: "date filter fixture session",
+      },
+    ]);
+    await withServerRuntime(
+      makeConfig(stateDir),
+      makeCustomSingleProviderRuntime(provider),
+      async (server, config) => {
+        await new Promise((r) => setTimeout(r, 300));
+
+        const includeRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          headers: { Authorization: "Bearer " + config.token },
+          path:
+            `/api/sessions/search?q=${encodeURIComponent("date filter fixture")}` +
+            `&updatedAfter=${encodeURIComponent("2026-01-02T11:59:00.000Z")}`,
+          method: "GET",
+        });
+        assert.equal(includeRes.statusCode, 200);
+        const included = includeRes.body as any[];
+        assert.ok(
+          included.some((session) => session.id === "fixture-filter"),
+          "expected session newer than updatedAfter filter",
+        );
+
+        const excludeRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          headers: { Authorization: "Bearer " + config.token },
+          path:
+            `/api/sessions/search?q=${encodeURIComponent("date filter fixture")}` +
+            `&updatedAfter=${encodeURIComponent("2026-01-02T12:01:00.000Z")}`,
+          method: "GET",
+        });
+        assert.equal(excludeRes.statusCode, 200);
+        const excluded = excludeRes.body as any[];
+        assert.ok(
+          !excluded.some((session) => session.id === "fixture-filter"),
+          "expected session older than updatedAfter filter to be excluded",
+        );
+      },
+    );
   });
 });
