@@ -77,7 +77,7 @@ class _SessionHubBody extends StatelessWidget {
       _HubTool(
         icon: Icons.open_in_browser_rounded,
         label: 'Browser preview',
-        description: 'Open local web previews and port forwards.',
+        description: 'Open and manage browser previews.',
         onTap: onOpenPorts,
       ),
     ];

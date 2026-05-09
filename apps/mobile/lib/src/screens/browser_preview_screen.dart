@@ -923,6 +923,169 @@ class _BrowserChromeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final addressField = Container(
+      height: desktopLike ? 40 : 36,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: desktopLike ? colors.surface : colors.canvas,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        children: [
+          if (pageLoading)
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: colors.accent,
+              ),
+            )
+          else
+            Tooltip(
+              message: _isHttps
+                  ? 'Connection is secure (HTTPS)'
+                  : 'Connection is not secure (HTTP)',
+              child: Icon(
+                _isHttps ? Icons.lock_rounded : Icons.info_outline_rounded,
+                size: 14,
+                color: _isHttps ? colors.textTertiary : colors.warning,
+              ),
+            ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: urlController,
+              focusNode: urlFocusNode,
+              style: TextStyle(
+                color: colors.textPrimary,
+                fontSize: 13,
+              ),
+              decoration: InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                hintText: preview.url,
+                hintStyle: TextStyle(
+                  color: colors.textSecondary,
+                  fontSize: 13,
+                ),
+                contentPadding: EdgeInsets.zero,
+              ),
+              textInputAction: TextInputAction.go,
+              autocorrect: false,
+              enableSuggestions: false,
+              keyboardType: TextInputType.url,
+              onSubmitted: (_) => onNavigate(),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (desktopLike) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+        decoration: BoxDecoration(
+          color: colors.canvas,
+          border: Border(
+            bottom: BorderSide(color: colors.border),
+          ),
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Row(
+            children: [
+              if (onBack != null) ...[
+                _DesktopChromeGroup(
+                  children: [
+                    _DesktopChromeButton(
+                      icon: Icons.close_rounded,
+                      tooltip: 'Close preview',
+                      onTap: onBack!,
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 8),
+              ],
+              _DesktopChromeGroup(
+                children: [
+                  _DesktopChromeButton(
+                    icon: Icons.arrow_back_rounded,
+                    tooltip: 'Back',
+                    onTap: onBackNavigation,
+                  ),
+                  _DesktopChromeButton(
+                    icon: Icons.arrow_forward_rounded,
+                    tooltip: 'Forward',
+                    onTap: onForwardNavigation,
+                  ),
+                  _DesktopChromeButton(
+                    icon: Icons.refresh_rounded,
+                    tooltip: 'Reload',
+                    onTap: onReload,
+                  ),
+                ],
+              ),
+              const SizedBox(width: 8),
+              Expanded(child: addressField),
+              const SizedBox(width: 8),
+              _ViewportChip(
+                width: preview.width,
+                height: preview.height,
+                onTap: onResize,
+              ),
+              const SizedBox(width: 8),
+              _DesktopChromeGroup(
+                children: [
+                  _DesktopChromeButton(
+                    icon: inputRailOpen
+                        ? Icons.keyboard_hide_rounded
+                        : Icons.keyboard_alt_rounded,
+                    tooltip: inputRailOpen ? 'Hide keyboard' : 'Keyboard',
+                    color: inputRailOpen ? colors.accent : null,
+                    active: inputRailOpen,
+                    onTap: onToggleInput,
+                  ),
+                  _DesktopChromeButton(
+                    icon: devToolsOpen
+                        ? Icons.construction_rounded
+                        : Icons.construction_outlined,
+                    tooltip: devToolsOpen ? 'Hide DevTools' : 'DevTools',
+                    color: devToolsOpen ? colors.accent : null,
+                    active: devToolsOpen,
+                    onTap: onToggleDevTools,
+                  ),
+                  _DesktopChromeButton(
+                    icon: streamPaused
+                        ? Icons.play_circle_outline_rounded
+                        : Icons.pause_circle_outline_rounded,
+                    tooltip: streamPaused ? 'Resume stream' : 'Pause stream',
+                    color: streamPaused ? colors.success : null,
+                    active: streamPaused,
+                    onTap: onTogglePause,
+                  ),
+                  if (onMinimize != null)
+                    _DesktopChromeButton(
+                      icon: Icons.keyboard_arrow_down_rounded,
+                      tooltip: 'Minimize',
+                      onTap: onMinimize!,
+                    ),
+                  if (onStop != null)
+                    _DesktopChromeButton(
+                      icon: Icons.stop_circle_rounded,
+                      tooltip: 'Stop remote browser',
+                      color: colors.danger,
+                      onTap: onStop!,
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
@@ -943,127 +1106,8 @@ class _BrowserChromeBar extends StatelessWidget {
               ),
               const SizedBox(width: 4),
             ],
-            if (desktopLike) ...[
-              _ChromeButton(
-                icon: Icons.arrow_back_rounded,
-                tooltip: 'Back',
-                onTap: onBackNavigation,
-              ),
-              const SizedBox(width: 2),
-              _ChromeButton(
-                icon: Icons.arrow_forward_rounded,
-                tooltip: 'Forward',
-                onTap: onForwardNavigation,
-              ),
-              const SizedBox(width: 2),
-              _ChromeButton(
-                icon: Icons.refresh_rounded,
-                tooltip: 'Reload',
-                onTap: onReload,
-              ),
-              const SizedBox(width: 6),
-            ],
-            Expanded(
-              child: Container(
-                height: 36,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: colors.canvas,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: colors.border),
-                ),
-                child: Row(
-                  children: [
-                    if (pageLoading)
-                      SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: colors.accent,
-                        ),
-                      )
-                    else
-                      Tooltip(
-                        message: _isHttps
-                            ? 'Connection is secure (HTTPS)'
-                            : 'Connection is not secure (HTTP)',
-                        child: Icon(
-                          _isHttps
-                              ? Icons.lock_rounded
-                              : Icons.info_outline_rounded,
-                          size: 14,
-                          color: _isHttps
-                              ? colors.textTertiary
-                              : colors.warning,
-                        ),
-                      ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: urlController,
-                        focusNode: urlFocusNode,
-                        style: TextStyle(
-                          color: colors.textPrimary,
-                          fontSize: 13,
-                        ),
-                        decoration: InputDecoration(
-                          isDense: true,
-                          border: InputBorder.none,
-                          hintText: preview.url,
-                          hintStyle: TextStyle(
-                            color: colors.textSecondary,
-                            fontSize: 13,
-                          ),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        textInputAction: TextInputAction.go,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        keyboardType: TextInputType.url,
-                        onSubmitted: (_) => onNavigate(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            Expanded(child: addressField),
             const SizedBox(width: 8),
-            if (desktopLike) ...[
-              _ViewportChip(
-                width: preview.width,
-                height: preview.height,
-                onTap: onResize,
-              ),
-              const SizedBox(width: 6),
-              _ChromeButton(
-                icon: inputRailOpen
-                    ? Icons.keyboard_hide_rounded
-                    : Icons.keyboard_alt_rounded,
-                tooltip: inputRailOpen ? 'Hide keyboard' : 'Keyboard',
-                color: inputRailOpen ? colors.accent : null,
-                onTap: onToggleInput,
-              ),
-              const SizedBox(width: 2),
-              _ChromeButton(
-                icon: devToolsOpen
-                    ? Icons.construction_rounded
-                    : Icons.construction_outlined,
-                tooltip: devToolsOpen ? 'Hide DevTools' : 'DevTools',
-                color: devToolsOpen ? colors.accent : null,
-                onTap: onToggleDevTools,
-              ),
-              const SizedBox(width: 2),
-              _ChromeButton(
-                icon: streamPaused
-                    ? Icons.play_circle_outline_rounded
-                    : Icons.pause_circle_outline_rounded,
-                tooltip: streamPaused ? 'Resume stream' : 'Pause stream',
-                color: streamPaused ? colors.success : null,
-                onTap: onTogglePause,
-              ),
-              const SizedBox(width: 4),
-            ],
             if (onMinimize != null) ...[
               _ChromeButton(
                 icon: Icons.keyboard_arrow_down_rounded,
@@ -1112,6 +1156,84 @@ class _ChromeButton extends StatelessWidget {
           child: Container(
             width: 32,
             height: 32,
+            alignment: Alignment.center,
+            child: Icon(
+              icon,
+              size: 18,
+              color: color ?? colors.textSecondary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopChromeGroup extends StatelessWidget {
+  const _DesktopChromeGroup({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: AppShapes.input,
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var index = 0; index < children.length; index++) ...[
+            children[index],
+            if (index != children.length - 1)
+              Container(
+                width: 1,
+                height: 18,
+                color: colors.border,
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _DesktopChromeButton extends StatelessWidget {
+  const _DesktopChromeButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.color,
+    this.active = false,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final Color? color;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onTap,
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: active ? colors.accentMuted : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
             alignment: Alignment.center,
             child: Icon(
               icon,
