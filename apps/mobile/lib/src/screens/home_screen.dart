@@ -895,8 +895,13 @@ class _HomeSearchField extends StatelessWidget {
             ),
             suffixIcon: hasQuery
                 ? IconButton(
-                    tooltip: 'Clear',
-                    iconSize: 16,
+                    tooltip: 'Clear search',
+                    iconSize: 20,
+                    // Honour the 44pt minimum tap target (Apple HIG / Material).
+                    constraints: const BoxConstraints.tightFor(
+                      width: 44,
+                      height: 44,
+                    ),
                     onPressed: controller.clear,
                     icon: Icon(
                       Icons.close_rounded,
@@ -990,11 +995,14 @@ class _MeshNavBar extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             tab.title,
+                            // Bottom-nav labels were 11pt; bumped to 12pt so
+                            // they meet the platform readability floor without
+                            // forcing a layout shift.
                             style: monoStyle(
                               color: selected
                                   ? colors.accent
                                   : colors.textSecondary,
-                              fontSize: 11,
+                              fontSize: 12,
                               fontWeight: AppWeights.emphasis,
                             ).copyWith(letterSpacing: 0.3),
                           ),

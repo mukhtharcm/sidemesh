@@ -442,7 +442,10 @@ class _DesktopShellState extends State<DesktopShell> {
                       const Spacer(),
                       IconButton(
                         tooltip: 'Close',
-                        iconSize: 18,
+                        iconSize: 22,
+                        // Even on desktop, dialog dismiss buttons should be
+                        // comfortable for trackpad users — 22pt icon inside
+                        // the default 48pt tap region keeps it scannable.
                         onPressed: () => Navigator.of(dialogContext).pop(),
                         icon: Icon(
                           Icons.close_rounded,

@@ -3468,7 +3468,10 @@ class _RuntimeSection extends StatelessWidget {
             title.toUpperCase(),
             style: monoStyle(
               color: colors.textSecondary,
-              fontSize: 9.5,
+              // Section header caps were 9.5pt — too small even for
+              // ALL-CAPS labels per Apple HIG. 11pt with the same
+              // letter-spacing keeps the visual rhythm.
+              fontSize: 11,
               fontWeight: AppWeights.title,
             ).copyWith(letterSpacing: 1.1),
           ),
