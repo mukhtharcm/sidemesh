@@ -449,7 +449,7 @@ class _PlanUpdateCard extends StatelessWidget {
       child: MeshCard(
         padding: EdgeInsets.zero,
         tone: MeshCardTone.muted,
-        accentStrip: colors.accent,
+        borderColor: colors.accent.withValues(alpha: 0.45),
         child: Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
           child: ExpansionTile(

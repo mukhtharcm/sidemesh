@@ -295,10 +295,9 @@ class _UsageAccountCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final tone = account.isError ? MeshCardTone.muted : MeshCardTone.surface;
-    final accent = account.isError ? colors.danger : colors.accent;
     return MeshCard(
       tone: tone,
-      accentStrip: accent,
+      borderColor: account.isError ? colors.danger.withValues(alpha: 0.45) : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

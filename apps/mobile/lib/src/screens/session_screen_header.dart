@@ -407,7 +407,7 @@ class _SessionHeader extends StatelessWidget {
       padding: const EdgeInsets.only(left: 16, top: 2, right: 16, bottom: 8),
       child: MeshCard(
         padding: const EdgeInsets.only(left: 14, top: 9, right: 8, bottom: 9),
-        accentStrip: running ? colors.success : colors.accent,
+        borderColor: running ? colors.success.withValues(alpha: 0.5) : null,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
@@ -1509,8 +1509,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     final maxHeight = mq.size.height * 0.5;
     return MeshCard(
       tone: MeshCardTone.surface,
-      borderColor: kindMeta.accent.withValues(alpha: 0.5),
-      accentStrip: kindMeta.accent,
+      borderColor: kindMeta.accent.withValues(alpha: 0.7),
       child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: maxHeight),
         child: Column(

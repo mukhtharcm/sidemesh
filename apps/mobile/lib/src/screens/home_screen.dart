@@ -2494,15 +2494,13 @@ class _PendingSendCard extends StatelessWidget {
     final stateLabel = _pendingSendStateLabel(analysis.state);
     final issueLabel = _pendingSendIssueLabel(analysis.issue);
     final borderTone = analysis.needsAttention
-        ? colors.warning.withValues(alpha: 0.35)
-        : colors.info.withValues(alpha: 0.3);
-    final accentTone = analysis.needsAttention ? colors.warning : colors.info;
+        ? colors.warning.withValues(alpha: 0.55)
+        : colors.info.withValues(alpha: 0.45);
 
     if (dense) {
       return MeshCard(
         tone: MeshCardTone.surface,
         borderColor: borderTone,
-        accentStrip: accentTone,
         padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2609,7 +2607,6 @@ class _PendingSendCard extends StatelessWidget {
     return MeshCard(
       tone: MeshCardTone.surface,
       borderColor: borderTone,
-      accentStrip: accentTone,
       padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3002,8 +2999,7 @@ class _InboxCard extends StatelessWidget {
     }
     return MeshCard(
       tone: MeshCardTone.surface,
-      borderColor: colors.warning.withValues(alpha: 0.35),
-      accentStrip: colors.warning,
+      borderColor: colors.warning.withValues(alpha: 0.55),
       onTap: onOpenSession,
       padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
       child: Column(
