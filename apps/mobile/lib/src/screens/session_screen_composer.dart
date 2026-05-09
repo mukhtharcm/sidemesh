@@ -1012,7 +1012,9 @@ class _ComposerFileSuggestionTrayState
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'No files match "@${widget.query}".',
+                widget.query.trim().isEmpty
+                    ? 'Type after "@" to search files.'
+                    : 'No files match "@${widget.query}".',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colors.textSecondary,
                 ),

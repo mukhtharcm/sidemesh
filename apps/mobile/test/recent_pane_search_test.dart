@@ -42,6 +42,12 @@ void main() {
     baseUrl: 'http://macbook.local:8787',
     token: 'secret',
   );
+  const brokenHost = HostProfile(
+    id: 'host-2',
+    label: 'Broken VPS',
+    baseUrl: 'http://broken.local:8787',
+    token: 'secret',
+  );
 
   setUp(() async {
     SessionLocalStore.instance.resetMigrationState();
@@ -130,6 +136,48 @@ void main() {
     final newer = tester.getTopLeft(find.text('Newer Match')).dy;
     expect(best, lessThan(newer));
   });
+
+  testWidgets('shows a banner when one host fails during search', (tester) async {
+    final now = DateTime(2026, 1, 1, 12);
+    final api = _FakeSearchApiClient(
+      sessions: const <SessionSummary>[],
+      searchResults: <String, List<SessionSummary>>{
+        'host-1::ng': <SessionSummary>[
+          _session(
+            id: 'best',
+            title: 'Best Match',
+            updatedAt: now,
+            matchRank: 1,
+          ),
+        ],
+      },
+      searchFailures: <String, Object>{
+        'host-2::ng': StateError('offline'),
+      },
+    );
+
+    await _pumpRecentPane(
+      tester,
+      api: api,
+      hosts: const <HostProfile>[host, brokenHost],
+      query: '',
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await _pumpRecentPane(
+      tester,
+      api: api,
+      hosts: const <HostProfile>[host, brokenHost],
+      query: 'ng',
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+
+    expect(find.textContaining('Broken VPS is unreachable.'), findsOneWidget);
+    expect(find.text('Best Match'), findsOneWidget);
+  });
 }
 
 Future<void> _pumpRecentPane(
@@ -193,11 +241,12 @@ class _FakeSearchApiClient extends ApiClient {
   _FakeSearchApiClient({
     required this.sessions,
     required this.searchResults,
+    this.searchFailures = const <String, Object>{},
   });
 
   final List<SessionSummary> sessions;
   final Map<String, List<SessionSummary>> searchResults;
-  final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
+  final Map<String, Object> searchFailures;
 
   @override
   Future<List<SessionSummary>> fetchSessions(HostProfile host, {int? limit}) {
@@ -210,23 +259,31 @@ class _FakeSearchApiClient extends ApiClient {
     required String query,
     int? limit,
   }) {
+    final scopedKey = '${host.id}::$query';
+    final failure = searchFailures[scopedKey] ?? searchFailures[query];
+    if (failure != null) {
+      return Future<List<SessionSummary>>.error(failure);
+    }
     return Future<List<SessionSummary>>.value(
-      searchResults[query] ?? const <SessionSummary>[],
+      searchResults[scopedKey] ??
+          searchResults[query] ??
+          const <SessionSummary>[],
     );
   }
 
   @override
   WebSocketChannel openSessionsLive(HostProfile host) {
+    final channel = _IdleWebSocketChannel();
     scheduleMicrotask(() {
-      _channel.emit(jsonEncode(<String, Object?>{'type': 'hello'}));
-      _channel.emit(
+      channel.emit(jsonEncode(<String, Object?>{'type': 'hello'}));
+      channel.emit(
         jsonEncode(<String, Object?>{
           'type': 'snapshot',
           'sessions': sessions.map((session) => session.toJson()).toList(),
         }),
       );
     });
-    return _channel;
+    return channel;
   }
 }
 

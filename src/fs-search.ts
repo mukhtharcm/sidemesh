@@ -10,8 +10,14 @@ export interface FsSearchResult {
   score: number;
 }
 
+interface SearchEntry {
+  path: string;
+  name: string;
+  isDirectory: boolean;
+}
+
 interface CacheEntry {
-  entries: string[];
+  entries: SearchEntry[];
   expiresAt: number;
 }
 
@@ -21,29 +27,34 @@ const MAX_SCANNED = 100_000;
 
 const searchCache = new Map<string, CacheEntry>();
 
+export function clearFsSearchCache(): void {
+  searchCache.clear();
+}
+
 export async function searchFiles(
   query: string,
   roots: string[],
   options: { limit?: number } = {},
 ): Promise<FsSearchResult[]> {
+  const normalizedQuery = query.trim();
+  if (normalizedQuery.length === 0) {
+    return [];
+  }
+
   const limit = options.limit ?? MAX_RESULTS;
-  const allEntries: Array<{ path: string; name: string; isDirectory: boolean }> = [];
+  const allEntries: SearchEntry[] = [];
 
   for (const root of roots) {
     const entries = await walkWithCache(root);
-    for (const entry of entries) {
-      const relative = entry;
-      const name = path.basename(entry);
-      const isDirectory = entry.endsWith("/");
-      const displayPath = isDirectory ? relative + "/" : relative;
-      allEntries.push({ path: displayPath, name, isDirectory });
-    }
+    allEntries.push(...entries);
   }
 
   const scored = allEntries
     .map((entry) => ({
-      ...entry,
-      score: fuzzyScore(query, entry.path),
+      path: entry.isDirectory ? `${entry.path}/` : entry.path,
+      name: entry.name,
+      isDirectory: entry.isDirectory,
+      score: fuzzyScore(normalizedQuery, entry.path),
     }))
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -52,7 +63,7 @@ export async function searchFiles(
   return scored;
 }
 
-async function walkWithCache(root: string): Promise<string[]> {
+async function walkWithCache(root: string): Promise<SearchEntry[]> {
   const now = Date.now();
   const cached = searchCache.get(root);
   if (cached && cached.expiresAt > now) {
@@ -64,8 +75,8 @@ async function walkWithCache(root: string): Promise<string[]> {
   return entries;
 }
 
-async function walkDirectory(root: string): Promise<string[]> {
-  const results: string[] = [];
+async function walkDirectory(root: string): Promise<SearchEntry[]> {
+  const results: SearchEntry[] = [];
   const stack: Array<{ dir: string; ig: ignore.Ignore }> = [];
 
   const rootIg = await loadGitignore(root);
@@ -87,10 +98,19 @@ async function walkDirectory(root: string): Promise<string[]> {
 
       if (entry.isDirectory()) {
         if (entry.name === "node_modules" || entry.name === ".git") continue;
+        results.push({
+          path: relative,
+          name: entry.name,
+          isDirectory: true,
+        });
         const subIg = await loadGitignore(path.join(dir, entry.name), ig);
         stack.push({ dir: path.join(dir, entry.name), ig: subIg });
       } else if (entry.isFile()) {
-        results.push(relative);
+        results.push({
+          path: relative,
+          name: entry.name,
+          isDirectory: false,
+        });
       }
     }
   }
