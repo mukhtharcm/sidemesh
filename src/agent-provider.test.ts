@@ -119,11 +119,11 @@ describe("recent fallback session merge", () => {
       capabilities: {
         ...EMPTY_CAPABILITIES,
         sessions: {
-          ...EMPTY_CAPABILITIES.sessions,
-          recentFallback: true,
-    searchSessions: true,
-        },
+        ...EMPTY_CAPABILITIES.sessions,
+        recentFallback: true,
+        searchSessions: true,
       },
+    },
       listRecentUnindexedSessionThreads: async () => [
         thread("fallback-new", 120),
         thread("fallback-old", 80),
@@ -135,6 +135,30 @@ describe("recent fallback session merge", () => {
     assert.deepEqual(
       merged.map((item) => item.id),
       ["fallback-new", "indexed-1"],
+    );
+  });
+
+  it("normalizes mixed timestamp units before merging indexed and fallback threads", async () => {
+    const indexed = [thread("codex-new", 1_778_310_387)];
+    const provider = makeProvider({
+      capabilities: {
+        ...EMPTY_CAPABILITIES,
+        sessions: {
+          ...EMPTY_CAPABILITIES.sessions,
+          recentFallback: true,
+          searchSessions: true,
+        },
+      },
+      listRecentUnindexedSessionThreads: async () => [
+        thread("opencode-old", 1_778_306_873_039),
+      ],
+    });
+
+    const merged = await mergeRecentUnindexedThreads(provider, indexed, 2);
+
+    assert.deepEqual(
+      merged.map((item) => item.id),
+      ["codex-new", "opencode-old"],
     );
   });
 });
