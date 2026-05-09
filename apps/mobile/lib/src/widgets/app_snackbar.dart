@@ -345,13 +345,17 @@ class _ToastOverlayState extends State<_ToastOverlay>
                         ],
                         const SizedBox(width: 4),
                         IconButton(
-                          tooltip: 'Dismiss',
-                          iconSize: 16,
+                          tooltip: 'Dismiss notification',
+                          iconSize: 20,
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
+                          // Apple HIG / Material both recommend a 44pt / 48dp
+                          // minimum tap target. Snackbars are dismissed under
+                          // time pressure — undersized targets are
+                          // disproportionately frustrating here.
                           constraints: const BoxConstraints.tightFor(
-                            width: 28,
-                            height: 28,
+                            width: 44,
+                            height: 44,
                           ),
                           onPressed: _ToastQueue.instance.clear,
                           icon: Icon(
