@@ -728,7 +728,7 @@ export class PiAgentProvider
     state.archived = this.isArchived(threadId);
     normalizeInactivePiSessionState(state);
     this.sessions.set(threadId, state);
-    await this.persistSoon();
+    this.persistEventually();
     return state;
   }
 

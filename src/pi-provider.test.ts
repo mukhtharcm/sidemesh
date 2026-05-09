@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 
@@ -379,6 +380,56 @@ describe("PiAgentProvider", () => {
         : null,
       "Still working.",
     );
+  });
+
+  it("does not block history reads on persistence", async () => {
+    const cwd = nodePath.join(tempDir, "repo");
+    const sessionDir = piSessionDirForCwd(cwd, agentDir);
+    await mkdir(sessionDir, { recursive: true });
+    const sessionPath = nodePath.join(sessionDir, "2026-05-01_session-1.jsonl");
+    await writePiSessionHistory(
+      sessionPath,
+      minimalPiHistoryLines(cwd),
+      "2026-05-01T10:00:02.100Z",
+    );
+
+    const provider = new PiAgentProvider({ agentDir, stateDir });
+    await provider.start();
+
+    const threads = await provider.listSessionThreads({
+      limit: 10,
+      archived: false,
+    });
+    const thread = threads[0];
+    assert.ok(thread);
+
+    let releaseSaveState = () => {};
+    const saveStateBlocked = new Promise<void>((resolve) => {
+      releaseSaveState = resolve;
+    });
+    let saveStateCalls = 0;
+    const providerWithInternals = provider as unknown as {
+      saveState: () => Promise<void>;
+    };
+    providerWithInternals.saveState = async () => {
+      saveStateCalls += 1;
+      await saveStateBlocked;
+    };
+
+    try {
+      const outcome = await Promise.race([
+        provider.readSessionLog(thread).then((log) => ({ type: "resolved" as const, log })),
+        delay(50).then(() => ({ type: "timed_out" as const })),
+      ]);
+      assert.equal(outcome.type, "resolved");
+      assert.equal(outcome.log.messages.length, 2);
+
+      await delay(0);
+      assert.equal(saveStateCalls, 1);
+    } finally {
+      releaseSaveState();
+      await delay(0);
+    }
   });
 
   it("maps live Pi session events onto Sidemesh events", async () => {
