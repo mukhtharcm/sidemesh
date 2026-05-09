@@ -16,7 +16,10 @@ InspectorSurface buildInspectorPortsSurface({
   return InspectorSurface(
     kind: InspectorSurfaceKind.ports,
     ownerKey: ownerKey,
-    title: 'Previews & tunnels',
+    title: portForwardScreenTitle(
+      supportsBrowserPreview: supportsBrowserPreview,
+      supportsPortForwarding: supportsPortForwarding,
+    ),
     icon: Icons.cable_rounded,
     bodyBuilder: (context) => PortForwardPane(
       key: ValueKey('ports:${host.id}:${session.id}:${session.cwd}'),

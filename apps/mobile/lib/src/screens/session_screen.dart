@@ -5551,6 +5551,8 @@ class _SessionScreenState extends State<SessionScreen>
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
     final showStopPill =
         isCompact && _running && _supportsSessionInterrupt;
+    final showWaitingState =
+        !_loading && timelineEntries.isEmpty && _running;
     final bodyContent = Column(
       children: [
         if (!isCompact)
@@ -5604,122 +5606,124 @@ class _SessionScreenState extends State<SessionScreen>
         Expanded(
           child: (_loading && timelineEntries.isEmpty)
               ? const MeshLoader()
-              : (!_loading && timelineEntries.isEmpty && _running)
-              ? _SessionWaitingState()
               : Stack(
                   children: [
-                    RefreshIndicator(
-                      onRefresh: () => _loadSnapshot(scrollToBottom: false),
-                      edgeOffset: 0,
-                      displacement: 28,
-                      child: SelectionArea(
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          reverse: true,
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
-                          padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          itemCount:
-                              visibleTimelineEntries.length +
-                              (showHistoryBanner ? 1 : 0),
-                          itemBuilder: (context, index) {
-                            if (showHistoryBanner &&
-                                index == visibleTimelineEntries.length) {
-                              return Padding(
-                                padding: const EdgeInsets.fromLTRB(0, 10, 0, 6),
-                                child: _HistoryTruncationCard(
-                                  history: _history!,
-                                  loading: _loadingOlderHistory,
-                                  onLoadOlderHistory: _loadOlderTranscript,
-                                  onDismiss: () => setState(
-                                    () => _historyBannerDismissed = true,
+                    if (showWaitingState)
+                      const Positioned.fill(child: _SessionWaitingState())
+                    else
+                      RefreshIndicator(
+                        onRefresh: () => _loadSnapshot(scrollToBottom: false),
+                        edgeOffset: 0,
+                        displacement: 28,
+                        child: SelectionArea(
+                          child: ListView.builder(
+                            controller: _scrollController,
+                            reverse: true,
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            itemCount:
+                                visibleTimelineEntries.length +
+                                (showHistoryBanner ? 1 : 0),
+                            itemBuilder: (context, index) {
+                              if (showHistoryBanner &&
+                                  index == visibleTimelineEntries.length) {
+                                return Padding(
+                                  padding: const EdgeInsets.fromLTRB(0, 10, 0, 6),
+                                  child: _HistoryTruncationCard(
+                                    history: _history!,
+                                    loading: _loadingOlderHistory,
+                                    onLoadOlderHistory: _loadOlderTranscript,
+                                    onDismiss: () => setState(
+                                      () => _historyBannerDismissed = true,
+                                    ),
                                   ),
-                                ),
-                              );
-                            }
-                            final chronoIndex =
-                                visibleTimelineEntries.length - index - 1;
-                            final entry = visibleTimelineEntries[chronoIndex];
-                            final prev = chronoIndex > 0
-                                ? visibleTimelineEntries[chronoIndex - 1]
-                                : null;
-                            final showDay =
-                                prev == null ||
-                                !_sameCalendarDay(
-                                  prev.createdAt,
-                                  entry.createdAt,
                                 );
-                            final child = KeyedSubtree(
-                              key: ValueKey(entry.keyId),
-                              child: switch (entry.kind) {
-                                _TimelineEntryKind.message => _MessageBubble(
-                                  host: widget.host,
-                                  api: widget.api,
-                                  message: entry.message!,
-                                  pinned: _pinsStore.isPinned(
-                                    widget.host,
-                                    session.id,
-                                    entry.message!.id,
-                                  ),
-                                  onTogglePin: () =>
-                                      _toggleMessagePin(entry.message!),
-                                  onOpenFile: _openWorkspaceFile,
-                                ),
-                                _TimelineEntryKind.activity => _ActivityCard(
-                                  host: widget.host,
-                                  api: widget.api,
-                                  activity: entry.activity!,
-                                  sessionCwd: session.cwd,
-                                  defaultCollapsed:
-                                      entry.activity!.type !=
-                                      'image_generation',
-                                  onOpenFile: _openWorkspaceFile,
-                                  onBrowsePath: _supportsFilesystem
-                                      ? _browseWorkspacePath
-                                      : null,
-                                  onOpenBrowserPreview: _supportsBrowserPreview
-                                      ? (target) => unawaited(
-                                          _openBrowserPreviewTarget(target),
-                                        )
-                                      : null,
-                                  onOpenTerminal: _supportsTerminal
-                                      ? (cwd) => unawaited(
-                                          _openTerminal(cwdOverride: cwd),
-                                        )
-                                      : null,
-                                ),
-                                _TimelineEntryKind.providerWarning =>
-                                  _ProviderWarningRow(
-                                    event: entry.runtimeEvent!.event,
-                                  ),
-                                _TimelineEntryKind.planUpdated =>
-                                  _PlanUpdateCard(
-                                    event: entry.runtimeEvent!.event,
-                                  ),
-                                _TimelineEntryKind.liveAssistant =>
-                                  _LiveAssistantBubble(
+                              }
+                              final chronoIndex =
+                                  visibleTimelineEntries.length - index - 1;
+                              final entry = visibleTimelineEntries[chronoIndex];
+                              final prev = chronoIndex > 0
+                                  ? visibleTimelineEntries[chronoIndex - 1]
+                                  : null;
+                              final showDay =
+                                  prev == null ||
+                                  !_sameCalendarDay(
+                                    prev.createdAt,
+                                    entry.createdAt,
+                                  );
+                              final child = KeyedSubtree(
+                                key: ValueKey(entry.keyId),
+                                child: switch (entry.kind) {
+                                  _TimelineEntryKind.message => _MessageBubble(
                                     host: widget.host,
                                     api: widget.api,
-                                    message: _liveAssistantNotifier,
+                                    message: entry.message!,
+                                    pinned: _pinsStore.isPinned(
+                                      widget.host,
+                                      session.id,
+                                      entry.message!.id,
+                                    ),
+                                    onTogglePin: () =>
+                                        _toggleMessagePin(entry.message!),
                                     onOpenFile: _openWorkspaceFile,
                                   ),
-                              },
-                            );
-                            if (!showDay) return child;
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _DaySeparator(
-                                  label: _formatDaySeparator(entry.createdAt),
-                                ),
-                                child,
-                              ],
-                            );
-                          },
+                                  _TimelineEntryKind.activity => _ActivityCard(
+                                    host: widget.host,
+                                    api: widget.api,
+                                    activity: entry.activity!,
+                                    sessionCwd: session.cwd,
+                                    defaultCollapsed:
+                                        entry.activity!.type !=
+                                        'image_generation',
+                                    onOpenFile: _openWorkspaceFile,
+                                    onBrowsePath: _supportsFilesystem
+                                        ? _browseWorkspacePath
+                                        : null,
+                                    onOpenBrowserPreview:
+                                        _supportsBrowserPreview
+                                        ? (target) => unawaited(
+                                            _openBrowserPreviewTarget(target),
+                                          )
+                                        : null,
+                                    onOpenTerminal: _supportsTerminal
+                                        ? (cwd) => unawaited(
+                                            _openTerminal(cwdOverride: cwd),
+                                          )
+                                        : null,
+                                  ),
+                                  _TimelineEntryKind.providerWarning =>
+                                    _ProviderWarningRow(
+                                      event: entry.runtimeEvent!.event,
+                                    ),
+                                  _TimelineEntryKind.planUpdated =>
+                                    _PlanUpdateCard(
+                                      event: entry.runtimeEvent!.event,
+                                    ),
+                                  _TimelineEntryKind.liveAssistant =>
+                                    _LiveAssistantBubble(
+                                      host: widget.host,
+                                      api: widget.api,
+                                      message: _liveAssistantNotifier,
+                                      onOpenFile: _openWorkspaceFile,
+                                    ),
+                                },
+                              );
+                              if (!showDay) return child;
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  _DaySeparator(
+                                    label: _formatDaySeparator(entry.createdAt),
+                                  ),
+                                  child,
+                                ],
+                              );
+                            },
+                          ),
                         ),
                       ),
-                    ),
                     if (showStopPill)
                       Positioned(
                         left: 16,

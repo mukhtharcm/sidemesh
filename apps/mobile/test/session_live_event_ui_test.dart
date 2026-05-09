@@ -434,16 +434,7 @@ void main() {
     tester,
   ) async {
     final session = _session('mobile-stop');
-    final api = _RichEventFakeApi(
-      sessionSummary: session,
-      messages: [
-        _assistantMessage(
-          id: 'seed-message',
-          text: 'Existing transcript item.',
-          content: const [TextBlock('Existing transcript item.')],
-        ),
-      ],
-    );
+    final api = _RichEventFakeApi(sessionSummary: session);
     addTearDown(api.dispose);
 
     await _pumpApp(

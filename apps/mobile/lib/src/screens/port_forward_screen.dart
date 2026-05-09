@@ -17,6 +17,19 @@ import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import 'browser_preview_screen.dart';
 
+String portForwardScreenTitle({
+  required bool supportsBrowserPreview,
+  required bool supportsPortForwarding,
+}) {
+  if (supportsBrowserPreview && supportsPortForwarding) {
+    return 'Previews & tunnels';
+  }
+  if (supportsBrowserPreview) {
+    return 'Browser previews';
+  }
+  return 'Connections';
+}
+
 class PortForwardScreen extends StatelessWidget {
   const PortForwardScreen({
     super.key,
@@ -46,7 +59,12 @@ class PortForwardScreen extends StatelessWidget {
       backgroundColor: colors.canvas,
       appBar: AppBar(
         backgroundColor: colors.canvas,
-        title: const Text('Previews & tunnels'),
+        title: Text(
+          portForwardScreenTitle(
+            supportsBrowserPreview: supportsBrowserPreview,
+            supportsPortForwarding: supportsPortForwarding,
+          ),
+        ),
       ),
       body: PortForwardPane(
         host: host,
@@ -114,6 +132,9 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   @override
   void initState() {
     super.initState();
+    if (!widget.supportsPortForwarding) {
+      _scheme = 'http';
+    }
     unawaited(_loadPorts());
   }
 
@@ -568,6 +589,28 @@ class _PortForwardPaneState extends State<PortForwardPane> {
     final hasAnyConnections = browserPreviews.isNotEmpty ||
         tcpTunnels.isNotEmpty ||
         localUrlBridges.isNotEmpty;
+    final formTitle = _scheme == 'tcp'
+        ? 'Tunnel a TCP service'
+        : widget.supportsBrowserPreview
+        ? 'Preview a localhost web app'
+        : 'Create a local URL bridge';
+    final formBody = _scheme == 'tcp'
+        ? 'Open a raw tunnel to a service like Redis, Postgres, or any other localhost TCP port on ${widget.host.label}.'
+        : widget.supportsBrowserPreview && widget.supportsPortForwarding
+        ? 'Remote browser previews are the fastest way to inspect modern dev servers from ${widget.host.label}. Local URL bridges stay available as an advanced fallback.'
+        : widget.supportsBrowserPreview
+        ? 'Open a remote browser preview for a localhost app on ${widget.host.label}. Browser rendering stays on the host, so modern dev servers remain responsive.'
+        : 'Create a local HTTP or HTTPS URL for a localhost service on ${widget.host.label}. Use TCP mode for raw socket services like Redis or Postgres.';
+    final emptyTitle = widget.supportsBrowserPreview && widget.supportsPortForwarding
+        ? 'No active previews or tunnels'
+        : widget.supportsBrowserPreview
+        ? 'No active browser previews'
+        : 'No active connections';
+    final emptyBody = widget.supportsBrowserPreview && widget.supportsPortForwarding
+        ? 'Open a browser preview for your localhost app or create a tunnel for an advanced service.'
+        : widget.supportsBrowserPreview
+        ? 'Open a browser preview for a localhost app on ${widget.host.label}.'
+        : 'Create a local URL bridge or TCP tunnel for a localhost service on ${widget.host.label}.';
 
     return RefreshIndicator(
       onRefresh: _loadPorts,
@@ -591,9 +634,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        _scheme == 'tcp'
-                            ? 'Tunnel a TCP service'
-                            : 'Preview a localhost web app',
+                        formTitle,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           color: colors.textPrimary,
                           fontWeight: AppWeights.title,
@@ -604,9 +645,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _scheme == 'tcp'
-                      ? 'Open a raw tunnel to a service like Redis, Postgres, or any other localhost TCP port on ${widget.host.label}.'
-                      : 'Remote browser previews are the fastest way to inspect modern dev servers from ${widget.host.label}. Local URL bridges stay available as an advanced fallback.',
+                  formBody,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.35,
@@ -643,14 +682,22 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                       width: 120,
                       child: DropdownButtonFormField<String>(
                         initialValue: _scheme,
+                        isExpanded: true,
                         decoration: const InputDecoration(labelText: 'Type'),
-                        items: const [
-                          DropdownMenuItem(value: 'http', child: Text('HTTP')),
-                          DropdownMenuItem(
+                        items: [
+                          const DropdownMenuItem(
+                            value: 'http',
+                            child: Text('HTTP'),
+                          ),
+                          const DropdownMenuItem(
                             value: 'https',
                             child: Text('HTTPS'),
                           ),
-                          DropdownMenuItem(value: 'tcp', child: Text('TCP')),
+                          if (widget.supportsPortForwarding)
+                            const DropdownMenuItem(
+                              value: 'tcp',
+                              child: Text('TCP'),
+                            ),
                         ],
                         onChanged: (value) =>
                             setState(() => _scheme = value ?? 'http'),
@@ -738,10 +785,8 @@ class _PortForwardPaneState extends State<PortForwardPane> {
               icon: widget.supportsBrowserPreview
                   ? Icons.open_in_browser_rounded
                   : Icons.settings_ethernet_rounded,
-              title: 'No active previews or tunnels',
-              body: widget.supportsBrowserPreview
-                  ? 'Open a browser preview for your localhost app or create a tunnel for an advanced service.'
-                  : 'Create a tunnel for a localhost service on ${widget.host.label}.',
+              title: emptyTitle,
+              body: emptyBody,
             )
           else ...[
             if (browserPreviews.isNotEmpty) ...[
