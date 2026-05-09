@@ -1,0 +1,284 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sidemesh_mobile/src/api_client.dart';
+import 'package:sidemesh_mobile/src/models.dart';
+import 'package:sidemesh_mobile/src/screens/home_screen.dart';
+import 'package:sidemesh_mobile/src/session_local_store.dart';
+import 'package:sidemesh_mobile/src/db.dart';
+import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
+import 'package:sidemesh_mobile/src/theme/app_theme.dart';
+import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:stream_channel/stream_channel.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+
+class _FakePathProvider extends PathProviderPlatform
+    with MockPlatformInterfaceMixin {
+  @override
+  Future<String?> getApplicationDocumentsPath() async => '/tmp/sidemesh_test';
+
+  @override
+  Future<String?> getApplicationSupportPath() async => '/tmp/sidemesh_test';
+
+  @override
+  Future<String?> getTemporaryPath() async => '/tmp/sidemesh_test';
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfiNoIsolate;
+  PathProviderPlatform.instance = _FakePathProvider();
+
+  const host = HostProfile(
+    id: 'host-1',
+    label: 'MacBook',
+    baseUrl: 'http://macbook.local:8787',
+    token: 'secret',
+  );
+
+  setUp(() async {
+    SessionLocalStore.instance.resetMigrationState();
+    final db = await SidemeshDb.instance;
+    await db.delete('sessions');
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
+  testWidgets('falls back to local filtering when query shrinks below two characters', (
+    tester,
+  ) async {
+    final now = DateTime(2026, 1, 1, 12);
+    final api = _FakeSearchApiClient(
+      sessions: <SessionSummary>[
+        _session(
+          id: 'local-alpha',
+          title: 'Alpha Local',
+          updatedAt: now,
+        ),
+      ],
+      searchResults: <String, List<SessionSummary>>{
+        'ab': <SessionSummary>[
+          _session(
+            id: 'remote-beta',
+            title: 'Remote Beta',
+            updatedAt: now.add(const Duration(minutes: 1)),
+            matchRank: 1,
+          ),
+        ],
+      },
+    );
+
+    await _pumpRecentPane(tester, api: api, hosts: const <HostProfile>[host], query: '');
+    await tester.pump();
+    await tester.pump();
+
+    await _pumpRecentPane(tester, api: api, hosts: const <HostProfile>[host], query: 'ab');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+
+    expect(find.text('Remote Beta'), findsOneWidget);
+    expect(find.text('Alpha Local'), findsNothing);
+
+    await _pumpRecentPane(tester, api: api, hosts: const <HostProfile>[host], query: 'a');
+    await tester.pump();
+
+    expect(find.text('Alpha Local'), findsOneWidget);
+    expect(find.text('Remote Beta'), findsNothing);
+  });
+
+  testWidgets('keeps search relevance ahead of recency when rendering remote matches', (
+    tester,
+  ) async {
+    final now = DateTime(2026, 1, 1, 12);
+    final api = _FakeSearchApiClient(
+      sessions: const <SessionSummary>[],
+      searchResults: <String, List<SessionSummary>>{
+        'ng': <SessionSummary>[
+          _session(
+            id: 'best',
+            title: 'Best Match',
+            updatedAt: now,
+            matchRank: 1,
+          ),
+          _session(
+            id: 'newer',
+            title: 'Newer Match',
+            updatedAt: now.add(const Duration(hours: 1)),
+            matchRank: 5,
+          ),
+        ],
+      },
+    );
+
+    await _pumpRecentPane(tester, api: api, hosts: const <HostProfile>[host], query: '');
+    await tester.pump();
+    await tester.pump();
+
+    await _pumpRecentPane(tester, api: api, hosts: const <HostProfile>[host], query: 'ng');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+
+    final best = tester.getTopLeft(find.text('Best Match')).dy;
+    final newer = tester.getTopLeft(find.text('Newer Match')).dy;
+    expect(best, lessThan(newer));
+  });
+}
+
+Future<void> _pumpRecentPane(
+  WidgetTester tester, {
+  required ApiClient api,
+  required List<HostProfile> hosts,
+  required String query,
+}) async {
+  final themeController = await ThemeController.load();
+  final palette = ThemeVariant.codexAmber;
+  await tester.pumpWidget(
+    ThemeScope(
+      notifier: themeController,
+      child: MaterialApp(
+        theme: buildLightTheme(
+          palette.light,
+          typography: themeController.typography,
+        ),
+        darkTheme: buildDarkTheme(
+          palette.dark,
+          typography: themeController.typography,
+        ),
+        home: Scaffold(
+          body: RecentPane(
+            hosts: hosts,
+            api: api,
+            query: query,
+            hasSavedHosts: hosts.isNotEmpty,
+            onOpenSession: (_, _) {},
+            onActiveCountChanged: (_) {},
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+SessionSummary _session({
+  required String id,
+  required String title,
+  required DateTime updatedAt,
+  num? matchRank,
+}) {
+  return SessionSummary(
+    id: id,
+    title: title,
+    preview: '$title preview',
+    cwd: '/repo',
+    createdAt: updatedAt,
+    updatedAt: updatedAt,
+    source: 'codex',
+    provider: 'codex',
+    status: 'loaded',
+    runtime: null,
+    gitInfo: null,
+    matchRank: matchRank,
+  );
+}
+
+class _FakeSearchApiClient extends ApiClient {
+  _FakeSearchApiClient({
+    required this.sessions,
+    required this.searchResults,
+  });
+
+  final List<SessionSummary> sessions;
+  final Map<String, List<SessionSummary>> searchResults;
+  final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
+
+  @override
+  Future<List<SessionSummary>> fetchSessions(HostProfile host, {int? limit}) {
+    return Future<List<SessionSummary>>.value(sessions);
+  }
+
+  @override
+  Future<List<SessionSummary>> searchSessions(
+    HostProfile host, {
+    required String query,
+    int? limit,
+  }) {
+    return Future<List<SessionSummary>>.value(
+      searchResults[query] ?? const <SessionSummary>[],
+    );
+  }
+
+  @override
+  WebSocketChannel openSessionsLive(HostProfile host) {
+    scheduleMicrotask(() {
+      _channel.emit(jsonEncode(<String, Object?>{'type': 'hello'}));
+      _channel.emit(
+        jsonEncode(<String, Object?>{
+          'type': 'snapshot',
+          'sessions': sessions.map((session) => session.toJson()).toList(),
+        }),
+      );
+    });
+    return _channel;
+  }
+}
+
+class _IdleWebSocketChannel extends StreamChannelMixin<dynamic>
+    implements WebSocketChannel {
+  final StreamController<dynamic> _incoming = StreamController<dynamic>();
+  final StreamController<dynamic> _outgoing = StreamController<dynamic>();
+
+  void emit(dynamic value) {
+    if (!_incoming.isClosed) {
+      _incoming.add(value);
+    }
+  }
+
+  @override
+  Stream<dynamic> get stream => _incoming.stream;
+
+  @override
+  WebSocketSink get sink => _IdleWebSocketSink(_outgoing.sink);
+
+  @override
+  Future<void> get ready => Future<void>.value();
+
+  @override
+  int? get closeCode => null;
+
+  @override
+  String? get closeReason => null;
+
+  @override
+  String? get protocol => null;
+}
+
+class _IdleWebSocketSink implements WebSocketSink {
+  _IdleWebSocketSink(this._delegate);
+
+  final StreamSink<dynamic> _delegate;
+
+  @override
+  Future<void> addStream(Stream<dynamic> stream) => _delegate.addStream(stream);
+
+  @override
+  Future<void> close([int? closeCode, String? closeReason]) =>
+      _delegate.close();
+
+  @override
+  Future<void> get done => _delegate.done;
+
+  @override
+  void add(dynamic data) => _delegate.add(data);
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) =>
+      _delegate.addError(error, stackTrace);
+}

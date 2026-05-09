@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../models.dart';
+import '../../search_query.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/app_tokens.dart';
@@ -129,7 +130,6 @@ class _SearchPanelState extends State<SearchPanel> {
   }
 
   List<SearchRecord> _filteredRecords() {
-    final needle = _query.trim().toLowerCase();
     return widget.records.where((r) {
       final kindOk = switch (_filter) {
         _SearchFilter.all => true,
@@ -137,8 +137,7 @@ class _SearchPanelState extends State<SearchPanel> {
         _SearchFilter.activities => r.kind == SearchRecordKind.activity,
       };
       if (!kindOk) return false;
-      if (needle.isEmpty) return true;
-      return r.haystack.contains(needle);
+      return matchesSearchQuery(r.haystack, _query);
     }).toList(growable: false);
   }
 

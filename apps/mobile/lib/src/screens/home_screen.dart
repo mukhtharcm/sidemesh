@@ -1132,6 +1132,7 @@ class _RecentPaneState extends State<RecentPane> {
   List<RemoteSessionEntry>? _searchEntries;
   bool _searchLoading = false;
   Timer? _searchDebounce;
+  int _searchRequestId = 0;
 
   @override
   void initState() {
@@ -1189,7 +1190,10 @@ class _RecentPaneState extends State<RecentPane> {
       _clearScreenAwakeSource(oldWidget.screenAwakeSourceKey);
       _syncScreenAwakeSource(_screenAwakeActiveEntryCount() > 0);
     }
-    if (widget.query != oldWidget.query) {
+    if (
+      widget.query != oldWidget.query ||
+      !_sameHostList(widget.hosts, oldWidget.hosts)
+    ) {
       _onQueryChanged(widget.query);
     }
     _store.configure(hosts: widget.hosts, api: widget.api);
@@ -1238,8 +1242,9 @@ class _RecentPaneState extends State<RecentPane> {
 
   void _onQueryChanged(String query) {
     _searchDebounce?.cancel();
+    _searchRequestId++;
     final trimmed = query.trim();
-    if (trimmed.isEmpty) {
+    if (trimmed.isEmpty || trimmed.length < 2) {
       if (mounted) {
         setState(() {
           _searchEntries = null;
@@ -1248,20 +1253,20 @@ class _RecentPaneState extends State<RecentPane> {
       }
       return;
     }
-    if (trimmed.length < 2) return;
+    final requestId = _searchRequestId;
     if (mounted) {
       setState(() => _searchLoading = true);
     }
     _searchDebounce = Timer(const Duration(milliseconds: 300), () {
-      _performSearch(trimmed);
+      _performSearch(trimmed, requestId);
     });
   }
 
-  Future<void> _performSearch(String query) async {
+  Future<void> _performSearch(String query, int requestId) async {
     if (!mounted) return;
     final hosts = widget.hosts.where((h) => h.enabled).toList();
     if (hosts.isEmpty) {
-      if (mounted) {
+      if (mounted && requestId == _searchRequestId) {
         setState(() {
           _searchEntries = [];
           _searchLoading = false;
@@ -1289,13 +1294,36 @@ class _RecentPaneState extends State<RecentPane> {
       eagerError: false,
     );
 
-    if (!mounted) return;
-    results.sort((a, b) => b.session.updatedAt.compareTo(a.session.updatedAt));
+    if (!mounted ||
+        requestId != _searchRequestId ||
+        widget.query.trim() != query) {
+      return;
+    }
+    results.sort(_compareSearchEntryRank);
 
     setState(() {
       _searchEntries = results;
       _searchLoading = false;
     });
+  }
+
+  int _compareSearchEntryRank(RemoteSessionEntry left, RemoteSessionEntry right) {
+    final leftRank = left.session.matchRank;
+    final rightRank = right.session.matchRank;
+    if (leftRank != null || rightRank != null) {
+      if (leftRank == null) return 1;
+      if (rightRank == null) return -1;
+      final rankCompare = leftRank.toDouble().compareTo(rightRank.toDouble());
+      if (rankCompare != 0) {
+        return rankCompare;
+      }
+    }
+
+    final updatedCompare = right.session.updatedAt.compareTo(left.session.updatedAt);
+    if (updatedCompare != 0) {
+      return updatedCompare;
+    }
+    return left.session.id.compareTo(right.session.id);
   }
 
   List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {

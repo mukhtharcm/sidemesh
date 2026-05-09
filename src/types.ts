@@ -238,6 +238,7 @@ export interface SessionSummary {
   gitInfo: GitInfoSummary | null;
   isSubAgent?: boolean;
   matchSnippet?: string | null;
+  matchRank?: number | null;
 }
 
 export interface GitInfoSummary {

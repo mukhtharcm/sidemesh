@@ -693,6 +693,7 @@ class SessionSummary {
     required this.gitInfo,
     this.isSubAgent = false,
     this.matchSnippet,
+    this.matchRank,
   });
 
   final String id;
@@ -708,6 +709,7 @@ class SessionSummary {
   final GitInfoSummary? gitInfo;
   final bool isSubAgent;
   final String? matchSnippet;
+  final num? matchRank;
 
   /// Older Sidemesh builds used `running`, while Codex app-server reports
   /// active threads as `active`.
@@ -728,6 +730,7 @@ class SessionSummary {
     bool clearGitInfo = false,
     bool? isSubAgent,
     String? matchSnippet,
+    num? matchRank,
   }) => SessionSummary(
     id: id,
     title: title ?? this.title,
@@ -742,6 +745,7 @@ class SessionSummary {
     gitInfo: clearGitInfo ? null : (gitInfo ?? this.gitInfo),
     isSubAgent: isSubAgent ?? this.isSubAgent,
     matchSnippet: matchSnippet ?? this.matchSnippet,
+    matchRank: matchRank ?? this.matchRank,
   );
 
   factory SessionSummary.fromJson(Map<String, dynamic> json) => SessionSummary(
@@ -764,6 +768,7 @@ class SessionSummary {
         : null,
     isSubAgent: (json['isSubAgent'] as bool?) ?? false,
     matchSnippet: json['matchSnippet'] as String?,
+    matchRank: json['matchRank'] as num?,
   );
 
   Map<String, dynamic> toJson() => {
@@ -780,6 +785,7 @@ class SessionSummary {
     'gitInfo': gitInfo?.toJson(),
     'isSubAgent': isSubAgent,
     'matchSnippet': matchSnippet,
+    'matchRank': matchRank,
   };
 }
 

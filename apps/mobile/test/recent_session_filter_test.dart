@@ -26,6 +26,14 @@ void main() {
     expect(recentSessionMatchesQuery(host, session, 'repo'), isTrue);
     expect(recentSessionMatchesQuery(host, session, 'macbook'), isTrue);
   });
+
+  test('matches multi-term queries across combined fields', () {
+    final session = _summary(provider: 'codex');
+
+    expect(recentSessionMatchesQuery(host, session, 'donation repo'), isTrue);
+    expect(recentSessionMatchesQuery(host, session, 'preview macbook'), isTrue);
+    expect(recentSessionMatchesQuery(host, session, 'donation windows'), isFalse);
+  });
 }
 
 SessionSummary _summary({required String provider}) {

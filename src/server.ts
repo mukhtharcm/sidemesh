@@ -1444,7 +1444,11 @@ export async function startServer(
         if (!thread) continue;
         const runtime = await loadCachedSessionRuntime(provider, thread, runtimeCache, "active");
         const session = mapSession(thread, runtime);
-        sessions.push({ ...session, matchSnippet: result.snippet ?? undefined });
+        sessions.push({
+          ...session,
+          matchSnippet: result.snippet ?? undefined,
+          matchRank: result.rank,
+        });
       }
       response.json(sessions);
     }),
