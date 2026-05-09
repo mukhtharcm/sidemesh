@@ -171,12 +171,22 @@ class MeshCard extends StatelessWidget {
 enum MeshCardTone { surface, elevated, muted }
 
 /// Large empty state placeholder.
+///
+/// Empty states are a high-leverage onboarding surface — research on AI-
+/// generated UIs (GenDesigns mistake #5, Apple HIG "Empty States") shows
+/// that adding concrete next steps and short feature bullets here is the
+/// single biggest win for discoverability of power features. The optional
+/// [primaryAction], [secondaryAction], and [tips] slots make that pattern
+/// reusable without forcing every caller to hand-roll a Column.
 class MeshEmptyState extends StatelessWidget {
   const MeshEmptyState({
     super.key,
     required this.icon,
     required this.title,
     required this.body,
+    this.primaryAction,
+    this.secondaryAction,
+    this.tips = const [],
   }) : compact = false;
 
   /// In-list / inline variant — smaller icon bubble, tighter padding.
@@ -187,12 +197,25 @@ class MeshEmptyState extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.body,
+    this.primaryAction,
+    this.secondaryAction,
+    this.tips = const [],
   }) : compact = true;
 
   final IconData icon;
   final String title;
   final String body;
   final bool compact;
+
+  /// Optional primary call-to-action. Rendered as a [FilledButton.icon].
+  final MeshEmptyStateAction? primaryAction;
+
+  /// Optional secondary call-to-action. Rendered as a [TextButton.icon].
+  final MeshEmptyStateAction? secondaryAction;
+
+  /// Short feature-tour bullets (icon + label) shown under the body.
+  /// Keep to ≤3 entries; longer lists overwhelm the empty state.
+  final List<MeshEmptyStateTip> tips;
 
   @override
   Widget build(BuildContext context) {
@@ -205,40 +228,138 @@ class MeshEmptyState extends StatelessWidget {
     return Center(
       child: Padding(
         padding: EdgeInsets.all(padding),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: bubble,
-              height: bubble,
-              decoration: BoxDecoration(
-                color: colors.accentMuted,
-                borderRadius: BorderRadius.circular(bubbleRadius),
-                border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
+        child: ConstrainedBox(
+          // Cap the body width so the bullet list stays scannable on tablet
+          // and desktop. Phones are constrained by their parent already.
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: bubble,
+                height: bubble,
+                decoration: BoxDecoration(
+                  color: colors.accentMuted,
+                  borderRadius: BorderRadius.circular(bubbleRadius),
+                  border: Border.all(
+                    color: colors.accent.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: Icon(icon, size: iconSize, color: colors.accent),
               ),
-              child: Icon(icon, size: iconSize, color: colors.accent),
-            ),
-            SizedBox(height: spacingTop),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: AppWeights.title,
-                    color: colors.textPrimary,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              body,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.45,
-                  ),
-            ),
-          ],
+              SizedBox(height: spacingTop),
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: AppWeights.title,
+                      color: colors.textPrimary,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                body,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colors.textSecondary,
+                      height: 1.45,
+                    ),
+              ),
+              if (tips.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                _MeshEmptyStateTips(tips: tips),
+              ],
+              if (primaryAction != null || secondaryAction != null) ...[
+                const SizedBox(height: 18),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (primaryAction != null)
+                      FilledButton.icon(
+                        onPressed: primaryAction!.onPressed,
+                        icon: Icon(primaryAction!.icon),
+                        label: Text(primaryAction!.label),
+                      ),
+                    if (secondaryAction != null)
+                      TextButton.icon(
+                        onPressed: secondaryAction!.onPressed,
+                        icon: Icon(secondaryAction!.icon),
+                        label: Text(secondaryAction!.label),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// Action button slot for [MeshEmptyState].
+class MeshEmptyStateAction {
+  const MeshEmptyStateAction({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+}
+
+/// One short feature-tour bullet inside a [MeshEmptyState].
+class MeshEmptyStateTip {
+  const MeshEmptyStateTip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+}
+
+class _MeshEmptyStateTips extends StatelessWidget {
+  const _MeshEmptyStateTips({required this.tips});
+
+  final List<MeshEmptyStateTip> tips;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final tip in tips)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Icon(
+                    tip.icon,
+                    size: 16,
+                    color: colors.accent,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    tip.label,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                          height: 1.4,
+                          fontSize: 13,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
