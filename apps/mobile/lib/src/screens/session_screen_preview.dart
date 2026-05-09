@@ -28,7 +28,7 @@ class _StopAgentPill extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               Text(
-                'Stop agent',
+                'Interrupt agent',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: colors.userBubbleOn,
                   fontWeight: FontWeight.w700,

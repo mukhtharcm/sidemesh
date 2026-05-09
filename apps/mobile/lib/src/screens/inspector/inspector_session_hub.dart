@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_colors.dart';
+import '../../theme/app_theme.dart';
 import '../../theme/app_tokens.dart';
+import '../../widgets/mesh_widgets.dart';
 import 'inspector_controller.dart';
 
 /// Builds the default inspector surface shown when a session first becomes
 /// active and no previously-saved surface exists for it.
 ///
-/// The hub presents a quick-launch grid for every inspector tool. Tapping
-/// a tile calls the corresponding [on*] callback. The callbacks handle their
-/// own capability checks and show a snackbar if the tool is not available on
-/// the current host.
+/// The hub presents quick-launch rows for every inspector tool. Tapping a row
+/// calls the corresponding [on*] callback. The callbacks handle their own
+/// capability checks and show a snackbar if the tool is not available on the
+/// current host.
 ///
-/// The hub is intentionally not persisted: [InspectorPersistence] skips it
-/// so that next time the session opens it checks for a real saved surface
-/// first, falling back to the hub again only when none is found.
+/// The hub is intentionally not persisted: [InspectorPersistence] skips it so
+/// that next time the session opens it checks for a real saved surface first,
+/// falling back to the hub again only when none is found.
 InspectorSurface buildInspectorSessionHubSurface({
   required String ownerKey,
   required VoidCallback onOpenSearch,
@@ -40,8 +42,6 @@ InspectorSurface buildInspectorSessionHubSurface({
   );
 }
 
-// ── Body ─────────────────────────────────────────────────────────────────────
-
 class _SessionHubBody extends StatelessWidget {
   const _SessionHubBody({
     required this.onOpenSearch,
@@ -62,42 +62,44 @@ class _SessionHubBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final tools = [
+    final transcriptTools = [
       _HubTool(
         icon: Icons.search_rounded,
-        label: 'Search',
+        label: 'Search transcript',
         description: 'Find text across loaded messages.',
         onTap: onOpenSearch,
       ),
       _HubTool(
         icon: Icons.push_pin_rounded,
-        label: 'Pinned',
-        description: 'Review saved message excerpts.',
+        label: 'Pinned messages',
+        description: 'Review saved excerpts from this session.',
         onTap: onOpenPinned,
       ),
       _HubTool(
+        icon: Icons.perm_media_rounded,
+        label: 'Resources',
+        description: 'Open generated files and attachments.',
+        onTap: onOpenResources,
+      ),
+    ];
+    final workspaceTools = [
+      _HubTool(
         icon: Icons.folder_rounded,
         label: 'Files',
-        description: 'Browse workspace files.',
+        description: 'Browse the current workspace.',
         onTap: onOpenFiles,
       ),
       _HubTool(
         icon: Icons.terminal_rounded,
         label: 'Terminal',
-        description: 'Shell in this workspace.',
+        description: 'Open a shell in this workspace.',
         onTap: onOpenTerminal,
       ),
       _HubTool(
         icon: Icons.cable_rounded,
         label: 'Connections',
-        description: 'Port forwards and browser preview.',
+        description: 'Manage browser previews and port forwards.',
         onTap: onOpenPorts,
-      ),
-      _HubTool(
-        icon: Icons.perm_media_rounded,
-        label: 'Resources',
-        description: 'Session files and attachments.',
-        onTap: onOpenResources,
       ),
     ];
 
@@ -106,33 +108,71 @@ class _SessionHubBody extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Open a tool',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: colors.textSecondary,
-              letterSpacing: 0.4,
+          MeshCard(
+            tone: MeshCardTone.muted,
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: colors.accentMuted,
+                    borderRadius: AppShapes.input,
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.widgets_rounded,
+                    size: 16,
+                    color: colors.accent,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Open a tool',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: colors.textPrimary,
+                          fontWeight: AppWeights.title,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Inspector tools stay in this pane so your transcript remains visible.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: AppSpacing.sm,
-              mainAxisSpacing: AppSpacing.sm,
-              childAspectRatio: 1.25,
-            ),
-            itemCount: tools.length,
-            itemBuilder: (context, index) =>
-                _HubToolCard(tool: tools[index]),
           ),
           const SizedBox(height: AppSpacing.lg),
-          Text(
-            'Tools open in this pane. Switch between them using the toolbar buttons at the top of the session view.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textTertiary,
-              height: 1.45,
+          _HubSection(
+            label: 'TRANSCRIPT',
+            tools: transcriptTools,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          _HubSection(
+            label: 'WORKSPACE',
+            tools: workspaceTools,
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+            child: Text(
+              'You can also jump to these tools from the session toolbar at the top.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textTertiary,
+                height: 1.45,
+              ),
             ),
           ),
         ],
@@ -141,7 +181,51 @@ class _SessionHubBody extends StatelessWidget {
   }
 }
 
-// ── Tool descriptor ───────────────────────────────────────────────────────────
+class _HubSection extends StatelessWidget {
+  const _HubSection({required this.label, required this.tools});
+
+  final String label;
+  final List<_HubTool> tools;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+          child: Text(
+            label,
+            style: monoStyle(
+              color: colors.textTertiary,
+              fontSize: 10.5,
+              fontWeight: AppWeights.emphasis,
+            ).copyWith(letterSpacing: AppLetterSpacing.caps),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        MeshCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            children: [
+              for (var index = 0; index < tools.length; index++) ...[
+                _HubToolRow(tool: tools[index]),
+                if (index != tools.length - 1)
+                  Builder(
+                    builder: (context) => Padding(
+                      padding: const EdgeInsets.only(left: 56, right: 12),
+                      child: Divider(height: 1, color: context.colors.border),
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 class _HubTool {
   const _HubTool({
@@ -157,58 +241,64 @@ class _HubTool {
   final VoidCallback onTap;
 }
 
-// ── Tile ──────────────────────────────────────────────────────────────────────
-
-class _HubToolCard extends StatelessWidget {
-  const _HubToolCard({required this.tool});
+class _HubToolRow extends StatelessWidget {
+  const _HubToolRow({required this.tool});
 
   final _HubTool tool;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return InkWell(
-      onTap: tool.onTap,
-      borderRadius: BorderRadius.circular(AppRadii.card),
-      child: Container(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        decoration: BoxDecoration(
-          color: colors.surface,
-          borderRadius: BorderRadius.circular(AppRadii.card),
-          border: Border.all(color: colors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: colors.accentMuted,
-                borderRadius: BorderRadius.circular(AppRadii.input),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: AppShapes.card,
+        onTap: tool.onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: colors.accentMuted,
+                  borderRadius: AppShapes.input,
+                ),
+                alignment: Alignment.center,
+                child: Icon(tool.icon, size: 16, color: colors.accent),
               ),
-              child: Icon(tool.icon, size: 16, color: colors.accent),
-            ),
-            const Spacer(),
-            Text(
-              tool.label,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: AppWeights.title,
-                color: colors.textPrimary,
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      tool.label,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: AppWeights.title,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      tool.description,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              tool.description,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              const SizedBox(width: AppSpacing.sm),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
                 color: colors.textTertiary,
-                height: 1.3,
-                fontSize: 10.5,
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
