@@ -1770,46 +1770,6 @@ export async function startServer(
         messageLimit,
         activityLimit,
       );
-      const cached = logCache.get(cacheKey);
-
-      if (cached) {
-        const session = await readSession(provider, sessionId, false);
-        if (cached.threadUpdatedAt === session.updatedAt) {
-          const latestPlanUpdate = mergeLatestPlanUpdate(
-            sessionId,
-            cached.latestPlanUpdate,
-            latestPlanUpdateForSession(sessionId),
-          );
-          ensureSeqCursor(
-            sessionId,
-            nextSeqForLatestPlanUpdate(cached.nextSeq, latestPlanUpdate),
-          );
-          runtimeCache.set(session.id, {
-            threadUpdatedAt: session.updatedAt,
-            runtime: cached.runtime,
-          });
-          response.json({
-            session: mapSession(
-              session,
-              cached.runtime,
-              latestThreadStatusForSession(session.id),
-            ),
-            messages: cached.messages,
-            activities: mergeSessionActivities(
-              cached.activities,
-              liveActivityValues(liveActivities.get(sessionId)),
-            ),
-            pendingAction: findPendingActionForSession(
-              pendingActions,
-              sessionId,
-            ),
-            history: cached.history,
-            latestPlanUpdate,
-          });
-          return;
-        }
-      }
-
       const session = await readSession(provider, sessionId, false);
       const log = await provider.readSessionLog!(session, {
         messageLimit,

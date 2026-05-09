@@ -261,6 +261,13 @@ void main() {
     final session = _session('cached-strip-clear', status: 'running');
     final api = _RichEventFakeApi(
       sessionSummary: session,
+      messages: [
+        _assistantMessage(
+          id: 'cached-msg',
+          text: 'Cached transcript item.',
+          content: const [TextBlock('Cached transcript item.')],
+        ),
+      ],
       sessionStatus: SessionStatus(
         sessionId: session.id,
         status: 'running',
@@ -396,6 +403,13 @@ void main() {
     final session = _session('cached-activity-delta');
     final api = _RichEventFakeApi(
       sessionSummary: session,
+      activities: [
+        _fileChangeActivity(
+          id: 'file-1',
+          seq: 1,
+          path: '/repo/after.txt',
+        ),
+      ],
       eventsDelta: SessionEventsDelta(
         sessionId: session.id,
         since: 1,
@@ -459,24 +473,36 @@ void main() {
   ) async {
     final host = _host('cached-history-delta');
     final session = _session('cached-history-delta');
+    final cachedMessage = _assistantMessage(
+      id: 'msg-1',
+      text: 'Cached message.',
+      content: const [TextBlock('Cached message.')],
+    );
+    final deltaMessage = SessionMessage(
+      id: 'msg-2',
+      role: 'assistant',
+      text: 'New delta message.',
+      content: const [TextBlock('New delta message.')],
+      attachments: const [],
+      createdAt: DateTime(2026, 1, 1, 12, 2),
+      seq: 2,
+      phase: 'final_answer',
+    );
     final api = _RichEventFakeApi(
       sessionSummary: session,
+      messages: [cachedMessage, deltaMessage],
+      sessionLogHistory: const SessionLogHistorySummary(
+        isTruncated: true,
+        totalMessages: 6,
+        returnedMessages: 2,
+        totalActivities: 0,
+        returnedActivities: 0,
+      ),
       eventsDelta: SessionEventsDelta(
         sessionId: session.id,
         since: 1,
         nextSeq: 2,
-        messages: [
-          SessionMessage(
-            id: 'msg-2',
-            role: 'assistant',
-            text: 'New delta message.',
-            content: const [TextBlock('New delta message.')],
-            attachments: const [],
-            createdAt: DateTime(2026, 1, 1, 12, 2),
-            seq: 2,
-            phase: 'final_answer',
-          ),
-        ],
+        messages: [deltaMessage],
         activities: const [],
         latestPlanUpdate: null,
         pendingAction: null,
@@ -489,13 +515,7 @@ void main() {
       host,
       SessionLog(
         session: session,
-        messages: [
-          _assistantMessage(
-            id: 'msg-1',
-            text: 'Cached message.',
-            content: const [TextBlock('Cached message.')],
-          ),
-        ],
+        messages: [cachedMessage],
         activities: const [],
         pendingAction: null,
         history: const SessionLogHistorySummary(
@@ -587,6 +607,72 @@ void main() {
 
     expect(find.text('fresh.txt'), findsOneWidget);
     expect(find.text('stale.txt'), findsNothing);
+  });
+
+  testWidgets('cached session verifies snapshot even when delta has no transcript rows', (
+    tester,
+  ) async {
+    final host = _host('cached-delta-empty-snapshot-verify');
+    final session = _session('cached-delta-empty-snapshot-verify');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      eventsDelta: SessionEventsDelta(
+        sessionId: session.id,
+        since: 1,
+        nextSeq: 1,
+        messages: const [],
+        activities: const [],
+        latestPlanUpdate: null,
+        pendingAction: null,
+        session: session,
+      ),
+      activities: [
+        _fileChangeActivity(
+          id: 'file-1',
+          seq: 1,
+          path: '/repo/fresh-from-snapshot.txt',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await SessionLocalStore.instance.saveSessionLog(
+      host,
+      SessionLog(
+        session: session,
+        messages: const [],
+        activities: [
+          _fileChangeActivity(
+            id: 'file-1',
+            seq: 1,
+            path: '/repo/stale-from-cache.txt',
+          ),
+        ],
+        pendingAction: null,
+        history: SessionLogHistorySummary(
+          isTruncated: false,
+          totalMessages: 0,
+          returnedMessages: 0,
+          totalActivities: 1,
+          returnedActivities: 1,
+        ),
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('fresh-from-snapshot.txt'), findsOneWidget);
+    expect(find.text('stale-from-cache.txt'), findsNothing);
   });
 
   testWidgets('completed assistant message keeps collapsed reasoning visible', (
@@ -1025,6 +1111,7 @@ class _RichEventFakeApi extends ApiClient {
   _RichEventFakeApi({
     this.messages = const [],
     this.activities = const [],
+    this.sessionLogHistory,
     this.latestPlanUpdate,
     this.eventsDelta,
     this.eventsError,
@@ -1037,6 +1124,7 @@ class _RichEventFakeApi extends ApiClient {
       _ControllableWebSocketChannel();
   List<SessionMessage> messages;
   final List<SessionActivity> activities;
+  final SessionLogHistorySummary? sessionLogHistory;
   final LiveEvent? latestPlanUpdate;
   final SessionEventsDelta? eventsDelta;
   final Object? eventsError;
@@ -1059,13 +1147,15 @@ class _RichEventFakeApi extends ApiClient {
     messages: messages,
     activities: activities,
     pendingAction: null,
-    history: SessionLogHistorySummary(
-      isTruncated: false,
-      totalMessages: messages.length,
-      returnedMessages: messages.length,
-      totalActivities: activities.length,
-      returnedActivities: activities.length,
-    ),
+    history:
+        sessionLogHistory ??
+        SessionLogHistorySummary(
+          isTruncated: false,
+          totalMessages: messages.length,
+          returnedMessages: messages.length,
+          totalActivities: activities.length,
+          returnedActivities: activities.length,
+        ),
     latestPlanUpdate: latestPlanUpdate,
   );
 

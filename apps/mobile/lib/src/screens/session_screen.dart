@@ -1983,6 +1983,10 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted || _disposed) {
       return;
     }
+    final needsSnapshotVerification =
+        _showingCachedSnapshot ||
+        _showingPossiblyStaleSnapshot ||
+        _messages.isNotEmpty;
     if (_messages.isNotEmpty && !_showingCachedSnapshot) {
       setState(() {
         _showingPossiblyStaleSnapshot = true;
@@ -1994,11 +1998,13 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted || _disposed) {
       return;
     }
-    final applied = await _resyncDelta();
+    final applied = await _resyncDelta(
+      markTranscriptFresh: !needsSnapshotVerification,
+    );
     if (!mounted || _disposed) {
       return;
     }
-    if (applied) {
+    if (applied && !needsSnapshotVerification) {
       setState(() {
         _showingPossiblyStaleSnapshot = false;
         _resumeSyncing = false;
@@ -2220,12 +2226,16 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _refreshSessionFreshness({bool scrollToBottom = true}) async {
+    final needsSnapshotVerification =
+        _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
     await _refreshCachedSessionStatus();
     if (!mounted || _disposed) {
       return;
     }
-    final applied = await _resyncDelta();
-    if (!mounted || _disposed || applied) {
+    final applied = await _resyncDelta(
+      markTranscriptFresh: !needsSnapshotVerification,
+    );
+    if (!mounted || _disposed || (applied && !needsSnapshotVerification)) {
       return;
     }
     await _loadSnapshot(
@@ -2259,7 +2269,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   /// Cheap catchup using the events endpoint. Returns true if the delta
   /// was applied; false if we should fall back to a full snapshot.
-  Future<bool> _resyncDelta() async {
+  Future<bool> _resyncDelta({bool markTranscriptFresh = true}) async {
     final last = _lastEventSeq;
     if (last == null) return false;
     try {
@@ -2277,7 +2287,8 @@ class _SessionScreenState extends State<SessionScreen>
           latestPlanUpdate == null &&
           delta.pendingAction == null &&
           delta.session == null) {
-        if (_showingCachedSnapshot || _showingPossiblyStaleSnapshot) {
+        if (markTranscriptFresh &&
+            (_showingCachedSnapshot || _showingPossiblyStaleSnapshot)) {
           setState(_markTranscriptFreshAfterDelta);
         }
         HostStatusStore.instance.markOnline(widget.host.id);
@@ -2345,7 +2356,9 @@ class _SessionScreenState extends State<SessionScreen>
         if (highestSeq > (_lastEventSeq ?? 0)) {
           _lastEventSeq = highestSeq;
         }
-        _markTranscriptFreshAfterDelta();
+        if (markTranscriptFresh) {
+          _markTranscriptFreshAfterDelta();
+        }
       });
       _refreshThinkingState();
       _syncSessionLiveActivity();
