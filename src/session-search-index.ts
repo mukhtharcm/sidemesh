@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { parseJsonLine } from "./codex-history.js";
 import type { SessionActivity, SessionMessage } from "./types.js";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export interface SessionSearchResult {
   sessionId: string;
@@ -320,6 +320,26 @@ export class SessionSearchIndex {
 
       // Clear stale manifest tables so next backfill repopulates them.
       this.db.exec(`DELETE FROM session_manifest;`);
+    }
+
+    if (version < 3) {
+      // Older generic session rows stored second-based timestamps. Normalize
+      // those in place so date filters keep working, then clear the generic
+      // manifest so startup backfill refreshes archived flags and any rows
+      // whose fingerprints were computed before the timestamp fix.
+      this.db.exec(`
+        UPDATE session_search_documents
+        SET
+          created_at = CASE
+            WHEN ABS(created_at) < 1000000000000 THEN created_at * 1000
+            ELSE created_at
+          END,
+          updated_at = CASE
+            WHEN ABS(updated_at) < 1000000000000 THEN updated_at * 1000
+            ELSE updated_at
+          END;
+        DELETE FROM session_manifest;
+      `);
     }
 
     const setVersion = this.db.prepare(

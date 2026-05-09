@@ -1660,6 +1660,8 @@ class _SessionScreenState extends State<SessionScreen>
         nextFileQuery?.start != _activeFileQuery?.start ||
         nextFileQuery?.end != _activeFileQuery?.end ||
         nextFileQuery?.query != _activeFileQuery?.query;
+    final fileQueryTextChanged =
+        nextFileQuery?.query.trim() != _activeFileQuery?.query.trim();
     final fileMentionsChanged = !listEquals(
       nextDraftFileMentions,
       _draftFileMentions,
@@ -1673,6 +1675,9 @@ class _SessionScreenState extends State<SessionScreen>
           _fileSuggestions = const <FsSearchResult>[];
           _loadingFileSearch = false;
           _fileSearchError = null;
+        } else if (fileQueryTextChanged) {
+          _fileSuggestions = const <FsSearchResult>[];
+          _fileSearchError = null;
         }
       } else {
         setState(() {
@@ -1683,13 +1688,16 @@ class _SessionScreenState extends State<SessionScreen>
             _fileSuggestions = const <FsSearchResult>[];
             _loadingFileSearch = false;
             _fileSearchError = null;
+          } else if (fileQueryTextChanged) {
+            _fileSuggestions = const <FsSearchResult>[];
+            _fileSearchError = null;
           }
         });
       }
     }
     if (nextFileQuery != null &&
         nextFileQuery.query.trim().isNotEmpty &&
-        !_loadingFileSearch) {
+        (fileQueryTextChanged || !_loadingFileSearch)) {
       unawaited(_loadFileSuggestions());
     }
   }

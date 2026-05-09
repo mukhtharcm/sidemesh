@@ -2943,15 +2943,18 @@ export async function startServer(
                   messageLimit: 200,
                   activityLimit: 200,
                 });
+                const createdAt = threadTimestampMillis(thread.createdAt);
+                const updatedAt = threadTimestampMillis(thread.updatedAt);
                 await searchIndex.indexDocument({
                   sessionKey: thread.id,
                   providerKind: provider.kind,
                   title: thread.name || thread.preview,
                   preview: thread.preview,
                   cwd: thread.cwd,
-                  createdAt: thread.createdAt,
-                  updatedAt: thread.updatedAt,
-                  fingerprint: `${provider.kind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${thread.createdAt}|${thread.updatedAt}|${archived}|${log.nextSeq}`,
+                  createdAt,
+                  updatedAt,
+                  archived,
+                  fingerprint: `${provider.kind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${createdAt}|${updatedAt}|${archived}|${log.nextSeq}`,
                   messages: log.messages,
                   activities: log.activities,
                 });
@@ -3458,16 +3461,18 @@ async function indexSessionForSearch(
       messageLimit: 200,
       activityLimit: 200,
     });
+    const createdAt = threadTimestampMillis(thread.createdAt);
+    const updatedAt = threadTimestampMillis(thread.updatedAt);
     await searchIndex.indexDocument({
       sessionKey: sessionId,
       providerKind: provider.kind,
       title: thread.name || thread.preview,
       preview: thread.preview,
       cwd: thread.cwd,
-      createdAt: thread.createdAt,
-      updatedAt: thread.updatedAt,
+      createdAt,
+      updatedAt,
       archived: archived ?? false,
-      fingerprint: `${provider.kind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${thread.createdAt}|${thread.updatedAt}|${archived ?? false}|${log.nextSeq}`,
+      fingerprint: `${provider.kind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${createdAt}|${updatedAt}|${archived ?? false}|${log.nextSeq}`,
       messages: log.messages,
       activities: log.activities,
     });
@@ -3805,8 +3810,8 @@ function mapSession(
     title: sanitizeTitle(thread.name || thread.preview),
     preview: thread.preview,
     cwd: thread.cwd,
-    createdAt: thread.createdAt * 1000,
-    updatedAt: thread.updatedAt * 1000,
+    createdAt: threadTimestampMillis(thread.createdAt),
+    updatedAt: threadTimestampMillis(thread.updatedAt),
     source:
       typeof thread.source === "string"
         ? thread.source
@@ -3955,13 +3960,24 @@ function asInteger(value: unknown): number | null {
 }
 
 function parseTimestamp(value: unknown): number | null {
-  const int = asInteger(value);
-  if (int != null) return int;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
   if (typeof value === "string" && value.trim()) {
-    const parsed = Date.parse(value);
+    const trimmed = value.trim();
+    if (/^-?\d+$/.test(trimmed)) {
+      const parsedInt = Number.parseInt(trimmed, 10);
+      return Number.isFinite(parsedInt) ? parsedInt : null;
+    }
+    const parsed = Date.parse(trimmed);
     if (!Number.isNaN(parsed)) return parsed;
   }
   return null;
+}
+
+function threadTimestampMillis(value: number): number {
+  const timestamp = Math.trunc(value);
+  return timestamp >= 1_000_000_000_000 ? timestamp : timestamp * 1000;
 }
 
 function buildSubmittedUserMessage(
