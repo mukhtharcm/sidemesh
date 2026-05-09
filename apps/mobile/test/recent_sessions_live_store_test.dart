@@ -14,8 +14,8 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'test_path_provider.dart';
 
 void main() {
-  setUpAll(() {
-    configureTestDatabaseFactory();
+  setUpAll(() async {
+    await configureTestDatabaseFactory();
   });
 
   const host = HostProfile(

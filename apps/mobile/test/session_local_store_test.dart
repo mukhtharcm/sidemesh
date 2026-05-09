@@ -14,8 +14,8 @@ void main() {
     token: 'secret',
   );
 
-  setUpAll(() {
-    configureTestDatabaseFactory();
+  setUpAll(() async {
+    await configureTestDatabaseFactory();
   });
 
   tearDownAll(() async {

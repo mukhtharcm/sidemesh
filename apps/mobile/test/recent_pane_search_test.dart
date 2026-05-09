@@ -19,7 +19,9 @@ import 'test_path_provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  configureTestDatabaseFactory();
+  setUpAll(() async {
+    await configureTestDatabaseFactory();
+  });
 
   const host = HostProfile(
     id: 'host-1',

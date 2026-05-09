@@ -25,8 +25,10 @@ class TestPathProvider extends PathProviderPlatform
   }
 }
 
-void configureTestDatabaseFactory() {
+Future<void> configureTestDatabaseFactory() async {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfiNoIsolate;
+  await _testSupportDirectory.create(recursive: true);
+  await databaseFactory.setDatabasesPath(_testSupportDirectory.path);
   PathProviderPlatform.instance = TestPathProvider();
 }
