@@ -61,8 +61,27 @@ class _SessionHubBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final transcriptTools = [
+    final workspaceTools = [
+      _HubTool(
+        icon: Icons.terminal_rounded,
+        label: 'Terminal',
+        description: 'Open a shell in this workspace.',
+        onTap: onOpenTerminal,
+      ),
+      _HubTool(
+        icon: Icons.folder_rounded,
+        label: 'Files',
+        description: 'Browse the current workspace.',
+        onTap: onOpenFiles,
+      ),
+      _HubTool(
+        icon: Icons.open_in_browser_rounded,
+        label: 'Browser preview',
+        description: 'Open local web previews and port forwards.',
+        onTap: onOpenPorts,
+      ),
+    ];
+    final sessionTools = [
       _HubTool(
         icon: Icons.search_rounded,
         label: 'Search transcript',
@@ -82,98 +101,20 @@ class _SessionHubBody extends StatelessWidget {
         onTap: onOpenResources,
       ),
     ];
-    final workspaceTools = [
-      _HubTool(
-        icon: Icons.folder_rounded,
-        label: 'Files',
-        description: 'Browse the current workspace.',
-        onTap: onOpenFiles,
-      ),
-      _HubTool(
-        icon: Icons.terminal_rounded,
-        label: 'Terminal',
-        description: 'Open a shell in this workspace.',
-        onTap: onOpenTerminal,
-      ),
-      _HubTool(
-        icon: Icons.cable_rounded,
-        label: 'Connections',
-        description: 'Manage browser previews and port forwards.',
-        onTap: onOpenPorts,
-      ),
-    ];
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          MeshCard(
-            tone: MeshCardTone.muted,
-            padding: const EdgeInsets.all(AppSpacing.md),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: colors.accentMuted,
-                    borderRadius: AppShapes.input,
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.widgets_rounded,
-                    size: 16,
-                    color: colors.accent,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Open a tool',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: colors.textPrimary,
-                          fontWeight: AppWeights.title,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Inspector tools stay in this pane so your transcript remains visible.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          _HubSection(
-            label: 'TRANSCRIPT',
-            tools: transcriptTools,
-          ),
-          const SizedBox(height: AppSpacing.md),
           _HubSection(
             label: 'WORKSPACE',
             tools: workspaceTools,
           ),
-          const SizedBox(height: AppSpacing.lg),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-            child: Text(
-              'You can also jump to these tools from the session toolbar at the top.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textTertiary,
-                height: 1.45,
-              ),
-            ),
+          const SizedBox(height: AppSpacing.md),
+          _HubSection(
+            label: 'SESSION',
+            tools: sessionTools,
           ),
         ],
       ),
