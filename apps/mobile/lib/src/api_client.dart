@@ -850,8 +850,8 @@ class ApiClient {
       '/api/fs/search',
       body: {
         'query': query,
-        'sessionId?': sessionId,
-        'limit?': limit,
+        'sessionId': sessionId,
+        'limit': limit,
       },
       operation: 'search files',
     );
