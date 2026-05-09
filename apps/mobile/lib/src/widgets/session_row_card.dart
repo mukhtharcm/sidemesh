@@ -191,28 +191,21 @@ class SessionRowCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 2),
                 ],
-                if (favorite)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 6, top: 2),
+                InkWell(
+                  onTap: onToggleFavorite,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
                     child: Icon(
-                      Icons.star_rounded,
+                      favorite
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
                       size: 13,
-                      color: colors.warning,
-                    ),
-                  )
-                else
-                  InkWell(
-                    onTap: onToggleFavorite,
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(
-                        Icons.star_outline_rounded,
-                        size: 13,
-                        color: colors.textTertiary,
-                      ),
+                      color:
+                          favorite ? colors.warning : colors.textTertiary,
                     ),
                   ),
+                ),
               ],
             ),
           ),

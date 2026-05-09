@@ -6218,22 +6218,50 @@ class _SessionScreenState extends State<SessionScreen>
               // git info to show.
               final showGitInMenu = gitAvailable && !gitDirty;
               if (isCompact) {
-                return MeshIconButton(
-                  icon: Icons.more_horiz_rounded,
-                  tooltip: _running ? 'Session actions (agent running)' : 'Session actions',
-                  color: _running ? colors.warning : colors.textPrimary,
-                  onTap: () => unawaited(
-                    _showSessionActionsSheet(
-                      session: session,
-                      favorite: favorite,
-                      gitAvailable: gitAvailable,
-                      gitDirty: gitDirty,
-                      terminalOpen: terminalOpenInInspector,
-                      portsOpen: portsOpenInInspector,
-                      searchOpen: searchOpenInInspector,
-                      resourcesOpen: resourcesOpenInInspector,
+                // One-tap star — surfaced directly in the AppBar on mobile so
+                // users don't have to open the overflow sheet to pin/unpin.
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        favorite
+                            ? Icons.star_rounded
+                            : Icons.star_outline_rounded,
+                        color:
+                            favorite ? colors.warning : colors.textSecondary,
+                        size: 20,
+                      ),
+                      tooltip:
+                          favorite ? 'Unpin session' : 'Pin session',
+                      padding: const EdgeInsets.all(8),
+                      constraints: const BoxConstraints(
+                        minWidth: 40,
+                        minHeight: 40,
+                      ),
+                      onPressed: _toggleFavorite,
                     ),
-                  ),
+                    MeshIconButton(
+                      icon: Icons.more_horiz_rounded,
+                      tooltip: _running
+                          ? 'Session actions (agent running)'
+                          : 'Session actions',
+                      color:
+                          _running ? colors.warning : colors.textPrimary,
+                      onTap: () => unawaited(
+                        _showSessionActionsSheet(
+                          session: session,
+                          favorite: favorite,
+                          gitAvailable: gitAvailable,
+                          gitDirty: gitDirty,
+                          terminalOpen: terminalOpenInInspector,
+                          portsOpen: portsOpenInInspector,
+                          searchOpen: searchOpenInInspector,
+                          resourcesOpen: resourcesOpenInInspector,
+                        ),
+                      ),
+                    ),
+                  ],
                 );
               }
               return PopupMenuButton<String>(
