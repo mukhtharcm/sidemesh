@@ -187,6 +187,11 @@ interface SessionInputDedupeEntry {
   receipt?: SessionInputReceipt;
 }
 
+interface LiveActivityEntry {
+  activity: SessionActivity;
+  replaySeq: number;
+}
+
 interface InstallInfoRefreshResult {
   ok: boolean;
   refreshed: boolean;
@@ -249,7 +254,7 @@ export async function startServer(
   }>();
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, AgentPendingAction>();
-  const liveActivities = new Map<string, Map<string, SessionActivity>>();
+  const liveActivities = new Map<string, Map<string, LiveActivityEntry>>();
   const liveThreadStatuses = new Map<string, LiveThreadStatus>();
   const replayIndex = new SessionReplayIndex();
   const searchIndex = new SessionSearchIndex(
@@ -871,6 +876,7 @@ export async function startServer(
             event.activity,
             () => allocSeq(event.sessionId),
           ),
+          () => allocSeq(event.sessionId),
         );
         broadcastLive(event.sessionId, {
           type: "activity_updated",
@@ -886,6 +892,7 @@ export async function startServer(
           event.sessionId,
           event.activityId,
           event.delta,
+          () => allocSeq(event.sessionId),
         );
         if (next) {
           broadcastLive(event.sessionId, {
@@ -903,6 +910,7 @@ export async function startServer(
           event.sessionId,
           event.activityId,
           event.stdin,
+          () => allocSeq(event.sessionId),
         );
         if (next) {
           broadcastLive(event.sessionId, {
@@ -1789,7 +1797,7 @@ export async function startServer(
             messages: cached.messages,
             activities: mergeSessionActivities(
               cached.activities,
-              liveActivities.get(sessionId)?.values() || [],
+              liveActivityValues(liveActivities.get(sessionId)),
             ),
             pendingAction: findPendingActionForSession(
               pendingActions,
@@ -1818,7 +1826,7 @@ export async function startServer(
       );
       const activities = mergeSessionActivities(
         log.activities,
-        liveActivities.get(sessionId)?.values() || [],
+        liveActivityValues(liveActivities.get(sessionId)),
       );
       const history = buildSessionHistorySummary(
         log.totalMessages,
@@ -1887,6 +1895,7 @@ export async function startServer(
       }
       const query = request.query as Record<string, unknown>;
       const since = asInteger(query.since) ?? 0;
+      const baseUpdatedAt = asInteger(query.baseUpdatedAt);
 
       const session = await readSession(provider, sessionId, false);
 
@@ -1899,6 +1908,7 @@ export async function startServer(
       if (session.path && session.path.endsWith(".jsonl")) {
         try {
           const entry = await replayIndex.load(sessionId, session.path);
+          const liveSessionActivities = liveActivities.get(sessionId);
           if (hostCapabilities.sessions.search) {
             void indexSessionForSearch(searchIndex, provider, sessionId).catch(() => {
               // Ignore indexing errors for live sessions
@@ -1907,15 +1917,23 @@ export async function startServer(
           ensureSeqCursor(sessionId, entry.nextSeq);
           const delta = replayIndex.getDelta(entry, since);
           newMessages = delta.messages;
-          newActivities = mergeSessionActivities(
-            delta.activities,
-            liveActivities.get(sessionId)?.values() || [],
-          ).filter((a) => (a.seq ?? 0) > since);
+          const replayedActivities = filterActivitiesForReplay(
+            mergeSessionActivities(
+              delta.activities,
+              liveActivityValues(liveSessionActivities),
+            ),
+            liveSessionActivities,
+            since,
+          );
+          newActivities = replayedActivities.activities;
           logLatestPlanUpdate = mergeLatestPlanUpdate(
             sessionId,
             latestPlanUpdateForSession(sessionId),
           );
-          nextSeq = nextSeqForLatestPlanUpdate(delta.nextSeq, logLatestPlanUpdate);
+          nextSeq = nextSeqForLatestPlanUpdate(
+            Math.max(delta.nextSeq, replayedActivities.highestSeq),
+            logLatestPlanUpdate,
+          );
           logRuntime = delta.runtime;
         } catch (error: unknown) {
           const staleCursor = error && typeof error === "object"
@@ -1940,18 +1958,21 @@ export async function startServer(
             sessionId,
             nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
           );
+          const liveSessionActivities = liveActivities.get(sessionId);
           const activities = mergeSessionActivities(
             log.activities,
-            liveActivities.get(sessionId)?.values() || [],
+            liveActivityValues(liveSessionActivities),
+          );
+          const replayedActivities = filterActivitiesForReplay(
+            activities,
+            liveSessionActivities,
+            since,
           );
           newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
-          newActivities = activities.filter((a) => (a.seq ?? 0) > since);
-          let highestSeq = since;
+          newActivities = replayedActivities.activities;
+          let highestSeq = replayedActivities.highestSeq;
           for (const m of newMessages) {
             if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
-          }
-          for (const a of newActivities) {
-            if ((a.seq ?? 0) > highestSeq) highestSeq = a.seq ?? highestSeq;
           }
           logLatestPlanUpdate = latestPlanUpdate;
           nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
@@ -1968,18 +1989,21 @@ export async function startServer(
           sessionId,
           nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
         );
+        const liveSessionActivities = liveActivities.get(sessionId);
         const activities = mergeSessionActivities(
           log.activities,
-          liveActivities.get(sessionId)?.values() || [],
+          liveActivityValues(liveSessionActivities),
+        );
+        const replayedActivities = filterActivitiesForReplay(
+          activities,
+          liveSessionActivities,
+          since,
         );
         newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
-        newActivities = activities.filter((a) => (a.seq ?? 0) > since);
-        let highestSeq = since;
+        newActivities = replayedActivities.activities;
+        let highestSeq = replayedActivities.highestSeq;
         for (const m of newMessages) {
           if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
-        }
-        for (const a of newActivities) {
-          if ((a.seq ?? 0) > highestSeq) highestSeq = a.seq ?? highestSeq;
         }
         logLatestPlanUpdate = latestPlanUpdate;
         nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
@@ -1992,6 +2016,22 @@ export async function startServer(
       )
         ? logLatestPlanUpdate
         : null;
+
+      if (
+        baseUpdatedAt != null &&
+        threadTimestampMillis(session.updatedAt) > baseUpdatedAt &&
+        newMessages.length === 0 &&
+        newActivities.length === 0 &&
+        latestPlanUpdate == null
+      ) {
+        response.status(409).json({
+          error: "stale_snapshot",
+          since,
+          baseUpdatedAt,
+          currentUpdatedAt: threadTimestampMillis(session.updatedAt),
+        });
+        return;
+      }
 
       const eventDeltaSize = measureSessionEventDelta(
         newMessages,
@@ -3841,25 +3881,30 @@ async function isThreadLoaded(
 }
 
 function upsertLiveActivity(
-  liveActivities: Map<string, Map<string, SessionActivity>>,
+  liveActivities: Map<string, Map<string, LiveActivityEntry>>,
   sessionId: string,
   activity: SessionActivity,
+  allocReplaySeq: () => number,
 ): SessionActivity {
   const sessionActivities =
-    liveActivities.get(sessionId) || new Map<string, SessionActivity>();
-  const merged = mergeActivity(sessionActivities.get(activity.id), activity);
-  sessionActivities.set(activity.id, merged);
+    liveActivities.get(sessionId) || new Map<string, LiveActivityEntry>();
+  const existing = sessionActivities.get(activity.id);
+  const merged = mergeActivity(existing?.activity, activity);
+  sessionActivities.set(activity.id, {
+    activity: merged,
+    replaySeq: existing ? allocReplaySeq() : merged.seq,
+  });
   liveActivities.set(sessionId, sessionActivities);
   return merged;
 }
 
 function materializeLiveActivityDraft(
-  liveActivities: Map<string, Map<string, SessionActivity>>,
+  liveActivities: Map<string, Map<string, LiveActivityEntry>>,
   sessionId: string,
   draft: AgentSessionActivityDraft,
   allocSeq: () => number,
 ): SessionActivity {
-  const existing = liveActivities.get(sessionId)?.get(draft.id);
+  const existing = liveActivities.get(sessionId)?.get(draft.id)?.activity;
   const activity = materializeAgentActivityDraft(draft, {
     createdAt: existing?.createdAt ?? Date.now(),
     seq: existing?.seq ?? allocSeq(),
@@ -3875,10 +3920,11 @@ function materializeLiveActivityDraft(
 }
 
 function updateLiveOutputActivity(
-  liveActivities: Map<string, Map<string, SessionActivity>>,
+  liveActivities: Map<string, Map<string, LiveActivityEntry>>,
   sessionId: string,
   itemId: string,
   delta: string,
+  allocReplaySeq: () => number,
 ): SessionActivity | null {
   const sessionActivities = liveActivities.get(sessionId);
   if (!sessionActivities) {
@@ -3886,24 +3932,29 @@ function updateLiveOutputActivity(
   }
 
   const existing = sessionActivities.get(itemId);
-  if (!existing || (existing.type !== "command" && existing.type !== "tool")) {
+  const activity = existing?.activity;
+  if (!activity || (activity.type !== "command" && activity.type !== "tool")) {
     return null;
   }
 
-  const updated = appendCommandActivityOutput(existing, delta);
+  const updated = appendCommandActivityOutput(activity, delta);
   if (!updated) {
     return null;
   }
 
-  sessionActivities.set(itemId, updated);
+  sessionActivities.set(itemId, {
+    activity: updated,
+    replaySeq: allocReplaySeq(),
+  });
   return updated;
 }
 
 function updateLiveCommandTerminalInteraction(
-  liveActivities: Map<string, Map<string, SessionActivity>>,
+  liveActivities: Map<string, Map<string, LiveActivityEntry>>,
   sessionId: string,
   itemId: string,
   stdin: string,
+  allocReplaySeq: () => number,
 ): SessionActivity | null {
   const sessionActivities = liveActivities.get(sessionId);
   if (!sessionActivities) {
@@ -3911,17 +3962,56 @@ function updateLiveCommandTerminalInteraction(
   }
 
   const existing = sessionActivities.get(itemId);
-  if (!existing || existing.type !== "command") {
+  const activity = existing?.activity;
+  if (!activity || activity.type !== "command") {
     return null;
   }
 
-  const updated = applyCommandTerminalInteraction(existing, stdin);
+  const updated = applyCommandTerminalInteraction(activity, stdin);
   if (!updated) {
     return null;
   }
 
-  sessionActivities.set(itemId, updated);
+  sessionActivities.set(itemId, {
+    activity: updated,
+    replaySeq: allocReplaySeq(),
+  });
   return updated;
+}
+
+function liveActivityValues(
+  sessionActivities: Map<string, LiveActivityEntry> | undefined,
+): SessionActivity[] {
+  if (!sessionActivities) {
+    return [];
+  }
+  return [...sessionActivities.values()].map((entry) => entry.activity);
+}
+
+function filterActivitiesForReplay(
+  activities: SessionActivity[],
+  sessionActivities: Map<string, LiveActivityEntry> | undefined,
+  since: number,
+): { activities: SessionActivity[]; highestSeq: number } {
+  const returned: SessionActivity[] = [];
+  let highestSeq = since;
+  for (const activity of activities) {
+    const replaySeq = Math.max(
+      activity.seq ?? 0,
+      sessionActivities?.get(activity.id)?.replaySeq ?? 0,
+    );
+    if (replaySeq <= since) {
+      continue;
+    }
+    returned.push(activity);
+    if (replaySeq > highestSeq) {
+      highestSeq = replaySeq;
+    }
+  }
+  return {
+    activities: returned,
+    highestSeq,
+  };
 }
 
 function mapSession(
@@ -4452,7 +4542,7 @@ function buildSessionHistorySummary(
 async function readSessionResources(
   provider: AgentProvider,
   sessionId: string,
-  liveActivities: Map<string, Map<string, SessionActivity>>,
+  liveActivities: Map<string, Map<string, LiveActivityEntry>>,
 ): Promise<SessionResourcesResponse> {
   const session = await readSession(provider, sessionId, false);
   const readLog = requireProviderMethod(
@@ -4463,7 +4553,7 @@ async function readSessionResources(
   const log = await readLog.call(provider, session);
   const activities = mergeSessionActivities(
     log.activities,
-    liveActivities.get(sessionId)?.values() || [],
+    liveActivityValues(liveActivities.get(sessionId)),
   );
   const resources: SessionResource[] = buildSessionResources(
     log.messages,

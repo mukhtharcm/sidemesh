@@ -389,6 +389,206 @@ void main() {
     expect(find.text('Approve file edit'), findsNothing);
   });
 
+  testWidgets('cached activity details refresh from delta replay without manual reload', (
+    tester,
+  ) async {
+    final host = _host('cached-activity-delta');
+    final session = _session('cached-activity-delta');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      eventsDelta: SessionEventsDelta(
+        sessionId: session.id,
+        since: 1,
+        nextSeq: 2,
+        messages: const [],
+        activities: [
+          _fileChangeActivity(
+            id: 'file-1',
+            seq: 1,
+            path: '/repo/after.txt',
+          ),
+        ],
+        latestPlanUpdate: null,
+        pendingAction: null,
+        session: session,
+      ),
+    );
+    addTearDown(api.dispose);
+
+    await SessionLocalStore.instance.saveSessionLog(
+      host,
+      SessionLog(
+        session: session,
+        messages: const [],
+        activities: [
+          _fileChangeActivity(
+            id: 'file-1',
+            seq: 1,
+            path: '/repo/before.txt',
+          ),
+        ],
+        pendingAction: null,
+        history: SessionLogHistorySummary(
+          isTruncated: false,
+          totalMessages: 0,
+          returnedMessages: 0,
+          totalActivities: 1,
+          returnedActivities: 1,
+        ),
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('after.txt'), findsOneWidget);
+    expect(find.text('before.txt'), findsNothing);
+  });
+
+  testWidgets('delta replay refreshes cached history metadata without manual reload', (
+    tester,
+  ) async {
+    final host = _host('cached-history-delta');
+    final session = _session('cached-history-delta');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      eventsDelta: SessionEventsDelta(
+        sessionId: session.id,
+        since: 1,
+        nextSeq: 2,
+        messages: [
+          SessionMessage(
+            id: 'msg-2',
+            role: 'assistant',
+            text: 'New delta message.',
+            content: const [TextBlock('New delta message.')],
+            attachments: const [],
+            createdAt: DateTime(2026, 1, 1, 12, 2),
+            seq: 2,
+            phase: 'final_answer',
+          ),
+        ],
+        activities: const [],
+        latestPlanUpdate: null,
+        pendingAction: null,
+        session: session,
+      ),
+    );
+    addTearDown(api.dispose);
+
+    await SessionLocalStore.instance.saveSessionLog(
+      host,
+      SessionLog(
+        session: session,
+        messages: [
+          _assistantMessage(
+            id: 'msg-1',
+            text: 'Cached message.',
+            content: const [TextBlock('Cached message.')],
+          ),
+        ],
+        activities: const [],
+        pendingAction: null,
+        history: const SessionLogHistorySummary(
+          isTruncated: true,
+          totalMessages: 5,
+          returnedMessages: 1,
+          totalActivities: 0,
+          returnedActivities: 0,
+        ),
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    final cached = await SessionLocalStore.instance.loadSessionLog(
+      host,
+      session.id,
+    );
+    expect(cached, isNotNull);
+    final history = cached!.log.history;
+    expect(history, isNotNull);
+    expect(history!.totalMessages, 6);
+    expect(history.returnedMessages, 2);
+    expect(history.isTruncated, isTrue);
+  });
+
+  testWidgets('stale delta fallback reloads the full snapshot automatically', (
+    tester,
+  ) async {
+    final host = _host('stale-delta-fallback');
+    final session = _session('stale-delta-fallback');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      eventsError: StateError('stale_snapshot'),
+      activities: [
+        _fileChangeActivity(
+          id: 'file-1',
+          seq: 1,
+          path: '/repo/fresh.txt',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await SessionLocalStore.instance.saveSessionLog(
+      host,
+      SessionLog(
+        session: session,
+        messages: const [],
+        activities: [
+          _fileChangeActivity(
+            id: 'file-1',
+            seq: 1,
+            path: '/repo/stale.txt',
+          ),
+        ],
+        pendingAction: null,
+        history: SessionLogHistorySummary(
+          isTruncated: false,
+          totalMessages: 0,
+          returnedMessages: 0,
+          totalActivities: 1,
+          returnedActivities: 1,
+        ),
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('fresh.txt'), findsOneWidget);
+    expect(find.text('stale.txt'), findsNothing);
+  });
+
   testWidgets('completed assistant message keeps collapsed reasoning visible', (
     tester,
   ) async {
@@ -827,6 +1027,7 @@ class _RichEventFakeApi extends ApiClient {
     this.activities = const [],
     this.latestPlanUpdate,
     this.eventsDelta,
+    this.eventsError,
     this.nodeInfo,
     this.sessionSummary,
     this.sessionStatus,
@@ -838,6 +1039,7 @@ class _RichEventFakeApi extends ApiClient {
   final List<SessionActivity> activities;
   final LiveEvent? latestPlanUpdate;
   final SessionEventsDelta? eventsDelta;
+  final Object? eventsError;
   final NodeInfo? nodeInfo;
   final SessionSummary? sessionSummary;
   final SessionStatus? sessionStatus;
@@ -872,18 +1074,23 @@ class _RichEventFakeApi extends ApiClient {
     HostProfile host,
     String sessionId, {
     required int since,
-  }) async =>
-      eventsDelta ??
-      SessionEventsDelta(
-        sessionId: sessionId,
-        since: since,
-        nextSeq: since,
-        messages: const [],
-        activities: const [],
-        latestPlanUpdate: null,
-        pendingAction: null,
-        session: null,
-      );
+    int? baseUpdatedAt,
+  }) async {
+    if (eventsError != null) {
+      throw eventsError!;
+    }
+    return eventsDelta ??
+        SessionEventsDelta(
+          sessionId: sessionId,
+          since: since,
+          nextSeq: since,
+          messages: const [],
+          activities: const [],
+          latestPlanUpdate: null,
+          pendingAction: null,
+          session: null,
+        );
+  }
 
   @override
   Future<SessionStatus> fetchStatus(HostProfile host, String sessionId) async {
