@@ -675,6 +675,91 @@ void main() {
     expect(find.text('stale-from-cache.txt'), findsNothing);
   });
 
+  testWidgets('hello gap keeps cached transcript stale until snapshot verifies', (
+    tester,
+  ) async {
+    final host = _host('cached-hello-gap-snapshot-verify');
+    final session = _session('cached-hello-gap-snapshot-verify');
+    final snapshotReady = Completer<void>();
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      fetchLogBlocker: snapshotReady.future,
+      messages: [
+        _assistantMessage(
+          id: 'msg-1',
+          text: 'Fresh snapshot item.',
+          content: const [TextBlock('Fresh snapshot item.')],
+        ),
+      ],
+      eventsDelta: SessionEventsDelta(
+        sessionId: session.id,
+        since: 1,
+        nextSeq: 1,
+        messages: const [],
+        activities: const [],
+        latestPlanUpdate: null,
+        pendingAction: null,
+        session: session,
+      ),
+    );
+    addTearDown(api.dispose);
+
+    await SessionLocalStore.instance.saveSessionLog(
+      host,
+      SessionLog(
+        session: session,
+        messages: [
+          _assistantMessage(
+            id: 'msg-1',
+            text: 'Cached transcript item.',
+            content: const [TextBlock('Cached transcript item.')],
+          ),
+        ],
+        activities: const [],
+        pendingAction: null,
+        history: const SessionLogHistorySummary(
+          isTruncated: false,
+          totalMessages: 1,
+          returnedMessages: 1,
+          totalActivities: 0,
+          returnedActivities: 0,
+        ),
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 3});
+    await _pumpFrames(tester);
+
+    expect(find.text('Cached transcript item.'), findsOneWidget);
+    expect(find.text('Fresh snapshot item.'), findsNothing);
+    expect(
+      find.text('Cached transcript · syncing latest changes'),
+      findsOneWidget,
+    );
+
+    snapshotReady.complete();
+    await _pumpFrames(tester);
+
+    expect(find.text('Fresh snapshot item.'), findsOneWidget);
+    expect(find.text('Cached transcript item.'), findsNothing);
+    expect(
+      find.text('Cached transcript · waiting for latest host snapshot'),
+      findsNothing,
+    );
+  });
+
   testWidgets('completed assistant message keeps collapsed reasoning visible', (
     tester,
   ) async {
@@ -1115,6 +1200,7 @@ class _RichEventFakeApi extends ApiClient {
     this.latestPlanUpdate,
     this.eventsDelta,
     this.eventsError,
+    this.fetchLogBlocker,
     this.nodeInfo,
     this.sessionSummary,
     this.sessionStatus,
@@ -1128,6 +1214,7 @@ class _RichEventFakeApi extends ApiClient {
   final LiveEvent? latestPlanUpdate;
   final SessionEventsDelta? eventsDelta;
   final Object? eventsError;
+  final Future<void>? fetchLogBlocker;
   final NodeInfo? nodeInfo;
   final SessionSummary? sessionSummary;
   final SessionStatus? sessionStatus;
@@ -1142,22 +1229,28 @@ class _RichEventFakeApi extends ApiClient {
     String sessionId, {
     int? messageLimit,
     int? activityLimit,
-  }) async => SessionLog(
-    session: sessionSummary ?? _session(sessionId),
-    messages: messages,
-    activities: activities,
-    pendingAction: null,
-    history:
-        sessionLogHistory ??
-        SessionLogHistorySummary(
-          isTruncated: false,
-          totalMessages: messages.length,
-          returnedMessages: messages.length,
-          totalActivities: activities.length,
-          returnedActivities: activities.length,
-        ),
-    latestPlanUpdate: latestPlanUpdate,
-  );
+  }) async {
+    final blocker = fetchLogBlocker;
+    if (blocker != null) {
+      await blocker;
+    }
+    return SessionLog(
+      session: sessionSummary ?? _session(sessionId),
+      messages: messages,
+      activities: activities,
+      pendingAction: null,
+      history:
+          sessionLogHistory ??
+          SessionLogHistorySummary(
+            isTruncated: false,
+            totalMessages: messages.length,
+            returnedMessages: messages.length,
+            totalActivities: activities.length,
+            returnedActivities: activities.length,
+          ),
+      latestPlanUpdate: latestPlanUpdate,
+    );
+  }
 
   @override
   Future<SessionEventsDelta> fetchEvents(
