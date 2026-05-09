@@ -86,7 +86,7 @@
     "@github/copilot-sdk": "^0.3.0",
     "@hono/node-server": "^2.0.1",
     "@hono/zod-validator": "^0.7.6",
-    "@mariozechner/pi-coding-agent": "^0.71.1",
+    "@mariozechner/pi-coding-agent": "^0.73.1",
     "commander": "^14.0.0",
     "hono": "^4.12.16",
     "ignore": "^7.0.5",
