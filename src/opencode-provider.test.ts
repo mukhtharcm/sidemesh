@@ -601,28 +601,6 @@ sleep 10
     });
   });
 
-  it("archives and unarchives sessions through the upstream client", async () => {
-    const client = new FakeOpenCodeClient();
-    const session = await client.createSession({
-      directory: "/repo/app",
-      title: "Archive me",
-      agent: "build",
-      model: { providerID: "opencode", modelID: "big-pickle" },
-    });
-    const provider = createProvider(client);
-    await provider.start();
-
-    assert.deepEqual(await provider.archiveSession(session.id), {
-      archived: true,
-    });
-    assert.ok(client.sessions.get(session.id)?.time.archived);
-
-    assert.deepEqual(await provider.unarchiveSession(session.id), {
-      unarchived: true,
-    });
-    assert.equal(client.sessions.get(session.id)?.time.archived, undefined);
-  });
-
   it("serializes image inputs and model variants for prompt_async", async () => {
     const client = new FakeOpenCodeClient();
     const provider = createProvider(client);
@@ -1175,20 +1153,6 @@ class FakeOpenCodeClient {
   public async setSessionName(options: { sessionID: string; title: string }) {
     const session = await this.getSession({ sessionID: options.sessionID });
     session.title = options.title;
-    session.time.updated = Date.now();
-    return session;
-  }
-
-  public async archiveSession(options: {
-    sessionID: string;
-    archivedAt: number | null;
-  }) {
-    const session = await this.getSession({ sessionID: options.sessionID });
-    if (options.archivedAt == null) {
-      delete session.time.archived;
-    } else {
-      session.time.archived = options.archivedAt;
-    }
     session.time.updated = Date.now();
     return session;
   }

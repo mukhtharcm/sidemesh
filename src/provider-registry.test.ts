@@ -278,7 +278,7 @@ describe("provider registry", () => {
     assert.equal(provider.capabilities.input.text, true);
     assert.equal(provider.capabilities.input.imageUrl, true);
     assert.equal(provider.capabilities.input.localImage, true);
-    assert.equal(provider.capabilities.sessions.archive, true);
+    assert.equal(provider.capabilities.sessions.archive, false);
     assert.equal(provider.capabilities.configuration.models, true);
     assert.equal(provider.capabilities.configuration.skills, true);
     assert.equal(provider.capabilities.runtimeControls.model, true);

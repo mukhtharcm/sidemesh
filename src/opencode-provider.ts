@@ -344,11 +344,6 @@ interface OpenCodeClient {
     sessionID: string;
     title: string;
   }): Promise<OpenCodeSessionInfo>;
-  archiveSession(options: {
-    directory: string;
-    sessionID: string;
-    archivedAt: number | null;
-  }): Promise<OpenCodeSessionInfo>;
   promptAsync(options: {
     directory: string;
     sessionID: string;
@@ -460,7 +455,7 @@ export const OPENCODE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     create: true,
     resume: true,
     rename: true,
-    archive: true,
+    archive: false,
     compact: false,
     interrupt: true,
     history: true,
@@ -715,30 +710,6 @@ export class OpenCodeAgentProvider
     });
     this.touchCache(updated);
     return { renamed: true };
-  }
-
-  public async archiveSession(threadId: string): Promise<unknown> {
-    await this.start();
-    const info = await this.ensureSessionInfo(threadId);
-    const updated = await this.requireClient().archiveSession({
-      directory: info.directory,
-      sessionID: threadId,
-      archivedAt: Date.now(),
-    });
-    this.touchCache(updated);
-    return { archived: true };
-  }
-
-  public async unarchiveSession(threadId: string): Promise<unknown> {
-    await this.start();
-    const info = await this.ensureSessionInfo(threadId);
-    const updated = await this.requireClient().archiveSession({
-      directory: info.directory,
-      sessionID: threadId,
-      archivedAt: null,
-    });
-    this.touchCache(updated);
-    return { unarchived: true };
   }
 
   public async createSession(
@@ -1632,22 +1603,6 @@ class HttpOpenCodeClient implements OpenCodeClient {
       method: "PATCH",
       directory: options.directory,
       body: { title: options.title },
-    });
-  }
-
-  public archiveSession(options: {
-    directory: string;
-    sessionID: string;
-    archivedAt: number | null;
-  }): Promise<OpenCodeSessionInfo> {
-    return this.requestJson(`/session/${encodeURIComponent(options.sessionID)}`, {
-      method: "PATCH",
-      directory: options.directory,
-      body: {
-        time: {
-          archived: options.archivedAt,
-        },
-      },
     });
   }
 
