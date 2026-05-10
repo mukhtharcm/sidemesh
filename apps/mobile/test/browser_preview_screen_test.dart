@@ -108,6 +108,72 @@ void main() {
     expect(find.text('Response body'), findsOneWidget);
     expect(find.textContaining('network ok'), findsOneWidget);
   });
+
+  testWidgets('browser preview surfaces network detail fetch errors', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-2',
+          'url': 'http://127.0.0.1:3000/assets/site.css',
+          'method': 'GET',
+          'resourceType': 'Stylesheet',
+          'status': 200,
+          'mimeType': 'text/css',
+          'encodedDataLength': 512,
+          'durationMs': 12,
+          'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.text('site.css'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkDetail',
+      'requestId': 'request-2',
+      'error': 'network request not found',
+    });
+    await _pumpFrames(tester);
+
+    expect(find.textContaining('network request not found'), findsOneWidget);
+  });
 }
 
 Future<void> _pumpFrames(WidgetTester tester) async {
