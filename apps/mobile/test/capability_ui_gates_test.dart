@@ -59,8 +59,8 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Browse files'), findsOneWidget);
-    expect(find.text('Preview web app'), findsNothing);
-    expect(find.text('Manage connections'), findsNothing);
+    expect(find.text('Open browser preview'), findsNothing);
+    expect(find.text('Manage browser previews'), findsNothing);
     expect(find.text('Rename'), findsNothing);
     expect(find.text('Archive'), findsNothing);
 
@@ -69,7 +69,7 @@ void main() {
   });
 
   testWidgets(
-    'session screen surfaces preview and connections actions for preview-capable hosts',
+    'session screen surfaces browser preview actions for preview-capable hosts',
     (tester) async {
       final api = _CapabilityFakeApi(
         _nodeForCapabilities(
@@ -100,13 +100,13 @@ void main() {
       await tester.tap(find.byTooltip('Session actions'));
       await _pumpFrames(tester);
 
-      expect(find.text('Preview web app'), findsOneWidget);
-      expect(find.text('Manage connections'), findsOneWidget);
+      expect(find.text('Open browser preview'), findsOneWidget);
+      expect(find.text('Manage browser previews'), findsOneWidget);
     },
   );
 
   testWidgets(
-    'session screen keeps connections but hides preview for tunnel-only hosts',
+    'session screen hides browser preview actions for tunnel-only hosts',
     (tester) async {
       final api = _CapabilityFakeApi(
         _nodeForCapabilities(
@@ -137,8 +137,8 @@ void main() {
       await tester.tap(find.byTooltip('Session actions'));
       await _pumpFrames(tester);
 
-      expect(find.text('Preview web app'), findsNothing);
-      expect(find.text('Manage connections'), findsOneWidget);
+      expect(find.text('Open browser preview'), findsNothing);
+      expect(find.text('Manage browser previews'), findsNothing);
     },
   );
 

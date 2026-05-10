@@ -676,8 +676,7 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
 
     return MeshCard(
       tone: MeshCardTone.muted,
-      borderColor: accent.withValues(alpha: 0.28),
-      accentStrip: accent,
+      borderColor: accent.withValues(alpha: 0.5),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
