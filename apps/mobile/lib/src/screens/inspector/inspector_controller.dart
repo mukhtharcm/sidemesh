@@ -18,6 +18,9 @@ enum InspectorSurfaceKind {
   ports,
   gitDetails,
   sessionDetails,
+  /// Default surface shown when no specific surface has been saved for a
+  /// session. Acts as a quick-launch hub for all inspector tools.
+  sessionHub,
 }
 
 /// A single surface that the inspector pane can host.

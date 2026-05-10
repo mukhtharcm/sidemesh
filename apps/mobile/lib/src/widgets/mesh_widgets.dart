@@ -109,6 +109,10 @@ class MeshCard extends StatelessWidget {
     this.onTap,
     this.tone = MeshCardTone.surface,
     this.borderColor,
+    @Deprecated(
+      'accentStrip produced an unexplained 3 px left-edge stripe. '
+      'Prefer a coloured borderColor or an inline status indicator instead.'
+    )
     this.accentStrip,
   });
 
@@ -117,6 +121,7 @@ class MeshCard extends StatelessWidget {
   final VoidCallback? onTap;
   final MeshCardTone tone;
   final Color? borderColor;
+  // ignore: deprecated_member_use_from_same_package
   final Color? accentStrip;
 
   @override
@@ -294,21 +299,74 @@ class MeshIconButton extends StatelessWidget {
   }
 }
 
-/// A subtle live-status indicator used in running/live contexts.
-class LivePulse extends StatelessWidget {
+/// A live-status indicator that pulses with a gentle opacity animation
+/// to communicate active agent activity.
+///
+/// The animation is driven by a [SingleTickerProviderStateMixin] and
+/// automatically pauses when the app is backgrounded via
+/// [WidgetsBindingObserver]. Because [ListView.builder] destroys
+/// off-screen items, the ticker is also naturally disposed when the
+/// widget scrolls out of the viewport — keeping resource usage minimal.
+class LivePulse extends StatefulWidget {
   const LivePulse({super.key, this.color});
 
   final Color? color;
 
   @override
+  State<LivePulse> createState() => _LivePulseState();
+}
+
+class _LivePulseState extends State<LivePulse>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  late final AnimationController _controller;
+  late final Animation<double> _opacity;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    )..repeat(reverse: true);
+    _opacity = Tween<double>(begin: 1.0, end: 0.3).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        if (!_controller.isAnimating) _controller.repeat(reverse: true);
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        _controller.stop();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final color = this.color ?? context.colors.success;
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
+    final color = widget.color ?? context.colors.success;
+    // RepaintBoundary isolates the opacity repaint to this 8×8 region so
+    // the animation doesn't trigger repaints in ancestor widgets.
+    return RepaintBoundary(
+      child: FadeTransition(
+        opacity: _opacity,
+        child: Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
       ),
     );
   }

@@ -191,28 +191,21 @@ class SessionRowCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 2),
                 ],
-                if (favorite)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 6, top: 2),
+                InkWell(
+                  onTap: onToggleFavorite,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
                     child: Icon(
-                      Icons.star_rounded,
+                      favorite
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
                       size: 13,
-                      color: colors.warning,
-                    ),
-                  )
-                else
-                  InkWell(
-                    onTap: onToggleFavorite,
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(
-                        Icons.star_outline_rounded,
-                        size: 13,
-                        color: colors.textTertiary,
-                      ),
+                      color:
+                          favorite ? colors.warning : colors.textTertiary,
                     ),
                   ),
+                ),
               ],
             ),
           ),
@@ -226,11 +219,6 @@ class SessionRowCard extends StatelessWidget {
     return MeshCard(
       onTap: onTap,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      accentStrip: running
-          ? colors.success
-          : (selected
-              ? colors.accent
-              : (unread ? colors.accent.withValues(alpha: 0.45) : null)),
       borderColor: selected ? colors.accent : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

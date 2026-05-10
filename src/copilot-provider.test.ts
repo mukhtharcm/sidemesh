@@ -163,7 +163,12 @@ describe("Copilot provider", () => {
       assert.equal(updated.messages.at(-1)?.text, "resumed: continue sdk");
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -213,7 +218,12 @@ describe("Copilot provider", () => {
       assert.equal(sessions[0]?.source, "copilot");
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -251,7 +261,12 @@ describe("Copilot provider", () => {
       assert.equal(runtime?.telemetry?.lastUsage?.totalNanoAiu, 42);
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -345,7 +360,12 @@ describe("Copilot provider", () => {
       assert.equal(info.source, "copilot");
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -383,7 +403,12 @@ describe("Copilot provider", () => {
       assert.equal(runtime?.telemetry?.compaction?.messagesRemoved, 8);
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -461,7 +486,12 @@ describe("Copilot provider", () => {
       assert.deepEqual([...sdk.disabledSkills], ["frontend-design"]);
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -500,7 +530,12 @@ describe("Copilot provider", () => {
       assert.equal(log.messages[0]?.text, "Use this skill\n/frontend-design");
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -554,7 +589,12 @@ describe("Copilot provider", () => {
       ]);
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -601,7 +641,12 @@ describe("Copilot provider", () => {
     } finally {
       globalThis.fetch = originalFetch;
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -680,7 +725,12 @@ describe("Copilot provider", () => {
       );
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -712,7 +762,12 @@ describe("Copilot provider", () => {
       );
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -744,7 +799,12 @@ describe("Copilot provider", () => {
       assert.equal(log.runtime?.mode, "plan");
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -809,7 +869,12 @@ describe("Copilot provider", () => {
       assert.equal(sdk.resumed[0]?.session.selectedModels.length, 0);
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -905,7 +970,12 @@ describe("Copilot provider", () => {
     } finally {
       sdk.flushHeldResponses();
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -961,7 +1031,12 @@ describe("Copilot provider", () => {
       );
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -1010,7 +1085,12 @@ describe("Copilot provider", () => {
       assert.equal(log.runtime?.telemetry?.compaction?.status, "failed");
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -1065,7 +1145,12 @@ describe("Copilot provider", () => {
       assert.equal(log.messages.at(-1)?.text, "copilot says: needs approval");
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -1105,7 +1190,12 @@ describe("Copilot provider", () => {
       assert.match(log.messages.at(-1)?.text ?? "", /staging/);
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -1149,7 +1239,12 @@ describe("Copilot provider", () => {
       assert.match(log.messages.at(-1)?.text ?? "", /dryRun/);
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -1185,7 +1280,12 @@ describe("Copilot provider", () => {
       ]);
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -1233,7 +1333,12 @@ describe("Copilot provider", () => {
       assert.equal(log.messages[1]?.text, "course correct");
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -1266,7 +1371,12 @@ describe("Copilot provider", () => {
       assert.equal(sdk.created[0]?.session.selectedModels.length, 0);
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -1306,7 +1416,12 @@ describe("Copilot provider", () => {
       );
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -1342,7 +1457,12 @@ describe("Copilot provider", () => {
       assert.equal(log.runtime?.approvalPolicy, "on-request");
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -1374,7 +1494,12 @@ describe("Copilot provider", () => {
       assert.match(log.messages.at(-1)?.text ?? "", /SDK unavailable/);
     } finally {
       await settleProviderWrites();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 });
@@ -2206,7 +2331,12 @@ describe("copilot rich event cleanup", () => {
       assert.equal(completedActivity?.result?.type, "success");
     } finally {
       await new Promise((r) => setTimeout(r, 50));
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -2249,7 +2379,12 @@ describe("copilot rich event cleanup", () => {
       assert.equal((failed?.result as any)?.summary, "Search timeout");
     } finally {
       await new Promise((r) => setTimeout(r, 50));
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -2294,7 +2429,12 @@ describe("copilot rich event cleanup", () => {
       assert.equal(bg?.message, "Background tasks changed");
     } finally {
       await new Promise((r) => setTimeout(r, 50));
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -2345,7 +2485,12 @@ describe("copilot rich event cleanup", () => {
       assert.ok(loadWarning?.message.includes("Connection refused"));
     } finally {
       await new Promise((r) => setTimeout(r, 50));
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -2388,7 +2533,12 @@ describe("copilot rich event cleanup", () => {
       assert.equal(cap?.message, "Elicitation enabled");
     } finally {
       await new Promise((r) => setTimeout(r, 50));
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 
@@ -2432,7 +2582,12 @@ describe("copilot rich event cleanup", () => {
       assert.equal(oauth?.source, "copilot/mcp");
     } finally {
       await new Promise((r) => setTimeout(r, 50));
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
     }
   });
 });

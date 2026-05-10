@@ -35,6 +35,7 @@ import 'inspector/inspector_pinned.dart';
 import 'inspector/inspector_ports.dart';
 import 'inspector/inspector_resources.dart';
 import 'inspector/inspector_search.dart';
+import 'inspector/inspector_session_hub.dart';
 import 'inspector/inspector_terminal.dart';
 import 'port_forward_screen.dart';
 import '../session_message_seed_store.dart';
@@ -746,8 +747,9 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsBrowserPreview =>
       _supportsHostCapability('workspace', 'browserPreview');
 
-  bool get _supportsConnections =>
-      _supportsPortForwarding || _supportsBrowserPreview;
+  // TCP / local tunnel UI is intentionally hidden for now. Keep the server
+  // capability intact, but only surface the browser-preview path in the app.
+  bool get _supportsConnections => _supportsBrowserPreview;
 
   bool get _supportsProviderRestart =>
       _supportsProviderCapability('lifecycle', 'restart');
@@ -765,6 +767,7 @@ class _SessionScreenState extends State<SessionScreen>
   InspectorController? _inspectorController;
   bool _inspectorRestoreAttempted = false;
   bool _inspectorSawOurSurface = false;
+  InspectorSurfaceKind? _lastInspectorSurfaceKind;
 
   // Ticks whenever the timeline inputs change so pane-3 surfaces
   // (currently the search panel) can rebuild with fresh records. A
@@ -1079,6 +1082,10 @@ class _SessionScreenState extends State<SessionScreen>
 
     if (kind == null) {
       closeOrphan();
+      // No saved surface — open the hub so pane 3 is immediately useful
+      // rather than blank. The hub itself is never persisted, so next open
+      // will again check for a real saved surface first.
+      _openDefaultInspectorHub(controller, ownerKey);
       return;
     }
     // If something else has already opened a surface for this owner
@@ -1154,6 +1161,16 @@ class _SessionScreenState extends State<SessionScreen>
             session: _session ?? widget.session,
             supportsBrowserPreview: _supportsBrowserPreview,
             supportsPortForwarding: _supportsPortForwarding,
+            onBrowserPreviewOpened: (preview) {
+              controller.show(
+                buildInspectorBrowserPreviewSurface(
+                  ownerKey: ownerKey,
+                  host: widget.host,
+                  api: widget.api,
+                  preview: preview,
+                ),
+              );
+            },
           ),
         );
         break;
@@ -1163,7 +1180,59 @@ class _SessionScreenState extends State<SessionScreen>
       case InspectorSurfaceKind.sessionDetails:
         // Not persisted / not owned by the session screen yet.
         break;
+      case InspectorSurfaceKind.sessionHub:
+        // Hub is the default; treat a persisted hub as if nothing was saved.
+        closeOrphan();
+        _openDefaultInspectorHub(controller, ownerKey);
+        break;
     }
+  }
+
+  /// Opens the inspector hub for this session.
+  ///
+  /// Each callback handles its own capability check and shows a snackbar when
+  /// the tool is not available on the current host, so the hub doesn't need
+  /// to know about capability flags at construction time.
+  void _openDefaultInspectorHub(
+    InspectorController controller,
+    String ownerKey,
+  ) {
+    final session = _session ?? widget.session;
+    controller.show(
+      buildInspectorSessionHubSurface(
+        ownerKey: ownerKey,
+        onOpenSearch: _toggleSearchPanel,
+        onOpenPinned: _openPinnedPanel,
+        onOpenFiles: () {
+          if (!_supportsFilesystem) {
+            showAppSnackBar(
+              context,
+              'File browser not available on this host.',
+            );
+            return;
+          }
+          _browseWorkspacePath(session.cwd);
+        },
+        onOpenTerminal: () {
+          if (!_supportsTerminal) {
+            showAppSnackBar(context, 'Terminal not available on this host.');
+            return;
+          }
+          unawaited(_openTerminal());
+        },
+        onOpenPorts: () {
+          if (!_supportsConnections) {
+            showAppSnackBar(
+              context,
+              'Browser previews are not available on this host.',
+            );
+            return;
+          }
+          unawaited(_openConnections());
+        },
+        onOpenResources: _openResourcesPanel,
+      ),
+    );
   }
 
   void _onInspectorChanged() {
@@ -1174,7 +1243,12 @@ class _SessionScreenState extends State<SessionScreen>
     final cur = controller.current;
     if (cur != null && cur.ownerKey == ownerKey) {
       _inspectorSawOurSurface = true;
-      unawaited(InspectorPersistence.save(ownerKey, cur.kind));
+      _lastInspectorSurfaceKind = cur.kind;
+      // Don't persist the hub — it's the default, not a deliberate user
+      // choice. A real surface opened next will replace it in persistence.
+      if (cur.kind != InspectorSurfaceKind.sessionHub) {
+        unawaited(InspectorPersistence.save(ownerKey, cur.kind));
+      }
       return;
     }
     // cur is null or belongs to a different owner. We only persist "closed"
@@ -1184,9 +1258,23 @@ class _SessionScreenState extends State<SessionScreen>
     if (cur == null &&
         _inspectorSawOurSurface &&
         controller.lastCloseWasUserInitiated) {
+      final lastKind = _lastInspectorSurfaceKind;
       unawaited(InspectorPersistence.save(ownerKey, null));
+      if (lastKind != null &&
+          lastKind != InspectorSurfaceKind.sessionHub &&
+          MediaQuery.of(context).size.width >= 900) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _disposed) return;
+          final nextController = _inspectorController;
+          if (nextController == null || nextController.current != null) return;
+          _openDefaultInspectorHub(nextController, ownerKey);
+        });
+      }
     }
     _inspectorSawOurSurface = false;
+    if (cur == null) {
+      _lastInspectorSurfaceKind = null;
+    }
   }
 
   @override
@@ -4173,22 +4261,22 @@ class _SessionScreenState extends State<SessionScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Stop session?'),
+        title: const Text('Interrupt agent?'),
         content: const Text(
-          'The running task will be interrupted. In-flight tool calls may not complete cleanly.',
+          'The current task will stop. Any tools mid-run may not finish cleanly.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Keep running'),
+            child: const Text('Cancel'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: context.colors.danger,
-              foregroundColor: context.colors.accentOn,
+              foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Stop'),
+            child: const Text('Interrupt'),
           ),
         ],
       ),
@@ -4210,7 +4298,7 @@ class _SessionScreenState extends State<SessionScreen>
       _syncSessionLiveActivity();
       showAppSnackBar(
         context,
-        'Session stopped.',
+        'Agent interrupted.',
         duration: const Duration(seconds: 2),
       );
     } catch (error) {
@@ -4219,7 +4307,7 @@ class _SessionScreenState extends State<SessionScreen>
       }
       showAppSnackBar(
         context,
-        "Failed to stop session: ${friendlyError(error)}",
+        'Failed to interrupt agent: ${friendlyError(error)}',
       );
     }
   }
@@ -4820,7 +4908,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (!_supportsConnections) {
       showAppSnackBar(
         context,
-        'This host does not expose previews or tunnels.',
+        'This host does not expose browser previews.',
       );
       return;
     }
@@ -4835,6 +4923,16 @@ class _SessionScreenState extends State<SessionScreen>
           session: session,
           supportsBrowserPreview: _supportsBrowserPreview,
           supportsPortForwarding: _supportsPortForwarding,
+          onBrowserPreviewOpened: (preview) {
+            scope.show(
+              buildInspectorBrowserPreviewSurface(
+                ownerKey: _inspectorOwnerKey(),
+                host: widget.host,
+                api: widget.api,
+                preview: preview,
+              ),
+            );
+          },
         ),
       );
       return;
@@ -5476,6 +5574,21 @@ class _SessionScreenState extends State<SessionScreen>
     required bool resourcesOpen,
   }) {
     return [
+      // When the agent is running, surface the interrupt action at the top so
+      // it's immediately reachable without scrolling the sheet.
+      if (_running && _supportsSessionInterrupt)
+        const _SessionActionGroup(
+          label: 'LIVE',
+          actions: [
+            _SessionActionSpec(
+              value: 'stop',
+              label: 'Interrupt agent',
+              detail: 'Stop the current task immediately.',
+              icon: Icons.stop_circle_rounded,
+              tone: _SessionActionTone.danger,
+            ),
+          ],
+        ),
       _SessionActionGroup(
         label: 'Workspace',
         actions: [
@@ -5513,12 +5626,12 @@ class _SessionScreenState extends State<SessionScreen>
         ],
       ),
       _SessionActionGroup(
-        label: 'Preview & connections',
+        label: 'Browser preview',
         actions: [
           if (_supportsBrowserPreview)
             const _SessionActionSpec(
               value: 'preview',
-              label: 'Preview web app',
+              label: 'Open browser preview',
               detail: 'Open a streamed browser preview for a localhost app.',
               icon: Icons.open_in_browser_rounded,
               tone: _SessionActionTone.accent,
@@ -5526,11 +5639,11 @@ class _SessionScreenState extends State<SessionScreen>
           if (_supportsConnections)
             _SessionActionSpec(
               value: 'connections',
-              label: portsOpen ? 'Connections are open' : 'Manage connections',
-              detail: _supportsPortForwarding
-                  ? 'Inspect browser previews, TCP tunnels, and local URLs.'
-                  : 'Inspect active browser previews for this session.',
-              icon: Icons.cable_rounded,
+              label: portsOpen
+                  ? 'Browser previews are open'
+                  : 'Manage browser previews',
+              detail: 'Inspect active browser previews for this session.',
+              icon: Icons.open_in_browser_rounded,
               tone: portsOpen
                   ? _SessionActionTone.accent
                   : _SessionActionTone.neutral,
@@ -5571,14 +5684,6 @@ class _SessionScreenState extends State<SessionScreen>
       _SessionActionGroup(
         label: 'Session',
         actions: [
-          if (_running && _supportsSessionInterrupt)
-            const _SessionActionSpec(
-              value: 'stop',
-              label: 'Stop agent',
-              detail: 'Interrupt the current turn immediately.',
-              icon: Icons.stop_circle_rounded,
-              tone: _SessionActionTone.danger,
-            ),
           const _SessionActionSpec(
             value: 'new',
             label: 'New session',
@@ -5768,7 +5873,13 @@ class _SessionScreenState extends State<SessionScreen>
               : Stack(
                   children: [
                     if (showWaitingState)
-                      const Positioned.fill(child: _SessionWaitingState())
+                      Positioned.fill(
+                        child: _SessionWaitingState(
+                          onStop: _supportsSessionInterrupt
+                              ? _stopSession
+                              : null,
+                        ),
+                      )
                     else
                       RefreshIndicator(
                         onRefresh: () => _loadSnapshot(scrollToBottom: false),
@@ -6023,7 +6134,7 @@ class _SessionScreenState extends State<SessionScreen>
           children: [
             if (_running) ...[const LivePulse(), const SizedBox(width: 10)],
             Expanded(
-              child: _supportsSessionRename
+              child: _supportsSessionRename && !isCompact
                   ? GestureDetector(
                       onTap: () => unawaited(_renameSession()),
                       behavior: HitTestBehavior.opaque,
@@ -6054,18 +6165,23 @@ class _SessionScreenState extends State<SessionScreen>
           ],
         ),
         actions: [
-          if (_running && _supportsSessionInterrupt && !isCompact)
+          // Reserve a permanent slot for interrupt — this prevents all other
+          // action buttons from jumping left/right when the agent starts/stops.
+          if (!isCompact && _supportsSessionInterrupt)
             Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: TextButton.icon(
-                onPressed: _stopSession,
-                icon: Icon(
-                  Icons.stop_circle_rounded,
-                  color: colors.danger,
-                ),
-                label: Text(
-                  'Stop',
-                  style: TextStyle(color: colors.danger),
+              padding: const EdgeInsets.only(right: 4),
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 200),
+                opacity: _running ? 1.0 : 0.3,
+                child: IgnorePointer(
+                  ignoring: !_running,
+                  child: MeshIconButton(
+                    icon: Icons.stop_circle_rounded,
+                    tooltip: 'Interrupt agent',
+                    color: colors.danger,
+                    onTap: _stopSession,
+                    semanticLabel: 'Interrupt agent',
+                  ),
                 ),
               ),
             ),
@@ -6107,10 +6223,10 @@ class _SessionScreenState extends State<SessionScreen>
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
-                icon: Icons.cable_rounded,
+                icon: Icons.open_in_browser_rounded,
                 tooltip: portsOpenInInspector
-                    ? 'Connections are open'
-                    : 'Manage connections',
+                    ? 'Browser previews are open'
+                    : 'Manage browser previews',
                 color: portsOpenInInspector
                     ? colors.accent
                     : colors.textSecondary,
@@ -6160,61 +6276,109 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: _openResourcesPanel,
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: ListenableBuilder(
-              listenable: Listenable.merge([_policyStore, _turnConfigStore]),
-              builder: (context, _) {
-                final policy = _policyStore.policyFor(widget.host, session.id);
-                final turnConfig = _turnConfigStore.configFor(
-                  widget.host,
-                  session.id,
-                );
-                final runtime = session.runtime;
-                final runtimeLoosened = SessionPolicy.runtimeIsLoosened(
-                  approvalPolicy: runtime?.approvalPolicy,
-                  sandboxMode: runtime?.sandboxMode,
-                  networkAccess: runtime?.networkAccess,
-                );
-                final customised =
-                    !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
-                return MeshIconButton(
-                  icon: customised ? Icons.tune_rounded : Icons.tune_rounded,
-                  tooltip: 'Session controls',
-                  color: customised ? colors.accent : colors.textSecondary,
-                  onTap: () => _showSessionPolicySheet(session),
-                );
-              },
+          if (!isCompact)
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: ListenableBuilder(
+                listenable: Listenable.merge([_policyStore, _turnConfigStore]),
+                builder: (context, _) {
+                  final policy = _policyStore.policyFor(widget.host, session.id);
+                  final turnConfig = _turnConfigStore.configFor(
+                    widget.host,
+                    session.id,
+                  );
+                  final runtime = session.runtime;
+                  final runtimeLoosened = SessionPolicy.runtimeIsLoosened(
+                    approvalPolicy: runtime?.approvalPolicy,
+                    sandboxMode: runtime?.sandboxMode,
+                    networkAccess: runtime?.networkAccess,
+                  );
+                  final customised =
+                      !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
+                  return MeshIconButton(
+                    icon: customised ? Icons.tune_rounded : Icons.tune_rounded,
+                    tooltip: 'Session controls',
+                    color: customised ? colors.accent : colors.textSecondary,
+                    onTap: () => _showSessionPolicySheet(session),
+                  );
+                },
+              ),
             ),
-          ),
           ListenableBuilder(
-            listenable: SessionLocalStore.instance,
+            listenable: Listenable.merge([
+              SessionLocalStore.instance,
+              _policyStore,
+              _turnConfigStore,
+            ]),
             builder: (context, _) {
               final favorite = _localStore.isFavorite(widget.host, session.id);
               final gitAvailable =
                   _supportsGitStatus &&
                   _gitHeaderLabel(session, _gitStatus) != null;
               final gitDirty = _gitStatus?.dirty ?? false;
+              final policy = _policyStore.policyFor(widget.host, session.id);
+              final turnConfig = _turnConfigStore.configFor(
+                widget.host,
+                session.id,
+              );
+              final runtime = session.runtime;
+              final runtimeLoosened = SessionPolicy.runtimeIsLoosened(
+                approvalPolicy: runtime?.approvalPolicy,
+                sandboxMode: runtime?.sandboxMode,
+                networkAccess: runtime?.networkAccess,
+              );
+              final sessionControlsCustomized =
+                  !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
               // Hide the 'Git details' menu item when it's already a visible
               // icon (dirty state). Keep it hidden entirely if there is no
               // git info to show.
               final showGitInMenu = gitAvailable && !gitDirty;
               if (isCompact) {
-                return MeshIconButton(
-                  icon: Icons.more_horiz_rounded,
-                  tooltip: _running ? 'Session actions (agent running)' : 'Session actions',
-                  color: _running ? colors.warning : colors.textPrimary,
-                  onTap: () => unawaited(
-                    _showSessionActionsSheet(
-                      session: session,
-                      favorite: favorite,
-                      gitAvailable: gitAvailable,
-                      gitDirty: gitDirty,
-                      terminalOpen: terminalOpenInInspector,
-                      portsOpen: portsOpenInInspector,
-                      searchOpen: searchOpenInInspector,
-                      resourcesOpen: resourcesOpenInInspector,
-                    ),
+                return Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.sm),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      MeshIconButton(
+                        icon: Icons.tune_rounded,
+                        tooltip: 'Session controls',
+                        color: sessionControlsCustomized
+                            ? colors.accent
+                            : colors.textSecondary,
+                        onTap: () => _showSessionPolicySheet(session),
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      MeshIconButton(
+                        icon: favorite
+                            ? Icons.star_rounded
+                            : Icons.star_outline_rounded,
+                        tooltip: favorite ? 'Unpin session' : 'Pin session',
+                        color:
+                            favorite ? colors.warning : colors.textSecondary,
+                        onTap: _toggleFavorite,
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      MeshIconButton(
+                        icon: Icons.more_vert_rounded,
+                        tooltip: _running
+                            ? 'Session actions (agent running)'
+                            : 'Session actions',
+                        color:
+                            _running ? colors.warning : colors.textPrimary,
+                        onTap: () => unawaited(
+                          _showSessionActionsSheet(
+                            session: session,
+                            favorite: favorite,
+                            gitAvailable: gitAvailable,
+                            gitDirty: gitDirty,
+                            terminalOpen: terminalOpenInInspector,
+                            portsOpen: portsOpenInInspector,
+                            searchOpen: searchOpenInInspector,
+                            resourcesOpen: resourcesOpenInInspector,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 );
               }
@@ -6257,7 +6421,12 @@ class _SessionScreenState extends State<SessionScreen>
                       children: [
                         Icon(Icons.flag_rounded, size: 18),
                         SizedBox(width: 10),
-                        Text('Flag for follow-up'),
+                        Expanded(
+                          child: Text(
+                            'Flag for follow-up',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -6301,7 +6470,12 @@ class _SessionScreenState extends State<SessionScreen>
                         children: [
                           Icon(Icons.open_in_browser_rounded, size: 18),
                           SizedBox(width: 10),
-                          Text('Preview web app'),
+                          Expanded(
+                            child: Text(
+                              'Open browser preview',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -6310,9 +6484,14 @@ class _SessionScreenState extends State<SessionScreen>
                       value: 'connections',
                       child: Row(
                         children: [
-                          Icon(Icons.cable_rounded, size: 18),
+                          Icon(Icons.open_in_browser_rounded, size: 18),
                           SizedBox(width: 10),
-                          Text('Manage connections'),
+                          Expanded(
+                            child: Text(
+                              'Manage browser previews',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -6324,7 +6503,12 @@ class _SessionScreenState extends State<SessionScreen>
                         children: [
                           Icon(Icons.open_in_new_rounded, size: 18),
                           SizedBox(width: 10),
-                          Text('Open in new window'),
+                          Expanded(
+                            child: Text(
+                              'Open in new window',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ],
                       ),
                     ),
