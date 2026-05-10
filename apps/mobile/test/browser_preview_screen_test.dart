@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
 import 'package:sidemesh_mobile/src/models.dart';
@@ -12,6 +13,14 @@ import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 void main() {
+  setUp(() {
+    _installClipboardMock();
+  });
+
+  tearDown(() {
+    _clearClipboardMock();
+  });
+
   testWidgets('browser preview renders a live network tab and detail sheet', (
     tester,
   ) async {
@@ -52,7 +61,7 @@ void main() {
         {
           'requestId': 'request-1',
           'url': 'http://127.0.0.1:3000/assets/main.js',
-          'method': 'GET',
+          'method': 'POST',
           'resourceType': 'Script',
           'status': 200,
           'mimeType': 'text/javascript',
@@ -83,7 +92,7 @@ void main() {
       'detail': {
         'requestId': 'request-1',
         'url': 'http://127.0.0.1:3000/assets/main.js',
-        'method': 'GET',
+        'method': 'POST',
         'resourceType': 'Script',
         'status': 200,
         'statusText': 'OK',
@@ -95,8 +104,13 @@ void main() {
         'finished': true,
         'failed': false,
         'servedFromCache': false,
-        'requestHeaders': {'accept': '*/*'},
+        'requestHeaders': {
+          'accept': '*/*',
+          'content-type': 'application/json',
+        },
         'responseHeaders': {'content-type': 'text/javascript'},
+        'requestBody': '{"query":"network ok"}',
+        'requestBodyError': null,
         'body': 'console.log("network ok")',
         'bodyBase64Encoded': false,
         'bodyError': null,
@@ -105,8 +119,112 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Request headers'), findsOneWidget);
+    expect(find.text('Request body'), findsOneWidget);
     expect(find.text('Response body'), findsOneWidget);
-    expect(find.textContaining('network ok'), findsOneWidget);
+    expect(find.textContaining('network ok'), findsWidgets);
+
+    await tester.tap(find.byIcon(Icons.copy_all_rounded));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Copy as cURL'));
+    await _pumpFrames(tester);
+
+    final clipboard = await Clipboard.getData('text/plain');
+    expect(clipboard?.text, contains('curl'));
+    expect(clipboard?.text, contains('--data-raw'));
+    expect(clipboard?.text, contains('assets/main.js'));
+  });
+
+  testWidgets('browser preview network tab supports search and sort', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-1',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'GET',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 4096,
+          'durationMs': 80,
+          'startedAt': DateTime(2026, 1, 1, 0, 0, 2).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+        {
+          'requestId': 'request-2',
+          'url': 'http://127.0.0.1:3000/assets/site.css',
+          'method': 'GET',
+          'resourceType': 'Stylesheet',
+          'status': 200,
+          'mimeType': 'text/css',
+          'encodedDataLength': 512,
+          'durationMs': 12,
+          'startedAt': DateTime(2026, 1, 1, 0, 0, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+
+    final searchField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField &&
+          widget.decoration?.hintText == 'Search requests',
+    );
+    await tester.enterText(searchField, 'site');
+    await _pumpFrames(tester);
+
+    expect(find.text('site.css'), findsOneWidget);
+    expect(find.text('main.js'), findsNothing);
+
+    await tester.enterText(searchField, '');
+    await _pumpFrames(tester);
+
+    await tester.tap(find.text('Newest'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Largest').last);
+    await _pumpFrames(tester);
+
+    expect(
+      tester.getTopLeft(find.text('main.js')).dy,
+      lessThan(tester.getTopLeft(find.text('site.css')).dy),
+    );
   });
 
   testWidgets('browser preview replaces stale network rows from fresh snapshots', (
@@ -551,6 +669,33 @@ HostBrowserPreviewInfo _preview() => HostBrowserPreviewInfo(
   lastFrameAt: DateTime(2026, 1, 1).millisecondsSinceEpoch,
   lastError: null,
 );
+
+String? _mockClipboardText;
+
+void _installClipboardMock() {
+  _mockClipboardText = null;
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        switch (call.method) {
+          case 'Clipboard.setData':
+            final arguments = call.arguments;
+            if (arguments is Map) {
+              _mockClipboardText = arguments['text']?.toString();
+            }
+            return null;
+          case 'Clipboard.getData':
+            return <String, dynamic>{'text': _mockClipboardText};
+          default:
+            return null;
+        }
+      });
+}
+
+void _clearClipboardMock() {
+  _mockClipboardText = null;
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(SystemChannels.platform, null);
+}
 
 class _BrowserPreviewFakeApi extends ApiClient {
   final _ControllableWebSocketChannel _channel = _ControllableWebSocketChannel();

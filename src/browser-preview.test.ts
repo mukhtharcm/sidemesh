@@ -303,7 +303,7 @@ describe("browser preview", () => {
       redirectHop: 0,
       isRedirectResponse: false,
       url: "http://127.0.0.1:3000/app.js",
-      method: "GET",
+      method: "POST",
       resourceType: "Script",
       requestHeaders: { accept: "*/*" },
       responseHeaders: { "content-type": "text/javascript" },
@@ -322,20 +322,24 @@ describe("browser preview", () => {
     cdp.sendResult = {
       body: '  console.log("ok")\n',
       base64Encoded: false,
+      postData: '{"query":"ok"}',
     };
     const messages: Array<Record<string, unknown>> = [];
     const socket = createFakeSocket(messages);
 
     await registry.sendNetworkDetail(preview, socket, "request-1");
 
-    assert.equal(cdp.sent.at(-1)?.method, "Network.getResponseBody");
+    assert.deepEqual(
+      cdp.sent.map((item) => item.method),
+      ["Network.getRequestPostData", "Network.getResponseBody"],
+    );
     assert.deepEqual(messages[0], {
       type: "networkDetail",
       requestId: "request-1",
       detail: {
         requestId: "request-1",
         url: "http://127.0.0.1:3000/app.js",
-        method: "GET",
+        method: "POST",
         resourceType: "Script",
         status: 200,
         mimeType: "text/javascript",
@@ -349,6 +353,8 @@ describe("browser preview", () => {
         statusText: "OK",
         requestHeaders: { accept: "*/*" },
         responseHeaders: { "content-type": "text/javascript" },
+        requestBody: '{"query":"ok"}',
+        requestBodyError: null,
         body: '  console.log("ok")\n',
         bodyBase64Encoded: false,
         bodyError: null,
