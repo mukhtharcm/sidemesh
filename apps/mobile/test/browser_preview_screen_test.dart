@@ -189,6 +189,111 @@ void main() {
     expect(find.text('site.css'), findsOneWidget);
   });
 
+  testWidgets('browser preview keeps cleared network rows hidden across reconnect snapshots', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+    final startedAt = DateTime(2026, 1, 1).millisecondsSinceEpoch;
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-1',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'GET',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 2048,
+          'durationMs': 31,
+          'startedAt': startedAt,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+    expect(find.text('main.js'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+    await _pumpFrames(tester);
+    expect(find.text('main.js'), findsNothing);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-1',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'GET',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 2048,
+          'durationMs': 31,
+          'startedAt': startedAt,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+    expect(find.text('main.js'), findsNothing);
+
+    api.emit({
+      'type': 'network',
+      'entry': {
+        'requestId': 'request-2',
+        'url': 'http://127.0.0.1:3000/assets/site.css',
+        'method': 'GET',
+        'resourceType': 'Stylesheet',
+        'status': 200,
+        'mimeType': 'text/css',
+        'encodedDataLength': 512,
+        'durationMs': 12,
+        'startedAt': startedAt,
+        'errorText': null,
+        'finished': true,
+        'failed': false,
+        'servedFromCache': false,
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('site.css'), findsOneWidget);
+  });
+
   testWidgets('browser preview explains when network inspection is unavailable', (
     tester,
   ) async {
