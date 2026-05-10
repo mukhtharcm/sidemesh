@@ -1181,6 +1181,18 @@ class _PreparedDraftImage {
   final Uint8List bytes;
 }
 
+class _ComposerImagePickerConfig {
+  const _ComposerImagePickerConfig({
+    required this.type,
+    this.allowedExtensions,
+    this.requestPhotoLibraryAccess = false,
+  });
+
+  final FileType type;
+  final List<String>? allowedExtensions;
+  final bool requestPhotoLibraryAccess;
+}
+
 class _DraftImageAppendResult {
   const _DraftImageAppendResult._({
     required this.totalBytes,
