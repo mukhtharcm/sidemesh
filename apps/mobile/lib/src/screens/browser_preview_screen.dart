@@ -116,6 +116,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       StreamController<_NetworkDetailUpdate>.broadcast();
   final int _maxNetworkEntries = 300;
   String _networkFilter = 'All';
+  bool _networkAvailable = true;
+  String? _networkUnavailableMessage;
 
   @override
   void initState() {
@@ -195,6 +197,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             ? 'Connecting to remote browser...'
             : 'Reconnecting stream...';
         _error = null;
+        _networkAvailable = true;
+        _networkUnavailableMessage = null;
       });
     }
     _subscription = channel.stream.listen(
@@ -335,6 +339,20 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       _handleConsole(frame);
       return;
     }
+    if (type == 'networkStatus') {
+      final available = frame['available'] != false;
+      final message = frame['message']?.toString().trim();
+      if (!mounted) return;
+      setState(() {
+        _networkAvailable = available;
+        _networkUnavailableMessage = available
+            ? null
+            : ((message != null && message.isNotEmpty)
+                  ? message
+                  : 'Network inspection is unavailable on this browser.');
+      });
+      return;
+    }
     if (type == 'networkSnapshot') {
       _handleNetworkSnapshot(frame);
       return;
@@ -401,6 +419,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     final entries = frame['entries'];
     if (entries is! List) return;
     setState(() {
+      _networkEntries.clear();
+      _networkEntryOrder.clear();
+      _networkDetails.clear();
       for (final item in entries) {
         if (item is! Map) continue;
         final parsed = _NetworkEntry.fromJson(item);
@@ -509,8 +530,24 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   void _showNetworkDetail(_NetworkEntry entry) {
+    const disconnectedDetailMessage =
+        'Viewer is disconnected. Resume the stream to inspect request details.';
+    final cachedDetail = _networkDetails[entry.requestId];
+    final shouldRequestDetail =
+        _channel != null &&
+        (cachedDetail == null ||
+            (cachedDetail.body == null &&
+                cachedDetail.bodyError != null &&
+                entry.finished &&
+                !entry.failed));
     final detailNotifier = ValueNotifier<_NetworkDetail?>(
-      _networkDetails[entry.requestId],
+      cachedDetail ??
+          (_channel == null
+              ? _networkDetailFromEntry(
+                  entry,
+                  bodyError: disconnectedDetailMessage,
+                )
+              : null),
     );
     final subscription = _networkDetailUpdates.stream
         .where((update) => update.requestId == entry.requestId)
@@ -519,14 +556,24 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             detailNotifier.value = update.detail;
             return;
           }
-          if (update.error != null) {
+          if (update.error != null && detailNotifier.value == null) {
             detailNotifier.value = _networkDetailFromEntry(
               entry,
               bodyError: update.error,
             );
           }
         });
-    _send({'type': 'networkDetailRequest', 'requestId': entry.requestId});
+    if (shouldRequestDetail &&
+        !_sendMessage({
+          'type': 'networkDetailRequest',
+          'requestId': entry.requestId,
+        }) &&
+        detailNotifier.value == null) {
+      detailNotifier.value = _networkDetailFromEntry(
+        entry,
+        bodyError: disconnectedDetailMessage,
+      );
+    }
     unawaited(
       showModalBottomSheet<void>(
         context: context,
@@ -667,14 +714,19 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     });
   }
 
-  void _send(Map<String, dynamic> message) {
+  bool _sendMessage(Map<String, dynamic> message) {
     final channel = _channel;
-    if (channel == null) return;
+    if (channel == null) return false;
     try {
       channel.sink.add(jsonEncode(message));
+      return true;
     } catch (_) {
-      // noop
+      return false;
     }
+  }
+
+  void _send(Map<String, dynamic> message) {
+    _sendMessage(message);
   }
 
   void _sendNavigation(String action) {
@@ -982,6 +1034,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             onTabChanged: _setDevToolsTab,
             consoleEntries: _consoleEntries,
             networkEntries: _filteredNetworkEntries,
+            networkAvailable: _networkAvailable,
+            networkUnavailableMessage: _networkUnavailableMessage,
             networkFilter: _networkFilter,
             onNetworkFilterChanged: (value) =>
                 setState(() => _networkFilter = value),
@@ -1415,6 +1469,8 @@ class _DevToolsPanel extends StatelessWidget {
     required this.onTabChanged,
     required this.consoleEntries,
     required this.networkEntries,
+    required this.networkAvailable,
+    required this.networkUnavailableMessage,
     required this.networkFilter,
     required this.onNetworkFilterChanged,
     required this.onClearConsole,
@@ -1427,6 +1483,8 @@ class _DevToolsPanel extends StatelessWidget {
   final ValueChanged<int> onTabChanged;
   final List<_ConsoleEntry> consoleEntries;
   final List<_NetworkEntry> networkEntries;
+  final bool networkAvailable;
+  final String? networkUnavailableMessage;
   final String networkFilter;
   final ValueChanged<String> onNetworkFilterChanged;
   final VoidCallback onClearConsole;
@@ -1496,6 +1554,8 @@ class _DevToolsPanel extends StatelessWidget {
                   )
                 : _NetworkTab(
                     entries: networkEntries,
+                    networkAvailable: networkAvailable,
+                    networkUnavailableMessage: networkUnavailableMessage,
                     filter: networkFilter,
                     onFilterChanged: onNetworkFilterChanged,
                     onOpenDetail: onOpenNetworkDetail,
@@ -1643,12 +1703,16 @@ class _ConsoleRow extends StatelessWidget {
 class _NetworkTab extends StatelessWidget {
   const _NetworkTab({
     required this.entries,
+    required this.networkAvailable,
+    required this.networkUnavailableMessage,
     required this.filter,
     required this.onFilterChanged,
     required this.onOpenDetail,
   });
 
   final List<_NetworkEntry> entries;
+  final bool networkAvailable;
+  final String? networkUnavailableMessage;
   final String filter;
   final ValueChanged<String> onFilterChanged;
   final void Function(_NetworkEntry entry) onOpenDetail;
@@ -1685,7 +1749,19 @@ class _NetworkTab extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: entries.isEmpty
+          child: !networkAvailable
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Text(
+                      networkUnavailableMessage ??
+                          'Network inspection is unavailable on this browser.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: colors.textSecondary),
+                    ),
+                  ),
+                )
+              : entries.isEmpty
               ? Center(
                   child: Text(
                     'No network requests yet.',

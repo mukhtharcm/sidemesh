@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 
 import type { WebSocket } from "ws";
@@ -276,6 +277,49 @@ describe("browser preview", () => {
       },
     });
   });
+
+  it("sends an authoritative network snapshot on attach", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const preview = buildFakePreview(new FakeCdpConnection(), {
+      status: "starting",
+      starting: new Promise<void>(() => {}),
+    });
+    registry.previews.set(preview.id, preview);
+    const socket = new FakeAttachSocket();
+
+    registry.attach(socket as unknown as WebSocket, preview.id);
+
+    assert.equal(socket.frames[0]?.type, "hello");
+    assert.deepEqual(socket.frames[1], {
+      type: "networkSnapshot",
+      entries: [],
+    });
+  });
+
+  it("reports unavailable network inspection on attach", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const preview = buildFakePreview(new FakeCdpConnection(), {
+      status: "starting",
+      starting: new Promise<void>(() => {}),
+      networkUnavailableMessage:
+        "Network inspection is unavailable: Network domain is not supported.",
+    });
+    registry.previews.set(preview.id, preview);
+    const socket = new FakeAttachSocket();
+
+    registry.attach(socket as unknown as WebSocket, preview.id);
+
+    assert.deepEqual(socket.frames[1], {
+      type: "networkStatus",
+      available: false,
+      message:
+        "Network inspection is unavailable: Network domain is not supported.",
+    });
+    assert.deepEqual(socket.frames[2], {
+      type: "networkSnapshot",
+      entries: [],
+    });
+  });
 });
 
 class FakeCdpConnection {
@@ -323,13 +367,47 @@ class FakeCdpConnection {
   }
 }
 
-function buildFakePreview(cdp: FakeCdpConnection): any {
+function buildFakePreview(
+  cdp: FakeCdpConnection,
+  overrides: Record<string, unknown> = {},
+): any {
   return {
-    cdp,
+    id: "preview-1",
+    label: "Preview",
+    url: "http://127.0.0.1:3000/",
+    targetHost: "127.0.0.1",
+    targetPort: 3000,
+    scheme: "http",
+    cwd: null,
+    sessionId: null,
+    profileMode: "temporary",
     status: "running",
+    width: 390,
+    height: 844,
+    createdAt: 1,
+    updatedAt: 1,
+    lastClientAt: null,
+    lastFrameAt: null,
+    lastError: null,
+    clients: new Set(),
+    userDataDir: null,
+    process: null,
+    cdp,
     sessionIdCdp: "session-1",
+    targetId: "target-1",
+    ownsBrowser: false,
+    nextFrameSeq: 1,
+    lastFramePayload: null,
+    frameTimer: null,
+    starting: null,
+    capturingFrame: false,
+    consoleBuffer: [],
+    consoleFlushTimer: null,
     networkEntries: new Map(),
+    networkUnavailableMessage: null,
+    pageLoading: false,
     cleanupHandlers: [],
+    ...overrides,
   };
 }
 
@@ -344,4 +422,20 @@ function createFakeSocket(
       messages.push(JSON.parse(payload) as Record<string, unknown>);
     },
   } as unknown as WebSocket;
+}
+
+class FakeAttachSocket extends EventEmitter {
+  public readonly OPEN = 1;
+  public readyState = 1;
+  public bufferedAmount = 0;
+  public readonly frames: Array<Record<string, unknown>> = [];
+
+  public send(payload: string): void {
+    this.frames.push(JSON.parse(payload) as Record<string, unknown>);
+  }
+
+  public close(): void {
+    this.readyState = 3;
+    this.emit("close");
+  }
 }

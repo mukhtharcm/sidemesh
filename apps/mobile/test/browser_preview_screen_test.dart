@@ -109,6 +109,198 @@ void main() {
     expect(find.textContaining('network ok'), findsOneWidget);
   });
 
+  testWidgets('browser preview replaces stale network rows from fresh snapshots', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-1',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'GET',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 2048,
+          'durationMs': 31,
+          'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+    expect(find.text('main.js'), findsOneWidget);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-2',
+          'url': 'http://127.0.0.1:3000/assets/site.css',
+          'method': 'GET',
+          'resourceType': 'Stylesheet',
+          'status': 200,
+          'mimeType': 'text/css',
+          'encodedDataLength': 512,
+          'durationMs': 12,
+          'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('main.js'), findsNothing);
+    expect(find.text('site.css'), findsOneWidget);
+  });
+
+  testWidgets('browser preview explains when network inspection is unavailable', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkStatus',
+      'available': false,
+      'message': 'Network inspection is unavailable: Network domain is not supported.',
+    });
+    await _pumpFrames(tester);
+
+    expect(
+      find.textContaining('Network inspection is unavailable'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('browser preview explains when network details are unavailable while paused', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-3',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'GET',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 2048,
+          'durationMs': 31,
+          'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.pause_circle_outline_rounded));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('main.js'));
+    await _pumpFrames(tester);
+
+    expect(
+      api.sentMessages.where((message) => message['type'] == 'networkDetailRequest'),
+      isEmpty,
+    );
+    expect(
+      find.textContaining('Viewer is disconnected. Resume the stream'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('browser preview surfaces network detail fetch errors', (
     tester,
   ) async {
