@@ -153,6 +153,30 @@ interface BrowserPreviewNetworkEntry {
   servedFromCache: boolean;
 }
 
+interface BrowserPreviewNetworkDetail {
+  requestId: string;
+  url: string;
+  method: string;
+  resourceType: string;
+  status: number | null;
+  mimeType: string | null;
+  encodedDataLength: number | null;
+  durationMs: number | null;
+  startedAt: number;
+  errorText: string | null;
+  finished: boolean;
+  failed: boolean;
+  servedFromCache: boolean;
+  statusText: string | null;
+  requestHeaders: Record<string, string>;
+  responseHeaders: Record<string, string>;
+  requestBody: string | null;
+  requestBodyError: string | null;
+  body: string | null;
+  bodyBase64Encoded: boolean;
+  bodyError: string | null;
+}
+
 export class BrowserPreviewRegistry {
   private readonly previews = new Map<string, BrowserPreviewRecord>();
   private readonly enabled: boolean;
@@ -1139,44 +1163,107 @@ export class BrowserPreviewRegistry {
       });
       return;
     }
-    let body: string | null = null;
-    let bodyBase64Encoded = false;
-    let bodyError: string | null = null;
+
+    const detail = this.networkDetailFromEntry(entry);
+    if (!preview.cdp || !preview.sessionIdCdp || preview.status !== "running") {
+      if (canBrowserPreviewRequestHaveBody(entry.method)) {
+        detail.requestBodyError = "Browser preview is no longer running.";
+      }
+      if (!entry.finished) {
+        detail.bodyError = "Response body is not available until the request finishes.";
+      } else if (entry.failed) {
+        detail.bodyError = "Response body is not available for failed requests.";
+      } else if (entry.isRedirectResponse) {
+        detail.bodyError = "Response body is not available for redirect responses.";
+      } else {
+        detail.bodyError = "Browser preview is no longer running.";
+      }
+      sendJson(socket, {
+        type: "networkDetail",
+        requestId,
+        detail,
+      });
+      return;
+    }
+
+    if (canBrowserPreviewRequestHaveBody(entry.method)) {
+      if (entry.isRedirectResponse) {
+        detail.requestBodyError =
+          "Request body is not available for redirect hops.";
+      } else {
+        try {
+          const result = await preview.cdp.send(
+            "Network.getRequestPostData",
+            { requestId: entry.cdpRequestId },
+            preview.sessionIdCdp,
+          );
+          detail.requestBody = typeof result.postData === "string"
+            ? result.postData
+            : null;
+          if (!detail.requestBody) {
+            detail.requestBodyError = "No request body captured for this request.";
+          }
+        } catch (error) {
+          detail.requestBodyError = error instanceof Error
+            ? error.message
+            : String(error);
+        }
+      }
+    }
+
     if (!entry.finished) {
-      bodyError = "Response body is not available until the request finishes.";
+      detail.bodyError = "Response body is not available until the request finishes.";
     } else if (entry.failed) {
-      bodyError = "Response body is not available for failed requests.";
+      detail.bodyError = "Response body is not available for failed requests.";
     } else if (entry.isRedirectResponse) {
-      bodyError = "Response body is not available for redirect responses.";
-    } else if (preview.cdp && preview.sessionIdCdp && preview.status === "running") {
+      detail.bodyError = "Response body is not available for redirect responses.";
+    } else {
       try {
         const result = await preview.cdp.send(
           "Network.getResponseBody",
           { requestId: entry.cdpRequestId },
           preview.sessionIdCdp,
         );
-        body = typeof result.body === "string" ? result.body : null;
-        bodyBase64Encoded = result.base64Encoded === true;
+        detail.body = typeof result.body === "string" ? result.body : null;
+        detail.bodyBase64Encoded = result.base64Encoded === true;
       } catch (error) {
-        bodyError = error instanceof Error ? error.message : String(error);
+        detail.bodyError = error instanceof Error ? error.message : String(error);
       }
-    } else {
-      bodyError = "Browser preview is no longer running.";
     }
 
     sendJson(socket, {
       type: "networkDetail",
       requestId,
-      detail: {
-        ...this.networkSummary(entry),
-        statusText: entry.statusText,
-        requestHeaders: entry.requestHeaders,
-        responseHeaders: entry.responseHeaders,
-        body,
-        bodyBase64Encoded,
-        bodyError,
-      },
+      detail,
     });
+  }
+
+  private networkDetailFromEntry(
+    entry: BrowserPreviewNetworkEntry,
+  ): BrowserPreviewNetworkDetail {
+    return {
+      requestId: entry.requestId,
+      url: entry.url,
+      method: entry.method,
+      resourceType: entry.resourceType,
+      status: entry.status,
+      mimeType: entry.mimeType,
+      encodedDataLength: entry.encodedDataLength,
+      durationMs: entry.durationMs,
+      startedAt: entry.startedAt,
+      errorText: entry.errorText,
+      finished: entry.finished,
+      failed: entry.failed,
+      servedFromCache: entry.servedFromCache,
+      statusText: entry.statusText,
+      requestHeaders: entry.requestHeaders,
+      responseHeaders: entry.responseHeaders,
+      requestBody: null,
+      requestBodyError: null,
+      body: null,
+      bodyBase64Encoded: false,
+      bodyError: null,
+    };
   }
 
   private registerConsoleHandlers(
@@ -2053,6 +2140,18 @@ function normalizeViewportSize(value: unknown, fallback: number): number {
 
 function isTrackedBrowserPreviewNetworkUrl(url: string): boolean {
   return !!url && !url.startsWith("data:") && !url.startsWith("about:");
+}
+
+function canBrowserPreviewRequestHaveBody(method: string): boolean {
+  switch (method.trim().toUpperCase()) {
+    case "POST":
+    case "PUT":
+    case "PATCH":
+    case "DELETE":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function browserPreviewNetworkStartedAt(

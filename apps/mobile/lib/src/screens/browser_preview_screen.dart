@@ -86,6 +86,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   final _browserFocusNode = FocusNode(debugLabel: 'browser-preview-input');
   final _urlFocusNode = FocusNode();
   final _urlController = TextEditingController();
+  final _networkSearchController = TextEditingController();
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   Timer? _firstFrameTimer;
@@ -116,6 +117,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       StreamController<_NetworkDetailUpdate>.broadcast();
   final int _maxNetworkEntries = 300;
   String _networkFilter = 'All';
+  String _networkSearchQuery = '';
+  String _networkSort = 'Newest';
   int? _networkClearedStartedAtFloor;
   final Set<String> _networkClearedRequestIdsAtFloor = <String>{};
   bool _networkAvailable = true;
@@ -136,6 +139,12 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _frameWidth = _preview.width;
     _frameHeight = _preview.height;
     _urlController.text = _preview.url;
+    _networkSearchController.addListener(() {
+      final value = _networkSearchController.text;
+      if (value == _networkSearchQuery) return;
+      if (!mounted) return;
+      setState(() => _networkSearchQuery = value);
+    });
     _connect();
   }
 
@@ -146,6 +155,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _inputFocusNode.dispose();
     _browserFocusNode.dispose();
     _urlFocusNode.dispose();
+    _networkSearchController.dispose();
     _firstFrameTimer?.cancel();
     HostReconnectScheduler.instance.unregisterSlot(
       widget.host.id,
@@ -492,6 +502,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       encodedDataLength: entry.encodedDataLength,
       durationMs: entry.durationMs,
       errorText: entry.errorText,
+      requestBody: null,
+      requestBodyError: null,
       bodyError: bodyError,
       finished: entry.finished,
       failed: entry.failed,
@@ -515,14 +527,14 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   List<_NetworkEntry> get _filteredNetworkEntries {
-    final ordered = _networkEntryOrder
+    final filtered = _networkEntryOrder
         .map((requestId) => _networkEntries[requestId])
         .whereType<_NetworkEntry>()
-        .toList(growable: false);
-    if (_networkFilter == 'All') return ordered;
-    return ordered
         .where((entry) => _matchesNetworkFilter(entry, _networkFilter))
-        .toList(growable: false);
+        .where((entry) => _matchesNetworkSearch(entry, _networkSearchQuery))
+        .toList(growable: true);
+    _sortNetworkEntries(filtered, _networkSort);
+    return filtered;
   }
 
   bool _shouldIncludeNetworkEntry(_NetworkEntry entry) {
@@ -1074,8 +1086,20 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             networkAvailable: _networkAvailable,
             networkUnavailableMessage: _networkUnavailableMessage,
             networkFilter: _networkFilter,
+            networkSearchController: _networkSearchController,
+            networkSearchQuery: _networkSearchQuery,
+            networkSort: _networkSort,
             onNetworkFilterChanged: (value) =>
                 setState(() => _networkFilter = value),
+            onNetworkSearchChanged: (value) {
+              if (_networkSearchController.text == value) return;
+              _networkSearchController.value = TextEditingValue(
+                text: value,
+                selection: TextSelection.collapsed(offset: value.length),
+              );
+            },
+            onNetworkSortChanged: (value) =>
+                setState(() => _networkSort = value),
             onClearConsole: () => setState(() => _consoleEntries.clear()),
             onClearNetwork: _clearNetworkLog,
             onOpenNetworkDetail: _showNetworkDetail,
@@ -1509,7 +1533,12 @@ class _DevToolsPanel extends StatelessWidget {
     required this.networkAvailable,
     required this.networkUnavailableMessage,
     required this.networkFilter,
+    required this.networkSearchController,
+    required this.networkSearchQuery,
+    required this.networkSort,
     required this.onNetworkFilterChanged,
+    required this.onNetworkSearchChanged,
+    required this.onNetworkSortChanged,
     required this.onClearConsole,
     required this.onClearNetwork,
     required this.onOpenNetworkDetail,
@@ -1523,7 +1552,12 @@ class _DevToolsPanel extends StatelessWidget {
   final bool networkAvailable;
   final String? networkUnavailableMessage;
   final String networkFilter;
+  final TextEditingController networkSearchController;
+  final String networkSearchQuery;
+  final String networkSort;
   final ValueChanged<String> onNetworkFilterChanged;
+  final ValueChanged<String> onNetworkSearchChanged;
+  final ValueChanged<String> onNetworkSortChanged;
   final VoidCallback onClearConsole;
   final VoidCallback onClearNetwork;
   final void Function(_NetworkEntry entry) onOpenNetworkDetail;
@@ -1534,7 +1568,7 @@ class _DevToolsPanel extends StatelessWidget {
     final colors = context.colors;
     final showingConsole = tabIndex == 0;
     return Container(
-      height: 320,
+      height: 380,
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(
@@ -1594,7 +1628,12 @@ class _DevToolsPanel extends StatelessWidget {
                     networkAvailable: networkAvailable,
                     networkUnavailableMessage: networkUnavailableMessage,
                     filter: networkFilter,
+                    searchController: networkSearchController,
+                    searchQuery: networkSearchQuery,
+                    sort: networkSort,
                     onFilterChanged: onNetworkFilterChanged,
+                    onSearchChanged: onNetworkSearchChanged,
+                    onSortChanged: onNetworkSortChanged,
                     onOpenDetail: onOpenNetworkDetail,
                   ),
           ),
@@ -1743,7 +1782,12 @@ class _NetworkTab extends StatelessWidget {
     required this.networkAvailable,
     required this.networkUnavailableMessage,
     required this.filter,
+    required this.searchController,
+    required this.searchQuery,
+    required this.sort,
     required this.onFilterChanged,
+    required this.onSearchChanged,
+    required this.onSortChanged,
     required this.onOpenDetail,
   });
 
@@ -1751,7 +1795,12 @@ class _NetworkTab extends StatelessWidget {
   final bool networkAvailable;
   final String? networkUnavailableMessage;
   final String filter;
+  final TextEditingController searchController;
+  final String searchQuery;
+  final String sort;
   final ValueChanged<String> onFilterChanged;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<String> onSortChanged;
   final void Function(_NetworkEntry entry) onOpenDetail;
 
   @override
@@ -1760,29 +1809,77 @@ class _NetworkTab extends StatelessWidget {
     return Column(
       children: [
         Container(
-          height: 42,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
           decoration: BoxDecoration(
             border: Border(
               bottom: BorderSide(color: colors.border),
             ),
           ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (final option in _networkFilterOptions)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: FilterChip(
-                      label: Text(option),
-                      selected: filter == option,
-                      onSelected: (_) => onFilterChanged(option),
-                      visualDensity: VisualDensity.compact,
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: searchController,
+                      onChanged: onSearchChanged,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        hintText: 'Search requests',
+                        prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                        border: const OutlineInputBorder(),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 10,
+                        ),
+                      ),
                     ),
                   ),
-              ],
-            ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: sort,
+                        onChanged: (value) {
+                          if (value != null) onSortChanged(value);
+                        },
+                        items: _networkSortOptions
+                            .map(
+                              (option) => DropdownMenuItem<String>(
+                                value: option,
+                                child: Text(option),
+                              ),
+                            )
+                            .toList(growable: false),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final option in _networkFilterOptions)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: FilterChip(
+                          label: Text(option),
+                          selected: filter == option,
+                          onSelected: (_) => onFilterChanged(option),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
         Expanded(
@@ -1801,7 +1898,9 @@ class _NetworkTab extends StatelessWidget {
               : entries.isEmpty
               ? Center(
                   child: Text(
-                    'No network requests yet.',
+                    searchQuery.trim().isEmpty
+                        ? 'No network requests yet.'
+                        : 'No requests match your search.',
                     style: TextStyle(color: colors.textSecondary),
                   ),
                 )
@@ -1973,13 +2072,25 @@ class _NetworkDetailSheet extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          _networkDisplayName(entry.url),
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                color: colors.textPrimary,
-                                fontWeight: AppWeights.title,
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _networkDisplayName(entry.url),
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      color: colors.textPrimary,
+                                      fontWeight: AppWeights.title,
+                                    ),
                               ),
+                            ),
+                            const SizedBox(width: 8),
+                            _NetworkDetailActionsButton(
+                              entry: entry,
+                              detail: detail,
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 6),
                         SelectableText(
@@ -2052,6 +2163,18 @@ class _NetworkDetailSheet extends StatelessWidget {
                                     headers: detail.requestHeaders,
                                   ),
                                 ),
+                              if (_networkShouldShowRequestBody(detail))
+                                _NetworkSection(
+                                  title: 'Request body',
+                                  child: _NetworkPayloadView(
+                                    body: detail.requestBody,
+                                    bodyError: detail.requestBodyError,
+                                    mimeType: _networkRequestMimeType(detail),
+                                    bodyBase64Encoded: false,
+                                    emptyMessage:
+                                        'No request body captured for this request.',
+                                  ),
+                                ),
                               if (detail.responseHeaders.isNotEmpty)
                                 _NetworkSection(
                                   title: 'Response headers',
@@ -2061,7 +2184,14 @@ class _NetworkDetailSheet extends StatelessWidget {
                                 ),
                               _NetworkSection(
                                 title: 'Response body',
-                                child: _NetworkBodyView(detail: detail),
+                                child: _NetworkPayloadView(
+                                  body: detail.body,
+                                  bodyError: detail.bodyError,
+                                  mimeType: detail.mimeType ?? '',
+                                  bodyBase64Encoded: detail.bodyBase64Encoded,
+                                  emptyMessage:
+                                      'No response body captured for this request.',
+                                ),
                               ),
                             ],
                           ),
@@ -2132,6 +2262,68 @@ class _NetworkSection extends StatelessWidget {
   }
 }
 
+class _NetworkDetailActionsButton extends StatelessWidget {
+  const _NetworkDetailActionsButton({required this.entry, required this.detail});
+
+  final _NetworkEntry entry;
+  final _NetworkDetail? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_NetworkCopyAction>(
+      tooltip: 'Copy request details',
+      icon: const Icon(Icons.copy_all_rounded, size: 18),
+      onSelected: (action) => _copyNetworkDetailAction(
+        context,
+        action,
+        entry,
+        detail,
+      ),
+      itemBuilder: (context) {
+        final items = <PopupMenuEntry<_NetworkCopyAction>>[
+          const PopupMenuItem<_NetworkCopyAction>(
+            value: _NetworkCopyAction.url,
+            child: Text('Copy URL'),
+          ),
+          const PopupMenuItem<_NetworkCopyAction>(
+            value: _NetworkCopyAction.requestHeaders,
+            child: Text('Copy request headers'),
+          ),
+          const PopupMenuItem<_NetworkCopyAction>(
+            value: _NetworkCopyAction.responseHeaders,
+            child: Text('Copy response headers'),
+          ),
+        ];
+        if (detail?.requestBody != null) {
+          items.add(
+            const PopupMenuItem<_NetworkCopyAction>(
+              value: _NetworkCopyAction.requestBody,
+              child: Text('Copy request body'),
+            ),
+          );
+        }
+        if (detail?.body != null) {
+          items.add(
+            const PopupMenuItem<_NetworkCopyAction>(
+              value: _NetworkCopyAction.responseBody,
+              child: Text('Copy response body'),
+            ),
+          );
+        }
+        if (detail != null) {
+          items.add(
+            const PopupMenuItem<_NetworkCopyAction>(
+              value: _NetworkCopyAction.curl,
+              child: Text('Copy as cURL'),
+            ),
+          );
+        }
+        return items;
+      },
+    );
+  }
+}
+
 class _HeaderList extends StatelessWidget {
   const _HeaderList({required this.headers});
 
@@ -2177,33 +2369,41 @@ class _HeaderList extends StatelessWidget {
   }
 }
 
-class _NetworkBodyView extends StatelessWidget {
-  const _NetworkBodyView({required this.detail});
+class _NetworkPayloadView extends StatelessWidget {
+  const _NetworkPayloadView({
+    required this.body,
+    required this.bodyError,
+    required this.mimeType,
+    required this.bodyBase64Encoded,
+    required this.emptyMessage,
+  });
 
-  final _NetworkDetail detail;
+  final String? body;
+  final String? bodyError;
+  final String mimeType;
+  final bool bodyBase64Encoded;
+  final String emptyMessage;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    if (detail.bodyError != null && detail.bodyError!.isNotEmpty) {
+    if (bodyError != null && bodyError!.isNotEmpty) {
       return SelectableText(
-        detail.bodyError!,
+        bodyError!,
         style: TextStyle(color: colors.textSecondary),
       );
     }
-    final body = detail.body;
     if (body == null) {
       return Text(
-        'No response body captured for this request.',
+        emptyMessage,
         style: TextStyle(color: colors.textSecondary),
       );
     }
-    final mimeType = detail.mimeType ?? '';
-    if (detail.bodyBase64Encoded && mimeType.startsWith('image/')) {
+    if (bodyBase64Encoded && mimeType.startsWith('image/')) {
       try {
         return ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: Image.memory(base64Decode(body)),
+          child: Image.memory(base64Decode(body!)),
         );
       } catch (_) {
         return Text(
@@ -2212,9 +2412,9 @@ class _NetworkBodyView extends StatelessWidget {
         );
       }
     }
-    if (detail.bodyBase64Encoded) {
+    if (bodyBase64Encoded) {
       return SelectableText(
-        'Binary response body (${_formatNetworkBytes(body.length)} encoded characters)',
+        'Binary payload (${_formatNetworkBytes(body!.length)} encoded characters)',
         style: TextStyle(color: colors.textSecondary),
       );
     }
@@ -2227,7 +2427,7 @@ class _NetworkBodyView extends StatelessWidget {
         border: Border.all(color: colors.border),
       ),
       child: SelectableText(
-        _prettyNetworkBody(body, mimeType),
+        _prettyNetworkBody(body!, mimeType),
         style: monoStyle(
           color: colors.textPrimary,
           fontSize: 11,
@@ -2366,6 +2566,8 @@ class _NetworkDetail implements _NetworkSummaryLike {
     this.encodedDataLength,
     this.durationMs,
     this.errorText,
+    this.requestBody,
+    this.requestBodyError,
     this.body,
     this.bodyBase64Encoded = false,
     this.bodyError,
@@ -2391,6 +2593,8 @@ class _NetworkDetail implements _NetworkSummaryLike {
     encodedDataLength: _intOrNull(json['encodedDataLength']),
     durationMs: _intOrNull(json['durationMs']),
     errorText: json['errorText']?.toString(),
+    requestBody: json['requestBody']?.toString(),
+    requestBodyError: json['requestBodyError']?.toString(),
     body: json['body']?.toString(),
     bodyBase64Encoded: json['bodyBase64Encoded'] == true,
     bodyError: json['bodyError']?.toString(),
@@ -2420,6 +2624,8 @@ class _NetworkDetail implements _NetworkSummaryLike {
   final int? durationMs;
   @override
   final String? errorText;
+  final String? requestBody;
+  final String? requestBodyError;
   final String? body;
   final bool bodyBase64Encoded;
   final String? bodyError;
@@ -2453,6 +2659,23 @@ const List<String> _networkFilterOptions = <String>[
   'Other',
 ];
 
+const List<String> _networkSortOptions = <String>[
+  'Newest',
+  'Oldest',
+  'Slowest',
+  'Largest',
+  'Status',
+];
+
+enum _NetworkCopyAction {
+  url,
+  requestHeaders,
+  responseHeaders,
+  requestBody,
+  responseBody,
+  curl,
+}
+
 bool _matchesNetworkFilter(_NetworkEntry entry, String filter) {
   switch (filter) {
     case 'XHR':
@@ -2482,6 +2705,60 @@ bool _matchesNetworkFilter(_NetworkEntry entry, String filter) {
     default:
       return true;
   }
+}
+
+bool _matchesNetworkSearch(_NetworkEntry entry, String query) {
+  final normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery.isEmpty) return true;
+  final haystack = [
+    entry.method,
+    entry.url,
+    entry.resourceType,
+    entry.mimeType ?? '',
+    if (entry.status != null) '${entry.status}',
+    entry.errorText ?? '',
+  ].join(' ').toLowerCase();
+  return normalizedQuery
+      .split(RegExp(r'\s+'))
+      .where((term) => term.isNotEmpty)
+      .every(haystack.contains);
+}
+
+void _sortNetworkEntries(List<_NetworkEntry> entries, String sort) {
+  int compareNullableIntDesc(int? left, int? right) {
+    if (left == null && right == null) return 0;
+    if (left == null) return 1;
+    if (right == null) return -1;
+    return right.compareTo(left);
+  }
+
+  entries.sort((left, right) {
+    switch (sort) {
+      case 'Oldest':
+        return left.startedAt.compareTo(right.startedAt);
+      case 'Slowest':
+        final durationOrder = compareNullableIntDesc(
+          left.durationMs,
+          right.durationMs,
+        );
+        if (durationOrder != 0) return durationOrder;
+        return right.startedAt.compareTo(left.startedAt);
+      case 'Largest':
+        final sizeOrder = compareNullableIntDesc(
+          left.encodedDataLength,
+          right.encodedDataLength,
+        );
+        if (sizeOrder != 0) return sizeOrder;
+        return right.startedAt.compareTo(left.startedAt);
+      case 'Status':
+        final statusOrder = compareNullableIntDesc(left.status, right.status);
+        if (statusOrder != 0) return statusOrder;
+        return right.startedAt.compareTo(left.startedAt);
+      case 'Newest':
+      default:
+        return right.startedAt.compareTo(left.startedAt);
+    }
+  });
 }
 
 String _networkResourceTypeLabel(String type) {
@@ -2559,7 +2836,108 @@ String _prettyNetworkBody(String body, String mimeType) {
       return body;
     }
   }
+  if (mimeType.contains('x-www-form-urlencoded')) {
+    try {
+      final parts = Uri.splitQueryString(body);
+      return parts.entries.map((entry) => '${entry.key}=${entry.value}').join('\n');
+    } catch (_) {
+      return body;
+    }
+  }
   return body;
+}
+
+bool _networkShouldShowRequestBody(_NetworkDetail detail) {
+  if (detail.requestBody != null) return true;
+  if (detail.requestBodyError != null && detail.requestBodyError!.isNotEmpty) {
+    return true;
+  }
+  return _networkMethodUsuallyHasBody(detail.method);
+}
+
+bool _networkMethodUsuallyHasBody(String method) {
+  switch (method.trim().toUpperCase()) {
+    case 'POST':
+    case 'PUT':
+    case 'PATCH':
+    case 'DELETE':
+      return true;
+    default:
+      return false;
+  }
+}
+
+String _networkRequestMimeType(_NetworkDetail detail) {
+  return _networkHeaderValue(detail.requestHeaders, 'content-type') ?? '';
+}
+
+String? _networkHeaderValue(Map<String, String> headers, String name) {
+  final target = name.toLowerCase();
+  for (final entry in headers.entries) {
+    if (entry.key.toLowerCase() == target) {
+      return entry.value;
+    }
+  }
+  return null;
+}
+
+String _networkHeadersText(Map<String, String> headers) {
+  return headers.entries
+      .map((entry) => '${entry.key}: ${entry.value}')
+      .join('\n');
+}
+
+String _networkCurlCommand(_NetworkEntry entry, _NetworkDetail detail) {
+  final buffer = StringBuffer('curl');
+  if (entry.method.toUpperCase() != 'GET') {
+    buffer.write(' -X ${_shellQuote(entry.method)}');
+  }
+  for (final header in detail.requestHeaders.entries) {
+    buffer.write(' -H ${_shellQuote('${header.key}: ${header.value}')}');
+  }
+  if (detail.requestBody != null && detail.requestBody!.isNotEmpty) {
+    buffer.write(' --data-raw ${_shellQuote(detail.requestBody!)}');
+  }
+  buffer.write(' ${_shellQuote(entry.url)}');
+  return buffer.toString();
+}
+
+String _shellQuote(String value) {
+  return "'${value.replaceAll("'", "'\\''")}'";
+}
+
+Future<void> _copyNetworkDetailAction(
+  BuildContext context,
+  _NetworkCopyAction action,
+  _NetworkEntry entry,
+  _NetworkDetail? detail,
+) async {
+  final text = switch (action) {
+    _NetworkCopyAction.url => entry.url,
+    _NetworkCopyAction.requestHeaders =>
+      _networkHeadersText(detail?.requestHeaders ?? const <String, String>{}),
+    _NetworkCopyAction.responseHeaders =>
+      _networkHeadersText(detail?.responseHeaders ?? const <String, String>{}),
+    _NetworkCopyAction.requestBody => detail?.requestBody ?? '',
+    _NetworkCopyAction.responseBody => detail?.body ?? '',
+    _NetworkCopyAction.curl when detail != null => _networkCurlCommand(entry, detail),
+    _ => '',
+  };
+  if (text.isEmpty) {
+    showAppSnackBar(context, 'Nothing to copy yet.');
+    return;
+  }
+  await Clipboard.setData(ClipboardData(text: text));
+  if (!context.mounted) return;
+  final label = switch (action) {
+    _NetworkCopyAction.url => 'URL',
+    _NetworkCopyAction.requestHeaders => 'Request headers',
+    _NetworkCopyAction.responseHeaders => 'Response headers',
+    _NetworkCopyAction.requestBody => 'Request body',
+    _NetworkCopyAction.responseBody => 'Response body',
+    _NetworkCopyAction.curl => 'cURL command',
+  };
+  showAppSnackBar(context, '$label copied.');
 }
 
 Map<String, String> _stringMap(Object? value) {
