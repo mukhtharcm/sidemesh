@@ -241,7 +241,7 @@ describe("browser preview", () => {
       servedFromCache: false,
     });
     cdp.sendResult = {
-      body: 'console.log("ok")',
+      body: '  console.log("ok")\n',
       base64Encoded: false,
     };
     const messages: Array<Record<string, unknown>> = [];
@@ -270,7 +270,7 @@ describe("browser preview", () => {
         statusText: "OK",
         requestHeaders: { accept: "*/*" },
         responseHeaders: { "content-type": "text/javascript" },
-        body: 'console.log("ok")',
+        body: '  console.log("ok")\n',
         bodyBase64Encoded: false,
         bodyError: null,
       },

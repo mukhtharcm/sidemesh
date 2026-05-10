@@ -1056,7 +1056,7 @@ export class BrowserPreviewRegistry {
           { requestId },
           preview.sessionIdCdp,
         );
-        body = stringOrNull(result.body);
+        body = typeof result.body === "string" ? result.body : null;
         bodyBase64Encoded = result.base64Encoded === true;
       } catch (error) {
         bodyError = error instanceof Error ? error.message : String(error);
