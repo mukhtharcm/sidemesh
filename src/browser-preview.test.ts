@@ -194,6 +194,81 @@ describe("browser preview", () => {
     assert.equal((events[3].entry as any).servedFromCache, true);
   });
 
+  it("tracks redirect hops as separate network rows", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp);
+    const events: Array<Record<string, unknown>> = [];
+    registry.broadcast = (_preview: unknown, payload: Record<string, unknown>) => {
+      events.push(payload);
+    };
+
+    registry.registerNetworkHandlers(preview, "session-1");
+
+    cdp.emitSession("Network.requestWillBeSent", {
+      requestId: "request-1",
+      type: "Document",
+      timestamp: 10,
+      wallTime: 20,
+      request: {
+        method: "GET",
+        url: "http://127.0.0.1:3000/start",
+        headers: {},
+      },
+    });
+    cdp.emitSession("Network.requestWillBeSent", {
+      requestId: "request-1",
+      type: "Document",
+      timestamp: 10.05,
+      wallTime: 20.05,
+      redirectResponse: {
+        status: 302,
+        statusText: "Found",
+        mimeType: "text/html",
+        headers: {
+          location: "/login",
+        },
+      },
+      request: {
+        method: "GET",
+        url: "http://127.0.0.1:3000/login",
+        headers: {},
+      },
+    });
+    cdp.emitSession("Network.responseReceived", {
+      requestId: "request-1",
+      response: {
+        status: 200,
+        statusText: "OK",
+        mimeType: "text/html",
+        headers: {
+          "content-type": "text/html",
+        },
+      },
+    });
+    cdp.emitSession("Network.loadingFinished", {
+      requestId: "request-1",
+      timestamp: 10.2,
+      encodedDataLength: 256,
+    });
+
+    assert.equal(preview.networkEntries.size, 2);
+    const redirectEntry = preview.networkEntries.get("request-1");
+    const finalEntry = preview.networkEntries.get("request-1:redirect:1");
+    assert.ok(redirectEntry);
+    assert.ok(finalEntry);
+    assert.equal(redirectEntry.status, 302);
+    assert.equal(redirectEntry.finished, true);
+    assert.equal(redirectEntry.isRedirectResponse, true);
+    assert.equal(redirectEntry.durationMs, 50);
+    assert.equal(finalEntry.status, 200);
+    assert.equal(finalEntry.finished, true);
+    assert.equal(finalEntry.durationMs, 150);
+    assert.equal(preview.networkEntryIdsByRequestId.get("request-1"), "request-1:redirect:1");
+    assert.equal((events[1].entry as any).requestId, "request-1");
+    assert.equal((events[2].entry as any).requestId, "request-1:redirect:1");
+  });
+
   it("ignores untracked data URLs in network logs", () => {
     const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
     const cdp = new FakeCdpConnection();
@@ -224,6 +299,9 @@ describe("browser preview", () => {
     preview.sessionIdCdp = "session-1";
     preview.networkEntries.set("request-1", {
       requestId: "request-1",
+      cdpRequestId: "request-1",
+      redirectHop: 0,
+      isRedirectResponse: false,
       url: "http://127.0.0.1:3000/app.js",
       method: "GET",
       resourceType: "Script",
@@ -276,6 +354,44 @@ describe("browser preview", () => {
         bodyError: null,
       },
     });
+  });
+
+  it("does not request response bodies for redirect responses", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp);
+    preview.networkEntries.set("request-1", {
+      requestId: "request-1",
+      cdpRequestId: "request-1",
+      redirectHop: 0,
+      isRedirectResponse: true,
+      url: "http://127.0.0.1:3000/start",
+      method: "GET",
+      resourceType: "Document",
+      requestHeaders: {},
+      responseHeaders: { location: "/login" },
+      status: 302,
+      statusText: "Found",
+      mimeType: "text/html",
+      encodedDataLength: null,
+      durationMs: 50,
+      startedAt: 1,
+      startTimestampSeconds: 1,
+      errorText: null,
+      finished: true,
+      failed: false,
+      servedFromCache: false,
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    const socket = createFakeSocket(messages);
+
+    await registry.sendNetworkDetail(preview, socket, "request-1");
+
+    assert.equal(cdp.sent.length, 0);
+    assert.equal(
+      (messages[0].detail as any).bodyError,
+      "Response body is not available for redirect responses.",
+    );
   });
 
   it("sends an authoritative network snapshot on attach", () => {
@@ -404,6 +520,8 @@ function buildFakePreview(
     consoleBuffer: [],
     consoleFlushTimer: null,
     networkEntries: new Map(),
+    networkEntryIdsByRequestId: new Map(),
+    networkRedirectCountsByRequestId: new Map(),
     networkUnavailableMessage: null,
     pageLoading: false,
     cleanupHandlers: [],

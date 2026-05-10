@@ -116,6 +116,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       StreamController<_NetworkDetailUpdate>.broadcast();
   final int _maxNetworkEntries = 300;
   String _networkFilter = 'All';
+  int? _networkClearedStartedAtFloor;
+  final Set<String> _networkClearedRequestIdsAtFloor = <String>{};
   bool _networkAvailable = true;
   String? _networkUnavailableMessage;
 
@@ -425,6 +427,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       for (final item in entries) {
         if (item is! Map) continue;
         final parsed = _NetworkEntry.fromJson(item);
+        if (!_shouldIncludeNetworkEntry(parsed)) continue;
         _upsertNetworkEntry(parsed);
       }
     });
@@ -435,6 +438,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     final rawEntry = frame['entry'];
     if (rawEntry is! Map) return;
     final entry = _NetworkEntry.fromJson(rawEntry);
+    if (!_shouldIncludeNetworkEntry(entry)) return;
     setState(() {
       _upsertNetworkEntry(entry);
     });
@@ -521,8 +525,41 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         .toList(growable: false);
   }
 
+  bool _shouldIncludeNetworkEntry(_NetworkEntry entry) {
+    final floor = _networkClearedStartedAtFloor;
+    if (floor == null) return true;
+    if (entry.startedAt > floor) return true;
+    if (entry.startedAt < floor) return false;
+    return !_networkClearedRequestIdsAtFloor.contains(entry.requestId);
+  }
+
   void _clearNetworkLog() {
+    var latestStartedAt = _networkClearedStartedAtFloor;
+    final requestIdsAtFloor = <String>{};
+    for (final entry in _networkEntries.values) {
+      if (latestStartedAt == null || entry.startedAt > latestStartedAt) {
+        latestStartedAt = entry.startedAt;
+        requestIdsAtFloor
+          ..clear()
+          ..add(entry.requestId);
+        continue;
+      }
+      if (entry.startedAt == latestStartedAt) {
+        requestIdsAtFloor.add(entry.requestId);
+      }
+    }
     setState(() {
+      if (latestStartedAt == null) {
+        _networkClearedStartedAtFloor = null;
+        _networkClearedRequestIdsAtFloor.clear();
+      } else if (_networkClearedStartedAtFloor == latestStartedAt) {
+        _networkClearedRequestIdsAtFloor.addAll(requestIdsAtFloor);
+      } else {
+        _networkClearedStartedAtFloor = latestStartedAt;
+        _networkClearedRequestIdsAtFloor
+          ..clear()
+          ..addAll(requestIdsAtFloor);
+      }
       _networkEntries.clear();
       _networkEntryOrder.clear();
       _networkDetails.clear();
@@ -2506,11 +2543,12 @@ String _networkStatusLabel(_NetworkSummaryLike entry) {
 }
 
 String _formatNetworkBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) {
-    return '${(bytes / 1024).toStringAsFixed(bytes < 10 * 1024 ? 1 : 0)} KB';
+  final normalizedBytes = bytes < 0 ? 0 : bytes;
+  if (normalizedBytes < 1024) return '$normalizedBytes B';
+  if (normalizedBytes < 1024 * 1024) {
+    return '${(normalizedBytes / 1024).toStringAsFixed(normalizedBytes < 10 * 1024 ? 1 : 0)} KB';
   }
-  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  return '${(normalizedBytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
 String _prettyNetworkBody(String body, String mimeType) {

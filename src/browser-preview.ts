@@ -117,6 +117,8 @@ interface BrowserPreviewRecord {
   consoleBuffer: Array<Record<string, unknown>>;
   consoleFlushTimer: NodeJS.Timeout | null;
   networkEntries: Map<string, BrowserPreviewNetworkEntry>;
+  networkEntryIdsByRequestId: Map<string, string>;
+  networkRedirectCountsByRequestId: Map<string, number>;
   networkUnavailableMessage: string | null;
   pageLoading: boolean;
   cleanupHandlers: Array<() => void>;
@@ -130,6 +132,9 @@ interface PersistentBrowserHost {
 
 interface BrowserPreviewNetworkEntry {
   requestId: string;
+  cdpRequestId: string;
+  redirectHop: number;
+  isRedirectResponse: boolean;
   url: string;
   method: string;
   resourceType: string;
@@ -279,6 +284,8 @@ export class BrowserPreviewRegistry {
       consoleBuffer: [],
       consoleFlushTimer: null,
       networkEntries: new Map(),
+      networkEntryIdsByRequestId: new Map(),
+      networkRedirectCountsByRequestId: new Map(),
       networkUnavailableMessage: null,
       pageLoading: false,
       cleanupHandlers: [],
@@ -904,12 +911,50 @@ export class BrowserPreviewRegistry {
 
     preview.cleanupHandlers.push(
       cdp.onSessionEvent(sessionId, "Network.requestWillBeSent", (params) => {
-        const requestId = stringValue(params.requestId);
+        const cdpRequestId = stringValue(params.requestId);
+        if (!cdpRequestId) return;
+
+        const redirectResponse = objectValue(params.redirectResponse);
+        const previousEntry = this.networkEntryForCdpRequest(preview, cdpRequestId);
+        if (previousEntry && redirectResponse) {
+          previousEntry.status = numberOrNull(redirectResponse.status);
+          previousEntry.statusText = stringOrNull(redirectResponse.statusText);
+          previousEntry.mimeType = stringOrNull(redirectResponse.mimeType);
+          previousEntry.responseHeaders = headerRecord(redirectResponse.headers);
+          previousEntry.servedFromCache =
+            previousEntry.servedFromCache ||
+            redirectResponse.fromDiskCache === true ||
+            redirectResponse.fromPrefetchCache === true ||
+            redirectResponse.fromServiceWorker === true;
+          previousEntry.finished = true;
+          previousEntry.failed = false;
+          previousEntry.errorText = null;
+          previousEntry.isRedirectResponse = true;
+          this.updateNetworkEntryDuration(
+            previousEntry,
+            numberOrNull(params.timestamp),
+          );
+          this.broadcast(preview, {
+            type: "network",
+            entry: this.networkSummary(previousEntry),
+          });
+        }
+
         const request = objectValue(params.request);
         const url = stringValue(request?.url);
-        if (!requestId || !isTrackedBrowserPreviewNetworkUrl(url)) return;
+        if (!isTrackedBrowserPreviewNetworkUrl(url)) {
+          if (redirectResponse) {
+            preview.networkEntryIdsByRequestId.delete(cdpRequestId);
+          }
+          return;
+        }
+
+        const identity = this.nextNetworkEntryIdentity(preview, cdpRequestId);
         const entry: BrowserPreviewNetworkEntry = {
-          requestId,
+          requestId: identity.entryId,
+          cdpRequestId,
+          redirectHop: identity.redirectHop,
+          isRedirectResponse: false,
           url,
           method: stringValue(request?.method) || "GET",
           resourceType: stringValue(params.type) || "Other",
@@ -928,6 +973,7 @@ export class BrowserPreviewRegistry {
           servedFromCache: false,
         };
         this.upsertNetworkEntry(preview, entry);
+        preview.networkEntryIdsByRequestId.set(cdpRequestId, entry.requestId);
         this.broadcast(preview, {
           type: "network",
           entry: this.networkSummary(entry),
@@ -937,8 +983,10 @@ export class BrowserPreviewRegistry {
 
     preview.cleanupHandlers.push(
       cdp.onSessionEvent(sessionId, "Network.requestServedFromCache", (params) => {
-        const requestId = stringValue(params.requestId);
-        const entry = preview.networkEntries.get(requestId);
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
         if (!entry) return;
         entry.servedFromCache = true;
         this.broadcast(preview, {
@@ -950,8 +998,10 @@ export class BrowserPreviewRegistry {
 
     preview.cleanupHandlers.push(
       cdp.onSessionEvent(sessionId, "Network.responseReceived", (params) => {
-        const requestId = stringValue(params.requestId);
-        const entry = preview.networkEntries.get(requestId);
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
         if (!entry) return;
         const response = objectValue(params.response);
         entry.status = numberOrNull(response?.status);
@@ -972,23 +1022,16 @@ export class BrowserPreviewRegistry {
 
     preview.cleanupHandlers.push(
       cdp.onSessionEvent(sessionId, "Network.loadingFinished", (params) => {
-        const requestId = stringValue(params.requestId);
-        const entry = preview.networkEntries.get(requestId);
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
         if (!entry) return;
         entry.encodedDataLength = numberOrNull(params.encodedDataLength);
         entry.finished = true;
         entry.failed = false;
         entry.errorText = null;
-        const finishedAtSeconds = numberOrNull(params.timestamp);
-        if (
-          entry.startTimestampSeconds != null &&
-          finishedAtSeconds != null &&
-          finishedAtSeconds >= entry.startTimestampSeconds
-        ) {
-          entry.durationMs = Math.round(
-            (finishedAtSeconds - entry.startTimestampSeconds) * 1000,
-          );
-        }
+        this.updateNetworkEntryDuration(entry, numberOrNull(params.timestamp));
         this.broadcast(preview, {
           type: "network",
           entry: this.networkSummary(entry),
@@ -998,27 +1041,61 @@ export class BrowserPreviewRegistry {
 
     preview.cleanupHandlers.push(
       cdp.onSessionEvent(sessionId, "Network.loadingFailed", (params) => {
-        const requestId = stringValue(params.requestId);
-        const entry = preview.networkEntries.get(requestId);
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
         if (!entry) return;
         entry.finished = true;
         entry.failed = true;
         entry.errorText = stringOrNull(params.errorText);
-        const failedAtSeconds = numberOrNull(params.timestamp);
-        if (
-          entry.startTimestampSeconds != null &&
-          failedAtSeconds != null &&
-          failedAtSeconds >= entry.startTimestampSeconds
-        ) {
-          entry.durationMs = Math.round(
-            (failedAtSeconds - entry.startTimestampSeconds) * 1000,
-          );
-        }
+        this.updateNetworkEntryDuration(entry, numberOrNull(params.timestamp));
         this.broadcast(preview, {
           type: "network",
           entry: this.networkSummary(entry),
         });
       }),
+    );
+  }
+
+  private networkEntryForCdpRequest(
+    preview: BrowserPreviewRecord,
+    cdpRequestId: string,
+  ): BrowserPreviewNetworkEntry | null {
+    const entryId = preview.networkEntryIdsByRequestId.get(cdpRequestId);
+    if (!entryId) return null;
+    return preview.networkEntries.get(entryId) ?? null;
+  }
+
+  private nextNetworkEntryIdentity(
+    preview: BrowserPreviewRecord,
+    cdpRequestId: string,
+  ): { entryId: string; redirectHop: number } {
+    const redirectHop =
+      (preview.networkRedirectCountsByRequestId.get(cdpRequestId) ?? -1) + 1;
+    preview.networkRedirectCountsByRequestId.set(cdpRequestId, redirectHop);
+    return {
+      entryId:
+        redirectHop === 0
+          ? cdpRequestId
+          : `${cdpRequestId}:redirect:${redirectHop}`,
+      redirectHop,
+    };
+  }
+
+  private updateNetworkEntryDuration(
+    entry: BrowserPreviewNetworkEntry,
+    completedAtSeconds: number | null,
+  ): void {
+    if (
+      entry.startTimestampSeconds == null ||
+      completedAtSeconds == null ||
+      completedAtSeconds < entry.startTimestampSeconds
+    ) {
+      return;
+    }
+    entry.durationMs = Math.round(
+      (completedAtSeconds - entry.startTimestampSeconds) * 1000,
     );
   }
 
@@ -1028,9 +1105,15 @@ export class BrowserPreviewRegistry {
   ): void {
     preview.networkEntries.set(entry.requestId, entry);
     while (preview.networkEntries.size > MAX_NETWORK_ENTRIES) {
-      const oldestRequestId = preview.networkEntries.keys().next().value;
-      if (!oldestRequestId) break;
-      preview.networkEntries.delete(oldestRequestId);
+      const oldestEntry = preview.networkEntries.values().next().value;
+      if (!oldestEntry) break;
+      preview.networkEntries.delete(oldestEntry.requestId);
+      if (
+        preview.networkEntryIdsByRequestId.get(oldestEntry.cdpRequestId) ===
+        oldestEntry.requestId
+      ) {
+        preview.networkEntryIdsByRequestId.delete(oldestEntry.cdpRequestId);
+      }
     }
   }
 
@@ -1063,11 +1146,13 @@ export class BrowserPreviewRegistry {
       bodyError = "Response body is not available until the request finishes.";
     } else if (entry.failed) {
       bodyError = "Response body is not available for failed requests.";
+    } else if (entry.isRedirectResponse) {
+      bodyError = "Response body is not available for redirect responses.";
     } else if (preview.cdp && preview.sessionIdCdp && preview.status === "running") {
       try {
         const result = await preview.cdp.send(
           "Network.getResponseBody",
-          { requestId },
+          { requestId: entry.cdpRequestId },
           preview.sessionIdCdp,
         );
         body = typeof result.body === "string" ? result.body : null;
