@@ -117,6 +117,7 @@ interface BrowserPreviewRecord {
   consoleBuffer: Array<Record<string, unknown>>;
   consoleFlushTimer: NodeJS.Timeout | null;
   networkEntries: Map<string, BrowserPreviewNetworkEntry>;
+  networkUnavailableMessage: string | null;
   pageLoading: boolean;
   cleanupHandlers: Array<() => void>;
 }
@@ -278,6 +279,7 @@ export class BrowserPreviewRegistry {
       consoleBuffer: [],
       consoleFlushTimer: null,
       networkEntries: new Map(),
+      networkUnavailableMessage: null,
       pageLoading: false,
       cleanupHandlers: [],
     };
@@ -318,13 +320,17 @@ export class BrowserPreviewRegistry {
     preview.lastClientAt = Date.now();
     preview.updatedAt = preview.lastClientAt;
     sendJson(socket, { type: "hello", preview: this.info(preview) });
-    const networkEntries = this.networkSummaries(preview);
-    if (networkEntries.length > 0) {
+    if (preview.networkUnavailableMessage) {
       sendJson(socket, {
-        type: "networkSnapshot",
-        entries: networkEntries,
+        type: "networkStatus",
+        available: false,
+        message: preview.networkUnavailableMessage,
       });
     }
+    sendJson(socket, {
+      type: "networkSnapshot",
+      entries: this.networkSummaries(preview),
+    });
     if (preview.lastFramePayload) {
       sendJson(socket, preview.lastFramePayload);
     }
@@ -409,9 +415,17 @@ export class BrowserPreviewRegistry {
       try {
         await cdp.send("Network.enable", {}, sessionId);
         this.registerNetworkHandlers(preview, sessionId);
-      } catch {
+      } catch (error) {
         // Keep the browser preview running even if Network CDP support is
         // unavailable on this Chromium build.
+        preview.networkUnavailableMessage = error instanceof Error && error.message
+          ? `Network inspection is unavailable: ${error.message}`
+          : "Network inspection is unavailable on this Chromium build.";
+        this.broadcast(preview, {
+          type: "networkStatus",
+          available: false,
+          message: preview.networkUnavailableMessage,
+        });
       }
       this.registerConsoleHandlers(preview, sessionId);
       this.registerPageLoadHandlers(preview, sessionId);
