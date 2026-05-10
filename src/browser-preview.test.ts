@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import type { WebSocket } from "ws";
+
 import {
   BrowserPreviewError,
   BrowserPreviewRegistry,
@@ -110,4 +112,236 @@ describe("browser preview", () => {
     assert.equal(isBrowserNavigationUrl("javascript:alert(1)"), false);
     assert.equal(isBrowserNavigationUrl("not a url"), false);
   });
+
+  it("tracks network requests and emits summary updates", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp);
+    const events: Array<Record<string, unknown>> = [];
+    registry.broadcast = (_preview: unknown, payload: Record<string, unknown>) => {
+      events.push(payload);
+    };
+
+    registry.registerNetworkHandlers(preview, "session-1");
+
+    cdp.emitSession("Network.requestWillBeSent", {
+      requestId: "request-1",
+      type: "Fetch",
+      timestamp: 10,
+      wallTime: 20,
+      request: {
+        method: "POST",
+        url: "http://127.0.0.1:3000/api/search",
+        headers: {
+          accept: "application/json",
+        },
+      },
+    });
+    cdp.emitSession("Network.responseReceived", {
+      requestId: "request-1",
+      response: {
+        status: 200,
+        statusText: "OK",
+        mimeType: "application/json",
+        headers: {
+          "content-type": "application/json",
+        },
+        fromDiskCache: false,
+      },
+    });
+    cdp.emitSession("Network.requestServedFromCache", {
+      requestId: "request-1",
+    });
+    cdp.emitSession("Network.loadingFinished", {
+      requestId: "request-1",
+      timestamp: 10.125,
+      encodedDataLength: 512,
+    });
+
+    assert.equal(preview.networkEntries.size, 1);
+    const entry = preview.networkEntries.get("request-1");
+    assert.ok(entry);
+    assert.equal(entry.method, "POST");
+    assert.equal(entry.resourceType, "Fetch");
+    assert.equal(entry.status, 200);
+    assert.equal(entry.mimeType, "application/json");
+    assert.equal(entry.servedFromCache, true);
+    assert.equal(entry.encodedDataLength, 512);
+    assert.equal(entry.durationMs, 125);
+
+    assert.equal(events.length, 4);
+    assert.deepEqual(events[0], {
+      type: "network",
+      entry: {
+        requestId: "request-1",
+        url: "http://127.0.0.1:3000/api/search",
+        method: "POST",
+        resourceType: "Fetch",
+        status: null,
+        mimeType: null,
+        encodedDataLength: null,
+        durationMs: null,
+        startedAt: 20_000,
+        errorText: null,
+        finished: false,
+        failed: false,
+        servedFromCache: false,
+      },
+    });
+    assert.equal(events[3].type, "network");
+    assert.equal((events[3].entry as any).durationMs, 125);
+    assert.equal((events[3].entry as any).servedFromCache, true);
+  });
+
+  it("ignores untracked data URLs in network logs", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp);
+    registry.broadcast = () => {};
+
+    registry.registerNetworkHandlers(preview, "session-1");
+    cdp.emitSession("Network.requestWillBeSent", {
+      requestId: "request-1",
+      type: "Image",
+      timestamp: 10,
+      wallTime: 20,
+      request: {
+        method: "GET",
+        url: "data:image/png;base64,AAAA",
+        headers: {},
+      },
+    });
+
+    assert.equal(preview.networkEntries.size, 0);
+  });
+
+  it("returns network details with response bodies on demand", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp);
+    preview.status = "running";
+    preview.sessionIdCdp = "session-1";
+    preview.networkEntries.set("request-1", {
+      requestId: "request-1",
+      url: "http://127.0.0.1:3000/app.js",
+      method: "GET",
+      resourceType: "Script",
+      requestHeaders: { accept: "*/*" },
+      responseHeaders: { "content-type": "text/javascript" },
+      status: 200,
+      statusText: "OK",
+      mimeType: "text/javascript",
+      encodedDataLength: 128,
+      durationMs: 42,
+      startedAt: 1,
+      startTimestampSeconds: 1,
+      errorText: null,
+      finished: true,
+      failed: false,
+      servedFromCache: false,
+    });
+    cdp.sendResult = {
+      body: 'console.log("ok")',
+      base64Encoded: false,
+    };
+    const messages: Array<Record<string, unknown>> = [];
+    const socket = createFakeSocket(messages);
+
+    await registry.sendNetworkDetail(preview, socket, "request-1");
+
+    assert.equal(cdp.sent.at(-1)?.method, "Network.getResponseBody");
+    assert.deepEqual(messages[0], {
+      type: "networkDetail",
+      requestId: "request-1",
+      detail: {
+        requestId: "request-1",
+        url: "http://127.0.0.1:3000/app.js",
+        method: "GET",
+        resourceType: "Script",
+        status: 200,
+        mimeType: "text/javascript",
+        encodedDataLength: 128,
+        durationMs: 42,
+        startedAt: 1,
+        errorText: null,
+        finished: true,
+        failed: false,
+        servedFromCache: false,
+        statusText: "OK",
+        requestHeaders: { accept: "*/*" },
+        responseHeaders: { "content-type": "text/javascript" },
+        body: 'console.log("ok")',
+        bodyBase64Encoded: false,
+        bodyError: null,
+      },
+    });
+  });
 });
+
+class FakeCdpConnection {
+  public sendResult: Record<string, unknown> = {};
+  public readonly sent: Array<{
+    method: string;
+    params: Record<string, unknown>;
+    sessionId?: string | null;
+  }> = [];
+  private readonly sessionListeners = new Map<
+    string,
+    Array<(params: Record<string, unknown>) => void>
+  >();
+
+  public onSessionEvent(
+    _sessionId: string,
+    method: string,
+    listener: (params: Record<string, unknown>) => void,
+  ): () => void {
+    const listeners = this.sessionListeners.get(method) ?? [];
+    listeners.push(listener);
+    this.sessionListeners.set(method, listeners);
+    return () => {
+      const current = this.sessionListeners.get(method) ?? [];
+      this.sessionListeners.set(
+        method,
+        current.filter((item) => item !== listener),
+      );
+    };
+  }
+
+  public emitSession(method: string, params: Record<string, unknown>): void {
+    for (const listener of this.sessionListeners.get(method) ?? []) {
+      listener(params);
+    }
+  }
+
+  public async send(
+    method: string,
+    params: Record<string, unknown> = {},
+    sessionId?: string | null,
+  ): Promise<Record<string, unknown>> {
+    this.sent.push({ method, params, sessionId });
+    return this.sendResult;
+  }
+}
+
+function buildFakePreview(cdp: FakeCdpConnection): any {
+  return {
+    cdp,
+    status: "running",
+    sessionIdCdp: "session-1",
+    networkEntries: new Map(),
+    cleanupHandlers: [],
+  };
+}
+
+function createFakeSocket(
+  messages: Array<Record<string, unknown>>,
+): WebSocket {
+  return {
+    OPEN: 1,
+    readyState: 1,
+    bufferedAmount: 0,
+    send(payload: string) {
+      messages.push(JSON.parse(payload) as Record<string, unknown>);
+    },
+  } as unknown as WebSocket;
+}
