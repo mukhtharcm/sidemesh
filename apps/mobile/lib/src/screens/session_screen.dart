@@ -3,12 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -3117,20 +3119,16 @@ class _SessionScreenState extends State<SessionScreen>
     }
 
     try {
+      final pickerConfig = _composerImagePickerConfig();
+      if (pickerConfig.requestPhotoLibraryAccess &&
+          !await _ensureImagePickerAccess()) {
+        return;
+      }
       final picked = await FilePicker.pickFiles(
         allowMultiple: true,
         withData: true,
-        type: FileType.custom,
-        allowedExtensions: const <String>[
-          'png',
-          'jpg',
-          'jpeg',
-          'webp',
-          'gif',
-          'bmp',
-          'heic',
-          'heif',
-        ],
+        type: pickerConfig.type,
+        allowedExtensions: pickerConfig.allowedExtensions,
       );
       if (!mounted || picked == null || picked.files.isEmpty) {
         return;
@@ -3145,6 +3143,59 @@ class _SessionScreenState extends State<SessionScreen>
         'Failed to attach images: ${friendlyError(error)}',
       );
     }
+  }
+
+  _ComposerImagePickerConfig _composerImagePickerConfig() {
+    if (Platform.isIOS) {
+      // `FileType.image` routes iOS through the Photos gallery picker instead
+      // of the Files document picker used by `FileType.custom`.
+      return const _ComposerImagePickerConfig(
+        type: FileType.image,
+        requestPhotoLibraryAccess: true,
+      );
+    }
+    return const _ComposerImagePickerConfig(
+      type: FileType.custom,
+      allowedExtensions: <String>[
+        'png',
+        'jpg',
+        'jpeg',
+        'webp',
+        'gif',
+        'bmp',
+        'heic',
+        'heif',
+      ],
+    );
+  }
+
+  Future<bool> _ensureImagePickerAccess() async {
+    if (!Platform.isIOS) {
+      return true;
+    }
+    final status = await Permission.photos.request();
+    if (status.isGranted || status.isLimited) {
+      return true;
+    }
+    if (await _supportsIosPhotoPickerWithoutLibraryAccess()) {
+      return true;
+    }
+    if (!mounted) {
+      return false;
+    }
+    showAppSnackBar(
+      context,
+      status.isPermanentlyDenied || status.isRestricted
+          ? 'Photo library access is disabled for Sidemesh in iOS Settings.'
+          : 'Photo library access is required to attach images.',
+    );
+    return false;
+  }
+
+  Future<bool> _supportsIosPhotoPickerWithoutLibraryAccess() async {
+    final systemVersion = (await DeviceInfoPlugin().iosInfo).systemVersion;
+    final majorVersion = int.tryParse(systemVersion.split('.').first) ?? 0;
+    return majorVersion >= 14;
   }
 
   Future<void> _addPickedDraftAttachments(List<PlatformFile> files) async {
