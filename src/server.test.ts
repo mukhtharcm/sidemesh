@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -138,6 +139,49 @@ function request(options: http.RequestOptions & { body?: string }): Promise<{
     if (options.body) req.write(options.body);
     req.end();
   });
+}
+
+async function writeLegacyDedupeReceipt(
+  stateDir: string,
+  key: string,
+  signatureHash: string,
+  receipt: { mode: string; turnId: string | null; messageId: string },
+): Promise<void> {
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(
+    nodePath.join(stateDir, "session-input-dedupe-v1.json"),
+    JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          key,
+          signatureHash,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          receipt,
+        },
+      ],
+    }),
+    "utf8",
+  );
+}
+
+function legacyInputSignature(input: AgentSessionInputItem[]): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        input,
+        overrides: {
+          model: null,
+          reasoningEffort: null,
+          fastMode: null,
+          approvalPolicy: null,
+          sandboxMode: null,
+          networkAccess: null,
+        },
+      }),
+    )
+    .digest("hex");
 }
 
 async function withServer(config: NodeConfig, fn: (server: RunningServer, config: NodeConfig) => Promise<void>): Promise<void> {
@@ -1039,6 +1083,74 @@ describe("session input item parsing", () => {
       assert.equal((retry.body as any).replayed, true);
       assert.equal((retry.body as any).messageId, (first.body as any).messageId);
       assert.equal(provider.submittedInputs, 1);
+    });
+  });
+
+  it("replays legacy dedupe receipts that ignored file inputs", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const clientMessageId = "legacy-file-retry";
+    const legacyReceipt = {
+      mode: "turn",
+      turnId: "legacy-turn",
+      messageId: "legacy-message",
+    };
+    await writeLegacyDedupeReceipt(
+      stateDir,
+      `fake-restart-session:${clientMessageId}`,
+      legacyInputSignature([
+        {
+          type: "text",
+          text: "legacy retry",
+          text_elements: [],
+        },
+      ]),
+      legacyReceipt,
+    );
+    await rm(nodePath.join(cwd, "package.json"));
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd,
+          prompt: "start",
+        }),
+      });
+      assert.equal(created.statusCode, 201);
+      const sessionId = (created.body as any).session.id as string;
+
+      const retry = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          clientMessageId,
+          input: [
+            { type: "file", path: "package.json" },
+            { type: "text", text: "legacy retry" },
+          ],
+        }),
+      });
+      assert.equal(retry.statusCode, 200);
+      assert.deepEqual(retry.body, {
+        ...legacyReceipt,
+        replayed: true,
+      });
+      assert.equal(provider.submittedInputs, 0);
     });
   });
 

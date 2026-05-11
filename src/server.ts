@@ -2586,6 +2586,18 @@ export async function startServer(
       };
 
       if (dedupeKey && existingDedupe && !existingDedupe.rawSignatureHash) {
+        const legacySignatureHash = hashLegacySessionInputSignature(
+          resolvedInput,
+          turnOverrides,
+        );
+        if (existingDedupe.signatureHash === legacySignatureHash) {
+          const receipt =
+            existingDedupe.receipt ?? (await existingDedupe.promise);
+          if (receipt) {
+            response.json({ ...receipt, replayed: true });
+            return;
+          }
+        }
         await resolveScopedInput();
         if (existingDedupe.signatureHash !== inputSignatureHash) {
           response.status(409).json({
@@ -4169,6 +4181,16 @@ function hashSessionInputSignature(
       }),
     )
     .digest("hex");
+}
+
+function hashLegacySessionInputSignature(
+  input: AgentSessionInputItem[],
+  overrides: AgentSessionOverrides,
+): string {
+  return hashSessionInputSignature(
+    input.filter((item) => item.type !== "file"),
+    overrides,
+  );
 }
 
 function buildTurnInputSignatureOverrides(
