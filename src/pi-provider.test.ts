@@ -1287,6 +1287,117 @@ describe("PiAgentProvider", () => {
     assert.equal(laterThread.preview, "Later answer");
   });
 
+  it("matches empty-text preserved user sidecars on history reload", async () => {
+    const cwd = nodePath.join(tempDir, "repo-empty-anchor");
+    await mkdir(cwd, { recursive: true });
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory(cwd);
+    const fakeSession = {
+      sessionId: "",
+      sessionFile: null as string | null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe() {
+        return () => {};
+      },
+      async prompt(_text: string) {},
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd,
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async (options: { sessionManager: SessionManager }) => {
+        fakeSession.sessionId = options.sessionManager.getSessionId();
+        fakeSession.sessionFile = options.sessionManager.getSessionFile() ?? null;
+        fakeSession.sessionManager = options.sessionManager;
+        return {
+          session: fakeSession,
+          extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+        };
+      }) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd,
+      input: [{ type: "text", text: "   ", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    assert.ok(created.activeTurnId);
+
+    await delay(150);
+
+    assert.ok(fakeSession.sessionFile);
+    const historyUserAtMs = Date.now();
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: new Date(historyUserAtMs - 1_000).toISOString(),
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "empty-user",
+          parentId: null,
+          timestamp: new Date(historyUserAtMs).toISOString(),
+          message: {
+            role: "user",
+            content: [{ type: "thinking", thinking: "image attachment" }],
+            timestamp: historyUserAtMs,
+          },
+        }),
+      ],
+      new Date(historyUserAtMs + 1_000).toISOString(),
+    );
+
+    const reloadedLog = await provider.readSessionLog(created.thread);
+    assert.equal(reloadedLog.messages.length, 1);
+    assert.equal(reloadedLog.messages[0]?.role, "user");
+    assert.equal(reloadedLog.messages[0]?.text, "");
+  });
+
   it("finishes prompt-resolved Pi turns after a slow event queue drains", async () => {
     const listeners = new Set<(event: unknown) => void>();
     let resolveEventQueue!: () => void;
