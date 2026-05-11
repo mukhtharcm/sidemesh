@@ -5,6 +5,8 @@ description: Stream browser screenshots to the client.
 
 Browser preview launches a headless Chromium instance on the host, captures screenshots, and streams them to the client as a live image feed.
 
+It also includes a lightweight remote DevTools surface inside the client for browser storage, network traffic, and console output.
+
 ## How it works
 
 1. The daemon launches headless Chromium via the Chrome DevTools Protocol (CDP)
@@ -31,13 +33,25 @@ The browser preview supports remote interaction through CDP:
 - Heavy pages with lots of JS, images, and fonts where you only need a visual
 - Quick checks without setting up a full tunnel
 - Verifying what a headless browser renders on the host
+- Inspecting cookies, local storage, session storage, and IndexedDB schema from a mobile device
+- Reviewing request traffic and console output without opening a desktop browser
+
+## Built-in DevTools
+
+Browser preview now exposes a compact remote DevTools panel in the client:
+
+| Panel | What you can do |
+|-------|------------------|
+| **Console** | View recent console output, exceptions, and browser log entries |
+| **Network** | Inspect requests, response metadata, websocket traffic, and request/response bodies when available |
+| **Storage** | View cookies, `localStorage`, `sessionStorage`, quota usage, IndexedDB database schema, and clear or edit supported storage entries |
 
 ## Limitations
 
 - Lower fidelity than a real browser (compressed JPEG screenshots, not native rendering)
 - Frame updates are periodic, not real-time (default every 900ms)
 - The browser runs on the host, so it sees the host's network and user-agent
-- No native browser developer tools or extensions
+- Built-in DevTools are lighter than full Chrome DevTools and do not yet include a DOM/CSS inspector
 - Only supports HTTP/HTTPS targets (not raw TCP)
 
 ## Comparison with port forwarding

@@ -348,6 +348,258 @@ void main() {
     expect(find.text('Response body'), findsNothing);
   });
 
+  testWidgets('browser preview renders storage snapshots and refreshes them', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Storage'));
+    await _pumpFrames(tester);
+
+    expect(api.sentMessages.last['type'], 'storageRefreshRequest');
+
+    api.emit({
+      'type': 'storageSnapshot',
+      'snapshot': {
+        'url': 'http://127.0.0.1:3000/app',
+        'origin': 'http://127.0.0.1:3000',
+        'refreshedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+        'cookies': [
+          {
+            'name': 'sid',
+            'value': 'abc123',
+            'domain': '127.0.0.1',
+            'path': '/',
+            'expires': null,
+            'size': 9,
+            'httpOnly': true,
+            'secure': false,
+            'session': true,
+            'sameSite': 'Lax',
+          },
+        ],
+        'indexedDbDatabases': [
+          {
+            'name': 'app-cache',
+            'version': 3,
+            'objectStores': [
+              {
+                'name': 'items',
+                'keyPath': 'id',
+                'autoIncrement': false,
+                'indexes': [
+                  {
+                    'name': 'byUpdatedAt',
+                    'keyPath': 'updatedAt',
+                    'unique': false,
+                    'multiEntry': false,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        'localStorage': [
+          {
+            'key': 'theme',
+            'value': 'amber',
+          },
+        ],
+        'sessionStorage': [
+          {
+            'key': 'draft',
+            'value': '42',
+          },
+        ],
+        'usage': 2048,
+        'quota': 10485760,
+        'usageBreakdown': [
+          {'storageType': 'indexeddb', 'usage': 1536},
+          {'storageType': 'local_storage', 'usage': 512},
+        ],
+        'warnings': [],
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Cookies'), findsWidgets);
+    expect(find.text('IndexedDB'), findsWidgets);
+    expect(find.text('localStorage'), findsWidgets);
+    expect(find.text('sessionStorage'), findsWidgets);
+    expect(find.text('Usage breakdown'), findsOneWidget);
+    expect(find.text('app-cache'), findsOneWidget);
+    expect(find.textContaining('10.0 MB'), findsOneWidget);
+    await tester.dragUntilVisible(
+      find.text('sid'),
+      find.byKey(const ValueKey('browserPreviewStorageList')),
+      const Offset(0, -200),
+    );
+    await _pumpFrames(tester);
+    expect(find.text('sid'), findsOneWidget);
+    await tester.dragUntilVisible(
+      find.text('theme'),
+      find.byKey(const ValueKey('browserPreviewStorageList')),
+      const Offset(0, -200),
+    );
+    await _pumpFrames(tester);
+    expect(find.text('theme'), findsOneWidget);
+    expect(find.text('amber'), findsOneWidget);
+    await tester.dragUntilVisible(
+      find.text('draft'),
+      find.byKey(const ValueKey('browserPreviewStorageList')),
+      const Offset(0, -200),
+    );
+    await _pumpFrames(tester);
+    expect(find.text('draft'), findsOneWidget);
+    expect(find.text('42'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey('browserPreviewStorageRefreshButton')),
+    );
+    await _pumpFrames(tester);
+    expect(api.sentMessages.last['type'], 'storageRefreshRequest');
+
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Storage'));
+    await _pumpFrames(tester);
+    expect(api.sentMessages.last['type'], 'storageRefreshRequest');
+  });
+
+  testWidgets('browser preview storage actions send mutation messages', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Y0/8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Storage'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'storageSnapshot',
+      'snapshot': {
+        'url': 'http://127.0.0.1:3000/app',
+        'origin': 'http://127.0.0.1:3000',
+        'refreshedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+        'cookies': [
+          {
+            'name': 'sid',
+            'value': 'abc123',
+            'domain': '127.0.0.1',
+            'path': '/',
+            'expires': null,
+            'size': 9,
+            'httpOnly': true,
+            'secure': false,
+            'session': true,
+            'sameSite': 'Lax',
+          },
+        ],
+        'indexedDbDatabases': const [],
+        'localStorage': [
+          {
+            'key': 'theme',
+            'value': 'amber',
+          },
+        ],
+        'sessionStorage': [],
+        'usage': 2048,
+        'quota': 10485760,
+        'usageBreakdown': const [],
+        'warnings': const [],
+      },
+    });
+    await _pumpFrames(tester);
+
+    await tester.dragUntilVisible(
+      find.byKey(const ValueKey('browserPreviewStorageAdd-localStorage')),
+      find.byKey(const ValueKey('browserPreviewStorageList')),
+      const Offset(0, -200),
+    );
+    await _pumpFrames(tester);
+    await tester.tap(
+      find.byKey(const ValueKey('browserPreviewStorageAdd-localStorage')),
+    );
+    await _pumpFrames(tester);
+    final dialogFields = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(dialogFields.at(0), 'accent');
+    await tester.enterText(dialogFields.at(1), 'orange');
+    await tester.tap(find.text('Save'));
+    await _pumpFrames(tester);
+
+    expect(api.sentMessages.last, {
+      'type': 'storageSetEntry',
+      'area': 'localStorage',
+      'key': 'accent',
+      'value': 'orange',
+    });
+
+    await tester.dragUntilVisible(
+      find.byKey(const ValueKey('browserPreviewStorageClear-cookies')),
+      find.byKey(const ValueKey('browserPreviewStorageList')),
+      const Offset(0, 200),
+    );
+    await _pumpFrames(tester);
+    await tester.tap(
+      find.byKey(const ValueKey('browserPreviewStorageClear-cookies')),
+    );
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Clear'));
+    await _pumpFrames(tester);
+
+    expect(api.sentMessages.last, {
+      'type': 'storageClearCookies',
+    });
+  });
+
   testWidgets('browser preview network tab supports search and sort', (
     tester,
   ) async {

@@ -124,6 +124,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   final Set<String> _networkClearedRequestIdsAtFloor = <String>{};
   bool _networkAvailable = true;
   String? _networkUnavailableMessage;
+  _StorageSnapshot? _storageSnapshot;
+  bool _storageLoading = false;
+  String? _storageError;
 
   @override
   void initState() {
@@ -279,10 +282,16 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       if (!mounted) return;
       setState(() {
         if (preview != null) {
+          final storageContextChanged = preview.url != _preview.url;
           _preview = preview;
           _frameWidth = preview.width;
           _frameHeight = preview.height;
           _urlController.text = preview.url;
+          if (storageContextChanged) {
+            _storageSnapshot = null;
+            _storageLoading = false;
+            _storageError = null;
+          }
         }
         if (type != 'preview') {
           _status = 'Waiting for first frame...';
@@ -380,6 +389,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     }
     if (type == 'networkDetail') {
       _handleNetworkDetail(frame);
+      return;
+    }
+    if (type == 'storageSnapshot') {
+      _handleStorageSnapshot(frame);
       return;
     }
     if (type == 'loading') {
@@ -492,6 +505,24 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _networkDetailUpdates.add(
       _NetworkDetailUpdate(requestId: requestId, detail: detail, error: error),
     );
+  }
+
+  void _handleStorageSnapshot(Map<dynamic, dynamic> frame) {
+    if (!mounted) return;
+    final rawSnapshot = frame['snapshot'];
+    final error = frame['error']?.toString();
+    if (rawSnapshot is Map) {
+      setState(() {
+        _storageSnapshot = _StorageSnapshot.fromJson(rawSnapshot);
+        _storageLoading = false;
+        _storageError = error;
+      });
+      return;
+    }
+    setState(() {
+      _storageLoading = false;
+      _storageError = error ?? 'Storage snapshot is unavailable.';
+    });
   }
 
   _NetworkDetail _networkDetailFromEntry(
@@ -860,6 +891,190 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _setDevToolsTab(int index) {
     setState(() => _devToolsTabIndex = index);
+    if (index == 2) {
+      _requestStorageSnapshot(force: true);
+    }
+  }
+
+  void _requestStorageSnapshot({bool force = false}) {
+    if (_storageLoading && !force) return;
+    if (_storageSnapshot != null && !force) return;
+    if (_channel == null) {
+      setState(() {
+        _storageLoading = false;
+        _storageError =
+            'Viewer is disconnected. Resume the stream to inspect storage.';
+      });
+      return;
+    }
+    final sent = _sendMessage({'type': 'storageRefreshRequest'});
+    if (!sent) {
+      setState(() {
+        _storageLoading = false;
+        _storageError =
+            'Viewer is disconnected. Resume the stream to inspect storage.';
+      });
+      return;
+    }
+    setState(() {
+      _storageLoading = true;
+      _storageError = null;
+    });
+  }
+
+  void _performStorageAction(Map<String, dynamic> message) {
+    if (_channel == null) {
+      setState(() {
+        _storageLoading = false;
+        _storageError =
+            'Viewer is disconnected. Resume the stream to edit storage.';
+      });
+      return;
+    }
+    final sent = _sendMessage(message);
+    if (!sent) {
+      setState(() {
+        _storageLoading = false;
+        _storageError =
+            'Viewer is disconnected. Resume the stream to edit storage.';
+      });
+      return;
+    }
+    setState(() {
+      _storageLoading = true;
+      _storageError = null;
+    });
+  }
+
+  Future<void> _showStorageEntryEditor(
+    String area, {
+    _StorageEntry? existing,
+  }) async {
+    final result = await showDialog<_StorageEntryDraft>(
+      context: context,
+      builder: (context) => _StorageEntryEditorDialog(
+        title: existing == null
+            ? 'Add ${_storageAreaLabel(area)} entry'
+            : 'Edit ${_storageAreaLabel(area)} entry',
+        initialKey: existing?.key ?? '',
+        initialValue: existing?.value ?? '',
+        keyEnabled: existing == null,
+      ),
+    );
+    if (result == null) return;
+    _performStorageAction({
+      'type': 'storageSetEntry',
+      'area': area,
+      'key': result.key,
+      'value': result.value,
+    });
+  }
+
+  Future<void> _confirmDeleteStorageEntry(
+    String area,
+    _StorageEntry entry,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete ${_storageAreaLabel(area)} entry?'),
+        content: Text('Remove `${entry.key}` from ${_storageAreaLabel(area)}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    _performStorageAction({
+      'type': 'storageRemoveEntry',
+      'area': area,
+      'key': entry.key,
+    });
+  }
+
+  Future<void> _confirmClearStorageArea(String area) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Clear ${_storageAreaLabel(area)}?'),
+        content: Text(
+          'This removes every entry from ${_storageAreaLabel(area)} for the current page.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    _performStorageAction({
+      'type': 'storageClearEntries',
+      'area': area,
+    });
+  }
+
+  Future<void> _confirmDeleteCookie(_StorageCookie cookie) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete cookie?'),
+        content: Text('Remove the `${cookie.name}` cookie from this page?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    _performStorageAction({
+      'type': 'storageDeleteCookie',
+      'name': cookie.name,
+      'domain': cookie.domain,
+      'path': cookie.path,
+    });
+  }
+
+  Future<void> _confirmClearCookies() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear cookies?'),
+        content: const Text(
+          'This removes every cookie currently visible for the page.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    _performStorageAction({'type': 'storageClearCookies'});
   }
 
   KeyEventResult _handleHardwareKey(FocusNode node, KeyEvent event) {
@@ -1117,6 +1332,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             networkSearchController: _networkSearchController,
             networkSearchQuery: _networkSearchQuery,
             networkSort: _networkSort,
+            storageSnapshot: _storageSnapshot,
+            storageLoading: _storageLoading,
+            storageError: _storageError,
             onNetworkFilterChanged: (value) =>
                 setState(() => _networkFilter = value),
             onNetworkSearchChanged: (value) {
@@ -1130,6 +1348,17 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                 setState(() => _networkSort = value),
             onClearConsole: _clearConsole,
             onClearNetwork: _clearNetworkLog,
+            onRefreshStorage: () => _requestStorageSnapshot(force: true),
+            onAddStorageEntry: (area) =>
+                unawaited(_showStorageEntryEditor(area)),
+            onEditStorageEntry: (area, entry) =>
+                unawaited(_showStorageEntryEditor(area, existing: entry)),
+            onDeleteStorageEntry: (area, entry) =>
+                unawaited(_confirmDeleteStorageEntry(area, entry)),
+            onClearStorageArea: (area) =>
+                unawaited(_confirmClearStorageArea(area)),
+            onDeleteCookie: (cookie) => unawaited(_confirmDeleteCookie(cookie)),
+            onClearCookies: () => unawaited(_confirmClearCookies()),
             onOpenNetworkDetail: _showNetworkDetail,
             preview: _preview,
           ),
@@ -1564,11 +1793,21 @@ class _DevToolsPanel extends StatelessWidget {
     required this.networkSearchController,
     required this.networkSearchQuery,
     required this.networkSort,
+    required this.storageSnapshot,
+    required this.storageLoading,
+    required this.storageError,
     required this.onNetworkFilterChanged,
     required this.onNetworkSearchChanged,
     required this.onNetworkSortChanged,
     required this.onClearConsole,
     required this.onClearNetwork,
+    required this.onRefreshStorage,
+    required this.onAddStorageEntry,
+    required this.onEditStorageEntry,
+    required this.onDeleteStorageEntry,
+    required this.onClearStorageArea,
+    required this.onDeleteCookie,
+    required this.onClearCookies,
     required this.onOpenNetworkDetail,
     required this.preview,
   });
@@ -1583,11 +1822,21 @@ class _DevToolsPanel extends StatelessWidget {
   final TextEditingController networkSearchController;
   final String networkSearchQuery;
   final String networkSort;
+  final _StorageSnapshot? storageSnapshot;
+  final bool storageLoading;
+  final String? storageError;
   final ValueChanged<String> onNetworkFilterChanged;
   final ValueChanged<String> onNetworkSearchChanged;
   final ValueChanged<String> onNetworkSortChanged;
   final VoidCallback onClearConsole;
   final VoidCallback onClearNetwork;
+  final VoidCallback onRefreshStorage;
+  final ValueChanged<String> onAddStorageEntry;
+  final void Function(String area, _StorageEntry entry) onEditStorageEntry;
+  final void Function(String area, _StorageEntry entry) onDeleteStorageEntry;
+  final ValueChanged<String> onClearStorageArea;
+  final ValueChanged<_StorageCookie> onDeleteCookie;
+  final VoidCallback onClearCookies;
   final void Function(_NetworkEntry entry) onOpenNetworkDetail;
   final HostBrowserPreviewInfo preview;
 
@@ -1595,6 +1844,7 @@ class _DevToolsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final showingConsole = tabIndex == 0;
+    final showingStorage = tabIndex == 2;
     return Container(
       height: 380,
       decoration: BoxDecoration(
@@ -1624,23 +1874,39 @@ class _DevToolsPanel extends StatelessWidget {
                   active: tabIndex == 1,
                   onTap: () => onTabChanged(1),
                 ),
+                _DevTab(
+                  label: 'Storage',
+                  active: showingStorage,
+                  onTap: () => onTabChanged(2),
+                ),
                 const Spacer(),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Text(
-                    'Storage · Inspector later',
+                    'Inspector later',
                     style: TextStyle(
                       color: colors.textTertiary,
                       fontSize: 11,
                     ),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                  tooltip: showingConsole ? 'Clear console' : 'Clear network log',
-                  onPressed: showingConsole ? onClearConsole : onClearNetwork,
-                  visualDensity: VisualDensity.compact,
-                ),
+                if (showingStorage)
+                  IconButton(
+                    key: const ValueKey('browserPreviewStorageRefreshButton'),
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    tooltip: 'Refresh storage',
+                    onPressed: onRefreshStorage,
+                    visualDensity: VisualDensity.compact,
+                  )
+                else
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    tooltip: showingConsole
+                        ? 'Clear console'
+                        : 'Clear network log',
+                    onPressed: showingConsole ? onClearConsole : onClearNetwork,
+                    visualDensity: VisualDensity.compact,
+                  ),
                 const SizedBox(width: 4),
               ],
             ),
@@ -1650,6 +1916,19 @@ class _DevToolsPanel extends StatelessWidget {
                 ? _ConsoleTab(
                     entries: consoleEntries,
                     preview: preview,
+                  )
+                : showingStorage
+                ? _StorageTab(
+                    snapshot: storageSnapshot,
+                    loading: storageLoading,
+                    error: storageError,
+                    onRefresh: onRefreshStorage,
+                    onAddStorageEntry: onAddStorageEntry,
+                    onEditStorageEntry: onEditStorageEntry,
+                    onDeleteStorageEntry: onDeleteStorageEntry,
+                    onClearStorageArea: onClearStorageArea,
+                    onDeleteCookie: onDeleteCookie,
+                    onClearCookies: onClearCookies,
                   )
                 : _NetworkTab(
                     entries: networkEntries,
@@ -1806,6 +2085,751 @@ class _ConsoleRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _StorageTab extends StatelessWidget {
+  const _StorageTab({
+    required this.snapshot,
+    required this.loading,
+    required this.error,
+    required this.onRefresh,
+    required this.onAddStorageEntry,
+    required this.onEditStorageEntry,
+    required this.onDeleteStorageEntry,
+    required this.onClearStorageArea,
+    required this.onDeleteCookie,
+    required this.onClearCookies,
+  });
+
+  final _StorageSnapshot? snapshot;
+  final bool loading;
+  final String? error;
+  final VoidCallback onRefresh;
+  final ValueChanged<String> onAddStorageEntry;
+  final void Function(String area, _StorageEntry entry) onEditStorageEntry;
+  final void Function(String area, _StorageEntry entry) onDeleteStorageEntry;
+  final ValueChanged<String> onClearStorageArea;
+  final ValueChanged<_StorageCookie> onDeleteCookie;
+  final VoidCallback onClearCookies;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (loading && snapshot == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (snapshot == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                error ?? 'No storage snapshot loaded yet.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: colors.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: onRefresh,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Load storage'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return ListView(
+      key: const ValueKey('browserPreviewStorageList'),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _StorageSummaryCard(
+              label: 'Origin',
+              value: snapshot!.origin ?? 'Unknown',
+            ),
+            _StorageSummaryCard(
+              label: 'Cookies',
+              value: '${snapshot!.cookies.length}',
+            ),
+            _StorageSummaryCard(
+              label: 'localStorage',
+              value: '${snapshot!.localStorage.length}',
+            ),
+            _StorageSummaryCard(
+              label: 'IndexedDB',
+              value: '${snapshot!.indexedDbDatabases.length}',
+            ),
+            _StorageSummaryCard(
+              label: 'sessionStorage',
+              value: '${snapshot!.sessionStorage.length}',
+            ),
+            _StorageSummaryCard(
+              label: 'Quota',
+              value: _storageQuotaLabel(snapshot!),
+            ),
+          ],
+        ),
+        if (loading) ...[
+          const SizedBox(height: 10),
+          const LinearProgressIndicator(minHeight: 2),
+        ],
+        if (error != null && error!.trim().isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colors.danger.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: colors.danger.withValues(alpha: 0.24),
+              ),
+            ),
+            child: Text(
+              error!,
+              style: TextStyle(
+                color: colors.textSecondary,
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ],
+        if (snapshot!.warnings.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          for (final warning in snapshot!.warnings)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.28),
+                  ),
+                ),
+                child: Text(
+                  warning,
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            ),
+        ],
+        if (snapshot!.usageBreakdown.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          _StorageSection(
+            title: 'Usage breakdown',
+            child: Column(
+              children: snapshot!.usageBreakdown.map((entry) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _storageUsageTypeLabel(entry.storageType),
+                          style: TextStyle(
+                            color: colors.textSecondary,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        _formatNetworkBytes(entry.usage),
+                        style: monoStyle(
+                          color: colors.textPrimary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(growable: false),
+            ),
+          ),
+        ],
+        _StorageSection(
+          title: 'IndexedDB',
+          child: snapshot!.indexedDbDatabases.isEmpty
+              ? _StorageEmpty(message: 'No IndexedDB databases found.')
+              : Column(
+                  children: snapshot!.indexedDbDatabases.map((database) {
+                    return _IndexedDbDatabaseCard(database: database);
+                  }).toList(growable: false),
+                ),
+        ),
+        const SizedBox(height: 14),
+        _StorageSection(
+          title: 'Cookies',
+          actions: [
+            _StorageSectionButton(
+              icon: Icons.delete_sweep_outlined,
+              tooltip: 'Clear cookies',
+              buttonKey: const ValueKey('browserPreviewStorageClear-cookies'),
+              onTap: snapshot!.cookies.isEmpty ? null : onClearCookies,
+            ),
+          ],
+          child: snapshot!.cookies.isEmpty
+              ? _StorageEmpty(message: 'No cookies found for this page.')
+              : Column(
+                  children: snapshot!.cookies.map((cookie) {
+                    return _StorageCookieRow(
+                      cookie: cookie,
+                      onDelete: () => onDeleteCookie(cookie),
+                    );
+                  }).toList(growable: false),
+                ),
+        ),
+        _StorageSection(
+          title: 'localStorage',
+          actions: [
+            _StorageSectionButton(
+              icon: Icons.add_rounded,
+              tooltip: 'Add localStorage entry',
+              buttonKey: const ValueKey('browserPreviewStorageAdd-localStorage'),
+              onTap: () => onAddStorageEntry('localStorage'),
+            ),
+            _StorageSectionButton(
+              icon: Icons.delete_sweep_outlined,
+              tooltip: 'Clear localStorage',
+              buttonKey: const ValueKey(
+                'browserPreviewStorageClear-localStorage',
+              ),
+              onTap: snapshot!.localStorage.isEmpty
+                  ? null
+                  : () => onClearStorageArea('localStorage'),
+            ),
+          ],
+          child: snapshot!.localStorage.isEmpty
+              ? _StorageEmpty(message: 'No localStorage entries found.')
+              : Column(
+                  children: snapshot!.localStorage.map((entry) {
+                    return _StorageEntryRow(
+                      entry: entry,
+                      onEdit: () => onEditStorageEntry('localStorage', entry),
+                      onDelete: () =>
+                          onDeleteStorageEntry('localStorage', entry),
+                    );
+                  }).toList(growable: false),
+                ),
+        ),
+        _StorageSection(
+          title: 'sessionStorage',
+          actions: [
+            _StorageSectionButton(
+              icon: Icons.add_rounded,
+              tooltip: 'Add sessionStorage entry',
+              buttonKey: const ValueKey(
+                'browserPreviewStorageAdd-sessionStorage',
+              ),
+              onTap: () => onAddStorageEntry('sessionStorage'),
+            ),
+            _StorageSectionButton(
+              icon: Icons.delete_sweep_outlined,
+              tooltip: 'Clear sessionStorage',
+              buttonKey: const ValueKey(
+                'browserPreviewStorageClear-sessionStorage',
+              ),
+              onTap: snapshot!.sessionStorage.isEmpty
+                  ? null
+                  : () => onClearStorageArea('sessionStorage'),
+            ),
+          ],
+          child: snapshot!.sessionStorage.isEmpty
+              ? _StorageEmpty(message: 'No sessionStorage entries found.')
+              : Column(
+                  children: snapshot!.sessionStorage.map((entry) {
+                    return _StorageEntryRow(
+                      entry: entry,
+                      onEdit: () => onEditStorageEntry('sessionStorage', entry),
+                      onDelete: () =>
+                          onDeleteStorageEntry('sessionStorage', entry),
+                    );
+                  }).toList(growable: false),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StorageSummaryCard extends StatelessWidget {
+  const _StorageSummaryCard({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      constraints: const BoxConstraints(minWidth: 120),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: colors.textTertiary,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            value,
+            style: monoStyle(
+              color: colors.textPrimary,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageSection extends StatelessWidget {
+  const _StorageSection({
+    required this.title,
+    required this.child,
+    this.actions = const <Widget>[],
+  });
+
+  final String title;
+  final Widget child;
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+              ),
+              if (actions.isNotEmpty) ...actions,
+            ],
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageSectionButton extends StatelessWidget {
+  const _StorageSectionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.buttonKey,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+  final Key? buttonKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      key: buttonKey,
+      icon: Icon(icon, size: 18),
+      tooltip: tooltip,
+      onPressed: onTap,
+      visualDensity: VisualDensity.compact,
+    );
+  }
+}
+
+class _StorageEmpty extends StatelessWidget {
+  const _StorageEmpty({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Text(
+      message,
+      style: TextStyle(color: colors.textSecondary),
+    );
+  }
+}
+
+class _IndexedDbDatabaseCard extends StatelessWidget {
+  const _IndexedDbDatabaseCard({required this.database});
+
+  final _IndexedDbDatabase database;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final storeCount = database.objectStores.length;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            database.name,
+            style: monoStyle(
+              color: colors.textPrimary,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Version ${database.version ?? '?'} · $storeCount ${storeCount == 1 ? 'object store' : 'object stores'}',
+            style: TextStyle(
+              color: colors.textTertiary,
+              fontSize: 10,
+            ),
+          ),
+          if (database.objectStores.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            for (final store in database.objectStores)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      store.name,
+                      style: TextStyle(
+                        color: colors.textPrimary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        if (store.keyPath != null &&
+                            store.keyPath!.trim().isNotEmpty)
+                          'key ${store.keyPath}',
+                        if (store.autoIncrement) 'autoIncrement',
+                      ].join(' · '),
+                      style: TextStyle(
+                        color: colors.textSecondary,
+                        fontSize: 10,
+                      ),
+                    ),
+                    if (store.indexes.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      for (final index in store.indexes)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Text(
+                            [
+                              'Index ${index.name}',
+                              if (index.keyPath != null &&
+                                  index.keyPath!.trim().isNotEmpty)
+                                index.keyPath!,
+                              if (index.unique) 'unique',
+                              if (index.multiEntry) 'multiEntry',
+                            ].join(' · '),
+                            style: TextStyle(
+                              color: colors.textTertiary,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageCookieRow extends StatelessWidget {
+  const _StorageCookieRow({
+    required this.cookie,
+    required this.onDelete,
+  });
+
+  final _StorageCookie cookie;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final metadata = <String>[
+      cookie.domain,
+      cookie.path,
+      if (cookie.httpOnly) 'HttpOnly',
+      if (cookie.secure) 'Secure',
+      if (cookie.sameSite != null && cookie.sameSite!.isNotEmpty)
+        cookie.sameSite!,
+      cookie.session ? 'Session' : _storageCookieExpiryLabel(cookie.expires),
+    ];
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  cookie.name,
+                  style: monoStyle(
+                    color: colors.textPrimary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                tooltip: 'Delete cookie',
+                onPressed: onDelete,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(),
+                padding: EdgeInsets.zero,
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            cookie.value,
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: 11,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            metadata.join(' · '),
+            style: TextStyle(
+              color: colors.textTertiary,
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageEntryRow extends StatelessWidget {
+  const _StorageEntryRow({
+    required this.entry,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final _StorageEntry entry;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  entry.key,
+                  style: monoStyle(
+                    color: colors.textPrimary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                tooltip: 'Edit storage entry',
+                onPressed: onEdit,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(),
+                padding: EdgeInsets.zero,
+              ),
+              const SizedBox(width: 6),
+              IconButton(
+                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                tooltip: 'Delete storage entry',
+                onPressed: onDelete,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(),
+                padding: EdgeInsets.zero,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SelectableText(
+            entry.value,
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageEntryEditorDialog extends StatefulWidget {
+  const _StorageEntryEditorDialog({
+    required this.title,
+    required this.initialKey,
+    required this.initialValue,
+    required this.keyEnabled,
+  });
+
+  final String title;
+  final String initialKey;
+  final String initialValue;
+  final bool keyEnabled;
+
+  @override
+  State<_StorageEntryEditorDialog> createState() =>
+      _StorageEntryEditorDialogState();
+}
+
+class _StorageEntryEditorDialogState extends State<_StorageEntryEditorDialog> {
+  late final TextEditingController _keyController;
+  late final TextEditingController _valueController;
+
+  @override
+  void initState() {
+    super.initState();
+    _keyController = TextEditingController(text: widget.initialKey);
+    _valueController = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _keyController.dispose();
+    _valueController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final key = _keyController.text.trim();
+    if (key.isEmpty) return;
+    Navigator.of(context).pop(
+      _StorageEntryDraft(
+        key: key,
+        value: _valueController.text,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _keyController,
+              autofocus: true,
+              readOnly: !widget.keyEnabled,
+              decoration: const InputDecoration(
+                labelText: 'Key',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _valueController,
+              maxLines: 4,
+              minLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Value',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }
@@ -2616,6 +3640,194 @@ class _ConsoleEntry {
   final int timestamp;
 }
 
+class _StorageSnapshot {
+  const _StorageSnapshot({
+    required this.url,
+    required this.origin,
+    required this.refreshedAt,
+    required this.cookies,
+    required this.indexedDbDatabases,
+    required this.localStorage,
+    required this.sessionStorage,
+    required this.usage,
+    required this.quota,
+    required this.usageBreakdown,
+    required this.warnings,
+  });
+
+  factory _StorageSnapshot.fromJson(Map<dynamic, dynamic> json) =>
+      _StorageSnapshot(
+        url: json['url']?.toString() ?? '',
+        origin: json['origin']?.toString(),
+        refreshedAt: _intValue(
+          json['refreshedAt'],
+          DateTime.now().millisecondsSinceEpoch,
+        ),
+        cookies: _storageCookieList(json['cookies']),
+        indexedDbDatabases: _indexedDbDatabaseList(json['indexedDbDatabases']),
+        localStorage: _storageEntryList(json['localStorage']),
+        sessionStorage: _storageEntryList(json['sessionStorage']),
+        usage: _intOrNull(json['usage']),
+        quota: _intOrNull(json['quota']),
+        usageBreakdown: _storageUsageList(json['usageBreakdown']),
+        warnings: _stringList(json['warnings']),
+      );
+
+  final String url;
+  final String? origin;
+  final int refreshedAt;
+  final List<_StorageCookie> cookies;
+  final List<_IndexedDbDatabase> indexedDbDatabases;
+  final List<_StorageEntry> localStorage;
+  final List<_StorageEntry> sessionStorage;
+  final int? usage;
+  final int? quota;
+  final List<_StorageUsage> usageBreakdown;
+  final List<String> warnings;
+}
+
+class _StorageCookie {
+  const _StorageCookie({
+    required this.name,
+    required this.value,
+    required this.domain,
+    required this.path,
+    required this.expires,
+    required this.size,
+    required this.httpOnly,
+    required this.secure,
+    required this.session,
+    required this.sameSite,
+  });
+
+  factory _StorageCookie.fromJson(Map<dynamic, dynamic> json) => _StorageCookie(
+    name: json['name']?.toString() ?? '',
+    value: json['value']?.toString() ?? '',
+    domain: json['domain']?.toString() ?? '',
+    path: json['path']?.toString() ?? '/',
+    expires: _intOrNull(json['expires']),
+    size: _intOrNull(json['size']),
+    httpOnly: json['httpOnly'] == true,
+    secure: json['secure'] == true,
+    session: json['session'] == true,
+    sameSite: json['sameSite']?.toString(),
+  );
+
+  final String name;
+  final String value;
+  final String domain;
+  final String path;
+  final int? expires;
+  final int? size;
+  final bool httpOnly;
+  final bool secure;
+  final bool session;
+  final String? sameSite;
+}
+
+class _StorageEntry {
+  const _StorageEntry({
+    required this.key,
+    required this.value,
+  });
+
+  factory _StorageEntry.fromJson(Map<dynamic, dynamic> json) => _StorageEntry(
+    key: json['key']?.toString() ?? '',
+    value: json['value']?.toString() ?? '',
+  );
+
+  final String key;
+  final String value;
+}
+
+class _StorageUsage {
+  const _StorageUsage({
+    required this.storageType,
+    required this.usage,
+  });
+
+  factory _StorageUsage.fromJson(Map<dynamic, dynamic> json) => _StorageUsage(
+    storageType: json['storageType']?.toString() ?? '',
+    usage: _intValue(json['usage'], 0),
+  );
+
+  final String storageType;
+  final int usage;
+}
+
+class _IndexedDbDatabase {
+  const _IndexedDbDatabase({
+    required this.name,
+    required this.version,
+    required this.objectStores,
+  });
+
+  factory _IndexedDbDatabase.fromJson(Map<dynamic, dynamic> json) =>
+      _IndexedDbDatabase(
+        name: json['name']?.toString() ?? '',
+        version: _intOrNull(json['version']),
+        objectStores: _indexedDbObjectStoreList(json['objectStores']),
+      );
+
+  final String name;
+  final int? version;
+  final List<_IndexedDbObjectStore> objectStores;
+}
+
+class _IndexedDbObjectStore {
+  const _IndexedDbObjectStore({
+    required this.name,
+    required this.keyPath,
+    required this.autoIncrement,
+    required this.indexes,
+  });
+
+  factory _IndexedDbObjectStore.fromJson(Map<dynamic, dynamic> json) =>
+      _IndexedDbObjectStore(
+        name: json['name']?.toString() ?? '',
+        keyPath: json['keyPath']?.toString(),
+        autoIncrement: json['autoIncrement'] == true,
+        indexes: _indexedDbIndexList(json['indexes']),
+      );
+
+  final String name;
+  final String? keyPath;
+  final bool autoIncrement;
+  final List<_IndexedDbIndex> indexes;
+}
+
+class _IndexedDbIndex {
+  const _IndexedDbIndex({
+    required this.name,
+    required this.keyPath,
+    required this.unique,
+    required this.multiEntry,
+  });
+
+  factory _IndexedDbIndex.fromJson(Map<dynamic, dynamic> json) =>
+      _IndexedDbIndex(
+        name: json['name']?.toString() ?? '',
+        keyPath: json['keyPath']?.toString(),
+        unique: json['unique'] == true,
+        multiEntry: json['multiEntry'] == true,
+      );
+
+  final String name;
+  final String? keyPath;
+  final bool unique;
+  final bool multiEntry;
+}
+
+class _StorageEntryDraft {
+  const _StorageEntryDraft({
+    required this.key,
+    required this.value,
+  });
+
+  final String key;
+  final String value;
+}
+
 abstract interface class _NetworkSummaryLike {
   String get method;
   String get url;
@@ -3107,6 +4319,59 @@ List<_NetworkWebSocketMessage> _webSocketMessageList(Object? value) {
       .toList(growable: false);
 }
 
+List<_StorageCookie> _storageCookieList(Object? value) {
+  if (value is! List) return const <_StorageCookie>[];
+  return value
+      .whereType<Map>()
+      .map(_StorageCookie.fromJson)
+      .toList(growable: false);
+}
+
+List<_IndexedDbDatabase> _indexedDbDatabaseList(Object? value) {
+  if (value is! List) return const <_IndexedDbDatabase>[];
+  return value
+      .whereType<Map>()
+      .map(_IndexedDbDatabase.fromJson)
+      .toList(growable: false);
+}
+
+List<_IndexedDbObjectStore> _indexedDbObjectStoreList(Object? value) {
+  if (value is! List) return const <_IndexedDbObjectStore>[];
+  return value
+      .whereType<Map>()
+      .map(_IndexedDbObjectStore.fromJson)
+      .toList(growable: false);
+}
+
+List<_IndexedDbIndex> _indexedDbIndexList(Object? value) {
+  if (value is! List) return const <_IndexedDbIndex>[];
+  return value
+      .whereType<Map>()
+      .map(_IndexedDbIndex.fromJson)
+      .toList(growable: false);
+}
+
+List<_StorageEntry> _storageEntryList(Object? value) {
+  if (value is! List) return const <_StorageEntry>[];
+  return value
+      .whereType<Map>()
+      .map(_StorageEntry.fromJson)
+      .toList(growable: false);
+}
+
+List<_StorageUsage> _storageUsageList(Object? value) {
+  if (value is! List) return const <_StorageUsage>[];
+  return value
+      .whereType<Map>()
+      .map(_StorageUsage.fromJson)
+      .toList(growable: false);
+}
+
+List<String> _stringList(Object? value) {
+  if (value is! List) return const <String>[];
+  return value.map((item) => item?.toString() ?? '').toList(growable: false);
+}
+
 String _webSocketMessagePayloadText(_NetworkWebSocketMessage message) {
   if (message.error != null && message.error!.isNotEmpty) {
     return message.error!;
@@ -3126,6 +4391,47 @@ String _formatConsoleTimestamp(int timestamp) {
   final mm = time.minute.toString().padLeft(2, '0');
   final ss = time.second.toString().padLeft(2, '0');
   return '$hh:$mm:$ss';
+}
+
+String _storageQuotaLabel(_StorageSnapshot snapshot) {
+  if (snapshot.usage == null || snapshot.quota == null || snapshot.quota == 0) {
+    return 'Unavailable';
+  }
+  final percent = ((snapshot.usage! / snapshot.quota!) * 100).clamp(0, 100);
+  return '${_formatNetworkBytes(snapshot.usage!)} / ${_formatNetworkBytes(snapshot.quota!)} (${percent.toStringAsFixed(percent >= 10 ? 0 : 1)}%)';
+}
+
+String _storageAreaLabel(String area) {
+  switch (area) {
+    case 'localStorage':
+      return 'localStorage';
+    case 'sessionStorage':
+      return 'sessionStorage';
+    default:
+      return 'storage';
+  }
+}
+
+String _storageUsageTypeLabel(String type) {
+  switch (type) {
+    case 'local_storage':
+      return 'localStorage';
+    case 'cache_storage':
+      return 'Cache Storage';
+    case 'service_workers':
+      return 'Service Workers';
+    default:
+      return type.replaceAll('_', ' ');
+  }
+}
+
+String _storageCookieExpiryLabel(int? expiresSeconds) {
+  if (expiresSeconds == null) return 'Session';
+  final time = DateTime.fromMillisecondsSinceEpoch(
+    expiresSeconds * 1000,
+    isUtc: true,
+  );
+  return 'Exp ${time.toIso8601String()}';
 }
 
 String _networkCurlCommand(_NetworkEntry entry, _NetworkDetail detail) {
