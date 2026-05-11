@@ -131,8 +131,9 @@ void main() {
     await controller.waitForIdle();
     await tester.pump();
 
-    expect(find.text('Favorites'), findsOneWidget);
-    expect(find.text('Recent'), findsOneWidget);
+    expect(find.text('Pinned'), findsOneWidget);
+    expect(find.text('Session favorite'), findsWidgets);
+    expect(find.text('Session recent'), findsOneWidget);
   });
 }
 
