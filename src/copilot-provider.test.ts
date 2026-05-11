@@ -598,6 +598,66 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("sends file and directory mentions through the SDK", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-file-input-"),
+    );
+    try {
+      const filePath = nodePath.join(dir, "README.md");
+      const directoryPath = nodePath.join(dir, "src");
+      await writeFile(filePath, "readme");
+      await mkdir(directoryPath);
+
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [
+          { type: "text", text: "inspect these", text_elements: [] },
+          { type: "file", path: filePath },
+          { type: "file", path: directoryPath, isDirectory: true },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      assert.equal(sdk.created[0]?.session.sent[0]?.prompt, "inspect these");
+      assert.deepEqual(sdk.created[0]?.session.sent[0]?.attachments, [
+        {
+          type: "file",
+          path: filePath,
+          displayName: "README.md",
+        },
+        {
+          type: "directory",
+          path: directoryPath,
+          displayName: "src",
+        },
+      ]);
+
+      const log = await provider.readSessionLog!(created.thread);
+      assert.equal(log.messages[0]?.text, "inspect these");
+      assert.deepEqual(log.messages[0]?.attachments, [
+        { type: "file", path: filePath },
+        { type: "file", path: directoryPath },
+      ]);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("fetches remote image URLs into SDK blob attachments", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-remote-image-"),

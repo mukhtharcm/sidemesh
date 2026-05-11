@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import { homedir, hostname, platform } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import nodePath from "node:path";
 
 import { getRequestListener } from "@hono/node-server";
@@ -182,6 +182,7 @@ interface SessionInputReceipt {
 
 interface SessionInputDedupeEntry {
   signatureHash: string;
+  rawSignatureHash?: string;
   createdAt: number;
   promise?: Promise<SessionInputReceipt>;
   receipt?: SessionInputReceipt;
@@ -278,6 +279,9 @@ export async function startServer(
   for (const entry of sessionInputDedupeStore.entries()) {
     sessionInputDedupe.set(entry.key, {
       signatureHash: entry.signatureHash,
+      ...(entry.rawSignatureHash
+        ? { rawSignatureHash: entry.rawSignatureHash }
+        : {}),
       createdAt: entry.createdAt,
       receipt: entry.receipt,
     });
@@ -2446,9 +2450,13 @@ export async function startServer(
         response.status(501).json({ error: unsupportedInput });
         return;
       }
+      const scopedInput = await resolveFileInputItemsForCwd(
+        resolvedInput,
+        cwd,
+      );
       const started = await provider.createSession!({
         cwd,
-        input: resolvedInput,
+        input: scopedInput,
         overrides,
         provider: selectedProvider.kind,
       });
@@ -2532,24 +2540,26 @@ export async function startServer(
         response.status(501).json({ error: unsupportedOverride });
         return;
       }
-      const inputSignatureHash = hashSessionInputSignature(
+      const rawInputSignatureHash = hashSessionInputSignature(
         resolvedInput,
         turnOverrides,
       );
       const dedupeKey = clientMessageId
         ? sessionInputDedupeKey(sessionId, clientMessageId)
         : null;
+      let existingDedupe: SessionInputDedupeEntry | undefined;
       if (dedupeKey) {
         pruneSessionInputDedupe();
-        const existing = sessionInputDedupe.get(dedupeKey);
-        if (existing) {
-          if (existing.signatureHash !== inputSignatureHash) {
+        existingDedupe = sessionInputDedupe.get(dedupeKey);
+        if (existingDedupe?.rawSignatureHash) {
+          if (existingDedupe.rawSignatureHash !== rawInputSignatureHash) {
             response.status(409).json({
               error: "clientMessageId was already used with different input",
             });
             return;
           }
-          const receipt = existing.receipt ?? (await existing.promise);
+          const receipt =
+            existingDedupe.receipt ?? (await existingDedupe.promise);
           if (receipt) {
             response.json({ ...receipt, replayed: true });
             return;
@@ -2557,16 +2567,50 @@ export async function startServer(
         }
       }
 
-      const submit = async (): Promise<SessionInputReceipt> => {
-        const submittedMessage = buildSubmittedUserMessage(
+      let scopedInput: AgentSessionInputItem[] | null = null;
+      let inputSignatureHash: string | null = null;
+      const resolveScopedInput = async (): Promise<AgentSessionInputItem[]> => {
+        if (scopedInput) {
+          return scopedInput;
+        }
+        scopedInput = await resolveFileInputItemsForSession(
+          provider,
+          sessionId,
           resolvedInput,
+        );
+        inputSignatureHash = hashSessionInputSignature(
+          scopedInput,
+          turnOverrides,
+        );
+        return scopedInput;
+      };
+
+      if (dedupeKey && existingDedupe && !existingDedupe.rawSignatureHash) {
+        await resolveScopedInput();
+        if (existingDedupe.signatureHash !== inputSignatureHash) {
+          response.status(409).json({
+            error: "clientMessageId was already used with different input",
+          });
+          return;
+        }
+        const receipt = existingDedupe.receipt ?? (await existingDedupe.promise);
+        if (receipt) {
+          response.json({ ...receipt, replayed: true });
+          return;
+        }
+      }
+
+      const submit = async (): Promise<SessionInputReceipt> => {
+        const inputForSubmit = await resolveScopedInput();
+        const submittedMessage = buildSubmittedUserMessage(
+          inputForSubmit,
           clientMessageId,
           allocSeq(sessionId),
         );
         const state = await loadRunState(provider, sessionId, activeTurns);
         const submitted = await provider.submitInput!({
           sessionId,
-          input: resolvedInput,
+          input: inputForSubmit,
           activeTurnId: state.turnId,
           overrides: turnOverrides,
         });
@@ -2601,7 +2645,8 @@ export async function startServer(
       const promise = submit();
       if (dedupeKey) {
         sessionInputDedupe.set(dedupeKey, {
-          signatureHash: inputSignatureHash,
+          signatureHash: rawInputSignatureHash,
+          rawSignatureHash: rawInputSignatureHash,
           createdAt: Date.now(),
           promise,
         });
@@ -2611,17 +2656,20 @@ export async function startServer(
       try {
         const receipt = await promise;
         if (dedupeKey) {
+          const finalSignatureHash = inputSignatureHash ?? rawInputSignatureHash;
           const createdAt =
             sessionInputDedupe.get(dedupeKey)?.createdAt ?? Date.now();
           sessionInputDedupe.set(dedupeKey, {
-            signatureHash: inputSignatureHash,
+            signatureHash: finalSignatureHash,
+            rawSignatureHash: rawInputSignatureHash,
             createdAt,
             receipt,
           });
           await persistSessionInputDedupeReceipt(
             sessionInputDedupeStore,
             dedupeKey,
-            inputSignatureHash,
+            finalSignatureHash,
+            rawInputSignatureHash,
             createdAt,
             receipt,
           );
@@ -4148,12 +4196,14 @@ async function persistSessionInputDedupeReceipt(
   store: SessionInputDedupeStore,
   key: string,
   signatureHash: string,
+  rawSignatureHash: string,
   createdAt: number,
   receipt: SessionInputReceipt,
 ): Promise<void> {
   const entry: StoredSessionInputDedupeEntry = {
     key,
     signatureHash,
+    rawSignatureHash,
     createdAt,
     updatedAt: Date.now(),
     receipt,
@@ -4712,12 +4762,77 @@ function parseInputItems(value: unknown): AgentSessionInputItem[] {
         items.push({ type: "skill", name, path });
         break;
       }
+      case "file": {
+        const path = asString(typed.path);
+        if (!path) {
+          continue;
+        }
+        items.push({
+          type: "file",
+          path,
+          ...(typed.isDirectory === true ? { isDirectory: true } : {}),
+        });
+        break;
+      }
       default:
         break;
     }
   }
 
   return items;
+}
+
+function hasFileInputItem(input: AgentSessionInputItem[]): boolean {
+  return input.some((item) => item.type === "file");
+}
+
+async function resolveFileInputItemsForSession(
+  provider: AgentProvider,
+  sessionId: string,
+  input: AgentSessionInputItem[],
+): Promise<AgentSessionInputItem[]> {
+  if (!hasFileInputItem(input)) {
+    return input;
+  }
+  const thread = await readSession(provider, sessionId, false);
+  if (!thread.cwd) {
+    throw new WorkspaceAccessError(
+      "session cwd is required for file mentions",
+      400,
+    );
+  }
+  return resolveFileInputItemsForCwd(input, thread.cwd);
+}
+
+async function resolveFileInputItemsForCwd(
+  input: AgentSessionInputItem[],
+  cwd: string,
+): Promise<AgentSessionInputItem[]> {
+  if (!hasFileInputItem(input)) {
+    return input;
+  }
+  const workspaceRoot = nodePath.resolve(cwd);
+  return Promise.all(
+    input.map(async (item): Promise<AgentSessionInputItem> => {
+      if (item.type !== "file") {
+        return item;
+      }
+      const candidate = nodePath.isAbsolute(item.path)
+        ? item.path
+        : nodePath.resolve(workspaceRoot, item.path);
+      const path = await resolveWorkspacePath(candidate, [workspaceRoot]);
+      const info = await stat(path);
+      if (!info.isFile() && !info.isDirectory()) {
+        throw new WorkspaceAccessError(
+          "file mention path must be a regular file or directory",
+          400,
+        );
+      }
+      return info.isDirectory()
+        ? { type: "file", path, isDirectory: true }
+        : { type: "file", path };
+    }),
+  );
 }
 
 function buildSubmittedUserMessageText(input: AgentSessionInputItem[]): string {
