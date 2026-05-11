@@ -2267,7 +2267,7 @@ async function sdkAttachments(
     }
     if (item.type === "file") {
       attachments.push({
-        type: "file",
+        type: item.isDirectory ? "directory" : "file",
         path: item.path,
         displayName: nodePath.basename(item.path),
       });

@@ -10,6 +10,7 @@ export interface SessionInputDedupeReceipt {
 export interface StoredSessionInputDedupeEntry {
   key: string;
   signatureHash: string;
+  rawSignatureHash?: string;
   createdAt: number;
   updatedAt: number;
   receipt: SessionInputDedupeReceipt;
@@ -171,6 +172,9 @@ function normalizeEntry(value: unknown): StoredSessionInputDedupeEntry | null {
   return {
     key: entry.key,
     signatureHash: entry.signatureHash,
+    ...(typeof entry.rawSignatureHash === "string"
+      ? { rawSignatureHash: entry.rawSignatureHash }
+      : {}),
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
     receipt: {
