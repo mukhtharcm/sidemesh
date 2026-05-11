@@ -22,6 +22,7 @@ const MAX_CLIENT_BUFFERED_AMOUNT = 8 * 1024 * 1024;
 const MAX_CONSOLE_BUFFER = 256;
 const CONSOLE_FLUSH_INTERVAL_MS = 500;
 const CONSOLE_FLUSH_THRESHOLD = 32;
+const MAX_NETWORK_ENTRIES = 300;
 
 const SIDEMESH_BROWSER_PROFILE_DIR = "sidemesh";
 
@@ -115,6 +116,10 @@ interface BrowserPreviewRecord {
   capturingFrame: boolean;
   consoleBuffer: Array<Record<string, unknown>>;
   consoleFlushTimer: NodeJS.Timeout | null;
+  networkEntries: Map<string, BrowserPreviewNetworkEntry>;
+  networkEntryIdsByRequestId: Map<string, string>;
+  networkRedirectCountsByRequestId: Map<string, number>;
+  networkUnavailableMessage: string | null;
   pageLoading: boolean;
   cleanupHandlers: Array<() => void>;
 }
@@ -123,6 +128,53 @@ interface PersistentBrowserHost {
   userDataDir: string;
   process: BrowserProcess;
   cdp: CdpConnection;
+}
+
+interface BrowserPreviewNetworkEntry {
+  requestId: string;
+  cdpRequestId: string;
+  redirectHop: number;
+  isRedirectResponse: boolean;
+  url: string;
+  method: string;
+  resourceType: string;
+  requestHeaders: Record<string, string>;
+  responseHeaders: Record<string, string>;
+  status: number | null;
+  statusText: string | null;
+  mimeType: string | null;
+  encodedDataLength: number | null;
+  durationMs: number | null;
+  startedAt: number;
+  startTimestampSeconds: number | null;
+  errorText: string | null;
+  finished: boolean;
+  failed: boolean;
+  servedFromCache: boolean;
+}
+
+interface BrowserPreviewNetworkDetail {
+  requestId: string;
+  url: string;
+  method: string;
+  resourceType: string;
+  status: number | null;
+  mimeType: string | null;
+  encodedDataLength: number | null;
+  durationMs: number | null;
+  startedAt: number;
+  errorText: string | null;
+  finished: boolean;
+  failed: boolean;
+  servedFromCache: boolean;
+  statusText: string | null;
+  requestHeaders: Record<string, string>;
+  responseHeaders: Record<string, string>;
+  requestBody: string | null;
+  requestBodyError: string | null;
+  body: string | null;
+  bodyBase64Encoded: boolean;
+  bodyError: string | null;
 }
 
 export class BrowserPreviewRegistry {
@@ -255,6 +307,10 @@ export class BrowserPreviewRegistry {
       capturingFrame: false,
       consoleBuffer: [],
       consoleFlushTimer: null,
+      networkEntries: new Map(),
+      networkEntryIdsByRequestId: new Map(),
+      networkRedirectCountsByRequestId: new Map(),
+      networkUnavailableMessage: null,
       pageLoading: false,
       cleanupHandlers: [],
     };
@@ -295,6 +351,17 @@ export class BrowserPreviewRegistry {
     preview.lastClientAt = Date.now();
     preview.updatedAt = preview.lastClientAt;
     sendJson(socket, { type: "hello", preview: this.info(preview) });
+    if (preview.networkUnavailableMessage) {
+      sendJson(socket, {
+        type: "networkStatus",
+        available: false,
+        message: preview.networkUnavailableMessage,
+      });
+    }
+    sendJson(socket, {
+      type: "networkSnapshot",
+      entries: this.networkSummaries(preview),
+    });
     if (preview.lastFramePayload) {
       sendJson(socket, preview.lastFramePayload);
     }
@@ -376,6 +443,21 @@ export class BrowserPreviewRegistry {
       await cdp.send("Page.enable", {}, sessionId);
       await cdp.send("Runtime.enable", {}, sessionId);
       await cdp.send("Log.enable", {}, sessionId);
+      try {
+        await cdp.send("Network.enable", {}, sessionId);
+        this.registerNetworkHandlers(preview, sessionId);
+      } catch (error) {
+        // Keep the browser preview running even if Network CDP support is
+        // unavailable on this Chromium build.
+        preview.networkUnavailableMessage = error instanceof Error && error.message
+          ? `Network inspection is unavailable: ${error.message}`
+          : "Network inspection is unavailable on this Chromium build.";
+        this.broadcast(preview, {
+          type: "networkStatus",
+          available: false,
+          message: preview.networkUnavailableMessage,
+        });
+      }
       this.registerConsoleHandlers(preview, sessionId);
       this.registerPageLoadHandlers(preview, sessionId);
       this.registerBrowserNavigationHandlers(preview, targetId, sessionId, {
@@ -526,8 +608,18 @@ export class BrowserPreviewRegistry {
     if (!message || typeof message !== "object" || Array.isArray(message)) {
       return;
     }
+    const record = message as Record<string, unknown>;
+    const type = stringValue(record.type);
     try {
-      await this.applyInput(preview, message as Record<string, unknown>);
+      if (type === "networkDetailRequest") {
+        await this.sendNetworkDetail(
+          preview,
+          socket,
+          stringValue(record.requestId),
+        );
+        return;
+      }
+      await this.applyInput(preview, record);
       await this.captureAndBroadcast(preview);
     } catch (error) {
       sendJson(socket, {
@@ -806,6 +898,373 @@ export class BrowserPreviewRegistry {
     });
   }
 
+  private networkSummaries(
+    preview: BrowserPreviewRecord,
+  ): Array<Record<string, unknown>> {
+    return [...preview.networkEntries.values()].map((entry) =>
+      this.networkSummary(entry),
+    );
+  }
+
+  private networkSummary(
+    entry: BrowserPreviewNetworkEntry,
+  ): Record<string, unknown> {
+    return {
+      requestId: entry.requestId,
+      url: entry.url,
+      method: entry.method,
+      resourceType: entry.resourceType,
+      status: entry.status,
+      mimeType: entry.mimeType,
+      encodedDataLength: entry.encodedDataLength,
+      durationMs: entry.durationMs,
+      startedAt: entry.startedAt,
+      errorText: entry.errorText,
+      finished: entry.finished,
+      failed: entry.failed,
+      servedFromCache: entry.servedFromCache,
+    };
+  }
+
+  private registerNetworkHandlers(
+    preview: BrowserPreviewRecord,
+    sessionId: string,
+  ): void {
+    const cdp = preview.cdp;
+    if (!cdp) return;
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Network.requestWillBeSent", (params) => {
+        const cdpRequestId = stringValue(params.requestId);
+        if (!cdpRequestId) return;
+
+        const redirectResponse = objectValue(params.redirectResponse);
+        const previousEntry = this.networkEntryForCdpRequest(preview, cdpRequestId);
+        if (previousEntry && redirectResponse) {
+          previousEntry.status = numberOrNull(redirectResponse.status);
+          previousEntry.statusText = stringOrNull(redirectResponse.statusText);
+          previousEntry.mimeType = stringOrNull(redirectResponse.mimeType);
+          previousEntry.responseHeaders = headerRecord(redirectResponse.headers);
+          previousEntry.servedFromCache =
+            previousEntry.servedFromCache ||
+            redirectResponse.fromDiskCache === true ||
+            redirectResponse.fromPrefetchCache === true ||
+            redirectResponse.fromServiceWorker === true;
+          previousEntry.finished = true;
+          previousEntry.failed = false;
+          previousEntry.errorText = null;
+          previousEntry.isRedirectResponse = true;
+          this.updateNetworkEntryDuration(
+            previousEntry,
+            numberOrNull(params.timestamp),
+          );
+          this.broadcast(preview, {
+            type: "network",
+            entry: this.networkSummary(previousEntry),
+          });
+        }
+
+        const request = objectValue(params.request);
+        const url = stringValue(request?.url);
+        if (!isTrackedBrowserPreviewNetworkUrl(url)) {
+          if (redirectResponse) {
+            preview.networkEntryIdsByRequestId.delete(cdpRequestId);
+          }
+          return;
+        }
+
+        const identity = this.nextNetworkEntryIdentity(preview, cdpRequestId);
+        const entry: BrowserPreviewNetworkEntry = {
+          requestId: identity.entryId,
+          cdpRequestId,
+          redirectHop: identity.redirectHop,
+          isRedirectResponse: false,
+          url,
+          method: stringValue(request?.method) || "GET",
+          resourceType: stringValue(params.type) || "Other",
+          requestHeaders: headerRecord(request?.headers),
+          responseHeaders: {},
+          status: null,
+          statusText: null,
+          mimeType: null,
+          encodedDataLength: null,
+          durationMs: null,
+          startedAt: browserPreviewNetworkStartedAt(params),
+          startTimestampSeconds: numberOrNull(params.timestamp),
+          errorText: null,
+          finished: false,
+          failed: false,
+          servedFromCache: false,
+        };
+        this.upsertNetworkEntry(preview, entry);
+        preview.networkEntryIdsByRequestId.set(cdpRequestId, entry.requestId);
+        this.broadcast(preview, {
+          type: "network",
+          entry: this.networkSummary(entry),
+        });
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Network.requestServedFromCache", (params) => {
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
+        if (!entry) return;
+        entry.servedFromCache = true;
+        this.broadcast(preview, {
+          type: "network",
+          entry: this.networkSummary(entry),
+        });
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Network.responseReceived", (params) => {
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
+        if (!entry) return;
+        const response = objectValue(params.response);
+        entry.status = numberOrNull(response?.status);
+        entry.statusText = stringOrNull(response?.statusText);
+        entry.mimeType = stringOrNull(response?.mimeType);
+        entry.responseHeaders = headerRecord(response?.headers);
+        entry.servedFromCache =
+          entry.servedFromCache ||
+          response?.fromDiskCache === true ||
+          response?.fromPrefetchCache === true ||
+          response?.fromServiceWorker === true;
+        this.broadcast(preview, {
+          type: "network",
+          entry: this.networkSummary(entry),
+        });
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Network.loadingFinished", (params) => {
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
+        if (!entry) return;
+        entry.encodedDataLength = numberOrNull(params.encodedDataLength);
+        entry.finished = true;
+        entry.failed = false;
+        entry.errorText = null;
+        this.updateNetworkEntryDuration(entry, numberOrNull(params.timestamp));
+        this.broadcast(preview, {
+          type: "network",
+          entry: this.networkSummary(entry),
+        });
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Network.loadingFailed", (params) => {
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
+        if (!entry) return;
+        entry.finished = true;
+        entry.failed = true;
+        entry.errorText = stringOrNull(params.errorText);
+        this.updateNetworkEntryDuration(entry, numberOrNull(params.timestamp));
+        this.broadcast(preview, {
+          type: "network",
+          entry: this.networkSummary(entry),
+        });
+      }),
+    );
+  }
+
+  private networkEntryForCdpRequest(
+    preview: BrowserPreviewRecord,
+    cdpRequestId: string,
+  ): BrowserPreviewNetworkEntry | null {
+    const entryId = preview.networkEntryIdsByRequestId.get(cdpRequestId);
+    if (!entryId) return null;
+    return preview.networkEntries.get(entryId) ?? null;
+  }
+
+  private nextNetworkEntryIdentity(
+    preview: BrowserPreviewRecord,
+    cdpRequestId: string,
+  ): { entryId: string; redirectHop: number } {
+    const redirectHop =
+      (preview.networkRedirectCountsByRequestId.get(cdpRequestId) ?? -1) + 1;
+    preview.networkRedirectCountsByRequestId.set(cdpRequestId, redirectHop);
+    return {
+      entryId:
+        redirectHop === 0
+          ? cdpRequestId
+          : `${cdpRequestId}:redirect:${redirectHop}`,
+      redirectHop,
+    };
+  }
+
+  private updateNetworkEntryDuration(
+    entry: BrowserPreviewNetworkEntry,
+    completedAtSeconds: number | null,
+  ): void {
+    if (
+      entry.startTimestampSeconds == null ||
+      completedAtSeconds == null ||
+      completedAtSeconds < entry.startTimestampSeconds
+    ) {
+      return;
+    }
+    entry.durationMs = Math.round(
+      (completedAtSeconds - entry.startTimestampSeconds) * 1000,
+    );
+  }
+
+  private upsertNetworkEntry(
+    preview: BrowserPreviewRecord,
+    entry: BrowserPreviewNetworkEntry,
+  ): void {
+    preview.networkEntries.set(entry.requestId, entry);
+    while (preview.networkEntries.size > MAX_NETWORK_ENTRIES) {
+      const oldestEntry = preview.networkEntries.values().next().value;
+      if (!oldestEntry) break;
+      preview.networkEntries.delete(oldestEntry.requestId);
+      if (
+        preview.networkEntryIdsByRequestId.get(oldestEntry.cdpRequestId) ===
+        oldestEntry.requestId
+      ) {
+        preview.networkEntryIdsByRequestId.delete(oldestEntry.cdpRequestId);
+      }
+    }
+  }
+
+  private async sendNetworkDetail(
+    preview: BrowserPreviewRecord,
+    socket: WebSocket,
+    requestId: string,
+  ): Promise<void> {
+    if (!requestId) {
+      sendJson(socket, {
+        type: "networkDetail",
+        requestId,
+        error: "network requestId is required",
+      });
+      return;
+    }
+    const entry = preview.networkEntries.get(requestId);
+    if (!entry) {
+      sendJson(socket, {
+        type: "networkDetail",
+        requestId,
+        error: "network request not found",
+      });
+      return;
+    }
+
+    const detail = this.networkDetailFromEntry(entry);
+    if (!preview.cdp || !preview.sessionIdCdp || preview.status !== "running") {
+      if (canBrowserPreviewRequestHaveBody(entry.method)) {
+        detail.requestBodyError = "Browser preview is no longer running.";
+      }
+      if (!entry.finished) {
+        detail.bodyError = "Response body is not available until the request finishes.";
+      } else if (entry.failed) {
+        detail.bodyError = "Response body is not available for failed requests.";
+      } else if (entry.isRedirectResponse) {
+        detail.bodyError = "Response body is not available for redirect responses.";
+      } else {
+        detail.bodyError = "Browser preview is no longer running.";
+      }
+      sendJson(socket, {
+        type: "networkDetail",
+        requestId,
+        detail,
+      });
+      return;
+    }
+
+    if (canBrowserPreviewRequestHaveBody(entry.method)) {
+      if (entry.isRedirectResponse) {
+        detail.requestBodyError =
+          "Request body is not available for redirect hops.";
+      } else {
+        try {
+          const result = await preview.cdp.send(
+            "Network.getRequestPostData",
+            { requestId: entry.cdpRequestId },
+            preview.sessionIdCdp,
+          );
+          detail.requestBody = typeof result.postData === "string"
+            ? result.postData
+            : null;
+          if (!detail.requestBody) {
+            detail.requestBodyError = "No request body captured for this request.";
+          }
+        } catch (error) {
+          detail.requestBodyError = error instanceof Error
+            ? error.message
+            : String(error);
+        }
+      }
+    }
+
+    if (!entry.finished) {
+      detail.bodyError = "Response body is not available until the request finishes.";
+    } else if (entry.failed) {
+      detail.bodyError = "Response body is not available for failed requests.";
+    } else if (entry.isRedirectResponse) {
+      detail.bodyError = "Response body is not available for redirect responses.";
+    } else {
+      try {
+        const result = await preview.cdp.send(
+          "Network.getResponseBody",
+          { requestId: entry.cdpRequestId },
+          preview.sessionIdCdp,
+        );
+        detail.body = typeof result.body === "string" ? result.body : null;
+        detail.bodyBase64Encoded = result.base64Encoded === true;
+      } catch (error) {
+        detail.bodyError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    sendJson(socket, {
+      type: "networkDetail",
+      requestId,
+      detail,
+    });
+  }
+
+  private networkDetailFromEntry(
+    entry: BrowserPreviewNetworkEntry,
+  ): BrowserPreviewNetworkDetail {
+    return {
+      requestId: entry.requestId,
+      url: entry.url,
+      method: entry.method,
+      resourceType: entry.resourceType,
+      status: entry.status,
+      mimeType: entry.mimeType,
+      encodedDataLength: entry.encodedDataLength,
+      durationMs: entry.durationMs,
+      startedAt: entry.startedAt,
+      errorText: entry.errorText,
+      finished: entry.finished,
+      failed: entry.failed,
+      servedFromCache: entry.servedFromCache,
+      statusText: entry.statusText,
+      requestHeaders: entry.requestHeaders,
+      responseHeaders: entry.responseHeaders,
+      requestBody: null,
+      requestBodyError: null,
+      body: null,
+      bodyBase64Encoded: false,
+      bodyError: null,
+    };
+  }
 
   private registerConsoleHandlers(
     preview: BrowserPreviewRecord,
@@ -1677,6 +2136,61 @@ function normalizeViewportSize(value: unknown, fallback: number): number {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(240, Math.min(2200, Math.round(parsed)));
+}
+
+function isTrackedBrowserPreviewNetworkUrl(url: string): boolean {
+  return !!url && !url.startsWith("data:") && !url.startsWith("about:");
+}
+
+function canBrowserPreviewRequestHaveBody(method: string): boolean {
+  switch (method.trim().toUpperCase()) {
+    case "POST":
+    case "PUT":
+    case "PATCH":
+    case "DELETE":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function browserPreviewNetworkStartedAt(
+  params: Record<string, unknown>,
+): number {
+  const wallTime = numberOrNull(params.wallTime);
+  if (wallTime != null) {
+    return Math.round(wallTime * 1000);
+  }
+  return Date.now();
+}
+
+function headerRecord(value: unknown): Record<string, string> {
+  const record = objectValue(value);
+  if (!record) return {};
+  const headers: Record<string, string> = {};
+  for (const [key, headerValue] of Object.entries(record)) {
+    if (typeof headerValue === "string") {
+      headers[key] = headerValue;
+      continue;
+    }
+    if (typeof headerValue === "number" || typeof headerValue === "boolean") {
+      headers[key] = String(headerValue);
+      continue;
+    }
+    if (Array.isArray(headerValue)) {
+      headers[key] = headerValue.map((item) => String(item)).join(", ");
+    }
+  }
+  return headers;
+}
+
+function stringOrNull(value: unknown): string | null {
+  const result = stringValue(value).trim();
+  return result ? result : null;
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function stringField(record: Record<string, unknown>, field: string): string {

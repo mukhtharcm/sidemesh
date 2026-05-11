@@ -1,0 +1,783 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:sidemesh_mobile/src/api_client.dart';
+import 'package:sidemesh_mobile/src/models.dart';
+import 'package:sidemesh_mobile/src/screens/browser_preview_screen.dart';
+import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
+import 'package:sidemesh_mobile/src/theme/app_theme.dart';
+import 'package:stream_channel/stream_channel.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+
+void main() {
+  setUp(() {
+    _installClipboardMock();
+  });
+
+  tearDown(() {
+    _clearClipboardMock();
+  });
+
+  testWidgets('browser preview renders a live network tab and detail sheet', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({
+      'type': 'hello',
+      'preview': _previewJson(),
+    });
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-1',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'POST',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 2048,
+          'durationMs': 31,
+          'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('main.js'), findsOneWidget);
+    expect(find.text('200'), findsOneWidget);
+
+    await tester.tap(find.text('main.js'));
+    await _pumpFrames(tester);
+
+    expect(api.sentMessages.last['type'], 'networkDetailRequest');
+    expect(api.sentMessages.last['requestId'], 'request-1');
+
+    api.emit({
+      'type': 'networkDetail',
+      'requestId': 'request-1',
+      'detail': {
+        'requestId': 'request-1',
+        'url': 'http://127.0.0.1:3000/assets/main.js',
+        'method': 'POST',
+        'resourceType': 'Script',
+        'status': 200,
+        'statusText': 'OK',
+        'mimeType': 'text/javascript',
+        'encodedDataLength': 2048,
+        'durationMs': 31,
+        'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+        'errorText': null,
+        'finished': true,
+        'failed': false,
+        'servedFromCache': false,
+        'requestHeaders': {
+          'accept': '*/*',
+          'content-type': 'application/json',
+        },
+        'responseHeaders': {'content-type': 'text/javascript'},
+        'requestBody': '{"query":"network ok"}',
+        'requestBodyError': null,
+        'body': 'console.log("network ok")',
+        'bodyBase64Encoded': false,
+        'bodyError': null,
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Request headers'), findsOneWidget);
+    expect(find.text('Request body'), findsOneWidget);
+    expect(find.text('Response body'), findsOneWidget);
+    expect(find.textContaining('network ok'), findsWidgets);
+
+    await tester.tap(find.byIcon(Icons.copy_all_rounded));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Copy as cURL'));
+    await _pumpFrames(tester);
+
+    final clipboard = await Clipboard.getData('text/plain');
+    expect(clipboard?.text, contains('curl'));
+    expect(clipboard?.text, contains('--data-raw'));
+    expect(clipboard?.text, contains('assets/main.js'));
+  });
+
+  testWidgets('browser preview network tab supports search and sort', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-1',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'GET',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 4096,
+          'durationMs': 80,
+          'startedAt': DateTime(2026, 1, 1, 0, 0, 2).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+        {
+          'requestId': 'request-2',
+          'url': 'http://127.0.0.1:3000/assets/site.css',
+          'method': 'GET',
+          'resourceType': 'Stylesheet',
+          'status': 200,
+          'mimeType': 'text/css',
+          'encodedDataLength': 512,
+          'durationMs': 12,
+          'startedAt': DateTime(2026, 1, 1, 0, 0, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+
+    final searchField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField &&
+          widget.decoration?.hintText == 'Search requests',
+    );
+    await tester.enterText(searchField, 'site');
+    await _pumpFrames(tester);
+
+    expect(find.text('site.css'), findsOneWidget);
+    expect(find.text('main.js'), findsNothing);
+
+    await tester.enterText(searchField, '');
+    await _pumpFrames(tester);
+
+    await tester.tap(find.text('Newest'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Largest').last);
+    await _pumpFrames(tester);
+
+    expect(
+      tester.getTopLeft(find.text('main.js')).dy,
+      lessThan(tester.getTopLeft(find.text('site.css')).dy),
+    );
+  });
+
+  testWidgets('browser preview replaces stale network rows from fresh snapshots', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-1',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'GET',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 2048,
+          'durationMs': 31,
+          'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+    expect(find.text('main.js'), findsOneWidget);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-2',
+          'url': 'http://127.0.0.1:3000/assets/site.css',
+          'method': 'GET',
+          'resourceType': 'Stylesheet',
+          'status': 200,
+          'mimeType': 'text/css',
+          'encodedDataLength': 512,
+          'durationMs': 12,
+          'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('main.js'), findsNothing);
+    expect(find.text('site.css'), findsOneWidget);
+  });
+
+  testWidgets('browser preview keeps cleared network rows hidden across reconnect snapshots', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+    final startedAt = DateTime(2026, 1, 1).millisecondsSinceEpoch;
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-1',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'GET',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 2048,
+          'durationMs': 31,
+          'startedAt': startedAt,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+    expect(find.text('main.js'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+    await _pumpFrames(tester);
+    expect(find.text('main.js'), findsNothing);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-1',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'GET',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 2048,
+          'durationMs': 31,
+          'startedAt': startedAt,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+    expect(find.text('main.js'), findsNothing);
+
+    api.emit({
+      'type': 'network',
+      'entry': {
+        'requestId': 'request-2',
+        'url': 'http://127.0.0.1:3000/assets/site.css',
+        'method': 'GET',
+        'resourceType': 'Stylesheet',
+        'status': 200,
+        'mimeType': 'text/css',
+        'encodedDataLength': 512,
+        'durationMs': 12,
+        'startedAt': startedAt,
+        'errorText': null,
+        'finished': true,
+        'failed': false,
+        'servedFromCache': false,
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('site.css'), findsOneWidget);
+  });
+
+  testWidgets('browser preview explains when network inspection is unavailable', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkStatus',
+      'available': false,
+      'message': 'Network inspection is unavailable: Network domain is not supported.',
+    });
+    await _pumpFrames(tester);
+
+    expect(
+      find.textContaining('Network inspection is unavailable'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('browser preview explains when network details are unavailable while paused', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-3',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'GET',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 2048,
+          'durationMs': 31,
+          'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.pause_circle_outline_rounded));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('main.js'));
+    await _pumpFrames(tester);
+
+    expect(
+      api.sentMessages.where((message) => message['type'] == 'networkDetailRequest'),
+      isEmpty,
+    );
+    expect(
+      find.textContaining('Viewer is disconnected. Resume the stream'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('browser preview surfaces network detail fetch errors', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'request-2',
+          'url': 'http://127.0.0.1:3000/assets/site.css',
+          'method': 'GET',
+          'resourceType': 'Stylesheet',
+          'status': 200,
+          'mimeType': 'text/css',
+          'encodedDataLength': 512,
+          'durationMs': 12,
+          'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.text('site.css'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkDetail',
+      'requestId': 'request-2',
+      'error': 'network request not found',
+    });
+    await _pumpFrames(tester);
+
+    expect(find.textContaining('network request not found'), findsOneWidget);
+  });
+}
+
+Future<void> _pumpFrames(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 50));
+  await tester.pump(const Duration(milliseconds: 250));
+  await tester.pump();
+}
+
+Future<void> _pumpApp(
+  WidgetTester tester,
+  Widget child, {
+  required Size size,
+}) async {
+  tester.view
+    ..devicePixelRatio = 1
+    ..physicalSize = size;
+  addTearDown(() {
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+  });
+
+  final palette = ThemeVariant.codexAmber;
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: buildLightTheme(palette.light),
+      darkTheme: buildDarkTheme(palette.dark),
+      home: TooltipVisibility(visible: false, child: child),
+    ),
+  );
+}
+
+HostProfile _host() => HostProfile(
+  id: 'browser-preview-network-test',
+  label: 'Fake Host',
+  baseUrl: 'http://127.0.0.1:4099',
+  token: 'test-token',
+);
+
+Map<String, Object?> _previewJson() => <String, Object?>{
+  'id': 'preview-1',
+  'label': 'Preview',
+  'url': 'http://127.0.0.1:3000/',
+  'targetHost': '127.0.0.1',
+  'targetPort': 3000,
+  'scheme': 'http',
+  'cwd': '/repo',
+  'sessionId': 'session-1',
+  'profileMode': 'temporary',
+  'status': 'running',
+  'width': 390,
+  'height': 844,
+  'clients': 1,
+  'createdAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+  'updatedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+  'lastClientAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+  'lastFrameAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+  'lastError': null,
+};
+
+HostBrowserPreviewInfo _preview() => HostBrowserPreviewInfo(
+  id: 'preview-1',
+  label: 'Preview',
+  url: 'http://127.0.0.1:3000/',
+  targetHost: '127.0.0.1',
+  targetPort: 3000,
+  scheme: 'http',
+  cwd: '/repo',
+  sessionId: 'session-1',
+  profileMode: 'temporary',
+  status: 'running',
+  width: 390,
+  height: 844,
+  clients: 1,
+  createdAt: DateTime(2026, 1, 1).millisecondsSinceEpoch,
+  updatedAt: DateTime(2026, 1, 1).millisecondsSinceEpoch,
+  lastClientAt: DateTime(2026, 1, 1).millisecondsSinceEpoch,
+  lastFrameAt: DateTime(2026, 1, 1).millisecondsSinceEpoch,
+  lastError: null,
+);
+
+String? _mockClipboardText;
+
+void _installClipboardMock() {
+  _mockClipboardText = null;
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        switch (call.method) {
+          case 'Clipboard.setData':
+            final arguments = call.arguments;
+            if (arguments is Map) {
+              _mockClipboardText = arguments['text']?.toString();
+            }
+            return null;
+          case 'Clipboard.getData':
+            return <String, dynamic>{'text': _mockClipboardText};
+          default:
+            return null;
+        }
+      });
+}
+
+void _clearClipboardMock() {
+  _mockClipboardText = null;
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(SystemChannels.platform, null);
+}
+
+class _BrowserPreviewFakeApi extends ApiClient {
+  final _ControllableWebSocketChannel _channel = _ControllableWebSocketChannel();
+  final List<Map<String, dynamic>> sentMessages = <Map<String, dynamic>>[];
+  StreamSubscription<dynamic>? _outgoingSubscription;
+
+  _BrowserPreviewFakeApi() {
+    _outgoingSubscription = _channel.outgoing.listen((message) {
+      if (message is String) {
+        sentMessages.add(jsonDecode(message) as Map<String, dynamic>);
+      }
+    });
+  }
+
+  @override
+  WebSocketChannel openBrowserPreviewLive(HostProfile host, String previewId) =>
+      _channel;
+
+  void emit(Map<String, Object?> event) {
+    _channel.emit(jsonEncode(event));
+  }
+
+  void dispose() {
+    unawaited(_outgoingSubscription?.cancel());
+    _channel.dispose();
+  }
+}
+
+class _ControllableWebSocketChannel extends StreamChannelMixin<dynamic>
+    implements WebSocketChannel {
+  final StreamController<dynamic> _incoming = StreamController<dynamic>();
+  final StreamController<dynamic> _outgoing = StreamController<dynamic>();
+
+  @override
+  Stream<dynamic> get stream => _incoming.stream;
+
+  Stream<dynamic> get outgoing => _outgoing.stream;
+
+  @override
+  WebSocketSink get sink => _TestWebSocketSink(_outgoing.sink);
+
+  @override
+  int? get closeCode => null;
+
+  @override
+  String? get closeReason => null;
+
+  @override
+  String? get protocol => null;
+
+  @override
+  Future<void> get ready async {}
+
+  void emit(String raw) {
+    _incoming.add(raw);
+  }
+
+  void dispose() {
+    unawaited(_incoming.close());
+    unawaited(_outgoing.close());
+  }
+}
+
+class _TestWebSocketSink implements WebSocketSink {
+  _TestWebSocketSink(this._delegate);
+
+  final StreamSink<dynamic> _delegate;
+
+  @override
+  Future<void> addStream(Stream<dynamic> stream) => _delegate.addStream(stream);
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) =>
+      _delegate.addError(error, stackTrace);
+
+  @override
+  Future<void> close([int? closeCode, String? closeReason]) =>
+      _delegate.close();
+
+  @override
+  Future<void> get done => _delegate.done;
+
+  @override
+  void add(dynamic data) => _delegate.add(data);
+}

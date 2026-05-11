@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart' hide Uint8List;
@@ -86,6 +86,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   final _browserFocusNode = FocusNode(debugLabel: 'browser-preview-input');
   final _urlFocusNode = FocusNode();
   final _urlController = TextEditingController();
+  final _networkSearchController = TextEditingController();
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   Timer? _firstFrameTimer;
@@ -108,6 +109,20 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   bool _pageLoading = false;
   final List<_ConsoleEntry> _consoleEntries = [];
   final int _maxConsoleEntries = 200;
+  final Map<String, _NetworkEntry> _networkEntries = <String, _NetworkEntry>{};
+  final List<String> _networkEntryOrder = <String>[];
+  final Map<String, _NetworkDetail> _networkDetails =
+      <String, _NetworkDetail>{};
+  final StreamController<_NetworkDetailUpdate> _networkDetailUpdates =
+      StreamController<_NetworkDetailUpdate>.broadcast();
+  final int _maxNetworkEntries = 300;
+  String _networkFilter = 'All';
+  String _networkSearchQuery = '';
+  String _networkSort = 'Newest';
+  int? _networkClearedStartedAtFloor;
+  final Set<String> _networkClearedRequestIdsAtFloor = <String>{};
+  bool _networkAvailable = true;
+  String? _networkUnavailableMessage;
 
   @override
   void initState() {
@@ -124,6 +139,12 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _frameWidth = _preview.width;
     _frameHeight = _preview.height;
     _urlController.text = _preview.url;
+    _networkSearchController.addListener(() {
+      final value = _networkSearchController.text;
+      if (value == _networkSearchQuery) return;
+      if (!mounted) return;
+      setState(() => _networkSearchQuery = value);
+    });
     _connect();
   }
 
@@ -134,6 +155,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _inputFocusNode.dispose();
     _browserFocusNode.dispose();
     _urlFocusNode.dispose();
+    _networkSearchController.dispose();
     _firstFrameTimer?.cancel();
     HostReconnectScheduler.instance.unregisterSlot(
       widget.host.id,
@@ -141,6 +163,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     );
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
+    unawaited(_networkDetailUpdates.close());
     if (widget.stopOnDispose) {
       unawaited(widget.api.stopBrowserPreview(widget.host, widget.preview.id));
     }
@@ -186,6 +209,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             ? 'Connecting to remote browser...'
             : 'Reconnecting stream...';
         _error = null;
+        _networkAvailable = true;
+        _networkUnavailableMessage = null;
       });
     }
     _subscription = channel.stream.listen(
@@ -326,6 +351,32 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       _handleConsole(frame);
       return;
     }
+    if (type == 'networkStatus') {
+      final available = frame['available'] != false;
+      final message = frame['message']?.toString().trim();
+      if (!mounted) return;
+      setState(() {
+        _networkAvailable = available;
+        _networkUnavailableMessage = available
+            ? null
+            : ((message != null && message.isNotEmpty)
+                  ? message
+                  : 'Network inspection is unavailable on this browser.');
+      });
+      return;
+    }
+    if (type == 'networkSnapshot') {
+      _handleNetworkSnapshot(frame);
+      return;
+    }
+    if (type == 'network') {
+      _handleNetworkEvent(frame);
+      return;
+    }
+    if (type == 'networkDetail') {
+      _handleNetworkDetail(frame);
+      return;
+    }
     if (type == 'loading') {
       final state = frame['state'];
       if (!mounted) return;
@@ -373,6 +424,219 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         _consoleEntries.removeAt(0);
       }
     });
+  }
+
+  void _handleNetworkSnapshot(Map<dynamic, dynamic> frame) {
+    if (!mounted) return;
+    final entries = frame['entries'];
+    if (entries is! List) return;
+    setState(() {
+      _networkEntries.clear();
+      _networkEntryOrder.clear();
+      _networkDetails.clear();
+      for (final item in entries) {
+        if (item is! Map) continue;
+        final parsed = _NetworkEntry.fromJson(item);
+        if (!_shouldIncludeNetworkEntry(parsed)) continue;
+        _upsertNetworkEntry(parsed);
+      }
+    });
+  }
+
+  void _handleNetworkEvent(Map<dynamic, dynamic> frame) {
+    if (!mounted) return;
+    final rawEntry = frame['entry'];
+    if (rawEntry is! Map) return;
+    final entry = _NetworkEntry.fromJson(rawEntry);
+    if (!_shouldIncludeNetworkEntry(entry)) return;
+    setState(() {
+      _upsertNetworkEntry(entry);
+    });
+  }
+
+  void _handleNetworkDetail(Map<dynamic, dynamic> frame) {
+    final requestId = frame['requestId']?.toString() ?? '';
+    if (requestId.isEmpty) return;
+    final rawDetail = frame['detail'];
+    final error = frame['error']?.toString();
+    if (rawDetail is! Map) {
+      final entry = _networkEntries[requestId];
+      if (entry != null) {
+        final fallbackDetail = _networkDetailFromEntry(entry, bodyError: error);
+        _networkDetails[requestId] = fallbackDetail;
+        _networkDetailUpdates.add(
+          _NetworkDetailUpdate(
+            requestId: requestId,
+            detail: fallbackDetail,
+            error: error,
+          ),
+        );
+        return;
+      }
+      _networkDetailUpdates.add(
+        _NetworkDetailUpdate(requestId: requestId, error: error),
+      );
+      return;
+    }
+    final detail = _NetworkDetail.fromJson(rawDetail);
+    _networkDetails[requestId] = detail;
+    _networkDetailUpdates.add(
+      _NetworkDetailUpdate(requestId: requestId, detail: detail, error: error),
+    );
+  }
+
+  _NetworkDetail _networkDetailFromEntry(
+    _NetworkEntry entry, {
+    String? bodyError,
+  }) {
+    return _NetworkDetail(
+      requestId: entry.requestId,
+      method: entry.method,
+      url: entry.url,
+      resourceType: entry.resourceType,
+      requestHeaders: const <String, String>{},
+      responseHeaders: const <String, String>{},
+      startedAt: entry.startedAt,
+      status: entry.status,
+      mimeType: entry.mimeType,
+      encodedDataLength: entry.encodedDataLength,
+      durationMs: entry.durationMs,
+      errorText: entry.errorText,
+      requestBody: null,
+      requestBodyError: null,
+      bodyError: bodyError,
+      finished: entry.finished,
+      failed: entry.failed,
+      servedFromCache: entry.servedFromCache,
+    );
+  }
+
+  void _upsertNetworkEntry(_NetworkEntry entry) {
+    final existing = _networkEntries[entry.requestId];
+    _networkEntries[entry.requestId] = existing == null
+        ? entry
+        : existing.merge(entry);
+    if (!_networkEntryOrder.contains(entry.requestId)) {
+      _networkEntryOrder.add(entry.requestId);
+    }
+    while (_networkEntryOrder.length > _maxNetworkEntries) {
+      final removedRequestId = _networkEntryOrder.removeAt(0);
+      _networkEntries.remove(removedRequestId);
+      _networkDetails.remove(removedRequestId);
+    }
+  }
+
+  List<_NetworkEntry> get _filteredNetworkEntries {
+    final filtered = _networkEntryOrder
+        .map((requestId) => _networkEntries[requestId])
+        .whereType<_NetworkEntry>()
+        .where((entry) => _matchesNetworkFilter(entry, _networkFilter))
+        .where((entry) => _matchesNetworkSearch(entry, _networkSearchQuery))
+        .toList(growable: true);
+    _sortNetworkEntries(filtered, _networkSort);
+    return filtered;
+  }
+
+  bool _shouldIncludeNetworkEntry(_NetworkEntry entry) {
+    final floor = _networkClearedStartedAtFloor;
+    if (floor == null) return true;
+    if (entry.startedAt > floor) return true;
+    if (entry.startedAt < floor) return false;
+    return !_networkClearedRequestIdsAtFloor.contains(entry.requestId);
+  }
+
+  void _clearNetworkLog() {
+    var latestStartedAt = _networkClearedStartedAtFloor;
+    final requestIdsAtFloor = <String>{};
+    for (final entry in _networkEntries.values) {
+      if (latestStartedAt == null || entry.startedAt > latestStartedAt) {
+        latestStartedAt = entry.startedAt;
+        requestIdsAtFloor
+          ..clear()
+          ..add(entry.requestId);
+        continue;
+      }
+      if (entry.startedAt == latestStartedAt) {
+        requestIdsAtFloor.add(entry.requestId);
+      }
+    }
+    setState(() {
+      if (latestStartedAt == null) {
+        _networkClearedStartedAtFloor = null;
+        _networkClearedRequestIdsAtFloor.clear();
+      } else if (_networkClearedStartedAtFloor == latestStartedAt) {
+        _networkClearedRequestIdsAtFloor.addAll(requestIdsAtFloor);
+      } else {
+        _networkClearedStartedAtFloor = latestStartedAt;
+        _networkClearedRequestIdsAtFloor
+          ..clear()
+          ..addAll(requestIdsAtFloor);
+      }
+      _networkEntries.clear();
+      _networkEntryOrder.clear();
+      _networkDetails.clear();
+    });
+  }
+
+  void _showNetworkDetail(_NetworkEntry entry) {
+    const disconnectedDetailMessage =
+        'Viewer is disconnected. Resume the stream to inspect request details.';
+    final cachedDetail = _networkDetails[entry.requestId];
+    final shouldRequestDetail =
+        _channel != null &&
+        (cachedDetail == null ||
+            (cachedDetail.body == null &&
+                cachedDetail.bodyError != null &&
+                entry.finished &&
+                !entry.failed));
+    final detailNotifier = ValueNotifier<_NetworkDetail?>(
+      cachedDetail ??
+          (_channel == null
+              ? _networkDetailFromEntry(
+                  entry,
+                  bodyError: disconnectedDetailMessage,
+                )
+              : null),
+    );
+    final subscription = _networkDetailUpdates.stream
+        .where((update) => update.requestId == entry.requestId)
+        .listen((update) {
+          if (update.detail != null) {
+            detailNotifier.value = update.detail;
+            return;
+          }
+          if (update.error != null && detailNotifier.value == null) {
+            detailNotifier.value = _networkDetailFromEntry(
+              entry,
+              bodyError: update.error,
+            );
+          }
+        });
+    if (shouldRequestDetail &&
+        !_sendMessage({
+          'type': 'networkDetailRequest',
+          'requestId': entry.requestId,
+        }) &&
+        detailNotifier.value == null) {
+      detailNotifier.value = _networkDetailFromEntry(
+        entry,
+        bodyError: disconnectedDetailMessage,
+      );
+    }
+    unawaited(
+      showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _NetworkDetailSheet(
+          entry: entry,
+          detailListenable: detailNotifier,
+        ),
+      ).whenComplete(() async {
+        await subscription.cancel();
+        detailNotifier.dispose();
+      }),
+    );
   }
 
   void _scheduleFirstFrameWatchdog() {
@@ -499,14 +763,19 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     });
   }
 
-  void _send(Map<String, dynamic> message) {
+  bool _sendMessage(Map<String, dynamic> message) {
     final channel = _channel;
-    if (channel == null) return;
+    if (channel == null) return false;
     try {
       channel.sink.add(jsonEncode(message));
+      return true;
     } catch (_) {
-      // noop
+      return false;
     }
+  }
+
+  void _send(Map<String, dynamic> message) {
+    _sendMessage(message);
   }
 
   void _sendNavigation(String action) {
@@ -813,7 +1082,27 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             tabIndex: _devToolsTabIndex,
             onTabChanged: _setDevToolsTab,
             consoleEntries: _consoleEntries,
+            networkEntries: _filteredNetworkEntries,
+            networkAvailable: _networkAvailable,
+            networkUnavailableMessage: _networkUnavailableMessage,
+            networkFilter: _networkFilter,
+            networkSearchController: _networkSearchController,
+            networkSearchQuery: _networkSearchQuery,
+            networkSort: _networkSort,
+            onNetworkFilterChanged: (value) =>
+                setState(() => _networkFilter = value),
+            onNetworkSearchChanged: (value) {
+              if (_networkSearchController.text == value) return;
+              _networkSearchController.value = TextEditingValue(
+                text: value,
+                selection: TextSelection.collapsed(offset: value.length),
+              );
+            },
+            onNetworkSortChanged: (value) =>
+                setState(() => _networkSort = value),
             onClearConsole: () => setState(() => _consoleEntries.clear()),
+            onClearNetwork: _clearNetworkLog,
+            onOpenNetworkDetail: _showNetworkDetail,
             preview: _preview,
           ),
       ],
@@ -1240,21 +1529,46 @@ class _DevToolsPanel extends StatelessWidget {
     required this.tabIndex,
     required this.onTabChanged,
     required this.consoleEntries,
+    required this.networkEntries,
+    required this.networkAvailable,
+    required this.networkUnavailableMessage,
+    required this.networkFilter,
+    required this.networkSearchController,
+    required this.networkSearchQuery,
+    required this.networkSort,
+    required this.onNetworkFilterChanged,
+    required this.onNetworkSearchChanged,
+    required this.onNetworkSortChanged,
     required this.onClearConsole,
+    required this.onClearNetwork,
+    required this.onOpenNetworkDetail,
     required this.preview,
   });
 
   final int tabIndex;
   final ValueChanged<int> onTabChanged;
   final List<_ConsoleEntry> consoleEntries;
+  final List<_NetworkEntry> networkEntries;
+  final bool networkAvailable;
+  final String? networkUnavailableMessage;
+  final String networkFilter;
+  final TextEditingController networkSearchController;
+  final String networkSearchQuery;
+  final String networkSort;
+  final ValueChanged<String> onNetworkFilterChanged;
+  final ValueChanged<String> onNetworkSearchChanged;
+  final ValueChanged<String> onNetworkSortChanged;
   final VoidCallback onClearConsole;
+  final VoidCallback onClearNetwork;
+  final void Function(_NetworkEntry entry) onOpenNetworkDetail;
   final HostBrowserPreviewInfo preview;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final showingConsole = tabIndex == 0;
     return Container(
-      height: 280,
+      height: 380,
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(
@@ -1274,14 +1588,19 @@ class _DevToolsPanel extends StatelessWidget {
               children: [
                 _DevTab(
                   label: 'Console',
-                  active: tabIndex == 0,
+                  active: showingConsole,
                   onTap: () => onTabChanged(0),
+                ),
+                _DevTab(
+                  label: 'Network',
+                  active: tabIndex == 1,
+                  onTap: () => onTabChanged(1),
                 ),
                 const Spacer(),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Text(
-                    'Network · Storage · Inspector coming soon',
+                    'Storage · Inspector later',
                     style: TextStyle(
                       color: colors.textTertiary,
                       fontSize: 11,
@@ -1290,8 +1609,8 @@ class _DevToolsPanel extends StatelessWidget {
                 ),
                 IconButton(
                   icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                  tooltip: 'Clear console',
-                  onPressed: onClearConsole,
+                  tooltip: showingConsole ? 'Clear console' : 'Clear network log',
+                  onPressed: showingConsole ? onClearConsole : onClearNetwork,
                   visualDensity: VisualDensity.compact,
                 ),
                 const SizedBox(width: 4),
@@ -1299,10 +1618,24 @@ class _DevToolsPanel extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: _ConsoleTab(
-              entries: consoleEntries,
-              preview: preview,
-            ),
+            child: showingConsole
+                ? _ConsoleTab(
+                    entries: consoleEntries,
+                    preview: preview,
+                  )
+                : _NetworkTab(
+                    entries: networkEntries,
+                    networkAvailable: networkAvailable,
+                    networkUnavailableMessage: networkUnavailableMessage,
+                    filter: networkFilter,
+                    searchController: networkSearchController,
+                    searchQuery: networkSearchQuery,
+                    sort: networkSort,
+                    onFilterChanged: onNetworkFilterChanged,
+                    onSearchChanged: onNetworkSearchChanged,
+                    onSortChanged: onNetworkSortChanged,
+                    onOpenDetail: onOpenNetworkDetail,
+                  ),
           ),
         ],
       ),
@@ -1443,6 +1776,667 @@ class _ConsoleRow extends StatelessWidget {
   }
 }
 
+class _NetworkTab extends StatelessWidget {
+  const _NetworkTab({
+    required this.entries,
+    required this.networkAvailable,
+    required this.networkUnavailableMessage,
+    required this.filter,
+    required this.searchController,
+    required this.searchQuery,
+    required this.sort,
+    required this.onFilterChanged,
+    required this.onSearchChanged,
+    required this.onSortChanged,
+    required this.onOpenDetail,
+  });
+
+  final List<_NetworkEntry> entries;
+  final bool networkAvailable;
+  final String? networkUnavailableMessage;
+  final String filter;
+  final TextEditingController searchController;
+  final String searchQuery;
+  final String sort;
+  final ValueChanged<String> onFilterChanged;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<String> onSortChanged;
+  final void Function(_NetworkEntry entry) onOpenDetail;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: colors.border),
+            ),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: searchController,
+                      onChanged: onSearchChanged,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        hintText: 'Search requests',
+                        prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                        border: const OutlineInputBorder(),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 10,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: sort,
+                        onChanged: (value) {
+                          if (value != null) onSortChanged(value);
+                        },
+                        items: _networkSortOptions
+                            .map(
+                              (option) => DropdownMenuItem<String>(
+                                value: option,
+                                child: Text(option),
+                              ),
+                            )
+                            .toList(growable: false),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final option in _networkFilterOptions)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: FilterChip(
+                          label: Text(option),
+                          selected: filter == option,
+                          onSelected: (_) => onFilterChanged(option),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: !networkAvailable
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Text(
+                      networkUnavailableMessage ??
+                          'Network inspection is unavailable on this browser.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: colors.textSecondary),
+                    ),
+                  ),
+                )
+              : entries.isEmpty
+              ? Center(
+                  child: Text(
+                    searchQuery.trim().isEmpty
+                        ? 'No network requests yet.'
+                        : 'No requests match your search.',
+                    style: TextStyle(color: colors.textSecondary),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  itemCount: entries.length,
+                  itemBuilder: (context, index) {
+                    final entry = entries[index];
+                    return _NetworkRow(
+                      entry: entry,
+                      onTap: () => onOpenDetail(entry),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _NetworkRow extends StatelessWidget {
+  const _NetworkRow({
+    required this.entry,
+    required this.onTap,
+  });
+
+  final _NetworkEntry entry;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final statusColor = _networkStatusColor(colors, entry);
+    final statusLabel = _networkStatusLabel(entry);
+    final subtitleParts = <String>[
+      _networkResourceTypeLabel(entry.resourceType),
+      if (entry.servedFromCache) 'cache',
+      if (entry.encodedDataLength != null)
+        _formatNetworkBytes(entry.encodedDataLength!),
+      if (entry.durationMs != null) '${entry.durationMs} ms',
+      if (entry.failed && entry.errorText != null) entry.errorText!,
+    ];
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              margin: const EdgeInsets.only(top: 5),
+              decoration: BoxDecoration(
+                color: statusColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colors.canvas,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Text(
+                          entry.method,
+                          style: monoStyle(
+                            color: colors.textSecondary,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _networkDisplayName(entry.url),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: colors.textPrimary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    _networkDisplayLocation(entry.url),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitleParts.join(' · '),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: colors.textTertiary,
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              statusLabel,
+              style: monoStyle(
+                color: statusColor,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NetworkDetailSheet extends StatelessWidget {
+  const _NetworkDetailSheet({
+    required this.entry,
+    required this.detailListenable,
+  });
+
+  final _NetworkEntry entry;
+  final ValueListenable<_NetworkDetail?> detailListenable;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final maxHeight = MediaQuery.sizeOf(context).height * 0.85;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: ValueListenableBuilder<_NetworkDetail?>(
+            valueListenable: detailListenable,
+            builder: (context, detail, _) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 14, 18, 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _networkDisplayName(entry.url),
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      color: colors.textPrimary,
+                                      fontWeight: AppWeights.title,
+                                    ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            _NetworkDetailActionsButton(
+                              entry: entry,
+                              detail: detail,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        SelectableText(
+                          entry.url,
+                          style: monoStyle(
+                            color: colors.textSecondary,
+                            fontSize: 11,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _NetworkMetaChip(label: entry.method),
+                            _NetworkMetaChip(
+                              label: _networkStatusLabel(detail ?? entry),
+                            ),
+                            _NetworkMetaChip(
+                              label: _networkResourceTypeLabel(
+                                detail?.resourceType ?? entry.resourceType,
+                              ),
+                            ),
+                            if ((detail?.mimeType ?? entry.mimeType) != null)
+                              _NetworkMetaChip(
+                                label: detail?.mimeType ?? entry.mimeType!,
+                              ),
+                            if ((detail?.encodedDataLength ??
+                                    entry.encodedDataLength) !=
+                                null)
+                              _NetworkMetaChip(
+                                label: _formatNetworkBytes(
+                                  detail?.encodedDataLength ??
+                                      entry.encodedDataLength!,
+                                ),
+                              ),
+                            if ((detail?.durationMs ?? entry.durationMs) != null)
+                              _NetworkMetaChip(
+                                label:
+                                    '${detail?.durationMs ?? entry.durationMs} ms',
+                              ),
+                            if ((detail?.servedFromCache ??
+                                    entry.servedFromCache))
+                              const _NetworkMetaChip(label: 'cache'),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(height: 1, color: colors.border),
+                  Expanded(
+                    child: detail == null
+                        ? const Center(child: CircularProgressIndicator())
+                        : ListView(
+                            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+                            children: [
+                              if (detail.errorText != null &&
+                                  detail.errorText!.isNotEmpty)
+                                _NetworkSection(
+                                  title: 'Request error',
+                                  child: SelectableText(
+                                    detail.errorText!,
+                                    style: TextStyle(color: colors.danger),
+                                  ),
+                                ),
+                              if (detail.requestHeaders.isNotEmpty)
+                                _NetworkSection(
+                                  title: 'Request headers',
+                                  child: _HeaderList(
+                                    headers: detail.requestHeaders,
+                                  ),
+                                ),
+                              if (_networkShouldShowRequestBody(detail))
+                                _NetworkSection(
+                                  title: 'Request body',
+                                  child: _NetworkPayloadView(
+                                    body: detail.requestBody,
+                                    bodyError: detail.requestBodyError,
+                                    mimeType: _networkRequestMimeType(detail),
+                                    bodyBase64Encoded: false,
+                                    emptyMessage:
+                                        'No request body captured for this request.',
+                                  ),
+                                ),
+                              if (detail.responseHeaders.isNotEmpty)
+                                _NetworkSection(
+                                  title: 'Response headers',
+                                  child: _HeaderList(
+                                    headers: detail.responseHeaders,
+                                  ),
+                                ),
+                              _NetworkSection(
+                                title: 'Response body',
+                                child: _NetworkPayloadView(
+                                  body: detail.body,
+                                  bodyError: detail.bodyError,
+                                  mimeType: detail.mimeType ?? '',
+                                  bodyBase64Encoded: detail.bodyBase64Encoded,
+                                  emptyMessage:
+                                      'No response body captured for this request.',
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NetworkMetaChip extends StatelessWidget {
+  const _NetworkMetaChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: colors.border),
+      ),
+      child: Text(
+        label,
+        style: monoStyle(
+          color: colors.textSecondary,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _NetworkSection extends StatelessWidget {
+  const _NetworkSection({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: AppWeights.title,
+            ),
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _NetworkDetailActionsButton extends StatelessWidget {
+  const _NetworkDetailActionsButton({required this.entry, required this.detail});
+
+  final _NetworkEntry entry;
+  final _NetworkDetail? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_NetworkCopyAction>(
+      tooltip: 'Copy request details',
+      icon: const Icon(Icons.copy_all_rounded, size: 18),
+      onSelected: (action) => _copyNetworkDetailAction(
+        context,
+        action,
+        entry,
+        detail,
+      ),
+      itemBuilder: (context) {
+        final items = <PopupMenuEntry<_NetworkCopyAction>>[
+          const PopupMenuItem<_NetworkCopyAction>(
+            value: _NetworkCopyAction.url,
+            child: Text('Copy URL'),
+          ),
+          const PopupMenuItem<_NetworkCopyAction>(
+            value: _NetworkCopyAction.requestHeaders,
+            child: Text('Copy request headers'),
+          ),
+          const PopupMenuItem<_NetworkCopyAction>(
+            value: _NetworkCopyAction.responseHeaders,
+            child: Text('Copy response headers'),
+          ),
+        ];
+        if (detail?.requestBody != null) {
+          items.add(
+            const PopupMenuItem<_NetworkCopyAction>(
+              value: _NetworkCopyAction.requestBody,
+              child: Text('Copy request body'),
+            ),
+          );
+        }
+        if (detail?.body != null) {
+          items.add(
+            const PopupMenuItem<_NetworkCopyAction>(
+              value: _NetworkCopyAction.responseBody,
+              child: Text('Copy response body'),
+            ),
+          );
+        }
+        if (detail != null) {
+          items.add(
+            const PopupMenuItem<_NetworkCopyAction>(
+              value: _NetworkCopyAction.curl,
+              child: Text('Copy as cURL'),
+            ),
+          );
+        }
+        return items;
+      },
+    );
+  }
+}
+
+class _HeaderList extends StatelessWidget {
+  const _HeaderList({required this.headers});
+
+  final Map<String, String> headers;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      children: headers.entries.map((entry) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 2,
+                child: SelectableText(
+                  entry.key,
+                  style: monoStyle(
+                    color: colors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 3,
+                child: SelectableText(
+                  entry.value,
+                  style: monoStyle(
+                    color: colors.textPrimary,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(growable: false),
+    );
+  }
+}
+
+class _NetworkPayloadView extends StatelessWidget {
+  const _NetworkPayloadView({
+    required this.body,
+    required this.bodyError,
+    required this.mimeType,
+    required this.bodyBase64Encoded,
+    required this.emptyMessage,
+  });
+
+  final String? body;
+  final String? bodyError;
+  final String mimeType;
+  final bool bodyBase64Encoded;
+  final String emptyMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (bodyError != null && bodyError!.isNotEmpty) {
+      return SelectableText(
+        bodyError!,
+        style: TextStyle(color: colors.textSecondary),
+      );
+    }
+    if (body == null) {
+      return Text(
+        emptyMessage,
+        style: TextStyle(color: colors.textSecondary),
+      );
+    }
+    if (bodyBase64Encoded && mimeType.startsWith('image/')) {
+      try {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.memory(base64Decode(body!)),
+        );
+      } catch (_) {
+        return Text(
+          'Could not decode the image response body.',
+          style: TextStyle(color: colors.textSecondary),
+        );
+      }
+    }
+    if (bodyBase64Encoded) {
+      return SelectableText(
+        'Binary payload (${_formatNetworkBytes(body!.length)} encoded characters)',
+        style: TextStyle(color: colors.textSecondary),
+      );
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: SelectableText(
+        _prettyNetworkBody(body!, mimeType),
+        style: monoStyle(
+          color: colors.textPrimary,
+          fontSize: 11,
+        ),
+      ),
+    );
+  }
+}
+
 class _ConsoleEntry {
   const _ConsoleEntry({
     required this.type,
@@ -1461,6 +2455,502 @@ class _ConsoleEntry {
   final int? lineNumber;
   final int? columnNumber;
   final int timestamp;
+}
+
+abstract interface class _NetworkSummaryLike {
+  String get method;
+  String get url;
+  String get resourceType;
+  String? get mimeType;
+  int? get status;
+  int? get encodedDataLength;
+  int? get durationMs;
+  String? get errorText;
+  bool get failed;
+  bool get finished;
+  bool get servedFromCache;
+}
+
+class _NetworkEntry implements _NetworkSummaryLike {
+  const _NetworkEntry({
+    required this.requestId,
+    required this.method,
+    required this.url,
+    required this.resourceType,
+    required this.startedAt,
+    this.status,
+    this.mimeType,
+    this.encodedDataLength,
+    this.durationMs,
+    this.errorText,
+    this.finished = false,
+    this.failed = false,
+    this.servedFromCache = false,
+  });
+
+  factory _NetworkEntry.fromJson(Map<dynamic, dynamic> json) => _NetworkEntry(
+    requestId: json['requestId']?.toString() ?? '',
+    method: json['method']?.toString() ?? 'GET',
+    url: json['url']?.toString() ?? '',
+    resourceType: json['resourceType']?.toString() ?? 'Other',
+    startedAt: _intValue(
+      json['startedAt'],
+      DateTime.now().millisecondsSinceEpoch,
+    ),
+    status: _intOrNull(json['status']),
+    mimeType: json['mimeType']?.toString(),
+    encodedDataLength: _intOrNull(json['encodedDataLength']),
+    durationMs: _intOrNull(json['durationMs']),
+    errorText: json['errorText']?.toString(),
+    finished: json['finished'] == true,
+    failed: json['failed'] == true,
+    servedFromCache: json['servedFromCache'] == true,
+  );
+
+  final String requestId;
+  @override
+  final String method;
+  @override
+  final String url;
+  @override
+  final String resourceType;
+  final int startedAt;
+  @override
+  final int? status;
+  @override
+  final String? mimeType;
+  @override
+  final int? encodedDataLength;
+  @override
+  final int? durationMs;
+  @override
+  final String? errorText;
+  @override
+  final bool finished;
+  @override
+  final bool failed;
+  @override
+  final bool servedFromCache;
+
+  _NetworkEntry merge(_NetworkEntry other) {
+    return _NetworkEntry(
+      requestId: requestId,
+      method: other.method.isEmpty ? method : other.method,
+      url: other.url.isEmpty ? url : other.url,
+      resourceType: other.resourceType.isEmpty ? resourceType : other.resourceType,
+      startedAt: other.startedAt,
+      status: other.status ?? status,
+      mimeType: other.mimeType ?? mimeType,
+      encodedDataLength: other.encodedDataLength ?? encodedDataLength,
+      durationMs: other.durationMs ?? durationMs,
+      errorText: other.errorText ?? errorText,
+      finished: other.finished || finished,
+      failed: other.failed || failed,
+      servedFromCache: other.servedFromCache || servedFromCache,
+    );
+  }
+}
+
+class _NetworkDetail implements _NetworkSummaryLike {
+  const _NetworkDetail({
+    required this.requestId,
+    required this.method,
+    required this.url,
+    required this.resourceType,
+    required this.requestHeaders,
+    required this.responseHeaders,
+    required this.startedAt,
+    this.status,
+    this.statusText,
+    this.mimeType,
+    this.encodedDataLength,
+    this.durationMs,
+    this.errorText,
+    this.requestBody,
+    this.requestBodyError,
+    this.body,
+    this.bodyBase64Encoded = false,
+    this.bodyError,
+    this.finished = false,
+    this.failed = false,
+    this.servedFromCache = false,
+  });
+
+  factory _NetworkDetail.fromJson(Map<dynamic, dynamic> json) => _NetworkDetail(
+    requestId: json['requestId']?.toString() ?? '',
+    method: json['method']?.toString() ?? 'GET',
+    url: json['url']?.toString() ?? '',
+    resourceType: json['resourceType']?.toString() ?? 'Other',
+    requestHeaders: _stringMap(json['requestHeaders']),
+    responseHeaders: _stringMap(json['responseHeaders']),
+    startedAt: _intValue(
+      json['startedAt'],
+      DateTime.now().millisecondsSinceEpoch,
+    ),
+    status: _intOrNull(json['status']),
+    statusText: json['statusText']?.toString(),
+    mimeType: json['mimeType']?.toString(),
+    encodedDataLength: _intOrNull(json['encodedDataLength']),
+    durationMs: _intOrNull(json['durationMs']),
+    errorText: json['errorText']?.toString(),
+    requestBody: json['requestBody']?.toString(),
+    requestBodyError: json['requestBodyError']?.toString(),
+    body: json['body']?.toString(),
+    bodyBase64Encoded: json['bodyBase64Encoded'] == true,
+    bodyError: json['bodyError']?.toString(),
+    finished: json['finished'] == true,
+    failed: json['failed'] == true,
+    servedFromCache: json['servedFromCache'] == true,
+  );
+
+  final String requestId;
+  @override
+  final String method;
+  @override
+  final String url;
+  @override
+  final String resourceType;
+  final Map<String, String> requestHeaders;
+  final Map<String, String> responseHeaders;
+  final int startedAt;
+  @override
+  final int? status;
+  final String? statusText;
+  @override
+  final String? mimeType;
+  @override
+  final int? encodedDataLength;
+  @override
+  final int? durationMs;
+  @override
+  final String? errorText;
+  final String? requestBody;
+  final String? requestBodyError;
+  final String? body;
+  final bool bodyBase64Encoded;
+  final String? bodyError;
+  @override
+  final bool finished;
+  @override
+  final bool failed;
+  @override
+  final bool servedFromCache;
+}
+
+class _NetworkDetailUpdate {
+  const _NetworkDetailUpdate({
+    required this.requestId,
+    this.detail,
+    this.error,
+  });
+
+  final String requestId;
+  final _NetworkDetail? detail;
+  final String? error;
+}
+
+const List<String> _networkFilterOptions = <String>[
+  'All',
+  'XHR',
+  'JS',
+  'CSS',
+  'Img',
+  'Media',
+  'Other',
+];
+
+const List<String> _networkSortOptions = <String>[
+  'Newest',
+  'Oldest',
+  'Slowest',
+  'Largest',
+  'Status',
+];
+
+enum _NetworkCopyAction {
+  url,
+  requestHeaders,
+  responseHeaders,
+  requestBody,
+  responseBody,
+  curl,
+}
+
+bool _matchesNetworkFilter(_NetworkEntry entry, String filter) {
+  switch (filter) {
+    case 'XHR':
+      return entry.resourceType == 'XHR' ||
+          entry.resourceType == 'Fetch' ||
+          entry.resourceType == 'Preflight';
+    case 'JS':
+      return entry.resourceType == 'Script';
+    case 'CSS':
+      return entry.resourceType == 'Stylesheet';
+    case 'Img':
+      return entry.resourceType == 'Image';
+    case 'Media':
+      return entry.resourceType == 'Media' || entry.resourceType == 'Font';
+    case 'Other':
+      return !<String>{
+        'XHR',
+        'Fetch',
+        'Preflight',
+        'Script',
+        'Stylesheet',
+        'Image',
+        'Media',
+        'Font',
+      }.contains(entry.resourceType);
+    case 'All':
+    default:
+      return true;
+  }
+}
+
+bool _matchesNetworkSearch(_NetworkEntry entry, String query) {
+  final normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery.isEmpty) return true;
+  final haystack = [
+    entry.method,
+    entry.url,
+    entry.resourceType,
+    entry.mimeType ?? '',
+    if (entry.status != null) '${entry.status}',
+    entry.errorText ?? '',
+  ].join(' ').toLowerCase();
+  return normalizedQuery
+      .split(RegExp(r'\s+'))
+      .where((term) => term.isNotEmpty)
+      .every(haystack.contains);
+}
+
+void _sortNetworkEntries(List<_NetworkEntry> entries, String sort) {
+  int compareNullableIntDesc(int? left, int? right) {
+    if (left == null && right == null) return 0;
+    if (left == null) return 1;
+    if (right == null) return -1;
+    return right.compareTo(left);
+  }
+
+  entries.sort((left, right) {
+    switch (sort) {
+      case 'Oldest':
+        return left.startedAt.compareTo(right.startedAt);
+      case 'Slowest':
+        final durationOrder = compareNullableIntDesc(
+          left.durationMs,
+          right.durationMs,
+        );
+        if (durationOrder != 0) return durationOrder;
+        return right.startedAt.compareTo(left.startedAt);
+      case 'Largest':
+        final sizeOrder = compareNullableIntDesc(
+          left.encodedDataLength,
+          right.encodedDataLength,
+        );
+        if (sizeOrder != 0) return sizeOrder;
+        return right.startedAt.compareTo(left.startedAt);
+      case 'Status':
+        final statusOrder = compareNullableIntDesc(left.status, right.status);
+        if (statusOrder != 0) return statusOrder;
+        return right.startedAt.compareTo(left.startedAt);
+      case 'Newest':
+      default:
+        return right.startedAt.compareTo(left.startedAt);
+    }
+  });
+}
+
+String _networkResourceTypeLabel(String type) {
+  switch (type) {
+    case 'Stylesheet':
+      return 'CSS';
+    case 'Script':
+      return 'JS';
+    case 'Image':
+      return 'Img';
+    case 'Document':
+      return 'Doc';
+    case 'WebSocket':
+      return 'WS';
+    default:
+      return type.isEmpty ? 'Other' : type;
+  }
+}
+
+String _networkDisplayName(String url) {
+  try {
+    final uri = Uri.parse(url);
+    if (uri.pathSegments.isNotEmpty && uri.pathSegments.last.isNotEmpty) {
+      return uri.pathSegments.last;
+    }
+    if (uri.host.isNotEmpty) return uri.host;
+  } catch (_) {
+    // Ignore parse failures and fall back to the raw URL.
+  }
+  return url;
+}
+
+String _networkDisplayLocation(String url) {
+  try {
+    final uri = Uri.parse(url);
+    final port = uri.hasPort ? ':${uri.port}' : '';
+    final path = uri.path.isEmpty ? '/' : uri.path;
+    return '${uri.scheme}://${uri.host}$port$path';
+  } catch (_) {
+    return url;
+  }
+}
+
+Color _networkStatusColor(AppColors colors, _NetworkSummaryLike entry) {
+  if (entry.failed) return colors.danger;
+  final status = entry.status;
+  if (status == null) return colors.textTertiary;
+  if (status >= 500) return colors.danger;
+  if (status >= 400) return colors.warning;
+  if (status >= 300) return colors.accent;
+  if (status >= 200) return colors.success;
+  return colors.textSecondary;
+}
+
+String _networkStatusLabel(_NetworkSummaryLike entry) {
+  if (entry.failed) return 'ERR';
+  if (entry.status != null) return '${entry.status}';
+  return entry.finished ? 'done' : '...';
+}
+
+String _formatNetworkBytes(int bytes) {
+  final normalizedBytes = bytes < 0 ? 0 : bytes;
+  if (normalizedBytes < 1024) return '$normalizedBytes B';
+  if (normalizedBytes < 1024 * 1024) {
+    return '${(normalizedBytes / 1024).toStringAsFixed(normalizedBytes < 10 * 1024 ? 1 : 0)} KB';
+  }
+  return '${(normalizedBytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
+String _prettyNetworkBody(String body, String mimeType) {
+  if (mimeType.contains('json')) {
+    try {
+      return const JsonEncoder.withIndent('  ').convert(jsonDecode(body));
+    } catch (_) {
+      return body;
+    }
+  }
+  if (mimeType.contains('x-www-form-urlencoded')) {
+    try {
+      final parts = Uri.splitQueryString(body);
+      return parts.entries.map((entry) => '${entry.key}=${entry.value}').join('\n');
+    } catch (_) {
+      return body;
+    }
+  }
+  return body;
+}
+
+bool _networkShouldShowRequestBody(_NetworkDetail detail) {
+  if (detail.requestBody != null) return true;
+  if (detail.requestBodyError != null && detail.requestBodyError!.isNotEmpty) {
+    return true;
+  }
+  return _networkMethodUsuallyHasBody(detail.method);
+}
+
+bool _networkMethodUsuallyHasBody(String method) {
+  switch (method.trim().toUpperCase()) {
+    case 'POST':
+    case 'PUT':
+    case 'PATCH':
+    case 'DELETE':
+      return true;
+    default:
+      return false;
+  }
+}
+
+String _networkRequestMimeType(_NetworkDetail detail) {
+  return _networkHeaderValue(detail.requestHeaders, 'content-type') ?? '';
+}
+
+String? _networkHeaderValue(Map<String, String> headers, String name) {
+  final target = name.toLowerCase();
+  for (final entry in headers.entries) {
+    if (entry.key.toLowerCase() == target) {
+      return entry.value;
+    }
+  }
+  return null;
+}
+
+String _networkHeadersText(Map<String, String> headers) {
+  return headers.entries
+      .map((entry) => '${entry.key}: ${entry.value}')
+      .join('\n');
+}
+
+String _networkCurlCommand(_NetworkEntry entry, _NetworkDetail detail) {
+  final buffer = StringBuffer('curl');
+  if (entry.method.toUpperCase() != 'GET') {
+    buffer.write(' -X ${_shellQuote(entry.method)}');
+  }
+  for (final header in detail.requestHeaders.entries) {
+    buffer.write(' -H ${_shellQuote('${header.key}: ${header.value}')}');
+  }
+  if (detail.requestBody != null && detail.requestBody!.isNotEmpty) {
+    buffer.write(' --data-raw ${_shellQuote(detail.requestBody!)}');
+  }
+  buffer.write(' ${_shellQuote(entry.url)}');
+  return buffer.toString();
+}
+
+String _shellQuote(String value) {
+  return "'${value.replaceAll("'", "'\\''")}'";
+}
+
+Future<void> _copyNetworkDetailAction(
+  BuildContext context,
+  _NetworkCopyAction action,
+  _NetworkEntry entry,
+  _NetworkDetail? detail,
+) async {
+  final text = switch (action) {
+    _NetworkCopyAction.url => entry.url,
+    _NetworkCopyAction.requestHeaders =>
+      _networkHeadersText(detail?.requestHeaders ?? const <String, String>{}),
+    _NetworkCopyAction.responseHeaders =>
+      _networkHeadersText(detail?.responseHeaders ?? const <String, String>{}),
+    _NetworkCopyAction.requestBody => detail?.requestBody ?? '',
+    _NetworkCopyAction.responseBody => detail?.body ?? '',
+    _NetworkCopyAction.curl when detail != null => _networkCurlCommand(entry, detail),
+    _ => '',
+  };
+  if (text.isEmpty) {
+    showAppSnackBar(context, 'Nothing to copy yet.');
+    return;
+  }
+  await Clipboard.setData(ClipboardData(text: text));
+  if (!context.mounted) return;
+  final label = switch (action) {
+    _NetworkCopyAction.url => 'URL',
+    _NetworkCopyAction.requestHeaders => 'Request headers',
+    _NetworkCopyAction.responseHeaders => 'Response headers',
+    _NetworkCopyAction.requestBody => 'Request body',
+    _NetworkCopyAction.responseBody => 'Response body',
+    _NetworkCopyAction.curl => 'cURL command',
+  };
+  showAppSnackBar(context, '$label copied.');
+}
+
+Map<String, String> _stringMap(Object? value) {
+  if (value is! Map) return const <String, String>{};
+  return value.map(
+    (key, entryValue) => MapEntry(key.toString(), entryValue.toString()),
+  );
+}
+
+int? _intOrNull(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.round();
+  return null;
 }
 
 class _ReconnectingChip extends StatelessWidget {
