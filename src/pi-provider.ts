@@ -3036,7 +3036,7 @@ function findPreservedSidecarUserIndex(
     message?: SessionMessage;
   },
 ): number {
-  if (!record.previousUserText) {
+  if (record.previousUserText === null) {
     return -1;
   }
   const anchorCreatedAt =
