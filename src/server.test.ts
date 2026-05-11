@@ -547,6 +547,131 @@ class SlowReadFakeProvider extends RestartableFakeProvider {
   }
 }
 
+class ImmediateCompletionProvider extends EventEmitter implements AgentProvider {
+  public readonly kind = "fake";
+  public readonly displayName = "Immediate Completion Provider";
+  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
+
+  private readonly sessionId = "fake-immediate-session";
+  private readonly createTurnId = "fake-immediate-create-turn";
+  private cwd = "/tmp";
+  private created = false;
+  private lastTurnId: string | null = null;
+  private submitCount = 0;
+
+  public async start(): Promise<void> {}
+
+  public async close(): Promise<void> {}
+
+  public async getVersion(): Promise<string> {
+    return "immediate-completion-test";
+  }
+
+  public async createSession(
+    request: AgentCreateSessionRequest,
+  ): Promise<AgentCreateSessionResult> {
+    this.created = true;
+    this.cwd = request.cwd;
+    const activeTurnId =
+      request.input.length > 0 ? this.completeTurn(this.createTurnId) : null;
+    return {
+      thread: this.buildThread(false),
+      activeTurnId,
+      runtime: null,
+    };
+  }
+
+  public async submitInput(
+    request: AgentSubmitInputRequest,
+  ): Promise<AgentSubmitInputResult> {
+    assert.equal(request.sessionId, this.sessionId);
+    this.submitCount += 1;
+    const turnId = this.completeTurn(`fake-immediate-submit-turn-${this.submitCount}`);
+    return {
+      mode: "turn",
+      turnId,
+    };
+  }
+
+  public async listSessionThreads(
+    options: AgentSessionListOptions,
+  ): Promise<ThreadRecord[]> {
+    if (!this.created || options.archived) {
+      return [];
+    }
+    return [this.buildThread(false)].slice(0, options.limit);
+  }
+
+  public async readSessionThread(
+    threadId: string,
+    includeTurns: boolean,
+  ): Promise<ThreadRecord> {
+    assert.equal(threadId, this.sessionId);
+    return this.buildThread(includeTurns);
+  }
+
+  public async listRecentUnindexedSessionThreads(
+    limit: number,
+  ): Promise<ThreadRecord[]> {
+    if (!this.created) {
+      return [];
+    }
+    return [this.buildThread(false)].slice(0, limit);
+  }
+
+  public async readSessionLog(): Promise<SessionLogSnapshot> {
+    return {
+      messages: [],
+      activities: [],
+      runtime: null,
+      totalMessages: 0,
+      totalActivities: 0,
+      nextSeq: 1,
+    };
+  }
+
+  public async readSessionRuntime(): Promise<null> {
+    return null;
+  }
+
+  private completeTurn(turnId: string): string {
+    this.lastTurnId = turnId;
+    this.emit("liveEvent", {
+      type: "turn_completed",
+      sessionId: this.sessionId,
+      turnId,
+      status: "completed",
+    });
+    return turnId;
+  }
+
+  private buildThread(includeTurns: boolean): ThreadRecord {
+    return {
+      id: this.sessionId,
+      name: "Immediate completion session",
+      preview: "Immediate completion session",
+      createdAt: 1,
+      updatedAt: 2,
+      cwd: this.cwd,
+      source: "fake",
+      path: null,
+      status: { type: "idle" },
+      ...(includeTurns && this.lastTurnId
+        ? {
+            turns: [
+              {
+                id: this.lastTurnId,
+                status: "completed",
+                startedAt: 1,
+                completedAt: 2,
+              },
+            ],
+          }
+        : {}),
+    };
+  }
+}
+
 class SearchFixtureProvider extends EventEmitter implements AgentProvider {
   public readonly kind = "fake";
   public readonly displayName = "Search Fixture Provider";
@@ -3346,6 +3471,72 @@ describe("GET /api/sessions/:sessionId/status", () => {
       });
       assert.equal(reconciledSessionsRes.statusCode, 200);
       assert.equal((reconciledSessionsRes.body as any[])[0]?.status, "closed");
+    });
+  });
+
+  it("does not resurrect already-completed turns after create or input returns", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new ImmediateCompletionProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const createRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd: "/tmp/immediate-completion-test",
+          prompt: "finish immediately",
+        }),
+      });
+      assert.equal(createRes.statusCode, 201);
+      const sessionId = (createRes.body as any).session.id as string;
+      assert.equal((createRes.body as any).session.status, "idle");
+      assert.equal((createRes.body as any).activeTurnId, "fake-immediate-create-turn");
+
+      const createStatus = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(createStatus.statusCode, 200);
+      assert.equal((createStatus.body as any).status, "idle");
+      assert.equal((createStatus.body as any).isRunning, false);
+      assert.equal((createStatus.body as any).activeTurnId, null);
+
+      const inputRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          text: "finish immediately again",
+        }),
+      });
+      assert.equal(inputRes.statusCode, 200);
+      assert.equal((inputRes.body as any).turnId, "fake-immediate-submit-turn-1");
+
+      const inputStatus = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(inputStatus.statusCode, 200);
+      assert.equal((inputStatus.body as any).status, "idle");
+      assert.equal((inputStatus.body as any).isRunning, false);
+      assert.equal((inputStatus.body as any).activeTurnId, null);
     });
   });
 

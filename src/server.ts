@@ -500,6 +500,34 @@ export async function startServer(
     return observedStatus;
   }
 
+  async function shouldTrackProviderTurn(
+    agentProvider: AgentProvider,
+    sessionId: string,
+    turnId: string | null | undefined,
+  ): Promise<boolean> {
+    if (!turnId) {
+      return false;
+    }
+    const observedStatus = latestThreadStatusForSession(sessionId);
+    if (
+      observedStatus === "idle" ||
+      observedStatus === "errored" ||
+      observedStatus === "closed"
+    ) {
+      return false;
+    }
+    const state = await loadFastRunState(
+      agentProvider,
+      sessionId,
+      new Map<string, ActiveTurnState>(),
+      isRunningThreadStatus(observedStatus) ? observedStatus : null,
+    );
+    if (state.status === "unknown" && observedStatus == null) {
+      return true;
+    }
+    return state.isRunning && (state.turnId == null || state.turnId === turnId);
+  }
+
   function persistSessionRuntimeSignalsEventually(): void {
     sessionRuntimeSignalsSaveChain = sessionRuntimeSignalsSaveChain
       .catch(() => undefined)
@@ -2530,9 +2558,15 @@ export async function startServer(
         overrides,
         provider: selectedProvider.kind,
       });
-      if (started.activeTurnId) {
+      if (
+        await shouldTrackProviderTurn(
+          provider,
+          started.thread.id,
+          started.activeTurnId,
+        )
+      ) {
         activeTurns.set(started.thread.id, {
-          turnId: started.activeTurnId,
+          turnId: started.activeTurnId!,
           startedAt: Date.now(),
         });
         setLatestThreadStatusForSession(
@@ -2696,12 +2730,18 @@ export async function startServer(
           activeTurnId: state.turnId,
           overrides: turnOverrides,
         });
-        if (submitted.turnId) {
+        if (
+          await shouldTrackProviderTurn(
+            provider,
+            sessionId,
+            submitted.turnId,
+          )
+        ) {
           const previousStartedAt = state.turnId
             ? activeTurns.get(sessionId)?.startedAt
             : undefined;
           activeTurns.set(sessionId, {
-            turnId: submitted.turnId,
+            turnId: submitted.turnId!,
             startedAt: previousStartedAt ?? Date.now(),
           });
           setLatestThreadStatusForSession(
