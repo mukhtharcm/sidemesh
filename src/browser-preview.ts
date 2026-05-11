@@ -1957,9 +1957,21 @@ export class BrowserPreviewRegistry {
         409,
       );
     }
-    const snapshot =
-      preview.storageSnapshot ?? (await this.buildStorageSnapshot(preview, cdp, sessionId));
-    for (const cookie of snapshot.cookies) {
+    let cookies: BrowserPreviewStorageCookie[] = [];
+    try {
+      const result = await cdp.send(
+        "Network.getCookies",
+        { urls: [preview.url] },
+        sessionId,
+      );
+      cookies = cookiesFromResult(result);
+    } catch {
+      const snapshot =
+        preview.storageSnapshot ??
+        (await this.buildStorageSnapshot(preview, cdp, sessionId));
+      cookies = snapshot.cookies;
+    }
+    for (const cookie of cookies) {
       await cdp.send(
         "Network.deleteCookies",
         {
