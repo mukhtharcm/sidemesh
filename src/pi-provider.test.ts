@@ -823,9 +823,311 @@ describe("PiAgentProvider", () => {
     assert.equal(log.messages.at(-1)?.text, "Done.");
   });
 
-  it("materializes draft assistant output when terminal message_end has no final content", async () => {
+  it("clears Pi running state when prompt resolves without terminal events", async () => {
     const liveEvents: Array<{ type: string; [key: string]: unknown }> = [];
     const listeners = new Set<(event: unknown) => void>();
+    const cwd = nodePath.join(tempDir, "repo");
+    await mkdir(cwd, { recursive: true });
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory(cwd);
+    const fakeSession = {
+      sessionId: "",
+      sessionFile: null as string | null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe(listener: (event: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt(_text: string) {
+        for (const listener of listeners) {
+          listener({
+            type: "message_update",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "Resolved from draft." }],
+            },
+            assistantMessageEvent: {
+              type: "text_delta",
+              contentIndex: 0,
+              delta: "Resolved from draft.",
+              partial: {
+                role: "assistant",
+                content: [{ type: "text", text: "Resolved from draft." }],
+              },
+            },
+          });
+        }
+      },
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd,
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async (options: { sessionManager: SessionManager }) => {
+        fakeSession.sessionId = options.sessionManager.getSessionId();
+        fakeSession.sessionFile = options.sessionManager.getSessionFile() ?? null;
+        fakeSession.sessionManager = options.sessionManager;
+        return {
+          session: fakeSession,
+          extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+        };
+      }) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    provider.on("liveEvent", (event) => liveEvents.push(event as never));
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd,
+      input: [{ type: "text", text: "Handled before model", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    assert.ok(created.activeTurnId);
+
+    const runningThread = await provider.readSessionThread(created.thread.id, true);
+    assert.equal(runningThread.status.type, "running");
+    assert.equal(runningThread.turns?.at(-1)?.status, "in_progress");
+
+    await delay(150);
+
+    const thread = await provider.readSessionThread(created.thread.id, true);
+    assert.equal(thread.status.type, "idle");
+    assert.equal(thread.turns?.at(-1)?.status, "completed");
+
+    const runtime = await provider.readSessionRuntime(created.thread);
+    assert.equal(runtime?.turnId, undefined);
+    const log = await provider.readSessionLog(created.thread);
+    assert.equal(log.messages.at(-1)?.text, "Resolved from draft.");
+    assert.equal(
+      liveEvents.filter((event) => event.type === "turn_completed").length,
+      1,
+    );
+    assert.ok(
+      liveEvents.some(
+        (event) =>
+          event.type === "turn_completed" &&
+          event.turnId === created.activeTurnId &&
+          event.status === "completed",
+      ),
+    );
+    const assistantCompletedIndex = liveEvents.findIndex(
+      (event) =>
+        event.type === "assistant_message_completed" &&
+        event.turnId === created.activeTurnId,
+    );
+    const turnCompletedIndex = liveEvents.findIndex(
+      (event) =>
+        event.type === "turn_completed" &&
+        event.turnId === created.activeTurnId,
+    );
+    assert.notEqual(assistantCompletedIndex, -1);
+    assert.notEqual(turnCompletedIndex, -1);
+    assert.ok(assistantCompletedIndex < turnCompletedIndex);
+
+    assert.ok(fakeSession.sessionFile);
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+      ],
+      "2026-05-01T10:00:01.000Z",
+    );
+
+    const headerOnlyLog = await provider.readSessionLog(created.thread);
+    assert.deepEqual(
+      headerOnlyLog.messages.map((message) => message.text),
+      ["Handled before model", "Resolved from draft."],
+    );
+
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Handled before model" }],
+            timestamp: 1_777_770_001_000,
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m2",
+          parentId: "m1",
+          timestamp: "2026-05-01T10:00:02.000Z",
+          message: {
+            role: "assistant",
+            content: [],
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            usage: {
+              input: 5,
+              output: 7,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 12,
+              cost: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                total: 0,
+              },
+            },
+            stopReason: "stop",
+            timestamp: 1_777_770_002_000,
+          },
+        }),
+      ],
+      "2026-05-01T10:00:02.000Z",
+    );
+
+    const emptyHistoryLog = await provider.readSessionLog(created.thread);
+    assert.equal(emptyHistoryLog.messages.at(-1)?.text, "Resolved from draft.");
+
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Handled before model" }],
+            timestamp: 1_777_770_001_000,
+          },
+        }),
+        JSON.stringify(
+          minimalPiAssistantMessage(
+            "m2",
+            "m1",
+            "2026-05-01T10:00:02.000Z",
+            "History truncated.",
+            5,
+            7,
+            12,
+            "length",
+          ),
+        ),
+      ],
+      "2026-05-01T10:00:02.500Z",
+    );
+
+    const lengthStopLog = await provider.readSessionLog(created.thread);
+    assert.deepEqual(
+      lengthStopLog.messages.map((message) => message.text),
+      ["Handled before model", "History truncated."],
+    );
+
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Handled before model" }],
+            timestamp: 1_777_770_001_000,
+          },
+        }),
+        JSON.stringify(
+          minimalPiAssistantMessage(
+            "m2",
+            "m1",
+            "2026-05-01T10:00:02.000Z",
+            "History terminal.",
+            5,
+            7,
+            12,
+          ),
+        ),
+      ],
+      "2026-05-01T10:00:03.000Z",
+    );
+
+    const refreshedLog = await provider.readSessionLog(created.thread);
+    assert.equal(refreshedLog.messages.at(-1)?.text, "History terminal.");
+  });
+
+  it("finishes prompt-resolved Pi turns after a slow event queue drains", async () => {
+    const listeners = new Set<(event: unknown) => void>();
+    let resolveEventQueue!: () => void;
+    const eventQueue = new Promise<void>((resolve) => {
+      resolveEventQueue = resolve;
+    });
     const fakeModel = {
       id: "claude-sonnet-4-5",
       name: "Claude Sonnet 4.5",
@@ -834,6 +1136,116 @@ describe("PiAgentProvider", () => {
       input: ["text"],
     };
     const sessionManager = SessionManager.inMemory("/repo");
+    const fakeSession = {
+      sessionId: "pi-slow-event-queue-1",
+      sessionFile: null,
+      sessionManager,
+      _agentEventQueue: eventQueue,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe(listener: (event: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt(_text: string) {
+        for (const listener of listeners) {
+          listener({
+            type: "message_update",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "Queued draft." }],
+            },
+            assistantMessageEvent: {
+              type: "text_delta",
+              contentIndex: 0,
+              delta: "Queued draft.",
+              partial: {
+                role: "assistant",
+                content: [{ type: "text", text: "Queued draft." }],
+              },
+            },
+          });
+        }
+      },
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "Slow queue", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    assert.ok(created.activeTurnId);
+
+    await delay(1_150);
+
+    const pendingThread = await provider.readSessionThread(created.thread.id, true);
+    assert.equal(pendingThread.status.type, "running");
+    assert.equal(pendingThread.turns?.at(-1)?.status, "in_progress");
+
+    resolveEventQueue();
+    await delay(50);
+
+    const completedThread = await provider.readSessionThread(created.thread.id, true);
+    assert.equal(completedThread.status.type, "idle");
+    assert.equal(completedThread.turns?.at(-1)?.status, "completed");
+    const log = await provider.readSessionLog(created.thread);
+    assert.equal(log.messages.at(-1)?.text, "Queued draft.");
+  });
+
+  it("materializes draft assistant output when terminal message_end has no final content", async () => {
+    const liveEvents: Array<{ type: string; [key: string]: unknown }> = [];
+    const listeners = new Set<(event: unknown) => void>();
+    const cwd = nodePath.join(tempDir, "repo-terminal-draft");
+    await mkdir(cwd, { recursive: true });
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory(cwd);
     const partialAssistant = {
       role: "assistant",
       content: [{ type: "text", text: "Done from draft." }],
@@ -856,8 +1268,8 @@ describe("PiAgentProvider", () => {
       timestamp: 1_777_770_010_000,
     };
     const fakeSession = {
-      sessionId: "pi-terminal-draft-1",
-      sessionFile: null,
+      sessionId: "",
+      sessionFile: null as string | null,
       sessionManager,
       model: fakeModel,
       thinkingLevel: "medium",
@@ -904,7 +1316,7 @@ describe("PiAgentProvider", () => {
       dispose() {},
     };
     const fakeServices = {
-      cwd: "/repo",
+      cwd,
       agentDir,
       authStorage: {},
       modelRegistry: {
@@ -927,16 +1339,21 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
-      createSessionFromServices: (async () => ({
-        session: fakeSession,
-        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      createSessionFromServices: (async (options: { sessionManager: SessionManager }) => {
+        fakeSession.sessionId = options.sessionManager.getSessionId();
+        fakeSession.sessionFile = options.sessionManager.getSessionFile() ?? null;
+        fakeSession.sessionManager = options.sessionManager;
+        return {
+          session: fakeSession,
+          extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+        };
+      }) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
     });
     provider.on("liveEvent", (event) => liveEvents.push(event as never));
     await provider.start();
 
     const created = await provider.createSession({
-      cwd: "/repo",
+      cwd,
       input: [{ type: "text", text: "Finish", text_elements: [] }],
       overrides: emptyOverrides(),
     });
@@ -960,6 +1377,320 @@ describe("PiAgentProvider", () => {
     const thread = await provider.readSessionThread(created.thread.id, true);
     assert.equal(thread.status.type, "idle");
     assert.equal(thread.turns?.at(-1)?.status, "completed");
+
+    assert.ok(fakeSession.sessionFile);
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Finish" }],
+            timestamp: 1_777_770_001_000,
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m2",
+          parentId: "m1",
+          timestamp: "2026-05-01T10:00:02.000Z",
+          message: {
+            role: "assistant",
+            content: [],
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            usage: partialAssistant.usage,
+            stopReason: "stop",
+            timestamp: 1_777_770_002_000,
+          },
+        }),
+      ],
+      "2026-05-01T10:00:02.000Z",
+    );
+
+    const snapshotLog = await provider.readSessionLog(created.thread);
+    assert.equal(snapshotLog.messages.at(-1)?.text, "Done from draft.");
+
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Finish" }],
+            timestamp: 1_777_770_001_000,
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m2",
+          parentId: "m1",
+          timestamp: "2026-05-01T10:00:02.000Z",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "text", text: "Checking tool." },
+              {
+                type: "toolCall",
+                id: "call-read",
+                name: "read",
+                arguments: { path: "README.md" },
+              },
+            ],
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            usage: partialAssistant.usage,
+            stopReason: "toolUse",
+            timestamp: 1_777_770_002_000,
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m3",
+          parentId: "m2",
+          timestamp: "2026-05-01T10:00:03.000Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "call-read",
+            toolName: "read",
+            content: [{ type: "text", text: "# README" }],
+            isError: false,
+            timestamp: 1_777_770_003_000,
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m4",
+          parentId: "m3",
+          timestamp: "2026-05-01T10:00:04.000Z",
+          message: {
+            role: "assistant",
+            content: [],
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            usage: partialAssistant.usage,
+            stopReason: "stop",
+            timestamp: 1_777_770_004_000,
+          },
+        }),
+      ],
+      "2026-05-01T10:00:03.000Z",
+    );
+
+    const toolLog = await provider.readSessionLog(created.thread);
+    const toolActivity = toolLog.activities.find(
+      (activity) => activity.type === "tool" && activity.toolName === "read",
+    );
+    const recoveredMessage = toolLog.messages.find(
+      (message) => message.text === "Done from draft.",
+    );
+    assert.ok(toolActivity);
+    assert.ok(recoveredMessage);
+    assert.equal(toolLog.messages.at(-1)?.text, "Done from draft.");
+    assert.ok(recoveredMessage.seq > toolActivity.seq);
+
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Finish" }],
+            timestamp: 1_777_770_001_000,
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m2",
+          parentId: "m1",
+          timestamp: "2026-05-01T10:00:02.000Z",
+          message: {
+            role: "assistant",
+            content: [],
+            errorMessage: "Overloaded",
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            usage: partialAssistant.usage,
+            stopReason: "error",
+            timestamp: 1_777_770_002_000,
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m3",
+          parentId: "m2",
+          timestamp: "2026-05-01T10:00:03.000Z",
+          message: {
+            role: "assistant",
+            content: [],
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            usage: partialAssistant.usage,
+            stopReason: "stop",
+            timestamp: 1_777_770_003_000,
+          },
+        }),
+      ],
+      "2026-05-01T10:00:03.500Z",
+    );
+
+    const retryLog = await provider.readSessionLog(created.thread);
+    assert.deepEqual(
+      retryLog.messages.map((message) => message.text),
+      ["Finish", "Overloaded", "Done from draft."],
+    );
+
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Finish" }],
+            timestamp: 1_777_770_001_000,
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m2",
+          parentId: "m1",
+          timestamp: "2026-05-01T10:00:02.000Z",
+          message: {
+            role: "assistant",
+            content: [],
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            usage: partialAssistant.usage,
+            stopReason: "stop",
+            timestamp: 1_777_770_002_000,
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m3",
+          parentId: "m2",
+          timestamp: "2026-05-01T10:00:03.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Next" }],
+            timestamp: 1_777_770_003_000,
+          },
+        }),
+        JSON.stringify(
+          minimalPiAssistantMessage(
+            "m4",
+            "m3",
+            "2026-05-01T10:00:04.000Z",
+            "Done from draft.",
+            3,
+            4,
+            7,
+          ),
+        ),
+      ],
+      "2026-05-01T10:00:04.000Z",
+    );
+
+    const appendedLog = await provider.readSessionLog(created.thread);
+    assert.deepEqual(
+      appendedLog.messages.map((message) => message.text),
+      ["Finish", "Done from draft.", "Next", "Done from draft."],
+    );
+
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Finish" }],
+            timestamp: 1_777_770_001_000,
+          },
+        }),
+        JSON.stringify(
+          minimalPiAssistantMessage(
+            "m2",
+            "m1",
+            "2026-05-01T10:00:02.000Z",
+            "Done from draft.",
+            5,
+            10,
+            15,
+          ),
+        ),
+        JSON.stringify({
+          type: "compaction",
+          id: "c1",
+          parentId: "m2",
+          timestamp: "2026-05-01T10:00:03.000Z",
+          summary: "Compacted after final answer.",
+          firstKeptEntryId: "m1",
+          tokensBefore: 1234,
+        }),
+      ],
+      "2026-05-01T10:00:05.000Z",
+    );
+
+    const compactionLog = await provider.readSessionLog(created.thread);
+    assert.deepEqual(
+      compactionLog.messages.map((message) => message.text),
+      ["Finish", "Done from draft."],
+    );
   });
 
   it("emits provider warnings when Pi auto-retry gives up", async () => {
@@ -2364,6 +3095,7 @@ function minimalPiAssistantMessage(
   inputTokens: number,
   outputTokens: number,
   totalTokens: number,
+  stopReason = "stop",
 ): Record<string, unknown> {
   return {
     type: "message",
@@ -2389,7 +3121,7 @@ function minimalPiAssistantMessage(
           total: 0.003,
         },
       },
-      stopReason: "stop",
+      stopReason,
       timestamp: Date.parse(timestamp),
     },
   };
