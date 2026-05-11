@@ -1674,10 +1674,24 @@ describe("PiAgentProvider", () => {
           ),
         ),
         JSON.stringify({
-          type: "compaction",
-          id: "c1",
+          type: "message",
+          id: "m3",
           parentId: "m2",
           timestamp: "2026-05-01T10:00:03.000Z",
+          message: {
+            role: "bashExecution",
+            command: "echo ok",
+            output: "ok\n",
+            exitCode: 0,
+            cancelled: false,
+            timestamp: 1_777_770_003_000,
+          },
+        }),
+        JSON.stringify({
+          type: "compaction",
+          id: "c1",
+          parentId: "m3",
+          timestamp: "2026-05-01T10:00:04.000Z",
           summary: "Compacted after final answer.",
           firstKeptEntryId: "m1",
           tokensBefore: 1234,
@@ -1690,6 +1704,11 @@ describe("PiAgentProvider", () => {
     assert.deepEqual(
       compactionLog.messages.map((message) => message.text),
       ["Finish", "Done from draft."],
+    );
+    assert.ok(
+      compactionLog.activities.some(
+        (activity) => activity.type === "command" && activity.command === "echo ok",
+      ),
     );
   });
 

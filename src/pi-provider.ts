@@ -2667,7 +2667,6 @@ function mergePreservedSidecarMessages(
     if (
       hasPiAssistantReplacement(
         messages,
-        activities,
         nonFinalAssistantMessageIds,
         anchoredRecord,
       )
@@ -2751,7 +2750,6 @@ function ensurePreservedSidecarUser(
 
 function hasPiAssistantReplacement(
   messages: SessionMessage[],
-  activities: SessionActivity[],
   nonFinalAssistantMessageIds: ReadonlySet<string>,
   record: PiPreservedSidecarMessage,
 ): boolean {
@@ -2771,13 +2769,7 @@ function hasPiAssistantReplacement(
     if (
       message.role === "assistant" &&
       message.text.trim().length > 0 &&
-      !nonFinalAssistantMessageIds.has(message.id) &&
-      !activities.some(
-        (activity) =>
-          activity.type !== "context_compaction" &&
-          activity.seq > message.seq &&
-          (nextUserSeq === null || activity.seq < nextUserSeq),
-      )
+      !nonFinalAssistantMessageIds.has(message.id)
     ) {
       return true;
     }
