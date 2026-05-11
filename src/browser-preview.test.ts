@@ -324,6 +324,39 @@ describe("browser preview", () => {
     });
   });
 
+  it("hydrates websocket timing from the handshake after early creation", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp);
+    registry.broadcast = () => {};
+
+    registry.registerNetworkHandlers(preview, "session-1");
+
+    cdp.emitSession("Network.webSocketCreated", {
+      requestId: "socket-1",
+      url: "ws://127.0.0.1:3000/socket",
+    });
+    const provisionalEntry = preview.networkEntries.get("socket-1");
+    assert.ok(provisionalEntry);
+    assert.equal(provisionalEntry.startTimestampSeconds, null);
+
+    cdp.emitSession("Network.webSocketWillSendHandshakeRequest", {
+      requestId: "socket-1",
+      timestamp: 10,
+      wallTime: 20,
+      request: {
+        url: "ws://127.0.0.1:3000/socket",
+        method: "GET",
+        headers: {},
+      },
+    });
+
+    const entry = preview.networkEntries.get("socket-1");
+    assert.ok(entry);
+    assert.equal(entry.startedAt, 20_000);
+    assert.equal(entry.startTimestampSeconds, 10);
+  });
+
   it("tracks redirect hops as separate network rows", () => {
     const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
     const cdp = new FakeCdpConnection();
@@ -625,6 +658,42 @@ describe("browser preview", () => {
     });
     assert.equal(preview.consoleBuffer.length, 0);
     assert.equal(preview.consoleHistory.length, 2);
+  });
+
+  it("normalizes console timestamps from CDP seconds", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp);
+    registry.broadcast = () => {};
+
+    registry.registerConsoleHandlers(preview, "session-1");
+
+    cdp.emitSession("Runtime.exceptionThrown", {
+      timestamp: 10.5,
+      exceptionDetails: {
+        text: "boom",
+        url: "http://127.0.0.1:3000/app.js",
+        lineNumber: 4,
+        columnNumber: 2,
+      },
+    });
+    cdp.emitSession("Log.entryAdded", {
+      entry: {
+        level: "warning",
+        source: "network",
+        text: "late header",
+        url: "http://127.0.0.1:3000/app.js",
+        lineNumber: 8,
+        timestamp: 10.25,
+      },
+    });
+
+    registry.flushConsoleBuffer(preview);
+
+    assert.deepEqual(
+      preview.consoleHistory.map((entry: { timestamp: number }) => entry.timestamp),
+      [10_500, 10_250],
+    );
   });
 
   it("reports unavailable network inspection on attach", () => {
