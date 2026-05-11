@@ -1295,8 +1295,12 @@ export class BrowserPreviewRegistry {
       if (url && !existing.url) {
         existing.url = url;
       }
-      if (existing.startTimestampSeconds == null) {
+      if (
+        startTimestampSeconds != null &&
+        existing.startTimestampSeconds == null
+      ) {
         existing.startTimestampSeconds = startTimestampSeconds;
+        existing.startedAt = startedAt;
       }
       if (existing.startedAt <= 0) {
         existing.startedAt = startedAt;
@@ -1575,7 +1579,8 @@ export class BrowserPreviewRegistry {
           lineNumber: numberOrNull(details?.lineNumber),
           columnNumber: numberOrNull(details?.columnNumber),
           source: null,
-          timestamp: Date.now(),
+          timestamp:
+            timestampFromSeconds(numberOrNull(params.timestamp)) ?? Date.now(),
         });
       }),
     );
@@ -1592,7 +1597,9 @@ export class BrowserPreviewRegistry {
           lineNumber: numberOrNull(entry?.lineNumber),
           columnNumber: null,
           source: stringOrNull(entry?.source),
-          timestamp: numberValue(entry?.timestamp, Date.now()),
+          timestamp:
+            timestampFromSeconds(numberOrNull(entry?.timestamp)) ??
+            numberValue(entry?.timestamp, Date.now()),
         });
       }),
     );
