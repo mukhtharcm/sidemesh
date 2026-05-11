@@ -515,10 +515,10 @@ export async function startServer(
       new Map<string, ActiveTurnState>(),
       isRunningThreadStatus(observedStatus) ? observedStatus : null,
     );
-    if (state.status === "unknown" && observedStatus == null) {
-      return true;
+    if (state.isRunning) {
+      return state.turnId == null || state.turnId === turnId;
     }
-    return state.isRunning && (state.turnId == null || state.turnId === turnId);
+    return !(await providerReportsTerminalTurn(agentProvider, sessionId, turnId));
   }
 
   function persistSessionRuntimeSignalsEventually(): void {
@@ -4042,6 +4042,34 @@ async function loadFastRunState(
   return { status, isRunning: false, turnId: null };
 }
 
+async function providerReportsTerminalTurn(
+  provider: AgentProvider,
+  sessionId: string,
+  turnId: string,
+): Promise<boolean> {
+  if (!hasProviderMethod(provider, "readSessionThread")) {
+    return false;
+  }
+  let session: ThreadRecord;
+  try {
+    session = await readSession(provider, sessionId, true);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (
+      message.includes("includeTurns is unavailable before first user message")
+    ) {
+      return false;
+    }
+    throw error;
+  }
+  const turns = Array.isArray(session.turns) ? session.turns : [];
+  const turn = turns.find((candidate) => candidate.id === turnId);
+  if (!turn) {
+    return false;
+  }
+  return turn.completedAt != null || isTerminalTurnStatus(turn.status);
+}
+
 async function isThreadLoaded(
   provider: AgentProvider,
   sessionId: string,
@@ -4435,6 +4463,18 @@ async function loadCachedSessionRuntime(
 
 function isActiveTurnStatus(status: string | null | undefined): boolean {
   return status === "inProgress" || status === "in_progress";
+}
+
+function isTerminalTurnStatus(status: string | null | undefined): boolean {
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "interrupted" ||
+    status === "error" ||
+    status === "errored" ||
+    status === "cancelled" ||
+    status === "canceled"
+  );
 }
 
 function isActiveThread(thread: ThreadRecord): boolean {
