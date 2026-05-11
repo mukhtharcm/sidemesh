@@ -311,7 +311,12 @@ async function startFakeDaemon(options: {
   });
 
   const baseUrl = `http://127.0.0.1:${port}`;
-  await waitForHealth(baseUrl, child, () => output);
+  try {
+    await waitForHealth(baseUrl, child, () => output);
+  } catch (error) {
+    await stopProcess(child);
+    throw error;
+  }
 
   return {
     baseUrl,
@@ -326,7 +331,7 @@ async function waitForHealth(
   child: ChildProcessWithoutNullStreams,
   output: () => string,
 ): Promise<void> {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(
