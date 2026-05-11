@@ -1093,6 +1093,252 @@ describe("browser preview", () => {
     ]);
   });
 
+  it("returns inspector snapshots on demand", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    cdp.sendHandler = async (method, params, sessionId) => {
+      assert.equal(method, "Runtime.evaluate");
+      assert.equal(sessionId, "session-1");
+      assert.equal(params.returnByValue, true);
+      assert.equal(params.awaitPromise, true);
+      assert.match(String(params.expression), /"selectedPath":null/);
+      assert.match(String(params.expression), /"inspectPoint":null/);
+      return {
+        result: {
+          value: {
+            selectedPath: [0, 1],
+            treeRoot: {
+              path: [],
+              nodeName: "html",
+              selector: "html",
+              textPreview: null,
+              childElementCount: 1,
+              isSelected: false,
+              truncatedChildren: false,
+              children: [
+                {
+                  path: [0],
+                  nodeName: "body",
+                  selector: "body",
+                  textPreview: "Hello",
+                  childElementCount: 1,
+                  isSelected: false,
+                  truncatedChildren: false,
+                  children: [
+                    {
+                      path: [0, 1],
+                      nodeName: "main",
+                      selector: "main#app.shell",
+                      textPreview: "Inspector",
+                      childElementCount: 0,
+                      isSelected: true,
+                      truncatedChildren: false,
+                      children: [],
+                    },
+                  ],
+                },
+              ],
+            },
+            selectedNode: {
+              path: [0, 1],
+              nodeName: "main",
+              selector: "main#app.shell",
+              textPreview: "Inspector",
+              childElementCount: 0,
+              isSelected: true,
+              truncatedChildren: false,
+              children: [],
+              attributes: [
+                { name: "id", value: "app" },
+                { name: "class", value: "shell" },
+              ],
+              computedStyles: [{ name: "display", value: "block" }],
+              inlineStyles: [{ name: "color", value: "red" }],
+              box: {
+                x: 12.5,
+                y: 44.25,
+                width: 320,
+                height: 180,
+              },
+            },
+            warnings: ["The selected element is no longer available."],
+          },
+        },
+      };
+    };
+    const preview = buildFakePreview(cdp, {
+      url: "http://127.0.0.1:3000/app",
+      status: "running",
+      sessionIdCdp: "session-1",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    const socket = createFakeSocket(messages);
+
+    await registry.sendInspectorSnapshot(preview, socket);
+
+    assert.deepEqual(
+      cdp.sent.map((item) => item.method),
+      ["Runtime.evaluate"],
+    );
+    assert.equal(messages[0]?.type, "inspectorSnapshot");
+    assert.equal((messages[0]?.snapshot as any).url, "http://127.0.0.1:3000/app");
+    assert.deepEqual((messages[0]?.snapshot as any).selectedPath, [0, 1]);
+    assert.equal(
+      (messages[0]?.snapshot as any).selectedNode?.selector,
+      "main#app.shell",
+    );
+    assert.deepEqual(
+      (messages[0]?.snapshot as any).warnings,
+      ["The selected element is no longer available."],
+    );
+    assert.deepEqual(preview.inspectorSelectedPath, [0, 1]);
+    assert.equal(preview.inspectorSnapshot?.selectedNode?.box?.height, 180);
+  });
+
+  it("selects inspector nodes by path and broadcasts refreshed snapshots", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    cdp.sendHandler = async (method, params) => {
+      assert.equal(method, "Runtime.evaluate");
+      assert.match(String(params.expression), /"selectedPath":\[1,2\]/);
+      return {
+        result: {
+          value: {
+            selectedPath: [1, 2],
+            treeRoot: {
+              path: [],
+              nodeName: "html",
+              selector: "html",
+              textPreview: null,
+              childElementCount: 0,
+              isSelected: false,
+              truncatedChildren: false,
+              children: [],
+            },
+            selectedNode: {
+              path: [1, 2],
+              nodeName: "button",
+              selector: "button.cta",
+              textPreview: "Deploy",
+              childElementCount: 0,
+              isSelected: true,
+              truncatedChildren: false,
+              children: [],
+              attributes: [{ name: "class", value: "cta" }],
+              computedStyles: [{ name: "display", value: "inline-flex" }],
+              inlineStyles: [],
+              box: { x: 30, y: 80, width: 120, height: 44 },
+            },
+            warnings: [],
+          },
+        },
+      };
+    };
+    const preview = buildFakePreview(cdp, {
+      status: "running",
+      sessionIdCdp: "session-1",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    const socket = createFakeSocket(messages);
+    preview.clients.add(socket);
+
+    await registry.handleClientMessage(
+      preview,
+      socket,
+      Buffer.from(
+        JSON.stringify({
+          type: "inspectorSelectPath",
+          path: [1, 2],
+        }),
+      ),
+    );
+
+    assert.deepEqual(
+      cdp.sent.map((item) => item.method),
+      ["Runtime.evaluate"],
+    );
+    assert.equal(messages[0]?.type, "inspectorSnapshot");
+    assert.deepEqual((messages[0]?.snapshot as any).selectedPath, [1, 2]);
+    assert.equal(
+      (messages[0]?.snapshot as any).selectedNode?.selector,
+      "button.cta",
+    );
+    assert.deepEqual(preview.inspectorSelectedPath, [1, 2]);
+  });
+
+  it("inspects preview points and broadcasts refreshed snapshots", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    cdp.sendHandler = async (method, params) => {
+      assert.equal(method, "Runtime.evaluate");
+      assert.match(String(params.expression), /"inspectPoint":\{"x":195,"y":211\}/);
+      return {
+        result: {
+          value: {
+            selectedPath: [0, 0],
+            treeRoot: {
+              path: [],
+              nodeName: "html",
+              selector: "html",
+              textPreview: null,
+              childElementCount: 0,
+              isSelected: false,
+              truncatedChildren: false,
+              children: [],
+            },
+            selectedNode: {
+              path: [0, 0],
+              nodeName: "section",
+              selector: "section.hero",
+              textPreview: "Ship faster",
+              childElementCount: 0,
+              isSelected: true,
+              truncatedChildren: false,
+              children: [],
+              attributes: [{ name: "class", value: "hero" }],
+              computedStyles: [{ name: "display", value: "block" }],
+              inlineStyles: [],
+              box: { x: 24, y: 96, width: 342, height: 220 },
+            },
+            warnings: [],
+          },
+        },
+      };
+    };
+    const preview = buildFakePreview(cdp, {
+      status: "running",
+      sessionIdCdp: "session-1",
+      width: 390,
+      height: 844,
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    const socket = createFakeSocket(messages);
+    preview.clients.add(socket);
+
+    await registry.handleClientMessage(
+      preview,
+      socket,
+      Buffer.from(
+        JSON.stringify({
+          type: "inspectorInspectPoint",
+          x: 0.5,
+          y: 0.25,
+        }),
+      ),
+    );
+
+    assert.deepEqual(
+      cdp.sent.map((item) => item.method),
+      ["Runtime.evaluate"],
+    );
+    assert.equal(messages[0]?.type, "inspectorSnapshot");
+    assert.deepEqual((messages[0]?.snapshot as any).selectedPath, [0, 0]);
+    assert.equal(
+      (messages[0]?.snapshot as any).selectedNode?.selector,
+      "section.hero",
+    );
+  });
+
   it("sends an authoritative network snapshot on attach", () => {
     const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
     const preview = buildFakePreview(new FakeCdpConnection(), {
@@ -1112,6 +1358,53 @@ describe("browser preview", () => {
     assert.deepEqual(socket.frames[2], {
       type: "networkSnapshot",
       entries: [],
+    });
+  });
+
+  it("sends cached inspector snapshots on attach", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const preview = buildFakePreview(new FakeCdpConnection(), {
+      status: "starting",
+      starting: new Promise<void>(() => {}),
+      inspectorSnapshot: {
+        url: "http://127.0.0.1:3000/app",
+        refreshedAt: 123,
+        selectedPath: [0],
+        treeRoot: {
+          path: [],
+          nodeName: "html",
+          selector: "html",
+          textPreview: null,
+          childElementCount: 1,
+          isSelected: false,
+          truncatedChildren: false,
+          children: [],
+        },
+        selectedNode: {
+          path: [0],
+          nodeName: "body",
+          selector: "body",
+          textPreview: "Hello",
+          childElementCount: 0,
+          isSelected: true,
+          truncatedChildren: false,
+          children: [],
+          attributes: [],
+          computedStyles: [],
+          inlineStyles: [],
+          box: { x: 0, y: 0, width: 390, height: 844 },
+        },
+        warnings: [],
+      },
+    });
+    registry.previews.set(preview.id, preview);
+    const socket = new FakeAttachSocket();
+
+    registry.attach(socket as unknown as WebSocket, preview.id);
+
+    assert.deepEqual(socket.frames[3], {
+      type: "inspectorSnapshot",
+      snapshot: preview.inspectorSnapshot,
     });
   });
 
@@ -1350,6 +1643,8 @@ function buildFakePreview(
     networkEntryIdsByRequestId: new Map(),
     networkRedirectCountsByRequestId: new Map(),
     networkUnavailableMessage: null,
+    inspectorSnapshot: null,
+    inspectorSelectedPath: null,
     storageSnapshot: null,
     storageRefreshTimer: null,
     pageLoading: false,
