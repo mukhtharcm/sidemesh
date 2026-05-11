@@ -481,6 +481,12 @@ void main() {
     );
     await _pumpFrames(tester);
     expect(api.sentMessages.last['type'], 'storageRefreshRequest');
+
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Storage'));
+    await _pumpFrames(tester);
+    expect(api.sentMessages.last['type'], 'storageRefreshRequest');
   });
 
   testWidgets('browser preview storage actions send mutation messages', (

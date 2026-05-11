@@ -892,7 +892,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   void _setDevToolsTab(int index) {
     setState(() => _devToolsTabIndex = index);
     if (index == 2) {
-      _requestStorageSnapshot();
+      _requestStorageSnapshot(force: true);
     }
   }
 
