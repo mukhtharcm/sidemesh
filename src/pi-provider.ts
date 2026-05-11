@@ -2849,20 +2849,9 @@ function mergePreservedSidecarUserMessages(
     if (findPreservedSidecarUserIndex(messages, record) !== -1) {
       continue;
     }
-    const message = {
-      ...cloneMessage(record.message),
-      seq: Math.max(
-        0,
-        ...messages.map((candidate) => candidate.seq + 1),
-        ...activities.map((activity) => activity.seq + 1),
-      ),
-    };
-    messages.push(message);
-    preserved.push({
-      message: cloneMessage(message),
-      previousUserText: record.previousUserText,
-      previousUserOccurrence: record.previousUserOccurrence,
-    });
+    preserved.push(
+      insertPreservedSidecarUserMessage(messages, activities, record),
+    );
   }
   return preserved;
 }
@@ -2878,25 +2867,83 @@ function ensurePreservedSidecarUser(
   ) {
     return record;
   }
-  const message = {
-    ...cloneMessage(record.previousUserMessage),
-    seq: Math.max(
-      0,
-      ...messages.map((candidate) => candidate.seq + 1),
-      ...activities.map((activity) => activity.seq + 1),
-    ),
-  };
-  const text = message.text.trim();
-  const previousUserOccurrence = messages.filter(
-    (candidate) => candidate.role === "user" && candidate.text.trim() === text,
-  ).length;
-  messages.push(message);
+  const inserted = insertPreservedSidecarUserMessage(messages, activities, {
+    message: record.previousUserMessage,
+    previousUserText: record.previousUserMessage.text.trim(),
+    previousUserOccurrence: 0,
+  });
   return {
     ...record,
-    previousUserText: text,
-    previousUserOccurrence,
-    previousUserMessage: cloneMessage(message),
+    previousUserText: inserted.previousUserText,
+    previousUserOccurrence: inserted.previousUserOccurrence,
+    previousUserMessage: cloneMessage(inserted.message),
   };
+}
+
+function insertPreservedSidecarUserMessage(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+  record: PiPreservedSidecarUserMessage,
+): PiPreservedSidecarUserMessage {
+  const seq = preservedSidecarUserInsertionSeq(
+    messages,
+    activities,
+    record.message,
+  );
+  shiftTranscriptSeqsAtOrAfter(messages, activities, seq);
+  const message = {
+    ...cloneMessage(record.message),
+    seq,
+  };
+  const insertAt = messages.findIndex((candidate) => candidate.seq >= seq);
+  messages.splice(insertAt === -1 ? messages.length : insertAt, 0, message);
+  return (
+    preservedSidecarUserRecordForMessage(messages, message.id) ?? {
+      message: cloneMessage(message),
+      previousUserText: record.previousUserText,
+      previousUserOccurrence: record.previousUserOccurrence,
+    }
+  );
+}
+
+function preservedSidecarUserInsertionSeq(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+  message: SessionMessage,
+): number {
+  const nextSeq = maxTranscriptNextSeq(messages, activities);
+  if (!Number.isFinite(message.seq)) {
+    return nextSeq;
+  }
+  return Math.min(Math.max(0, Math.trunc(message.seq)), nextSeq);
+}
+
+function maxTranscriptNextSeq(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+): number {
+  return Math.max(
+    0,
+    ...messages.map((message) => message.seq + 1),
+    ...activities.map((activity) => activity.seq + 1),
+  );
+}
+
+function shiftTranscriptSeqsAtOrAfter(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+  seq: number,
+): void {
+  for (const message of messages) {
+    if (message.seq >= seq) {
+      message.seq += 1;
+    }
+  }
+  for (const activity of activities) {
+    if (activity.seq >= seq) {
+      activity.seq += 1;
+    }
+  }
 }
 
 function hasPiAssistantReplacement(

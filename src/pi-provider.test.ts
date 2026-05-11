@@ -1234,6 +1234,50 @@ describe("PiAgentProvider", () => {
       false,
     );
     assert.equal(reloadedThread.preview, "Prompt only");
+
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "later-user",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:02.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Later persisted" }],
+            timestamp: 1_777_770_002_000,
+          },
+        }),
+        JSON.stringify(
+          minimalPiAssistantMessage(
+            "later-assistant",
+            "later-user",
+            "2026-05-01T10:00:03.000Z",
+            "Later answer",
+            10,
+            20,
+            30,
+          ),
+        ),
+      ],
+      "2026-05-01T10:00:04.000Z",
+    );
+
+    const laterLog = await provider.readSessionLog(created.thread);
+    assert.deepEqual(
+      laterLog.messages.map((message) => message.text),
+      ["Prompt only", "Later persisted", "Later answer"],
+    );
+    const laterThread = await provider.readSessionThread(created.thread.id, false);
+    assert.equal(laterThread.preview, "Later answer");
   });
 
   it("finishes prompt-resolved Pi turns after a slow event queue drains", async () => {
