@@ -591,6 +591,47 @@ describe("browser preview", () => {
           ],
         };
       }
+      if (method === "IndexedDB.requestDatabaseNames") {
+        assert.deepEqual(params, {
+          securityOrigin: "http://127.0.0.1:3000",
+        });
+        return {
+          databaseNames: ["app-cache"],
+        };
+      }
+      if (method === "IndexedDB.requestDatabase") {
+        assert.deepEqual(params, {
+          securityOrigin: "http://127.0.0.1:3000",
+          databaseName: "app-cache",
+        });
+        return {
+          databaseWithObjectStores: {
+            name: "app-cache",
+            version: 3,
+            objectStores: [
+              {
+                name: "items",
+                keyPath: {
+                  type: "string",
+                  string: "id",
+                },
+                autoIncrement: false,
+                indexes: [
+                  {
+                    name: "byUpdatedAt",
+                    keyPath: {
+                      type: "string",
+                      string: "updatedAt",
+                    },
+                    unique: false,
+                    multiEntry: false,
+                  },
+                ],
+              },
+            ],
+          },
+        };
+      }
       if (method === "DOMStorage.getDOMStorageItems") {
         const storageId = (params.storageId ?? {}) as Record<string, unknown>;
         if (storageId.isLocalStorage === true) {
@@ -627,6 +668,8 @@ describe("browser preview", () => {
       cdp.sent.map((item) => item.method),
       [
         "Network.getCookies",
+        "IndexedDB.requestDatabaseNames",
+        "IndexedDB.requestDatabase",
         "DOMStorage.getDOMStorageItems",
         "DOMStorage.getDOMStorageItems",
         "Storage.getUsageAndQuota",
@@ -651,6 +694,27 @@ describe("browser preview", () => {
         sameSite: "Lax",
       },
     ]);
+    assert.deepEqual(snapshot.indexedDbDatabases, [
+      {
+        name: "app-cache",
+        version: 3,
+        objectStores: [
+          {
+            name: "items",
+            keyPath: "id",
+            autoIncrement: false,
+            indexes: [
+              {
+                name: "byUpdatedAt",
+                keyPath: "updatedAt",
+                unique: false,
+                multiEntry: false,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
     assert.deepEqual(snapshot.localStorage, [
       { key: "theme", value: "dark" },
     ]);
@@ -665,6 +729,242 @@ describe("browser preview", () => {
     ]);
     assert.deepEqual(snapshot.warnings, []);
     assert.deepEqual(preview.storageSnapshot, snapshot);
+  });
+
+  it("updates localStorage entries and broadcasts the refreshed snapshot", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp, {
+      url: "http://127.0.0.1:3000/app",
+      status: "running",
+      sessionIdCdp: "session-1",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    const socket = createFakeSocket(messages);
+    preview.clients.add(socket);
+
+    cdp.sendHandler = async (method, params) => {
+      if (method === "DOMStorage.setDOMStorageItem") {
+        assert.deepEqual(params, {
+          storageId: {
+            securityOrigin: "http://127.0.0.1:3000",
+            isLocalStorage: true,
+          },
+          key: "theme",
+          value: "amber",
+        });
+        return {};
+      }
+      if (method === "IndexedDB.requestDatabaseNames") {
+        return { databaseNames: [] };
+      }
+      if (method === "Network.getCookies") {
+        return { cookies: [] };
+      }
+      if (method === "DOMStorage.getDOMStorageItems") {
+        const storageId = (params.storageId ?? {}) as Record<string, unknown>;
+        if (storageId.isLocalStorage === true) {
+          return { entries: [["theme", "amber"]] };
+        }
+        return { entries: [["draft", "42"]] };
+      }
+      if (method === "Storage.getUsageAndQuota") {
+        return {
+          usage: 512,
+          quota: 2048,
+          usageBreakdown: [{ storageType: "local_storage", usage: 512 }],
+        };
+      }
+      throw new Error(`Unexpected CDP method: ${method}`);
+    };
+
+    await registry.handleClientMessage(
+      preview,
+      socket,
+      Buffer.from(
+        JSON.stringify({
+          type: "storageSetEntry",
+          area: "localStorage",
+          key: "theme",
+          value: "amber",
+        }),
+      ),
+    );
+
+    assert.deepEqual(
+      cdp.sent.map((item) => item.method),
+      [
+        "DOMStorage.setDOMStorageItem",
+        "Network.getCookies",
+        "IndexedDB.requestDatabaseNames",
+        "DOMStorage.getDOMStorageItems",
+        "DOMStorage.getDOMStorageItems",
+        "Storage.getUsageAndQuota",
+      ],
+    );
+    assert.equal(messages[0]?.type, "storageSnapshot");
+    assert.deepEqual((messages[0]?.snapshot as any).localStorage, [
+      { key: "theme", value: "amber" },
+    ]);
+    assert.deepEqual((messages[0]?.snapshot as any).sessionStorage, [
+      { key: "draft", value: "42" },
+    ]);
+  });
+
+  it("clears visible cookies and broadcasts the refreshed snapshot", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp, {
+      url: "http://127.0.0.1:3000/app",
+      status: "running",
+      sessionIdCdp: "session-1",
+      storageSnapshot: {
+        url: "http://127.0.0.1:3000/app",
+        origin: "http://127.0.0.1:3000",
+        refreshedAt: 1,
+        cookies: [
+          {
+            name: "sid",
+            value: "abc",
+            domain: "127.0.0.1",
+            path: "/",
+            expires: null,
+            size: 3,
+            httpOnly: true,
+            secure: false,
+            session: true,
+            sameSite: "Lax",
+          },
+        ],
+        indexedDbDatabases: [],
+        localStorage: [],
+        sessionStorage: [],
+        usage: 0,
+        quota: 2048,
+        usageBreakdown: [],
+        warnings: [],
+      },
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    const socket = createFakeSocket(messages);
+    preview.clients.add(socket);
+
+    cdp.sendHandler = async (method, params) => {
+      if (method === "Network.deleteCookies") {
+        assert.deepEqual(params, {
+          name: "sid",
+          domain: "127.0.0.1",
+          path: "/",
+          url: "http://127.0.0.1:3000/app",
+        });
+        return {};
+      }
+      if (method === "IndexedDB.requestDatabaseNames") {
+        return { databaseNames: [] };
+      }
+      if (method === "Network.getCookies") {
+        return { cookies: [] };
+      }
+      if (method === "DOMStorage.getDOMStorageItems") {
+        return { entries: [] };
+      }
+      if (method === "Storage.getUsageAndQuota") {
+        return {
+          usage: 0,
+          quota: 2048,
+          usageBreakdown: [],
+        };
+      }
+      throw new Error(`Unexpected CDP method: ${method}`);
+    };
+
+    await registry.handleClientMessage(
+      preview,
+      socket,
+      Buffer.from(JSON.stringify({ type: "storageClearCookies" })),
+    );
+
+    assert.deepEqual(
+      cdp.sent.map((item) => item.method),
+      [
+        "Network.deleteCookies",
+        "Network.getCookies",
+        "IndexedDB.requestDatabaseNames",
+        "DOMStorage.getDOMStorageItems",
+        "DOMStorage.getDOMStorageItems",
+        "Storage.getUsageAndQuota",
+      ],
+    );
+    assert.equal(messages[0]?.type, "storageSnapshot");
+    assert.deepEqual((messages[0]?.snapshot as any).cookies, []);
+  });
+
+  it("refreshes storage snapshots after DOMStorage events", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp, {
+      url: "http://127.0.0.1:3000/app",
+      status: "running",
+      sessionIdCdp: "session-1",
+      storageSnapshot: {
+        url: "http://127.0.0.1:3000/app",
+        origin: "http://127.0.0.1:3000",
+        refreshedAt: 1,
+        cookies: [],
+        indexedDbDatabases: [],
+        localStorage: [{ key: "theme", value: "dark" }],
+        sessionStorage: [],
+        usage: 128,
+        quota: 2048,
+        usageBreakdown: [{ storageType: "local_storage", usage: 128 }],
+        warnings: [],
+      },
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    const socket = createFakeSocket(messages);
+    preview.clients.add(socket);
+
+    cdp.sendHandler = async (method, params) => {
+      if (method === "IndexedDB.requestDatabaseNames") {
+        return { databaseNames: [] };
+      }
+      if (method === "Network.getCookies") {
+        return { cookies: [] };
+      }
+      if (method === "DOMStorage.getDOMStorageItems") {
+        const storageId = (params.storageId ?? {}) as Record<string, unknown>;
+        if (storageId.isLocalStorage === true) {
+          return { entries: [["theme", "amber"]] };
+        }
+        return { entries: [] };
+      }
+      if (method === "Storage.getUsageAndQuota") {
+        return {
+          usage: 256,
+          quota: 2048,
+          usageBreakdown: [{ storageType: "local_storage", usage: 256 }],
+        };
+      }
+      throw new Error(`Unexpected CDP method: ${method}`);
+    };
+
+    registry.registerStorageHandlers(preview, "session-1");
+    cdp.emitSession("DOMStorage.domStorageItemUpdated", {
+      storageId: {
+        securityOrigin: "http://127.0.0.1:3000",
+        isLocalStorage: true,
+      },
+      key: "theme",
+      oldValue: "dark",
+      newValue: "amber",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 220));
+
+    assert.equal(messages[0]?.type, "storageSnapshot");
+    assert.deepEqual((messages[0]?.snapshot as any).localStorage, [
+      { key: "theme", value: "amber" },
+    ]);
   });
 
   it("sends an authoritative network snapshot on attach", () => {
@@ -925,6 +1225,7 @@ function buildFakePreview(
     networkRedirectCountsByRequestId: new Map(),
     networkUnavailableMessage: null,
     storageSnapshot: null,
+    storageRefreshTimer: null,
     pageLoading: false,
     cleanupHandlers: [],
     ...overrides,

@@ -124,6 +124,7 @@ interface BrowserPreviewRecord {
   networkRedirectCountsByRequestId: Map<string, number>;
   networkUnavailableMessage: string | null;
   storageSnapshot: BrowserPreviewStorageSnapshot | null;
+  storageRefreshTimer: NodeJS.Timeout | null;
   pageLoading: boolean;
   cleanupHandlers: Array<() => void>;
 }
@@ -210,6 +211,8 @@ interface BrowserPreviewStorageEntry {
   value: string;
 }
 
+type BrowserPreviewStorageArea = "localStorage" | "sessionStorage";
+
 interface BrowserPreviewStorageUsage {
   storageType: string;
   usage: number;
@@ -228,11 +231,32 @@ interface BrowserPreviewStorageCookie {
   sameSite: string | null;
 }
 
+interface BrowserPreviewIndexedDbIndex {
+  name: string;
+  keyPath: string | null;
+  unique: boolean;
+  multiEntry: boolean;
+}
+
+interface BrowserPreviewIndexedDbObjectStore {
+  name: string;
+  keyPath: string | null;
+  autoIncrement: boolean;
+  indexes: BrowserPreviewIndexedDbIndex[];
+}
+
+interface BrowserPreviewIndexedDbDatabase {
+  name: string;
+  version: number | null;
+  objectStores: BrowserPreviewIndexedDbObjectStore[];
+}
+
 interface BrowserPreviewStorageSnapshot {
   url: string;
   origin: string | null;
   refreshedAt: number;
   cookies: BrowserPreviewStorageCookie[];
+  indexedDbDatabases: BrowserPreviewIndexedDbDatabase[];
   localStorage: BrowserPreviewStorageEntry[];
   sessionStorage: BrowserPreviewStorageEntry[];
   usage: number | null;
@@ -378,6 +402,7 @@ export class BrowserPreviewRegistry {
       networkRedirectCountsByRequestId: new Map(),
       networkUnavailableMessage: null,
       storageSnapshot: null,
+      storageRefreshTimer: null,
       pageLoading: false,
       cleanupHandlers: [],
     };
@@ -538,6 +563,13 @@ export class BrowserPreviewRegistry {
           available: false,
           message: preview.networkUnavailableMessage,
         });
+      }
+      try {
+        await cdp.send("DOMStorage.enable", {}, sessionId);
+        this.registerStorageHandlers(preview, sessionId);
+      } catch {
+        // Keep storage snapshots available even if live DOMStorage events are
+        // unsupported on this Chromium build.
       }
       this.registerConsoleHandlers(preview, sessionId);
       this.registerPageLoadHandlers(preview, sessionId);
@@ -702,6 +734,36 @@ export class BrowserPreviewRegistry {
       }
       if (type === "storageRefreshRequest") {
         await this.sendStorageSnapshot(preview, socket);
+        return;
+      }
+      if (type === "storageSetEntry") {
+        await this.handleStorageMutation(preview, socket, () =>
+          this.setStorageEntry(preview, record),
+        );
+        return;
+      }
+      if (type === "storageRemoveEntry") {
+        await this.handleStorageMutation(preview, socket, () =>
+          this.removeStorageEntry(preview, record),
+        );
+        return;
+      }
+      if (type === "storageClearEntries") {
+        await this.handleStorageMutation(preview, socket, () =>
+          this.clearStorageEntries(preview, record),
+        );
+        return;
+      }
+      if (type === "storageDeleteCookie") {
+        await this.handleStorageMutation(preview, socket, () =>
+          this.deleteStorageCookie(preview, record),
+        );
+        return;
+      }
+      if (type === "storageClearCookies") {
+        await this.handleStorageMutation(preview, socket, () =>
+          this.clearStorageCookies(preview),
+        );
         return;
       }
       await this.applyInput(preview, record);
@@ -1577,6 +1639,23 @@ export class BrowserPreviewRegistry {
     } catch (error) {
       sendJson(socket, {
         type: "storageSnapshot",
+        snapshot: preview.storageSnapshot ?? undefined,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async handleStorageMutation(
+    preview: BrowserPreviewRecord,
+    socket: WebSocket,
+    mutation: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await mutation();
+    } catch (error) {
+      sendJson(socket, {
+        type: "storageSnapshot",
+        snapshot: preview.storageSnapshot ?? undefined,
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -1606,6 +1685,7 @@ export class BrowserPreviewRegistry {
     const warnings: string[] = [];
     const origin = storageOriginForUrl(preview.url);
     let cookies: BrowserPreviewStorageCookie[] = [];
+    let indexedDbDatabases: BrowserPreviewIndexedDbDatabase[] = [];
     let localStorage: BrowserPreviewStorageEntry[] = [];
     let sessionStorage: BrowserPreviewStorageEntry[] = [];
     let usage: number | null = null;
@@ -1628,6 +1708,35 @@ export class BrowserPreviewRegistry {
     if (!origin) {
       warnings.push("Storage inspection requires a page with a valid origin.");
     } else {
+      try {
+        const namesResult = await cdp.send(
+          "IndexedDB.requestDatabaseNames",
+          { securityOrigin: origin },
+          sessionId,
+        );
+        const databaseNames = indexedDbDatabaseNamesFromResult(namesResult);
+        const databases: BrowserPreviewIndexedDbDatabase[] = [];
+        for (const databaseName of databaseNames) {
+          const result = await cdp.send(
+            "IndexedDB.requestDatabase",
+            {
+              securityOrigin: origin,
+              databaseName,
+            },
+            sessionId,
+          );
+          const database = indexedDbDatabaseFromResult(result);
+          if (database) {
+            databases.push(database);
+          }
+        }
+        indexedDbDatabases = databases;
+      } catch (error) {
+        warnings.push(
+          `Could not read IndexedDB: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
       try {
         const result = await cdp.send(
           "DOMStorage.getDOMStorageItems",
@@ -1685,6 +1794,7 @@ export class BrowserPreviewRegistry {
       origin,
       refreshedAt: Date.now(),
       cookies,
+      indexedDbDatabases,
       localStorage,
       sessionStorage,
       usage,
@@ -1692,6 +1802,226 @@ export class BrowserPreviewRegistry {
       usageBreakdown,
       warnings,
     };
+  }
+
+  private async setStorageEntry(
+    preview: BrowserPreviewRecord,
+    record: Record<string, unknown>,
+  ): Promise<void> {
+    const cdp = preview.cdp;
+    const sessionId = preview.sessionIdCdp;
+    const origin = storageOriginForUrl(preview.url);
+    const area = storageAreaFromMessage(record.area);
+    const key = stringValue(record.key);
+    const value = stringValue(record.value);
+    if (!cdp || !sessionId || preview.status !== "running") {
+      throw new BrowserPreviewError(
+        "Browser preview is no longer running.",
+        409,
+      );
+    }
+    if (!origin) {
+      throw new BrowserPreviewError(
+        "Storage editing requires a page with a valid origin.",
+        400,
+      );
+    }
+    if (!area) {
+      throw new BrowserPreviewError("Storage area must be localStorage or sessionStorage.", 400);
+    }
+    if (!key.trim()) {
+      throw new BrowserPreviewError("Storage key is required.", 400);
+    }
+    await cdp.send(
+      "DOMStorage.setDOMStorageItem",
+      {
+        storageId: storageIdForArea(origin, area),
+        key,
+        value,
+      },
+      sessionId,
+    );
+    await this.refreshAndBroadcastStorageSnapshot(preview);
+  }
+
+  private async removeStorageEntry(
+    preview: BrowserPreviewRecord,
+    record: Record<string, unknown>,
+  ): Promise<void> {
+    const cdp = preview.cdp;
+    const sessionId = preview.sessionIdCdp;
+    const origin = storageOriginForUrl(preview.url);
+    const area = storageAreaFromMessage(record.area);
+    const key = stringValue(record.key);
+    if (!cdp || !sessionId || preview.status !== "running") {
+      throw new BrowserPreviewError(
+        "Browser preview is no longer running.",
+        409,
+      );
+    }
+    if (!origin) {
+      throw new BrowserPreviewError(
+        "Storage editing requires a page with a valid origin.",
+        400,
+      );
+    }
+    if (!area) {
+      throw new BrowserPreviewError("Storage area must be localStorage or sessionStorage.", 400);
+    }
+    if (!key.trim()) {
+      throw new BrowserPreviewError("Storage key is required.", 400);
+    }
+    await cdp.send(
+      "DOMStorage.removeDOMStorageItem",
+      {
+        storageId: storageIdForArea(origin, area),
+        key,
+      },
+      sessionId,
+    );
+    await this.refreshAndBroadcastStorageSnapshot(preview);
+  }
+
+  private async clearStorageEntries(
+    preview: BrowserPreviewRecord,
+    record: Record<string, unknown>,
+  ): Promise<void> {
+    const cdp = preview.cdp;
+    const sessionId = preview.sessionIdCdp;
+    const origin = storageOriginForUrl(preview.url);
+    const area = storageAreaFromMessage(record.area);
+    if (!cdp || !sessionId || preview.status !== "running") {
+      throw new BrowserPreviewError(
+        "Browser preview is no longer running.",
+        409,
+      );
+    }
+    if (!origin) {
+      throw new BrowserPreviewError(
+        "Storage editing requires a page with a valid origin.",
+        400,
+      );
+    }
+    if (!area) {
+      throw new BrowserPreviewError("Storage area must be localStorage or sessionStorage.", 400);
+    }
+    await cdp.send(
+      "DOMStorage.clear",
+      {
+        storageId: storageIdForArea(origin, area),
+      },
+      sessionId,
+    );
+    await this.refreshAndBroadcastStorageSnapshot(preview);
+  }
+
+  private async deleteStorageCookie(
+    preview: BrowserPreviewRecord,
+    record: Record<string, unknown>,
+  ): Promise<void> {
+    const cdp = preview.cdp;
+    const sessionId = preview.sessionIdCdp;
+    const name = stringValue(record.name);
+    const domain = stringValue(record.domain);
+    const path = stringValue(record.path) || "/";
+    if (!cdp || !sessionId || preview.status !== "running") {
+      throw new BrowserPreviewError(
+        "Browser preview is no longer running.",
+        409,
+      );
+    }
+    if (!name.trim()) {
+      throw new BrowserPreviewError("Cookie name is required.", 400);
+    }
+    await cdp.send(
+      "Network.deleteCookies",
+      {
+        name,
+        domain: domain || undefined,
+        path,
+        url: preview.url || undefined,
+      },
+      sessionId,
+    );
+    await this.refreshAndBroadcastStorageSnapshot(preview);
+  }
+
+  private async clearStorageCookies(
+    preview: BrowserPreviewRecord,
+  ): Promise<void> {
+    const cdp = preview.cdp;
+    const sessionId = preview.sessionIdCdp;
+    if (!cdp || !sessionId || preview.status !== "running") {
+      throw new BrowserPreviewError(
+        "Browser preview is no longer running.",
+        409,
+      );
+    }
+    const snapshot =
+      preview.storageSnapshot ?? (await this.buildStorageSnapshot(preview, cdp, sessionId));
+    for (const cookie of snapshot.cookies) {
+      await cdp.send(
+        "Network.deleteCookies",
+        {
+          name: cookie.name,
+          domain: cookie.domain || undefined,
+          path: cookie.path || "/",
+          url: preview.url || undefined,
+        },
+        sessionId,
+      );
+    }
+    await this.refreshAndBroadcastStorageSnapshot(preview);
+  }
+
+  private async refreshAndBroadcastStorageSnapshot(
+    preview: BrowserPreviewRecord,
+  ): Promise<void> {
+    const snapshot = await this.refreshStorageSnapshot(preview);
+    this.broadcastStorageSnapshot(preview, snapshot);
+  }
+
+  private broadcastStorageSnapshot(
+    preview: BrowserPreviewRecord,
+    snapshot: BrowserPreviewStorageSnapshot,
+  ): void {
+    this.broadcast(preview, {
+      type: "storageSnapshot",
+      snapshot,
+    });
+  }
+
+  private registerStorageHandlers(
+    preview: BrowserPreviewRecord,
+    sessionId: string,
+  ): void {
+    const cdp = preview.cdp;
+    if (!cdp) return;
+    const schedule = () => this.scheduleStorageSnapshotRefresh(preview);
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "DOMStorage.domStorageItemsCleared", schedule),
+    );
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "DOMStorage.domStorageItemRemoved", schedule),
+    );
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "DOMStorage.domStorageItemAdded", schedule),
+    );
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "DOMStorage.domStorageItemUpdated", schedule),
+    );
+  }
+
+  private scheduleStorageSnapshotRefresh(preview: BrowserPreviewRecord): void {
+    if (!preview.storageSnapshot) return;
+    if (preview.storageRefreshTimer) {
+      clearTimeout(preview.storageRefreshTimer);
+    }
+    preview.storageRefreshTimer = setTimeout(() => {
+      preview.storageRefreshTimer = null;
+      void this.refreshAndBroadcastStorageSnapshot(preview).catch(() => {});
+    }, 150);
+    preview.storageRefreshTimer.unref?.();
   }
 
   private flushConsoleBuffer(preview: BrowserPreviewRecord): void {
@@ -1808,6 +2138,7 @@ export class BrowserPreviewRegistry {
       cdp.onSessionEvent(sessionId, "Page.loadEventFired", () => {
         preview.pageLoading = false;
         this.broadcast(preview, { type: "loading", state: "complete" });
+        this.scheduleStorageSnapshotRefresh(preview);
       }),
     );
   }
@@ -1955,6 +2286,10 @@ export class BrowserPreviewRegistry {
     if (preview.consoleFlushTimer) {
       clearInterval(preview.consoleFlushTimer);
       preview.consoleFlushTimer = null;
+    }
+    if (preview.storageRefreshTimer) {
+      clearTimeout(preview.storageRefreshTimer);
+      preview.storageRefreshTimer = null;
     }
     for (const cleanup of preview.cleanupHandlers.splice(0)) {
       cleanup();
@@ -2768,6 +3103,107 @@ function storageOriginForUrl(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+function storageAreaFromMessage(
+  value: unknown,
+): BrowserPreviewStorageArea | null {
+  if (value === "localStorage" || value === "sessionStorage") {
+    return value;
+  }
+  return null;
+}
+
+function storageIdForArea(
+  origin: string,
+  area: BrowserPreviewStorageArea,
+): { securityOrigin: string; isLocalStorage: boolean } {
+  return {
+    securityOrigin: origin,
+    isLocalStorage: area === "localStorage",
+  };
+}
+
+function indexedDbDatabaseNamesFromResult(value: unknown): string[] {
+  const record = objectValue(value);
+  if (!Array.isArray(record?.databaseNames)) return [];
+  return record.databaseNames
+    .map((item) => stringValue(item).trim())
+    .filter((item) => item.length > 0)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function indexedDbDatabaseFromResult(
+  value: unknown,
+): BrowserPreviewIndexedDbDatabase | null {
+  const record = objectValue(value);
+  const rawDatabase = objectValue(record?.databaseWithObjectStores);
+  if (!rawDatabase) return null;
+  const name = stringValue(rawDatabase.name).trim();
+  if (!name) return null;
+  const objectStores = Array.isArray(rawDatabase.objectStores)
+    ? rawDatabase.objectStores
+        .map((item) => objectValue(item))
+        .filter((item): item is Record<string, unknown> => item !== null)
+        .map((store) => ({
+          name: stringValue(store.name),
+          keyPath: indexedDbKeyPathText(store.keyPath),
+          autoIncrement: store.autoIncrement === true,
+          indexes: indexedDbIndexesFromResult(store.indexes),
+        }))
+        .filter((store) => store.name.length > 0)
+        .sort((left, right) => left.name.localeCompare(right.name))
+    : [];
+  return {
+    name,
+    version: numberOrNull(rawDatabase.version),
+    objectStores,
+  };
+}
+
+function indexedDbIndexesFromResult(
+  value: unknown,
+): BrowserPreviewIndexedDbIndex[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => objectValue(item))
+    .filter((item): item is Record<string, unknown> => item !== null)
+    .map((item) => ({
+      name: stringValue(item.name),
+      keyPath: indexedDbKeyPathText(item.keyPath),
+      unique: item.unique === true,
+      multiEntry: item.multiEntry === true,
+    }))
+    .filter((item) => item.name.length > 0)
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function indexedDbKeyPathText(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (Array.isArray(value)) {
+    const values = value
+      .map((item) => stringValue(item).trim())
+      .filter((item) => item.length > 0);
+    return values.length > 0 ? `[${values.join(", ")}]` : null;
+  }
+  const record = objectValue(value);
+  if (!record) return null;
+  const type = stringValue(record.type);
+  if (type === "string") {
+    return stringOrNull(record.string);
+  }
+  if (type === "array") {
+    const values = Array.isArray(record.array)
+      ? record.array
+          .map((item) => stringValue(item).trim())
+          .filter((item) => item.length > 0)
+      : [];
+    return values.length > 0 ? `[${values.join(", ")}]` : null;
+  }
+  return stringOrNull(record.description);
 }
 
 function storageEntriesFromPairs(value: unknown): BrowserPreviewStorageEntry[] {
