@@ -108,7 +108,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   int _devToolsTabIndex = 0;
   bool _pageLoading = false;
   final List<_ConsoleEntry> _consoleEntries = [];
-  final int _maxConsoleEntries = 200;
+  final int _maxConsoleEntries = 256;
+  int _consoleClearedSeqFloor = 0;
   final Map<String, _NetworkEntry> _networkEntries = <String, _NetworkEntry>{};
   final List<String> _networkEntryOrder = <String>[];
   final Map<String, _NetworkDetail> _networkDetails =
@@ -347,6 +348,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       });
       return;
     }
+    if (type == 'consoleSnapshot') {
+      _handleConsoleSnapshot(frame);
+      return;
+    }
     if (type == 'console' || type == 'exception' || type == 'log') {
       _handleConsole(frame);
       return;
@@ -398,30 +403,34 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _handleConsole(Map<dynamic, dynamic> frame) {
     if (!mounted) return;
-    final args = frame['args'];
-    var text = frame['text']?.toString() ?? '';
-    if (text.isEmpty && args is List) {
-      text = args.map((a) {
-        if (a is Map && a.containsKey('value')) {
-          final v = a['value'];
-          return v?.toString() ?? '';
-        }
-        return a?.toString() ?? '';
-      }).join(' ');
-    }
-    final entry = _ConsoleEntry(
-      type: frame['type']?.toString() ?? 'log',
-      level: frame['level']?.toString() ?? 'log',
-      text: text,
-      url: frame['url']?.toString(),
-      lineNumber: frame['lineNumber'] is int ? frame['lineNumber'] as int : null,
-      columnNumber: frame['columnNumber'] is int ? frame['columnNumber'] as int : null,
-      timestamp: frame['timestamp'] is int ? frame['timestamp'] as int : DateTime.now().millisecondsSinceEpoch,
-    );
+    final entry = _ConsoleEntry.fromJson(frame);
+    if (!_shouldIncludeConsoleEntry(entry)) return;
     setState(() {
       _consoleEntries.add(entry);
       if (_consoleEntries.length > _maxConsoleEntries) {
         _consoleEntries.removeAt(0);
+      }
+    });
+  }
+
+  void _handleConsoleSnapshot(Map<dynamic, dynamic> frame) {
+    if (!mounted) return;
+    final entries = frame['entries'];
+    if (entries is! List) return;
+    setState(() {
+      _consoleEntries
+        ..clear()
+        ..addAll(
+          entries
+              .whereType<Map>()
+              .map(_ConsoleEntry.fromJson)
+              .where(_shouldIncludeConsoleEntry),
+        );
+      if (_consoleEntries.length > _maxConsoleEntries) {
+        _consoleEntries.removeRange(
+          0,
+          _consoleEntries.length - _maxConsoleEntries,
+        );
       }
     });
   }
@@ -504,10 +513,11 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       errorText: entry.errorText,
       requestBody: null,
       requestBodyError: null,
-      bodyError: bodyError,
+      bodyError: entry.resourceType == 'WebSocket' ? null : bodyError,
       finished: entry.finished,
       failed: entry.failed,
       servedFromCache: entry.servedFromCache,
+      webSocketMessages: const <_NetworkWebSocketMessage>[],
     );
   }
 
@@ -535,6 +545,24 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         .toList(growable: true);
     _sortNetworkEntries(filtered, _networkSort);
     return filtered;
+  }
+
+  bool _shouldIncludeConsoleEntry(_ConsoleEntry entry) {
+    return entry.seq > _consoleClearedSeqFloor;
+  }
+
+  void _clearConsole() {
+    if (_consoleEntries.isNotEmpty) {
+      final latestSeq = _consoleEntries
+          .map((entry) => entry.seq)
+          .reduce((left, right) => left > right ? left : right);
+      if (latestSeq > _consoleClearedSeqFloor) {
+        _consoleClearedSeqFloor = latestSeq;
+      }
+    }
+    setState(() {
+      _consoleEntries.clear();
+    });
   }
 
   bool _shouldIncludeNetworkEntry(_NetworkEntry entry) {
@@ -1100,7 +1128,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             },
             onNetworkSortChanged: (value) =>
                 setState(() => _networkSort = value),
-            onClearConsole: () => setState(() => _consoleEntries.clear()),
+            onClearConsole: _clearConsole,
             onClearNetwork: _clearNetworkLog,
             onOpenNetworkDetail: _showNetworkDetail,
             preview: _preview,
@@ -1733,6 +1761,12 @@ class _ConsoleRow extends StatelessWidget {
       'debug' => colors.textTertiary,
       _ => colors.textPrimary,
     };
+    final metadata = <String>[
+      _formatConsoleTimestamp(entry.timestamp),
+      if (entry.source != null && entry.source!.isNotEmpty) entry.source!,
+      if (entry.url != null && entry.url!.isNotEmpty)
+        '${entry.url}:${entry.lineNumber ?? 0}',
+    ];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       child: Row(
@@ -1759,9 +1793,9 @@ class _ConsoleRow extends StatelessWidget {
                     fontFamily: 'monospace',
                   ),
                 ),
-                if (entry.url != null && entry.url!.isNotEmpty)
+                if (metadata.isNotEmpty)
                   Text(
-                    '${entry.url}:${entry.lineNumber ?? 0}',
+                    metadata.join(' · '),
                     style: TextStyle(
                       color: colors.textTertiary,
                       fontSize: 10,
@@ -1938,6 +1972,8 @@ class _NetworkRow extends StatelessWidget {
     final subtitleParts = <String>[
       _networkResourceTypeLabel(entry.resourceType),
       if (entry.servedFromCache) 'cache',
+      if (entry.webSocketMessageCount > 0)
+        '${entry.webSocketMessageCount} ${entry.webSocketMessageCount == 1 ? 'msg' : 'msgs'}',
       if (entry.encodedDataLength != null)
         _formatNetworkBytes(entry.encodedDataLength!),
       if (entry.durationMs != null) '${entry.durationMs} ms',
@@ -2182,17 +2218,25 @@ class _NetworkDetailSheet extends StatelessWidget {
                                     headers: detail.responseHeaders,
                                   ),
                                 ),
-                              _NetworkSection(
-                                title: 'Response body',
-                                child: _NetworkPayloadView(
-                                  body: detail.body,
-                                  bodyError: detail.bodyError,
-                                  mimeType: detail.mimeType ?? '',
-                                  bodyBase64Encoded: detail.bodyBase64Encoded,
-                                  emptyMessage:
-                                      'No response body captured for this request.',
+                              if (_networkShouldShowWebSocketMessages(detail))
+                                _NetworkSection(
+                                  title: 'Messages',
+                                  child: _NetworkWebSocketMessagesView(
+                                    messages: detail.webSocketMessages,
+                                  ),
                                 ),
-                              ),
+                              if (_networkShouldShowResponseBody(detail))
+                                _NetworkSection(
+                                  title: 'Response body',
+                                  child: _NetworkPayloadView(
+                                    body: detail.body,
+                                    bodyError: detail.bodyError,
+                                    mimeType: detail.mimeType ?? '',
+                                    bodyBase64Encoded: detail.bodyBase64Encoded,
+                                    emptyMessage:
+                                        'No response body captured for this request.',
+                                  ),
+                                ),
                             ],
                           ),
                   ),
@@ -2437,20 +2481,135 @@ class _NetworkPayloadView extends StatelessWidget {
   }
 }
 
+class _NetworkWebSocketMessagesView extends StatelessWidget {
+  const _NetworkWebSocketMessagesView({required this.messages});
+
+  final List<_NetworkWebSocketMessage> messages;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (messages.isEmpty) {
+      return Text(
+        'No WebSocket messages captured yet.',
+        style: TextStyle(color: colors.textSecondary),
+      );
+    }
+    return Column(
+      children: messages.map((message) {
+        final directionColor = switch (message.direction) {
+          'sent' => colors.accent,
+          'received' => colors.success,
+          'error' => colors.danger,
+          _ => colors.textSecondary,
+        };
+        final directionLabel = switch (message.direction) {
+          'sent' => 'Sent',
+          'received' => 'Recv',
+          'error' => 'Err',
+          _ => message.direction,
+        };
+        final payloadText = _webSocketMessagePayloadText(message);
+        final meta = <String>[
+          directionLabel,
+          _formatConsoleTimestamp(message.timestamp),
+          if (message.opcode != null) 'opcode ${message.opcode}',
+        ];
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: colors.canvas,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: directionColor.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      directionLabel,
+                      style: monoStyle(
+                        color: directionColor,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      meta.join(' · '),
+                      style: TextStyle(
+                        color: colors.textTertiary,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SelectableText(
+                payloadText,
+                style: monoStyle(
+                  color: message.direction == 'error'
+                      ? colors.danger
+                      : colors.textPrimary,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(growable: false),
+    );
+  }
+}
+
 class _ConsoleEntry {
   const _ConsoleEntry({
+    required this.seq,
     required this.type,
     required this.level,
     required this.text,
+    this.source,
     this.url,
     this.lineNumber,
     this.columnNumber,
     required this.timestamp,
   });
 
+  factory _ConsoleEntry.fromJson(Map<dynamic, dynamic> json) => _ConsoleEntry(
+    seq: _intValue(json['seq'], 0),
+    type: json['type']?.toString() ?? 'log',
+    level: json['level']?.toString() ?? 'log',
+    text: json['text']?.toString() ?? '',
+    source: json['source']?.toString(),
+    url: json['url']?.toString(),
+    lineNumber: _intOrNull(json['lineNumber']),
+    columnNumber: _intOrNull(json['columnNumber']),
+    timestamp: _intValue(
+      json['timestamp'],
+      DateTime.now().millisecondsSinceEpoch,
+    ),
+  );
+
+  final int seq;
   final String type;
   final String level;
   final String text;
+  final String? source;
   final String? url;
   final int? lineNumber;
   final int? columnNumber;
@@ -2471,6 +2630,37 @@ abstract interface class _NetworkSummaryLike {
   bool get servedFromCache;
 }
 
+class _NetworkWebSocketMessage {
+  const _NetworkWebSocketMessage({
+    required this.direction,
+    required this.timestamp,
+    this.opcode,
+    this.payload,
+    this.base64Encoded = false,
+    this.error,
+  });
+
+  factory _NetworkWebSocketMessage.fromJson(Map<dynamic, dynamic> json) =>
+      _NetworkWebSocketMessage(
+        direction: json['direction']?.toString() ?? 'received',
+        timestamp: _intValue(
+          json['timestamp'],
+          DateTime.now().millisecondsSinceEpoch,
+        ),
+        opcode: _intOrNull(json['opcode']),
+        payload: json['payload']?.toString(),
+        base64Encoded: json['base64Encoded'] == true,
+        error: json['error']?.toString(),
+      );
+
+  final String direction;
+  final int timestamp;
+  final int? opcode;
+  final String? payload;
+  final bool base64Encoded;
+  final String? error;
+}
+
 class _NetworkEntry implements _NetworkSummaryLike {
   const _NetworkEntry({
     required this.requestId,
@@ -2486,6 +2676,7 @@ class _NetworkEntry implements _NetworkSummaryLike {
     this.finished = false,
     this.failed = false,
     this.servedFromCache = false,
+    this.webSocketMessageCount = 0,
   });
 
   factory _NetworkEntry.fromJson(Map<dynamic, dynamic> json) => _NetworkEntry(
@@ -2505,6 +2696,7 @@ class _NetworkEntry implements _NetworkSummaryLike {
     finished: json['finished'] == true,
     failed: json['failed'] == true,
     servedFromCache: json['servedFromCache'] == true,
+    webSocketMessageCount: _intValue(json['webSocketMessageCount'], 0),
   );
 
   final String requestId;
@@ -2531,6 +2723,7 @@ class _NetworkEntry implements _NetworkSummaryLike {
   final bool failed;
   @override
   final bool servedFromCache;
+  final int webSocketMessageCount;
 
   _NetworkEntry merge(_NetworkEntry other) {
     return _NetworkEntry(
@@ -2547,6 +2740,9 @@ class _NetworkEntry implements _NetworkSummaryLike {
       finished: other.finished || finished,
       failed: other.failed || failed,
       servedFromCache: other.servedFromCache || servedFromCache,
+      webSocketMessageCount: other.webSocketMessageCount > webSocketMessageCount
+          ? other.webSocketMessageCount
+          : webSocketMessageCount,
     );
   }
 }
@@ -2574,6 +2770,7 @@ class _NetworkDetail implements _NetworkSummaryLike {
     this.finished = false,
     this.failed = false,
     this.servedFromCache = false,
+    this.webSocketMessages = const <_NetworkWebSocketMessage>[],
   });
 
   factory _NetworkDetail.fromJson(Map<dynamic, dynamic> json) => _NetworkDetail(
@@ -2601,6 +2798,7 @@ class _NetworkDetail implements _NetworkSummaryLike {
     finished: json['finished'] == true,
     failed: json['failed'] == true,
     servedFromCache: json['servedFromCache'] == true,
+    webSocketMessages: _webSocketMessageList(json['webSocketMessages']),
   );
 
   final String requestId;
@@ -2635,6 +2833,7 @@ class _NetworkDetail implements _NetworkSummaryLike {
   final bool failed;
   @override
   final bool servedFromCache;
+  final List<_NetworkWebSocketMessage> webSocketMessages;
 }
 
 class _NetworkDetailUpdate {
@@ -2656,6 +2855,7 @@ const List<String> _networkFilterOptions = <String>[
   'CSS',
   'Img',
   'Media',
+  'WS',
   'Other',
 ];
 
@@ -2690,6 +2890,8 @@ bool _matchesNetworkFilter(_NetworkEntry entry, String filter) {
       return entry.resourceType == 'Image';
     case 'Media':
       return entry.resourceType == 'Media' || entry.resourceType == 'Font';
+    case 'WS':
+      return entry.resourceType == 'WebSocket';
     case 'Other':
       return !<String>{
         'XHR',
@@ -2700,6 +2902,7 @@ bool _matchesNetworkFilter(_NetworkEntry entry, String filter) {
         'Image',
         'Media',
         'Font',
+        'WebSocket',
       }.contains(entry.resourceType);
     case 'All':
     default:
@@ -2848,11 +3051,20 @@ String _prettyNetworkBody(String body, String mimeType) {
 }
 
 bool _networkShouldShowRequestBody(_NetworkDetail detail) {
+  if (detail.resourceType == 'WebSocket') return false;
   if (detail.requestBody != null) return true;
   if (detail.requestBodyError != null && detail.requestBodyError!.isNotEmpty) {
     return true;
   }
   return _networkMethodUsuallyHasBody(detail.method);
+}
+
+bool _networkShouldShowResponseBody(_NetworkDetail detail) {
+  return detail.resourceType != 'WebSocket';
+}
+
+bool _networkShouldShowWebSocketMessages(_NetworkDetail detail) {
+  return detail.resourceType == 'WebSocket';
 }
 
 bool _networkMethodUsuallyHasBody(String method) {
@@ -2885,6 +3097,35 @@ String _networkHeadersText(Map<String, String> headers) {
   return headers.entries
       .map((entry) => '${entry.key}: ${entry.value}')
       .join('\n');
+}
+
+List<_NetworkWebSocketMessage> _webSocketMessageList(Object? value) {
+  if (value is! List) return const <_NetworkWebSocketMessage>[];
+  return value
+      .whereType<Map>()
+      .map(_NetworkWebSocketMessage.fromJson)
+      .toList(growable: false);
+}
+
+String _webSocketMessagePayloadText(_NetworkWebSocketMessage message) {
+  if (message.error != null && message.error!.isNotEmpty) {
+    return message.error!;
+  }
+  if (message.payload == null || message.payload!.isEmpty) {
+    return 'No payload captured.';
+  }
+  if (message.base64Encoded) {
+    return 'Binary frame (${message.payload!.length} encoded chars)';
+  }
+  return message.payload!;
+}
+
+String _formatConsoleTimestamp(int timestamp) {
+  final time = DateTime.fromMillisecondsSinceEpoch(timestamp);
+  final hh = time.hour.toString().padLeft(2, '0');
+  final mm = time.minute.toString().padLeft(2, '0');
+  final ss = time.second.toString().padLeft(2, '0');
+  return '$hh:$mm:$ss';
 }
 
 String _networkCurlCommand(_NetworkEntry entry, _NetworkDetail detail) {

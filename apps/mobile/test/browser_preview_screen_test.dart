@@ -21,6 +21,80 @@ void main() {
     _clearClipboardMock();
   });
 
+  testWidgets(
+    'browser preview keeps cleared console rows hidden across reconnect snapshots',
+    (tester) async {
+      final api = _BrowserPreviewFakeApi();
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        BrowserPreviewScreen(
+          host: _host(),
+          api: api,
+          preview: _preview(),
+        ),
+        size: const Size(1180, 900),
+      );
+
+      api.emit({'type': 'hello', 'preview': _previewJson()});
+      api.emit({
+        'type': 'frame',
+        'data':
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+        'width': 390,
+        'height': 844,
+      });
+      await _pumpFrames(tester);
+
+      await tester.tap(find.byIcon(Icons.construction_outlined));
+      await _pumpFrames(tester);
+
+      api.emit({
+        'type': 'consoleSnapshot',
+        'entries': [
+          {
+            'seq': 1,
+            'type': 'console',
+            'level': 'log',
+            'text': 'first log',
+            'timestamp': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          },
+        ],
+      });
+      await _pumpFrames(tester);
+      expect(find.text('first log'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+      await _pumpFrames(tester);
+      expect(find.text('first log'), findsNothing);
+
+      api.emit({
+        'type': 'consoleSnapshot',
+        'entries': [
+          {
+            'seq': 1,
+            'type': 'console',
+            'level': 'log',
+            'text': 'first log',
+            'timestamp': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          },
+          {
+            'seq': 2,
+            'type': 'console',
+            'level': 'info',
+            'text': 'second log',
+            'timestamp': DateTime(2026, 1, 1, 0, 0, 1).millisecondsSinceEpoch,
+          },
+        ],
+      });
+      await _pumpFrames(tester);
+
+      expect(find.text('first log'), findsNothing);
+      expect(find.text('second log'), findsOneWidget);
+    },
+  );
+
   testWidgets('browser preview renders a live network tab and detail sheet', (
     tester,
   ) async {
@@ -132,6 +206,146 @@ void main() {
     expect(clipboard?.text, contains('curl'));
     expect(clipboard?.text, contains('--data-raw'));
     expect(clipboard?.text, contains('assets/main.js'));
+  });
+
+  testWidgets('browser preview renders websocket detail and ws filter', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'networkSnapshot',
+      'entries': [
+        {
+          'requestId': 'socket-1',
+          'url': 'ws://127.0.0.1:3000/socket',
+          'method': 'GET',
+          'resourceType': 'WebSocket',
+          'status': 101,
+          'mimeType': null,
+          'encodedDataLength': null,
+          'durationMs': 120,
+          'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+          'webSocketMessageCount': 2,
+        },
+        {
+          'requestId': 'request-1',
+          'url': 'http://127.0.0.1:3000/assets/main.js',
+          'method': 'GET',
+          'resourceType': 'Script',
+          'status': 200,
+          'mimeType': 'text/javascript',
+          'encodedDataLength': 2048,
+          'durationMs': 31,
+          'startedAt': DateTime(2026, 1, 1, 0, 0, 1).millisecondsSinceEpoch,
+          'errorText': null,
+          'finished': true,
+          'failed': false,
+          'servedFromCache': false,
+        },
+      ],
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('socket'), findsOneWidget);
+    expect(find.text('main.js'), findsOneWidget);
+    expect(find.textContaining('2 msgs'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilterChip, 'WS'));
+    await _pumpFrames(tester);
+    expect(find.text('socket'), findsOneWidget);
+    expect(find.text('main.js'), findsNothing);
+
+    await tester.tap(find.text('socket'));
+    await _pumpFrames(tester);
+    expect(api.sentMessages.last['type'], 'networkDetailRequest');
+    expect(api.sentMessages.last['requestId'], 'socket-1');
+
+    api.emit({
+      'type': 'networkDetail',
+      'requestId': 'socket-1',
+      'detail': {
+        'requestId': 'socket-1',
+        'url': 'ws://127.0.0.1:3000/socket',
+        'method': 'GET',
+        'resourceType': 'WebSocket',
+        'status': 101,
+        'statusText': 'Switching Protocols',
+        'mimeType': null,
+        'encodedDataLength': null,
+        'durationMs': 120,
+        'startedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+        'errorText': null,
+        'finished': true,
+        'failed': false,
+        'servedFromCache': false,
+        'requestHeaders': {
+          'upgrade': 'websocket',
+        },
+        'responseHeaders': {
+          'upgrade': 'websocket',
+        },
+        'requestBody': null,
+        'requestBodyError': null,
+        'body': null,
+        'bodyBase64Encoded': false,
+        'bodyError': null,
+        'webSocketMessages': [
+          {
+            'direction': 'sent',
+            'timestamp': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+            'opcode': 1,
+            'payload': 'ping',
+            'base64Encoded': false,
+            'error': null,
+          },
+          {
+            'direction': 'received',
+            'timestamp': DateTime(2026, 1, 1, 0, 0, 1).millisecondsSinceEpoch,
+            'opcode': 1,
+            'payload': 'pong',
+            'base64Encoded': false,
+            'error': null,
+          },
+        ],
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Messages'), findsOneWidget);
+    expect(find.text('ping'), findsOneWidget);
+    expect(find.text('pong'), findsOneWidget);
+    expect(find.text('Response body'), findsNothing);
   });
 
   testWidgets('browser preview network tab supports search and sort', (
