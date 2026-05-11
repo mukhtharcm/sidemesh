@@ -775,7 +775,11 @@ export class PiAgentProvider
     state.thread.preview =
       latestPreviewMessage(state.messages) ?? (parsed.preview || state.thread.preview);
     state.thread.path = summary.path;
-    state.thread.updatedAt = summary.updatedAt;
+    state.thread.updatedAt = latestThreadUpdatedAt(
+      summary.updatedAt,
+      state.thread.updatedAt,
+      state.messages,
+    );
     state.historyFingerprint = summaryFingerprint;
     state.preservedSidecarMessages = merged.preservedSidecarMessages;
     state.preservedSidecarUserMessages = merged.preservedSidecarUserMessages;
@@ -3748,6 +3752,25 @@ function latestPreviewMessage(messages: SessionMessage[]): string | null {
     }
   }
   return null;
+}
+
+function latestThreadUpdatedAt(
+  summaryUpdatedAt: number,
+  currentUpdatedAt: number,
+  messages: SessionMessage[],
+): number {
+  let latest = Math.max(summaryUpdatedAt, currentUpdatedAt);
+  for (const message of messages) {
+    latest = Math.max(latest, messageCreatedAtSeconds(message.createdAt));
+  }
+  return latest;
+}
+
+function messageCreatedAtSeconds(createdAt: number): number {
+  const timestamp = Math.trunc(createdAt);
+  return timestamp >= 1_000_000_000_000
+    ? Math.trunc(timestamp / 1000)
+    : timestamp;
 }
 
 function parseExitCode(output: string | null): number | null {
