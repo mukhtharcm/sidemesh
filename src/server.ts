@@ -509,13 +509,6 @@ export async function startServer(
       return false;
     }
     const observedStatus = latestThreadStatusForSession(sessionId);
-    if (
-      observedStatus === "idle" ||
-      observedStatus === "errored" ||
-      observedStatus === "closed"
-    ) {
-      return false;
-    }
     const state = await loadFastRunState(
       agentProvider,
       sessionId,
