@@ -107,6 +107,7 @@ interface PiSessionState {
   unsubscribe?: (() => void) | null;
   pendingCompactionActivityId?: string | null;
   preservedSidecarMessages?: PiPreservedSidecarMessage[];
+  preservedSidecarUserMessages?: PiPreservedSidecarUserMessage[];
 }
 
 interface ActivePiTurn {
@@ -128,6 +129,12 @@ interface PiPreservedSidecarMessage {
   previousUserText: string | null;
   previousUserOccurrence: number | null;
   previousUserMessage: SessionMessage | null;
+}
+
+interface PiPreservedSidecarUserMessage {
+  message: SessionMessage;
+  previousUserText: string;
+  previousUserOccurrence: number;
 }
 
 export interface PiAgentProviderOptions {
@@ -361,7 +368,10 @@ export class PiAgentProvider
       return this.ensureLoadedSession(threadId);
     }
     const existing = this.sessions.get(threadId);
-    if (existing && (existing.preservedSidecarMessages?.length ?? 0) > 0) {
+    const hasPreservedSidecar =
+      (existing?.preservedSidecarMessages?.length ?? 0) > 0 ||
+      (existing?.preservedSidecarUserMessages?.length ?? 0) > 0;
+    if (existing && hasPreservedSidecar) {
       const summary = await this.findPiSessionSummary(threadId);
       const fingerprint = summary
         ? this.sessionSummaryFingerprints.get(summary.path) ?? null
@@ -607,6 +617,7 @@ export class PiAgentProvider
       unsubscribe: null,
       pendingCompactionActivityId: null,
       preservedSidecarMessages: [],
+      preservedSidecarUserMessages: [],
     };
     this.sessions.set(thread.id, state);
     if (thread.path) {
@@ -718,6 +729,7 @@ export class PiAgentProvider
       draftAssistantMessage: null,
       pendingCompactionActivityId: null,
       preservedSidecarMessages: [],
+      preservedSidecarUserMessages: [],
     };
     state.thread = mergeThreadWithSummary(summary, state, false);
     const merged = mergePreservedSidecarMessages(
@@ -725,6 +737,7 @@ export class PiAgentProvider
       parsed.activities,
       parsed.nonFinalAssistantMessageIds,
       state.preservedSidecarMessages ?? [],
+      state.preservedSidecarUserMessages ?? [],
     );
     state.messages = merged.messages;
     state.activities = new Map(
@@ -759,11 +772,13 @@ export class PiAgentProvider
     }
     state.nextSeq = Math.max(parsed.nextSeq, merged.nextSeq);
     state.thread.name = parsed.threadName ?? state.thread.name;
-    state.thread.preview = parsed.preview || state.thread.preview;
+    state.thread.preview =
+      latestPreviewMessage(state.messages) ?? (parsed.preview || state.thread.preview);
     state.thread.path = summary.path;
     state.thread.updatedAt = summary.updatedAt;
     state.historyFingerprint = summaryFingerprint;
     state.preservedSidecarMessages = merged.preservedSidecarMessages;
+    state.preservedSidecarUserMessages = merged.preservedSidecarUserMessages;
     state.archived = this.isArchived(threadId);
     normalizeInactivePiSessionState(state);
     this.sessions.set(threadId, state);
@@ -1543,6 +1558,13 @@ export class PiAgentProvider
         : null;
     if (draftMessage && status === "completed") {
       this.preserveMaterializedSidecarLog(session, draftMessage);
+    } else if (status === "completed") {
+      const userMessage = latestUserMessageWithoutAssistantResponse(
+        session.messages,
+      );
+      if (userMessage) {
+        this.preserveUserSidecarLog(session, userMessage);
+      }
     }
     const turn = session.turns.find((candidate) => candidate.id === active.turnId);
     if (turn) {
@@ -1601,6 +1623,27 @@ export class PiAgentProvider
     ];
   }
 
+  private preserveUserSidecarLog(
+    session: PiSessionState,
+    message: SessionMessage,
+  ): void {
+    const record = preservedSidecarUserRecordForMessage(
+      session.messages,
+      message.id,
+    );
+    if (!record) {
+      return;
+    }
+    if ((session.preservedSidecarUserMessages?.length ?? 0) === 0) {
+      session.historyFingerprint = null;
+    }
+    const records = session.preservedSidecarUserMessages ?? [];
+    if (records.some((candidate) => candidate.message.id === message.id)) {
+      return;
+    }
+    session.preservedSidecarUserMessages = [...records, record];
+  }
+
   private touch(session: PiSessionState): void {
     session.thread.updatedAt = nowSeconds();
     const preview = latestPreviewMessage(session.messages);
@@ -1644,6 +1687,11 @@ export class PiAgentProvider
             previousUserText?: string | null;
             previousUserOccurrence?: number | null;
             previousUserMessage?: SessionMessage | null;
+          }>;
+          preservedSidecarUserMessages?: Array<{
+            message?: SessionMessage;
+            previousUserText?: string | null;
+            previousUserOccurrence?: number | null;
           }>;
         }>;
       };
@@ -1699,6 +1747,24 @@ export class PiAgentProvider
                   previousUserMessage: record.previousUserMessage
                     ? cloneMessage(record.previousUserMessage)
                     : null,
+                }];
+              })
+            : [],
+          preservedSidecarUserMessages: Array.isArray(
+            item.preservedSidecarUserMessages,
+          )
+            ? item.preservedSidecarUserMessages.flatMap((record) => {
+                if (
+                  !record.message ||
+                  typeof record.previousUserText !== "string" ||
+                  typeof record.previousUserOccurrence !== "number"
+                ) {
+                  return [];
+                }
+                return [{
+                  message: cloneMessage(record.message),
+                  previousUserText: record.previousUserText,
+                  previousUserOccurrence: record.previousUserOccurrence,
                 }];
               })
             : [],
@@ -1780,6 +1846,13 @@ export class PiAgentProvider
               : null,
           }),
         ),
+        preservedSidecarUserMessages: (
+          session.preservedSidecarUserMessages ?? []
+        ).map((record) => ({
+          message: cloneMessage(record.message),
+          previousUserText: record.previousUserText,
+          previousUserOccurrence: record.previousUserOccurrence,
+        })),
       })),
     };
     await writeFile(this.statePath, JSON.stringify(payload, null, 2));
@@ -2644,19 +2717,68 @@ function previousUserAnchorForMessage(
   };
 }
 
+function latestUserMessageWithoutAssistantResponse(
+  messages: SessionMessage[],
+): SessionMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message) {
+      continue;
+    }
+    if (message.role === "assistant") {
+      return null;
+    }
+    if (message.role === "user") {
+      return message;
+    }
+  }
+  return null;
+}
+
+function preservedSidecarUserRecordForMessage(
+  messages: SessionMessage[],
+  messageId: string,
+): PiPreservedSidecarUserMessage | null {
+  const index = messages.findIndex((message) => message.id === messageId);
+  const message = messages[index];
+  if (!message || message.role !== "user") {
+    return null;
+  }
+  const text = message.text.trim();
+  let occurrence = 0;
+  for (let prior = 0; prior < index; prior += 1) {
+    const priorMessage = messages[prior];
+    if (priorMessage?.role === "user" && priorMessage.text.trim() === text) {
+      occurrence += 1;
+    }
+  }
+  return {
+    message: cloneMessage(message),
+    previousUserText: text,
+    previousUserOccurrence: occurrence,
+  };
+}
+
 function mergePreservedSidecarMessages(
   parsedMessages: SessionMessage[],
   parsedActivities: SessionActivity[],
   nonFinalAssistantMessageIds: ReadonlySet<string>,
   preservedSidecarMessages: PiPreservedSidecarMessage[],
+  preservedSidecarUserMessages: PiPreservedSidecarUserMessage[],
 ): {
   messages: SessionMessage[];
   activities: SessionActivity[];
   preservedSidecarMessages: PiPreservedSidecarMessage[];
+  preservedSidecarUserMessages: PiPreservedSidecarUserMessage[];
   nextSeq: number;
 } {
   const messages = parsedMessages.map(cloneMessage);
   const activities = parsedActivities.map(cloneActivity);
+  const preservedUsers = mergePreservedSidecarUserMessages(
+    messages,
+    activities,
+    preservedSidecarUserMessages,
+  );
   const preserved: PiPreservedSidecarMessage[] = [];
   for (const record of preservedSidecarMessages) {
     const anchoredRecord = ensurePreservedSidecarUser(
@@ -2712,8 +2834,37 @@ function mergePreservedSidecarMessages(
     messages,
     activities,
     preservedSidecarMessages: preserved,
+    preservedSidecarUserMessages: preservedUsers,
     nextSeq,
   };
+}
+
+function mergePreservedSidecarUserMessages(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+  records: PiPreservedSidecarUserMessage[],
+): PiPreservedSidecarUserMessage[] {
+  const preserved: PiPreservedSidecarUserMessage[] = [];
+  for (const record of records) {
+    if (findPreservedSidecarUserIndex(messages, record) !== -1) {
+      continue;
+    }
+    const message = {
+      ...cloneMessage(record.message),
+      seq: Math.max(
+        0,
+        ...messages.map((candidate) => candidate.seq + 1),
+        ...activities.map((activity) => activity.seq + 1),
+      ),
+    };
+    messages.push(message);
+    preserved.push({
+      message: cloneMessage(message),
+      previousUserText: record.previousUserText,
+      previousUserOccurrence: record.previousUserOccurrence,
+    });
+  }
+  return preserved;
 }
 
 function ensurePreservedSidecarUser(
@@ -2823,7 +2974,10 @@ function preservedSidecarInsertion(
 
 function findPreservedSidecarUserIndex(
   messages: SessionMessage[],
-  record: PiPreservedSidecarMessage,
+  record: {
+    previousUserText: string | null;
+    previousUserOccurrence: number | null;
+  },
 ): number {
   if (!record.previousUserText) {
     return -1;

@@ -982,6 +982,11 @@ describe("PiAgentProvider", () => {
       headerOnlyLog.messages.map((message) => message.text),
       ["Handled before model", "Resolved from draft."],
     );
+    const headerOnlyThread = await provider.readSessionThread(
+      created.thread.id,
+      false,
+    );
+    assert.equal(headerOnlyThread.preview, "Resolved from draft.");
 
     await writePiSessionHistory(
       fakeSession.sessionFile,
@@ -1120,6 +1125,115 @@ describe("PiAgentProvider", () => {
 
     const refreshedLog = await provider.readSessionLog(created.thread);
     assert.equal(refreshedLog.messages.at(-1)?.text, "History terminal.");
+  });
+
+  it("preserves prompt-only Pi turns when prompt resolves without events", async () => {
+    const cwd = nodePath.join(tempDir, "repo");
+    await mkdir(cwd, { recursive: true });
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory(cwd);
+    const fakeSession = {
+      sessionId: "",
+      sessionFile: null as string | null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe() {
+        return () => {};
+      },
+      async prompt(_text: string) {},
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd,
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async (options: { sessionManager: SessionManager }) => {
+        fakeSession.sessionId = options.sessionManager.getSessionId();
+        fakeSession.sessionFile = options.sessionManager.getSessionFile() ?? null;
+        fakeSession.sessionManager = options.sessionManager;
+        return {
+          session: fakeSession,
+          extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+        };
+      }) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd,
+      input: [{ type: "text", text: "Prompt only", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    assert.ok(created.activeTurnId);
+
+    await delay(150);
+
+    const thread = await provider.readSessionThread(created.thread.id, true);
+    assert.equal(thread.status.type, "idle");
+    assert.equal(thread.turns?.at(-1)?.status, "completed");
+
+    assert.ok(fakeSession.sessionFile);
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+      ],
+      "2026-05-01T10:00:01.000Z",
+    );
+
+    const reloadedLog = await provider.readSessionLog(created.thread);
+    assert.deepEqual(
+      reloadedLog.messages.map((message) => message.text),
+      ["Prompt only"],
+    );
+    const reloadedThread = await provider.readSessionThread(
+      created.thread.id,
+      false,
+    );
+    assert.equal(reloadedThread.preview, "Prompt only");
   });
 
   it("finishes prompt-resolved Pi turns after a slow event queue drains", async () => {
