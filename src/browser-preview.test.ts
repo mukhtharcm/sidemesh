@@ -566,6 +566,107 @@ describe("browser preview", () => {
     );
   });
 
+  it("returns storage snapshots on demand", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    cdp.sendHandler = async (method, params) => {
+      if (method === "Network.getCookies") {
+        assert.deepEqual(params, {
+          urls: ["http://127.0.0.1:3000/app"],
+        });
+        return {
+          cookies: [
+            {
+              name: "sid",
+              value: "abc123",
+              domain: "127.0.0.1",
+              path: "/",
+              expires: -1,
+              size: 9,
+              httpOnly: true,
+              secure: false,
+              session: true,
+              sameSite: "Lax",
+            },
+          ],
+        };
+      }
+      if (method === "DOMStorage.getDOMStorageItems") {
+        const storageId = (params.storageId ?? {}) as Record<string, unknown>;
+        if (storageId.isLocalStorage === true) {
+          return { entries: [["theme", "dark"]] };
+        }
+        return { entries: [["draft", "1"]] };
+      }
+      if (method === "Storage.getUsageAndQuota") {
+        assert.deepEqual(params, {
+          origin: "http://127.0.0.1:3000",
+        });
+        return {
+          usage: 2_048,
+          quota: 10_485_760,
+          usageBreakdown: [
+            { storageType: "indexeddb", usage: 1_536 },
+            { storageType: "local_storage", usage: 512 },
+          ],
+        };
+      }
+      return {};
+    };
+    const preview = buildFakePreview(cdp, {
+      url: "http://127.0.0.1:3000/app",
+      status: "running",
+      sessionIdCdp: "session-1",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    const socket = createFakeSocket(messages);
+
+    await registry.sendStorageSnapshot(preview, socket);
+
+    assert.deepEqual(
+      cdp.sent.map((item) => item.method),
+      [
+        "Network.getCookies",
+        "DOMStorage.getDOMStorageItems",
+        "DOMStorage.getDOMStorageItems",
+        "Storage.getUsageAndQuota",
+      ],
+    );
+    assert.equal(messages[0]?.type, "storageSnapshot");
+    const snapshot = (messages[0]?.snapshot ?? {}) as Record<string, unknown>;
+    assert.equal(snapshot.url, "http://127.0.0.1:3000/app");
+    assert.equal(snapshot.origin, "http://127.0.0.1:3000");
+    assert.equal(typeof snapshot.refreshedAt, "number");
+    assert.deepEqual(snapshot.cookies, [
+      {
+        name: "sid",
+        value: "abc123",
+        domain: "127.0.0.1",
+        path: "/",
+        expires: null,
+        size: 9,
+        httpOnly: true,
+        secure: false,
+        session: true,
+        sameSite: "Lax",
+      },
+    ]);
+    assert.deepEqual(snapshot.localStorage, [
+      { key: "theme", value: "dark" },
+    ]);
+    assert.deepEqual(snapshot.sessionStorage, [
+      { key: "draft", value: "1" },
+    ]);
+    assert.equal(snapshot.usage, 2_048);
+    assert.equal(snapshot.quota, 10_485_760);
+    assert.deepEqual(snapshot.usageBreakdown, [
+      { storageType: "indexeddb", usage: 1_536 },
+      { storageType: "local_storage", usage: 512 },
+    ]);
+    assert.deepEqual(snapshot.warnings, []);
+    assert.deepEqual(preview.storageSnapshot, snapshot);
+  });
+
   it("sends an authoritative network snapshot on attach", () => {
     const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
     const preview = buildFakePreview(new FakeCdpConnection(), {
@@ -728,6 +829,13 @@ describe("browser preview", () => {
 
 class FakeCdpConnection {
   public sendResult: Record<string, unknown> = {};
+  public sendHandler:
+    | ((
+        method: string,
+        params: Record<string, unknown>,
+        sessionId?: string | null,
+      ) => Promise<Record<string, unknown>> | Record<string, unknown>)
+    | null = null;
   public readonly sent: Array<{
     method: string;
     params: Record<string, unknown>;
@@ -767,6 +875,9 @@ class FakeCdpConnection {
     sessionId?: string | null,
   ): Promise<Record<string, unknown>> {
     this.sent.push({ method, params, sessionId });
+    if (this.sendHandler) {
+      return await this.sendHandler(method, params, sessionId);
+    }
     return this.sendResult;
   }
 }
@@ -813,6 +924,7 @@ function buildFakePreview(
     networkEntryIdsByRequestId: new Map(),
     networkRedirectCountsByRequestId: new Map(),
     networkUnavailableMessage: null,
+    storageSnapshot: null,
     pageLoading: false,
     cleanupHandlers: [],
     ...overrides,

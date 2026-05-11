@@ -124,6 +124,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   final Set<String> _networkClearedRequestIdsAtFloor = <String>{};
   bool _networkAvailable = true;
   String? _networkUnavailableMessage;
+  _StorageSnapshot? _storageSnapshot;
+  bool _storageLoading = false;
+  String? _storageError;
 
   @override
   void initState() {
@@ -279,10 +282,16 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       if (!mounted) return;
       setState(() {
         if (preview != null) {
+          final storageContextChanged = preview.url != _preview.url;
           _preview = preview;
           _frameWidth = preview.width;
           _frameHeight = preview.height;
           _urlController.text = preview.url;
+          if (storageContextChanged) {
+            _storageSnapshot = null;
+            _storageLoading = false;
+            _storageError = null;
+          }
         }
         if (type != 'preview') {
           _status = 'Waiting for first frame...';
@@ -380,6 +389,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     }
     if (type == 'networkDetail') {
       _handleNetworkDetail(frame);
+      return;
+    }
+    if (type == 'storageSnapshot') {
+      _handleStorageSnapshot(frame);
       return;
     }
     if (type == 'loading') {
@@ -492,6 +505,24 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _networkDetailUpdates.add(
       _NetworkDetailUpdate(requestId: requestId, detail: detail, error: error),
     );
+  }
+
+  void _handleStorageSnapshot(Map<dynamic, dynamic> frame) {
+    if (!mounted) return;
+    final rawSnapshot = frame['snapshot'];
+    final error = frame['error']?.toString();
+    if (rawSnapshot is Map) {
+      setState(() {
+        _storageSnapshot = _StorageSnapshot.fromJson(rawSnapshot);
+        _storageLoading = false;
+        _storageError = null;
+      });
+      return;
+    }
+    setState(() {
+      _storageLoading = false;
+      _storageError = error ?? 'Storage snapshot is unavailable.';
+    });
   }
 
   _NetworkDetail _networkDetailFromEntry(
@@ -860,6 +891,35 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _setDevToolsTab(int index) {
     setState(() => _devToolsTabIndex = index);
+    if (index == 2) {
+      _requestStorageSnapshot();
+    }
+  }
+
+  void _requestStorageSnapshot({bool force = false}) {
+    if (_storageLoading && !force) return;
+    if (_storageSnapshot != null && !force) return;
+    if (_channel == null) {
+      setState(() {
+        _storageLoading = false;
+        _storageError =
+            'Viewer is disconnected. Resume the stream to inspect storage.';
+      });
+      return;
+    }
+    final sent = _sendMessage({'type': 'storageRefreshRequest'});
+    if (!sent) {
+      setState(() {
+        _storageLoading = false;
+        _storageError =
+            'Viewer is disconnected. Resume the stream to inspect storage.';
+      });
+      return;
+    }
+    setState(() {
+      _storageLoading = true;
+      _storageError = null;
+    });
   }
 
   KeyEventResult _handleHardwareKey(FocusNode node, KeyEvent event) {
@@ -1117,6 +1177,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             networkSearchController: _networkSearchController,
             networkSearchQuery: _networkSearchQuery,
             networkSort: _networkSort,
+            storageSnapshot: _storageSnapshot,
+            storageLoading: _storageLoading,
+            storageError: _storageError,
             onNetworkFilterChanged: (value) =>
                 setState(() => _networkFilter = value),
             onNetworkSearchChanged: (value) {
@@ -1130,6 +1193,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                 setState(() => _networkSort = value),
             onClearConsole: _clearConsole,
             onClearNetwork: _clearNetworkLog,
+            onRefreshStorage: () => _requestStorageSnapshot(force: true),
             onOpenNetworkDetail: _showNetworkDetail,
             preview: _preview,
           ),
@@ -1564,11 +1628,15 @@ class _DevToolsPanel extends StatelessWidget {
     required this.networkSearchController,
     required this.networkSearchQuery,
     required this.networkSort,
+    required this.storageSnapshot,
+    required this.storageLoading,
+    required this.storageError,
     required this.onNetworkFilterChanged,
     required this.onNetworkSearchChanged,
     required this.onNetworkSortChanged,
     required this.onClearConsole,
     required this.onClearNetwork,
+    required this.onRefreshStorage,
     required this.onOpenNetworkDetail,
     required this.preview,
   });
@@ -1583,11 +1651,15 @@ class _DevToolsPanel extends StatelessWidget {
   final TextEditingController networkSearchController;
   final String networkSearchQuery;
   final String networkSort;
+  final _StorageSnapshot? storageSnapshot;
+  final bool storageLoading;
+  final String? storageError;
   final ValueChanged<String> onNetworkFilterChanged;
   final ValueChanged<String> onNetworkSearchChanged;
   final ValueChanged<String> onNetworkSortChanged;
   final VoidCallback onClearConsole;
   final VoidCallback onClearNetwork;
+  final VoidCallback onRefreshStorage;
   final void Function(_NetworkEntry entry) onOpenNetworkDetail;
   final HostBrowserPreviewInfo preview;
 
@@ -1595,6 +1667,7 @@ class _DevToolsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final showingConsole = tabIndex == 0;
+    final showingStorage = tabIndex == 2;
     return Container(
       height: 380,
       decoration: BoxDecoration(
@@ -1624,23 +1697,39 @@ class _DevToolsPanel extends StatelessWidget {
                   active: tabIndex == 1,
                   onTap: () => onTabChanged(1),
                 ),
+                _DevTab(
+                  label: 'Storage',
+                  active: showingStorage,
+                  onTap: () => onTabChanged(2),
+                ),
                 const Spacer(),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Text(
-                    'Storage · Inspector later',
+                    'Inspector later',
                     style: TextStyle(
                       color: colors.textTertiary,
                       fontSize: 11,
                     ),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                  tooltip: showingConsole ? 'Clear console' : 'Clear network log',
-                  onPressed: showingConsole ? onClearConsole : onClearNetwork,
-                  visualDensity: VisualDensity.compact,
-                ),
+                if (showingStorage)
+                  IconButton(
+                    key: const ValueKey('browserPreviewStorageRefreshButton'),
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    tooltip: 'Refresh storage',
+                    onPressed: onRefreshStorage,
+                    visualDensity: VisualDensity.compact,
+                  )
+                else
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    tooltip: showingConsole
+                        ? 'Clear console'
+                        : 'Clear network log',
+                    onPressed: showingConsole ? onClearConsole : onClearNetwork,
+                    visualDensity: VisualDensity.compact,
+                  ),
                 const SizedBox(width: 4),
               ],
             ),
@@ -1650,6 +1739,13 @@ class _DevToolsPanel extends StatelessWidget {
                 ? _ConsoleTab(
                     entries: consoleEntries,
                     preview: preview,
+                  )
+                : showingStorage
+                ? _StorageTab(
+                    snapshot: storageSnapshot,
+                    loading: storageLoading,
+                    error: storageError,
+                    onRefresh: onRefreshStorage,
                   )
                 : _NetworkTab(
                     entries: networkEntries,
@@ -1802,6 +1898,371 @@ class _ConsoleRow extends StatelessWidget {
                     ),
                   ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageTab extends StatelessWidget {
+  const _StorageTab({
+    required this.snapshot,
+    required this.loading,
+    required this.error,
+    required this.onRefresh,
+  });
+
+  final _StorageSnapshot? snapshot;
+  final bool loading;
+  final String? error;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (loading && snapshot == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (snapshot == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                error ?? 'No storage snapshot loaded yet.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: colors.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: onRefresh,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Load storage'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return ListView(
+      key: const ValueKey('browserPreviewStorageList'),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _StorageSummaryCard(
+              label: 'Origin',
+              value: snapshot!.origin ?? 'Unknown',
+            ),
+            _StorageSummaryCard(
+              label: 'Cookies',
+              value: '${snapshot!.cookies.length}',
+            ),
+            _StorageSummaryCard(
+              label: 'localStorage',
+              value: '${snapshot!.localStorage.length}',
+            ),
+            _StorageSummaryCard(
+              label: 'sessionStorage',
+              value: '${snapshot!.sessionStorage.length}',
+            ),
+            _StorageSummaryCard(
+              label: 'Quota',
+              value: _storageQuotaLabel(snapshot!),
+            ),
+          ],
+        ),
+        if (loading) ...[
+          const SizedBox(height: 10),
+          const LinearProgressIndicator(minHeight: 2),
+        ],
+        if (snapshot!.warnings.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          for (final warning in snapshot!.warnings)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.28),
+                  ),
+                ),
+                child: Text(
+                  warning,
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            ),
+        ],
+        if (snapshot!.usageBreakdown.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          _StorageSection(
+            title: 'Usage breakdown',
+            child: Column(
+              children: snapshot!.usageBreakdown.map((entry) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _storageUsageTypeLabel(entry.storageType),
+                          style: TextStyle(
+                            color: colors.textSecondary,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        _formatNetworkBytes(entry.usage),
+                        style: monoStyle(
+                          color: colors.textPrimary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(growable: false),
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
+        _StorageSection(
+          title: 'Cookies',
+          child: snapshot!.cookies.isEmpty
+              ? _StorageEmpty(message: 'No cookies found for this page.')
+              : Column(
+                  children: snapshot!.cookies.map((cookie) {
+                    return _StorageCookieRow(cookie: cookie);
+                  }).toList(growable: false),
+                ),
+        ),
+        _StorageSection(
+          title: 'localStorage',
+          child: snapshot!.localStorage.isEmpty
+              ? _StorageEmpty(message: 'No localStorage entries found.')
+              : Column(
+                  children: snapshot!.localStorage.map((entry) {
+                    return _StorageEntryRow(entry: entry);
+                  }).toList(growable: false),
+                ),
+        ),
+        _StorageSection(
+          title: 'sessionStorage',
+          child: snapshot!.sessionStorage.isEmpty
+              ? _StorageEmpty(message: 'No sessionStorage entries found.')
+              : Column(
+                  children: snapshot!.sessionStorage.map((entry) {
+                    return _StorageEntryRow(entry: entry);
+                  }).toList(growable: false),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StorageSummaryCard extends StatelessWidget {
+  const _StorageSummaryCard({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      constraints: const BoxConstraints(minWidth: 120),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: colors.textTertiary,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            value,
+            style: monoStyle(
+              color: colors.textPrimary,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageSection extends StatelessWidget {
+  const _StorageSection({
+    required this.title,
+    required this.child,
+  });
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: AppWeights.title,
+            ),
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageEmpty extends StatelessWidget {
+  const _StorageEmpty({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Text(
+      message,
+      style: TextStyle(color: colors.textSecondary),
+    );
+  }
+}
+
+class _StorageCookieRow extends StatelessWidget {
+  const _StorageCookieRow({required this.cookie});
+
+  final _StorageCookie cookie;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final metadata = <String>[
+      cookie.domain,
+      cookie.path,
+      if (cookie.httpOnly) 'HttpOnly',
+      if (cookie.secure) 'Secure',
+      if (cookie.sameSite != null && cookie.sameSite!.isNotEmpty)
+        cookie.sameSite!,
+      cookie.session ? 'Session' : _storageCookieExpiryLabel(cookie.expires),
+    ];
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            cookie.name,
+            style: monoStyle(
+              color: colors.textPrimary,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            cookie.value,
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: 11,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            metadata.join(' · '),
+            style: TextStyle(
+              color: colors.textTertiary,
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageEntryRow extends StatelessWidget {
+  const _StorageEntryRow({required this.entry});
+
+  final _StorageEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            entry.key,
+            style: monoStyle(
+              color: colors.textPrimary,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          SelectableText(
+            entry.value,
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: 11,
             ),
           ),
         ],
@@ -2616,6 +3077,118 @@ class _ConsoleEntry {
   final int timestamp;
 }
 
+class _StorageSnapshot {
+  const _StorageSnapshot({
+    required this.url,
+    required this.origin,
+    required this.refreshedAt,
+    required this.cookies,
+    required this.localStorage,
+    required this.sessionStorage,
+    required this.usage,
+    required this.quota,
+    required this.usageBreakdown,
+    required this.warnings,
+  });
+
+  factory _StorageSnapshot.fromJson(Map<dynamic, dynamic> json) =>
+      _StorageSnapshot(
+        url: json['url']?.toString() ?? '',
+        origin: json['origin']?.toString(),
+        refreshedAt: _intValue(
+          json['refreshedAt'],
+          DateTime.now().millisecondsSinceEpoch,
+        ),
+        cookies: _storageCookieList(json['cookies']),
+        localStorage: _storageEntryList(json['localStorage']),
+        sessionStorage: _storageEntryList(json['sessionStorage']),
+        usage: _intOrNull(json['usage']),
+        quota: _intOrNull(json['quota']),
+        usageBreakdown: _storageUsageList(json['usageBreakdown']),
+        warnings: _stringList(json['warnings']),
+      );
+
+  final String url;
+  final String? origin;
+  final int refreshedAt;
+  final List<_StorageCookie> cookies;
+  final List<_StorageEntry> localStorage;
+  final List<_StorageEntry> sessionStorage;
+  final int? usage;
+  final int? quota;
+  final List<_StorageUsage> usageBreakdown;
+  final List<String> warnings;
+}
+
+class _StorageCookie {
+  const _StorageCookie({
+    required this.name,
+    required this.value,
+    required this.domain,
+    required this.path,
+    required this.expires,
+    required this.size,
+    required this.httpOnly,
+    required this.secure,
+    required this.session,
+    required this.sameSite,
+  });
+
+  factory _StorageCookie.fromJson(Map<dynamic, dynamic> json) => _StorageCookie(
+    name: json['name']?.toString() ?? '',
+    value: json['value']?.toString() ?? '',
+    domain: json['domain']?.toString() ?? '',
+    path: json['path']?.toString() ?? '/',
+    expires: _intOrNull(json['expires']),
+    size: _intOrNull(json['size']),
+    httpOnly: json['httpOnly'] == true,
+    secure: json['secure'] == true,
+    session: json['session'] == true,
+    sameSite: json['sameSite']?.toString(),
+  );
+
+  final String name;
+  final String value;
+  final String domain;
+  final String path;
+  final int? expires;
+  final int? size;
+  final bool httpOnly;
+  final bool secure;
+  final bool session;
+  final String? sameSite;
+}
+
+class _StorageEntry {
+  const _StorageEntry({
+    required this.key,
+    required this.value,
+  });
+
+  factory _StorageEntry.fromJson(Map<dynamic, dynamic> json) => _StorageEntry(
+    key: json['key']?.toString() ?? '',
+    value: json['value']?.toString() ?? '',
+  );
+
+  final String key;
+  final String value;
+}
+
+class _StorageUsage {
+  const _StorageUsage({
+    required this.storageType,
+    required this.usage,
+  });
+
+  factory _StorageUsage.fromJson(Map<dynamic, dynamic> json) => _StorageUsage(
+    storageType: json['storageType']?.toString() ?? '',
+    usage: _intValue(json['usage'], 0),
+  );
+
+  final String storageType;
+  final int usage;
+}
+
 abstract interface class _NetworkSummaryLike {
   String get method;
   String get url;
@@ -3107,6 +3680,35 @@ List<_NetworkWebSocketMessage> _webSocketMessageList(Object? value) {
       .toList(growable: false);
 }
 
+List<_StorageCookie> _storageCookieList(Object? value) {
+  if (value is! List) return const <_StorageCookie>[];
+  return value
+      .whereType<Map>()
+      .map(_StorageCookie.fromJson)
+      .toList(growable: false);
+}
+
+List<_StorageEntry> _storageEntryList(Object? value) {
+  if (value is! List) return const <_StorageEntry>[];
+  return value
+      .whereType<Map>()
+      .map(_StorageEntry.fromJson)
+      .toList(growable: false);
+}
+
+List<_StorageUsage> _storageUsageList(Object? value) {
+  if (value is! List) return const <_StorageUsage>[];
+  return value
+      .whereType<Map>()
+      .map(_StorageUsage.fromJson)
+      .toList(growable: false);
+}
+
+List<String> _stringList(Object? value) {
+  if (value is! List) return const <String>[];
+  return value.map((item) => item?.toString() ?? '').toList(growable: false);
+}
+
 String _webSocketMessagePayloadText(_NetworkWebSocketMessage message) {
   if (message.error != null && message.error!.isNotEmpty) {
     return message.error!;
@@ -3126,6 +3728,36 @@ String _formatConsoleTimestamp(int timestamp) {
   final mm = time.minute.toString().padLeft(2, '0');
   final ss = time.second.toString().padLeft(2, '0');
   return '$hh:$mm:$ss';
+}
+
+String _storageQuotaLabel(_StorageSnapshot snapshot) {
+  if (snapshot.usage == null || snapshot.quota == null || snapshot.quota == 0) {
+    return 'Unavailable';
+  }
+  final percent = ((snapshot.usage! / snapshot.quota!) * 100).clamp(0, 100);
+  return '${_formatNetworkBytes(snapshot.usage!)} / ${_formatNetworkBytes(snapshot.quota!)} (${percent.toStringAsFixed(percent >= 10 ? 0 : 1)}%)';
+}
+
+String _storageUsageTypeLabel(String type) {
+  switch (type) {
+    case 'local_storage':
+      return 'localStorage';
+    case 'cache_storage':
+      return 'Cache Storage';
+    case 'service_workers':
+      return 'Service Workers';
+    default:
+      return type.replaceAll('_', ' ');
+  }
+}
+
+String _storageCookieExpiryLabel(int? expiresSeconds) {
+  if (expiresSeconds == null) return 'Session';
+  final time = DateTime.fromMillisecondsSinceEpoch(
+    expiresSeconds * 1000,
+    isUtc: true,
+  );
+  return 'Exp ${time.toIso8601String()}';
 }
 
 String _networkCurlCommand(_NetworkEntry entry, _NetworkDetail detail) {

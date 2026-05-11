@@ -123,6 +123,7 @@ interface BrowserPreviewRecord {
   networkEntryIdsByRequestId: Map<string, string>;
   networkRedirectCountsByRequestId: Map<string, number>;
   networkUnavailableMessage: string | null;
+  storageSnapshot: BrowserPreviewStorageSnapshot | null;
   pageLoading: boolean;
   cleanupHandlers: Array<() => void>;
 }
@@ -202,6 +203,42 @@ interface BrowserPreviewNetworkDetail {
   bodyBase64Encoded: boolean;
   bodyError: string | null;
   webSocketMessages: BrowserPreviewNetworkMessage[];
+}
+
+interface BrowserPreviewStorageEntry {
+  key: string;
+  value: string;
+}
+
+interface BrowserPreviewStorageUsage {
+  storageType: string;
+  usage: number;
+}
+
+interface BrowserPreviewStorageCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires: number | null;
+  size: number | null;
+  httpOnly: boolean;
+  secure: boolean;
+  session: boolean;
+  sameSite: string | null;
+}
+
+interface BrowserPreviewStorageSnapshot {
+  url: string;
+  origin: string | null;
+  refreshedAt: number;
+  cookies: BrowserPreviewStorageCookie[];
+  localStorage: BrowserPreviewStorageEntry[];
+  sessionStorage: BrowserPreviewStorageEntry[];
+  usage: number | null;
+  quota: number | null;
+  usageBreakdown: BrowserPreviewStorageUsage[];
+  warnings: string[];
 }
 
 export class BrowserPreviewRegistry {
@@ -340,6 +377,7 @@ export class BrowserPreviewRegistry {
       networkEntryIdsByRequestId: new Map(),
       networkRedirectCountsByRequestId: new Map(),
       networkUnavailableMessage: null,
+      storageSnapshot: null,
       pageLoading: false,
       cleanupHandlers: [],
     };
@@ -396,6 +434,12 @@ export class BrowserPreviewRegistry {
       type: "networkSnapshot",
       entries: this.networkSummaries(preview),
     });
+    if (preview.storageSnapshot) {
+      sendJson(socket, {
+        type: "storageSnapshot",
+        snapshot: preview.storageSnapshot,
+      });
+    }
     if (preview.lastFramePayload) {
       sendJson(socket, preview.lastFramePayload);
     }
@@ -654,6 +698,10 @@ export class BrowserPreviewRegistry {
           socket,
           stringValue(record.requestId),
         );
+        return;
+      }
+      if (type === "storageRefreshRequest") {
+        await this.sendStorageSnapshot(preview, socket);
         return;
       }
       await this.applyInput(preview, record);
@@ -1516,6 +1564,136 @@ export class BrowserPreviewRegistry {
     };
   }
 
+  private async sendStorageSnapshot(
+    preview: BrowserPreviewRecord,
+    socket: WebSocket,
+  ): Promise<void> {
+    try {
+      const snapshot = await this.refreshStorageSnapshot(preview);
+      sendJson(socket, {
+        type: "storageSnapshot",
+        snapshot,
+      });
+    } catch (error) {
+      sendJson(socket, {
+        type: "storageSnapshot",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async refreshStorageSnapshot(
+    preview: BrowserPreviewRecord,
+  ): Promise<BrowserPreviewStorageSnapshot> {
+    const cdp = preview.cdp;
+    const sessionId = preview.sessionIdCdp;
+    if (!cdp || !sessionId || preview.status !== "running") {
+      throw new BrowserPreviewError(
+        "Browser preview is no longer running.",
+        409,
+      );
+    }
+    const snapshot = await this.buildStorageSnapshot(preview, cdp, sessionId);
+    preview.storageSnapshot = snapshot;
+    return snapshot;
+  }
+
+  private async buildStorageSnapshot(
+    preview: BrowserPreviewRecord,
+    cdp: CdpConnection,
+    sessionId: string,
+  ): Promise<BrowserPreviewStorageSnapshot> {
+    const warnings: string[] = [];
+    const origin = storageOriginForUrl(preview.url);
+    let cookies: BrowserPreviewStorageCookie[] = [];
+    let localStorage: BrowserPreviewStorageEntry[] = [];
+    let sessionStorage: BrowserPreviewStorageEntry[] = [];
+    let usage: number | null = null;
+    let quota: number | null = null;
+    let usageBreakdown: BrowserPreviewStorageUsage[] = [];
+
+    try {
+      const result = await cdp.send(
+        "Network.getCookies",
+        { urls: [preview.url] },
+        sessionId,
+      );
+      cookies = cookiesFromResult(result);
+    } catch (error) {
+      warnings.push(
+        `Could not read cookies: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (!origin) {
+      warnings.push("Storage inspection requires a page with a valid origin.");
+    } else {
+      try {
+        const result = await cdp.send(
+          "DOMStorage.getDOMStorageItems",
+          {
+            storageId: {
+              securityOrigin: origin,
+              isLocalStorage: true,
+            },
+          },
+          sessionId,
+        );
+        localStorage = storageEntriesFromPairs(result.entries);
+      } catch (error) {
+        warnings.push(
+          `Could not read localStorage: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      try {
+        const result = await cdp.send(
+          "DOMStorage.getDOMStorageItems",
+          {
+            storageId: {
+              securityOrigin: origin,
+              isLocalStorage: false,
+            },
+          },
+          sessionId,
+        );
+        sessionStorage = storageEntriesFromPairs(result.entries);
+      } catch (error) {
+        warnings.push(
+          `Could not read sessionStorage: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      try {
+        const result = await cdp.send(
+          "Storage.getUsageAndQuota",
+          { origin },
+          sessionId,
+        );
+        usage = numberOrNull(result.usage);
+        quota = numberOrNull(result.quota);
+        usageBreakdown = storageUsageBreakdownFromResult(result.usageBreakdown);
+      } catch (error) {
+        warnings.push(
+          `Could not read storage quota: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    return {
+      url: preview.url,
+      origin,
+      refreshedAt: Date.now(),
+      cookies,
+      localStorage,
+      sessionStorage,
+      usage,
+      quota,
+      usageBreakdown,
+      warnings,
+    };
+  }
+
   private flushConsoleBuffer(preview: BrowserPreviewRecord): void {
     if (preview.consoleBuffer.length === 0) return;
     const batch = preview.consoleBuffer.splice(0, preview.consoleBuffer.length);
@@ -1725,6 +1903,7 @@ export class BrowserPreviewRegistry {
   private updatePreviewUrl(preview: BrowserPreviewRecord, url: string): void {
     if (preview.url === url) return;
     preview.url = url;
+    preview.storageSnapshot = null;
     preview.updatedAt = Date.now();
     this.broadcast(preview, { type: "preview", preview: this.info(preview) });
   }
@@ -2577,6 +2756,81 @@ function websocketFramePayloadIsBase64(
     return false;
   }
   return opcode !== 0 && opcode !== 1;
+}
+
+function storageOriginForUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function storageEntriesFromPairs(value: unknown): BrowserPreviewStorageEntry[] {
+  if (!Array.isArray(value)) return [];
+  const entries: BrowserPreviewStorageEntry[] = [];
+  for (const item of value) {
+    if (!Array.isArray(item) || item.length < 2) continue;
+    entries.push({
+      key: typeof item[0] === "string" ? item[0] : String(item[0] ?? ""),
+      value: typeof item[1] === "string" ? item[1] : String(item[1] ?? ""),
+    });
+  }
+  entries.sort((left, right) => left.key.localeCompare(right.key));
+  return entries;
+}
+
+function storageUsageBreakdownFromResult(
+  value: unknown,
+): BrowserPreviewStorageUsage[] {
+  if (!Array.isArray(value)) return [];
+  const entries = value
+    .map((item) => objectValue(item))
+    .filter((item): item is Record<string, unknown> => item !== null)
+    .map((item) => ({
+      storageType: stringValue(item.storageType),
+      usage: numberValue(item.usage, 0),
+    }))
+    .filter((item) => item.storageType.length > 0);
+  entries.sort((left, right) => right.usage - left.usage);
+  return entries;
+}
+
+function cookiesFromResult(value: unknown): BrowserPreviewStorageCookie[] {
+  const record = objectValue(value);
+  const cookies = Array.isArray(record?.cookies) ? record.cookies : [];
+  const entries = cookies
+    .map((item) => objectValue(item))
+    .filter((item): item is Record<string, unknown> => item !== null)
+    .map((item) => {
+      const session = item.session === true;
+      const expires = numberOrNull(item.expires);
+      return {
+        name: stringValue(item.name),
+        value: stringValue(item.value),
+        domain: stringValue(item.domain),
+        path: stringValue(item.path) || "/",
+        expires:
+          session || expires == null || expires < 0 ? null : expires,
+        size: numberOrNull(item.size),
+        httpOnly: item.httpOnly === true,
+        secure: item.secure === true,
+        session,
+        sameSite: stringOrNull(item.sameSite),
+      } satisfies BrowserPreviewStorageCookie;
+    });
+  entries.sort((left, right) => {
+    const domainOrder = left.domain.localeCompare(right.domain);
+    if (domainOrder !== 0) return domainOrder;
+    const pathOrder = left.path.localeCompare(right.path);
+    if (pathOrder !== 0) return pathOrder;
+    return left.name.localeCompare(right.name);
+  });
+  return entries;
 }
 
 function stringOrNull(value: unknown): string | null {
