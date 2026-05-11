@@ -23,6 +23,7 @@ const MAX_CONSOLE_BUFFER = 256;
 const CONSOLE_FLUSH_INTERVAL_MS = 500;
 const CONSOLE_FLUSH_THRESHOLD = 32;
 const MAX_NETWORK_ENTRIES = 300;
+const MAX_WEBSOCKET_MESSAGES_PER_ENTRY = 100;
 
 const SIDEMESH_BROWSER_PROFILE_DIR = "sidemesh";
 
@@ -114,7 +115,9 @@ interface BrowserPreviewRecord {
   frameTimer: NodeJS.Timeout | null;
   starting: Promise<void> | null;
   capturingFrame: boolean;
-  consoleBuffer: Array<Record<string, unknown>>;
+  consoleBuffer: BrowserPreviewConsoleEntry[];
+  consoleHistory: BrowserPreviewConsoleEntry[];
+  nextConsoleSeq: number;
   consoleFlushTimer: NodeJS.Timeout | null;
   networkEntries: Map<string, BrowserPreviewNetworkEntry>;
   networkEntryIdsByRequestId: Map<string, string>;
@@ -128,6 +131,28 @@ interface PersistentBrowserHost {
   userDataDir: string;
   process: BrowserProcess;
   cdp: CdpConnection;
+}
+
+interface BrowserPreviewConsoleEntry {
+  seq: number;
+  type: "console" | "exception" | "log";
+  level: string;
+  text: string;
+  args: Array<Record<string, unknown>>;
+  url: string | null;
+  lineNumber: number | null;
+  columnNumber: number | null;
+  source: string | null;
+  timestamp: number;
+}
+
+interface BrowserPreviewNetworkMessage {
+  direction: "sent" | "received" | "error";
+  timestamp: number;
+  opcode: number | null;
+  payload: string | null;
+  base64Encoded: boolean;
+  error: string | null;
 }
 
 interface BrowserPreviewNetworkEntry {
@@ -151,6 +176,7 @@ interface BrowserPreviewNetworkEntry {
   finished: boolean;
   failed: boolean;
   servedFromCache: boolean;
+  webSocketMessages: BrowserPreviewNetworkMessage[];
 }
 
 interface BrowserPreviewNetworkDetail {
@@ -175,6 +201,7 @@ interface BrowserPreviewNetworkDetail {
   body: string | null;
   bodyBase64Encoded: boolean;
   bodyError: string | null;
+  webSocketMessages: BrowserPreviewNetworkMessage[];
 }
 
 export class BrowserPreviewRegistry {
@@ -306,6 +333,8 @@ export class BrowserPreviewRegistry {
       starting: null,
       capturingFrame: false,
       consoleBuffer: [],
+      consoleHistory: [],
+      nextConsoleSeq: 1,
       consoleFlushTimer: null,
       networkEntries: new Map(),
       networkEntryIdsByRequestId: new Map(),
@@ -347,10 +376,15 @@ export class BrowserPreviewRegistry {
       return;
     }
 
+    this.flushConsoleBuffer(preview);
     preview.clients.add(socket);
     preview.lastClientAt = Date.now();
     preview.updatedAt = preview.lastClientAt;
     sendJson(socket, { type: "hello", preview: this.info(preview) });
+    sendJson(socket, {
+      type: "consoleSnapshot",
+      entries: preview.consoleHistory,
+    });
     if (preview.networkUnavailableMessage) {
       sendJson(socket, {
         type: "networkStatus",
@@ -364,6 +398,9 @@ export class BrowserPreviewRegistry {
     });
     if (preview.lastFramePayload) {
       sendJson(socket, preview.lastFramePayload);
+    }
+    if (preview.pageLoading) {
+      sendJson(socket, { type: "loading", state: "started" });
     }
 
     const onClose = () => {
@@ -923,7 +960,18 @@ export class BrowserPreviewRegistry {
       finished: entry.finished,
       failed: entry.failed,
       servedFromCache: entry.servedFromCache,
+      webSocketMessageCount: entry.webSocketMessages.length,
     };
+  }
+
+  private broadcastNetworkEntry(
+    preview: BrowserPreviewRecord,
+    entry: BrowserPreviewNetworkEntry,
+  ): void {
+    this.broadcast(preview, {
+      type: "network",
+      entry: this.networkSummary(entry),
+    });
   }
 
   private registerNetworkHandlers(
@@ -958,10 +1006,7 @@ export class BrowserPreviewRegistry {
             previousEntry,
             numberOrNull(params.timestamp),
           );
-          this.broadcast(preview, {
-            type: "network",
-            entry: this.networkSummary(previousEntry),
-          });
+          this.broadcastNetworkEntry(preview, previousEntry);
         }
 
         const request = objectValue(params.request);
@@ -995,13 +1040,11 @@ export class BrowserPreviewRegistry {
           finished: false,
           failed: false,
           servedFromCache: false,
+          webSocketMessages: [],
         };
         this.upsertNetworkEntry(preview, entry);
         preview.networkEntryIdsByRequestId.set(cdpRequestId, entry.requestId);
-        this.broadcast(preview, {
-          type: "network",
-          entry: this.networkSummary(entry),
-        });
+        this.broadcastNetworkEntry(preview, entry);
       }),
     );
 
@@ -1013,10 +1056,7 @@ export class BrowserPreviewRegistry {
         );
         if (!entry) return;
         entry.servedFromCache = true;
-        this.broadcast(preview, {
-          type: "network",
-          entry: this.networkSummary(entry),
-        });
+        this.broadcastNetworkEntry(preview, entry);
       }),
     );
 
@@ -1037,10 +1077,7 @@ export class BrowserPreviewRegistry {
           response?.fromDiskCache === true ||
           response?.fromPrefetchCache === true ||
           response?.fromServiceWorker === true;
-        this.broadcast(preview, {
-          type: "network",
-          entry: this.networkSummary(entry),
-        });
+        this.broadcastNetworkEntry(preview, entry);
       }),
     );
 
@@ -1056,10 +1093,7 @@ export class BrowserPreviewRegistry {
         entry.failed = false;
         entry.errorText = null;
         this.updateNetworkEntryDuration(entry, numberOrNull(params.timestamp));
-        this.broadcast(preview, {
-          type: "network",
-          entry: this.networkSummary(entry),
-        });
+        this.broadcastNetworkEntry(preview, entry);
       }),
     );
 
@@ -1074,10 +1108,151 @@ export class BrowserPreviewRegistry {
         entry.failed = true;
         entry.errorText = stringOrNull(params.errorText);
         this.updateNetworkEntryDuration(entry, numberOrNull(params.timestamp));
-        this.broadcast(preview, {
-          type: "network",
-          entry: this.networkSummary(entry),
+        this.broadcastNetworkEntry(preview, entry);
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Network.webSocketCreated", (params) => {
+        const requestId = stringValue(params.requestId);
+        if (!requestId) return;
+        const entry = this.ensureWebSocketEntry(
+          preview,
+          requestId,
+          stringValue(params.url),
+          Date.now(),
+          null,
+        );
+        if (!entry) return;
+        this.broadcastNetworkEntry(preview, entry);
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(
+        sessionId,
+        "Network.webSocketWillSendHandshakeRequest",
+        (params) => {
+          const requestId = stringValue(params.requestId);
+          if (!requestId) return;
+          const request = objectValue(params.request);
+          const entry = this.ensureWebSocketEntry(
+            preview,
+            requestId,
+            stringValue(request?.url),
+            browserPreviewNetworkStartedAt(params),
+            numberOrNull(params.timestamp),
+          );
+          if (!entry) return;
+          entry.method = stringValue(request?.method) || "GET";
+          entry.requestHeaders = headerRecord(request?.headers);
+          this.broadcastNetworkEntry(preview, entry);
+        },
+      ),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(
+        sessionId,
+        "Network.webSocketHandshakeResponseReceived",
+        (params) => {
+          const entry = this.networkEntryForCdpRequest(
+            preview,
+            stringValue(params.requestId),
+          );
+          if (!entry) return;
+          const response = objectValue(params.response);
+          entry.status = numberOrNull(response?.status);
+          entry.statusText = stringOrNull(response?.statusText);
+          entry.responseHeaders = headerRecord(response?.headers);
+          entry.requestHeaders = {
+            ...entry.requestHeaders,
+            ...headerRecord(response?.requestHeaders),
+          };
+          entry.mimeType =
+            stringOrNull(response?.mimeType) ||
+            headerValue(entry.responseHeaders, "content-type");
+          entry.failed = false;
+          entry.errorText = null;
+          this.broadcastNetworkEntry(preview, entry);
+        },
+      ),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Network.webSocketFrameSent", (params) => {
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
+        if (!entry) return;
+        const response = objectValue(params.response);
+        this.recordWebSocketMessage(entry, {
+          direction: "sent",
+          timestamp:
+            timestampFromSeconds(numberOrNull(params.timestamp)) ?? Date.now(),
+          opcode: numberOrNull(response?.opcode),
+          payload: stringOrNull(response?.payloadData),
+          base64Encoded: websocketFramePayloadIsBase64(response),
+          error: null,
         });
+        this.broadcastNetworkEntry(preview, entry);
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Network.webSocketFrameReceived", (params) => {
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
+        if (!entry) return;
+        const response = objectValue(params.response);
+        this.recordWebSocketMessage(entry, {
+          direction: "received",
+          timestamp:
+            timestampFromSeconds(numberOrNull(params.timestamp)) ?? Date.now(),
+          opcode: numberOrNull(response?.opcode),
+          payload: stringOrNull(response?.payloadData),
+          base64Encoded: websocketFramePayloadIsBase64(response),
+          error: null,
+        });
+        this.broadcastNetworkEntry(preview, entry);
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Network.webSocketFrameError", (params) => {
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
+        if (!entry) return;
+        entry.failed = true;
+        entry.errorText = stringOrNull(params.errorMessage);
+        this.recordWebSocketMessage(entry, {
+          direction: "error",
+          timestamp:
+            timestampFromSeconds(numberOrNull(params.timestamp)) ?? Date.now(),
+          opcode: null,
+          payload: null,
+          base64Encoded: false,
+          error: entry.errorText,
+        });
+        this.broadcastNetworkEntry(preview, entry);
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Network.webSocketClosed", (params) => {
+        const entry = this.networkEntryForCdpRequest(
+          preview,
+          stringValue(params.requestId),
+        );
+        if (!entry) return;
+        entry.finished = true;
+        this.updateNetworkEntryDuration(entry, numberOrNull(params.timestamp));
+        this.broadcastNetworkEntry(preview, entry);
       }),
     );
   }
@@ -1107,6 +1282,58 @@ export class BrowserPreviewRegistry {
     };
   }
 
+  private ensureWebSocketEntry(
+    preview: BrowserPreviewRecord,
+    cdpRequestId: string,
+    url: string,
+    startedAt: number,
+    startTimestampSeconds: number | null,
+  ): BrowserPreviewNetworkEntry | null {
+    const existing = this.networkEntryForCdpRequest(preview, cdpRequestId);
+    if (existing) {
+      existing.resourceType = "WebSocket";
+      if (url && !existing.url) {
+        existing.url = url;
+      }
+      if (existing.startTimestampSeconds == null) {
+        existing.startTimestampSeconds = startTimestampSeconds;
+      }
+      if (existing.startedAt <= 0) {
+        existing.startedAt = startedAt;
+      }
+      return existing;
+    }
+    if (!isTrackedBrowserPreviewNetworkUrl(url)) {
+      return null;
+    }
+    const entry: BrowserPreviewNetworkEntry = {
+      requestId: cdpRequestId,
+      cdpRequestId,
+      redirectHop: 0,
+      isRedirectResponse: false,
+      url,
+      method: "GET",
+      resourceType: "WebSocket",
+      requestHeaders: {},
+      responseHeaders: {},
+      status: null,
+      statusText: null,
+      mimeType: null,
+      encodedDataLength: null,
+      durationMs: null,
+      startedAt,
+      startTimestampSeconds,
+      errorText: null,
+      finished: false,
+      failed: false,
+      servedFromCache: false,
+      webSocketMessages: [],
+    };
+    this.upsertNetworkEntry(preview, entry);
+    preview.networkEntryIdsByRequestId.set(cdpRequestId, entry.requestId);
+    return entry;
+  }
+
   private updateNetworkEntryDuration(
     entry: BrowserPreviewNetworkEntry,
     completedAtSeconds: number | null,
@@ -1121,6 +1348,16 @@ export class BrowserPreviewRegistry {
     entry.durationMs = Math.round(
       (completedAtSeconds - entry.startTimestampSeconds) * 1000,
     );
+  }
+
+  private recordWebSocketMessage(
+    entry: BrowserPreviewNetworkEntry,
+    message: BrowserPreviewNetworkMessage,
+  ): void {
+    entry.webSocketMessages.push(message);
+    while (entry.webSocketMessages.length > MAX_WEBSOCKET_MESSAGES_PER_ENTRY) {
+      entry.webSocketMessages.shift();
+    }
   }
 
   private upsertNetworkEntry(
@@ -1165,6 +1402,14 @@ export class BrowserPreviewRegistry {
     }
 
     const detail = this.networkDetailFromEntry(entry);
+    if (entry.resourceType === "WebSocket") {
+      sendJson(socket, {
+        type: "networkDetail",
+        requestId,
+        detail,
+      });
+      return;
+    }
     if (!preview.cdp || !preview.sessionIdCdp || preview.status !== "running") {
       if (canBrowserPreviewRequestHaveBody(entry.method)) {
         detail.requestBodyError = "Browser preview is no longer running.";
@@ -1263,7 +1508,20 @@ export class BrowserPreviewRegistry {
       body: null,
       bodyBase64Encoded: false,
       bodyError: null,
+      webSocketMessages: entry.webSocketMessages,
     };
+  }
+
+  private flushConsoleBuffer(preview: BrowserPreviewRecord): void {
+    if (preview.consoleBuffer.length === 0) return;
+    const batch = preview.consoleBuffer.splice(0, preview.consoleBuffer.length);
+    preview.consoleHistory.push(...batch);
+    while (preview.consoleHistory.length > MAX_CONSOLE_BUFFER) {
+      preview.consoleHistory.shift();
+    }
+    for (const entry of batch) {
+      this.broadcast(preview, { ...entry });
+    }
   }
 
   private registerConsoleHandlers(
@@ -1273,66 +1531,74 @@ export class BrowserPreviewRegistry {
     const cdp = preview.cdp;
     if (!cdp) return;
 
-    const flushConsole = () => {
-      if (preview.consoleBuffer.length === 0) return;
-      const batch = preview.consoleBuffer.splice(0, preview.consoleBuffer.length);
-      for (const message of batch) {
-        this.broadcast(preview, message);
+    const queueConsole = (entry: Omit<BrowserPreviewConsoleEntry, "seq">) => {
+      preview.consoleBuffer.push({
+        seq: preview.nextConsoleSeq++,
+        ...entry,
+      });
+      if (preview.consoleBuffer.length >= CONSOLE_FLUSH_THRESHOLD) {
+        this.flushConsoleBuffer(preview);
       }
     };
 
     preview.cleanupHandlers.push(
       cdp.onSessionEvent(sessionId, "Runtime.consoleAPICalled", (params) => {
         const args = Array.isArray(params.args) ? params.args : [];
-        preview.consoleBuffer.push({
+        queueConsole({
           type: "console",
-          level: stringValue(params.type),
-          args: args.slice(0, 20),
-          timestamp: numberValue(params.timestamp, Date.now()),
+          level: stringValue(params.type) || "log",
+          text: browserPreviewConsoleText(args),
+          args: consoleArgumentRecords(args),
+          url: null,
+          lineNumber: null,
+          columnNumber: null,
+          source: null,
+          timestamp:
+            timestampFromSeconds(numberOrNull(params.timestamp)) ?? Date.now(),
         });
-        if (preview.consoleBuffer.length >= CONSOLE_FLUSH_THRESHOLD) {
-          flushConsole();
-        }
       }),
     );
 
     preview.cleanupHandlers.push(
       cdp.onSessionEvent(sessionId, "Runtime.exceptionThrown", (params) => {
         const details = objectValue(params.exceptionDetails);
-        preview.consoleBuffer.push({
+        const exception = objectValue(details?.exception);
+        queueConsole({
           type: "exception",
-          text: stringValue(details?.text),
-          url: stringValue(details?.url),
-          lineNumber: numberValue(details?.lineNumber, 0),
-          columnNumber: numberValue(details?.columnNumber, 0),
+          level: "error",
+          text:
+            stringOrNull(exception?.description) ||
+            stringOrNull(details?.text) ||
+            "Uncaught exception",
+          args: [],
+          url: stringOrNull(details?.url),
+          lineNumber: numberOrNull(details?.lineNumber),
+          columnNumber: numberOrNull(details?.columnNumber),
+          source: null,
           timestamp: Date.now(),
         });
-        if (preview.consoleBuffer.length >= CONSOLE_FLUSH_THRESHOLD) {
-          flushConsole();
-        }
       }),
     );
 
     preview.cleanupHandlers.push(
       cdp.onSessionEvent(sessionId, "Log.entryAdded", (params) => {
         const entry = objectValue(params.entry);
-        preview.consoleBuffer.push({
+        queueConsole({
           type: "log",
-          level: stringValue(entry?.level),
-          source: stringValue(entry?.source),
+          level: stringValue(entry?.level) || "info",
           text: stringValue(entry?.text),
-          url: stringValue(entry?.url),
-          lineNumber: numberValue(entry?.lineNumber, 0),
+          args: [],
+          url: stringOrNull(entry?.url),
+          lineNumber: numberOrNull(entry?.lineNumber),
+          columnNumber: null,
+          source: stringOrNull(entry?.source),
           timestamp: numberValue(entry?.timestamp, Date.now()),
         });
-        if (preview.consoleBuffer.length >= CONSOLE_FLUSH_THRESHOLD) {
-          flushConsole();
-        }
       }),
     );
 
     preview.consoleFlushTimer = setInterval(() => {
-      flushConsole();
+      this.flushConsoleBuffer(preview);
     }, CONSOLE_FLUSH_INTERVAL_MS);
     preview.consoleFlushTimer.unref?.();
   }
@@ -1488,6 +1754,7 @@ export class BrowserPreviewRegistry {
     status: BrowserPreviewStatus,
   ): Promise<void> {
     this.stopFrameLoop(preview);
+    this.flushConsoleBuffer(preview);
     preview.status = status;
     preview.updatedAt = Date.now();
     for (const client of preview.clients) {
@@ -2164,6 +2431,11 @@ function browserPreviewNetworkStartedAt(
   return Date.now();
 }
 
+function timestampFromSeconds(value: number | null): number | null {
+  if (value == null) return null;
+  return Math.round(value * 1000);
+}
+
 function headerRecord(value: unknown): Record<string, string> {
   const record = objectValue(value);
   if (!record) return {};
@@ -2182,6 +2454,122 @@ function headerRecord(value: unknown): Record<string, string> {
     }
   }
   return headers;
+}
+
+function headerValue(
+  headers: Record<string, string>,
+  name: string,
+): string | null {
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function consoleArgumentRecords(args: unknown[]): Array<Record<string, unknown>> {
+  return args
+    .map((arg) => objectValue(arg))
+    .filter((arg): arg is Record<string, unknown> => arg !== null)
+    .slice(0, 20);
+}
+
+function browserPreviewConsoleText(args: unknown[]): string {
+  return args
+    .map((arg) => browserPreviewConsoleValue(arg))
+    .filter((value) => value.length > 0)
+    .join(" ");
+}
+
+function browserPreviewConsoleValue(value: unknown): string {
+  const record = objectValue(value);
+  if (!record) {
+    return typeof value === "string" ? value : String(value ?? "");
+  }
+  if (Object.prototype.hasOwnProperty.call(record, "value")) {
+    const primitive = record.value;
+    if (typeof primitive === "string") {
+      return primitive;
+    }
+    if (primitive === null) {
+      return "null";
+    }
+    if (
+      typeof primitive === "number" ||
+      typeof primitive === "boolean" ||
+      typeof primitive === "bigint"
+    ) {
+      return String(primitive);
+    }
+    if (primitive !== undefined) {
+      try {
+        return JSON.stringify(primitive);
+      } catch {
+        return String(primitive);
+      }
+    }
+  }
+  const unserializableValue = stringOrNull(record.unserializableValue);
+  if (unserializableValue) {
+    return unserializableValue;
+  }
+  if (record.subtype === "null") {
+    return "null";
+  }
+  const preview = objectValue(record.preview);
+  const previewText = browserPreviewConsolePreviewText(preview);
+  if (previewText) {
+    return previewText;
+  }
+  const description = stringOrNull(record.description);
+  if (description) {
+    return description;
+  }
+  const type = stringOrNull(record.type);
+  return type ?? "";
+}
+
+function browserPreviewConsolePreviewText(
+  preview: Record<string, unknown> | null,
+): string | null {
+  if (!preview) return null;
+  const subtype = stringOrNull(preview.subtype);
+  const properties = Array.isArray(preview.properties)
+    ? preview.properties
+        .map((item) => objectValue(item))
+        .filter((item): item is Record<string, unknown> => item !== null)
+    : [];
+  const overflow = preview.overflow === true;
+  if (subtype === "array") {
+    const values = properties
+      .map((item) => stringOrNull(item.value) ?? stringOrNull(item.name) ?? "")
+      .filter((item) => item.length > 0);
+    if (values.length === 0) {
+      return overflow ? "[…]" : "[]";
+    }
+    return `[${values.join(", ")}${overflow ? ", …" : ""}]`;
+  }
+  if (properties.length === 0) {
+    return null;
+  }
+  const parts = properties.map((item) => {
+    const name = stringOrNull(item.name) ?? "";
+    const value = stringOrNull(item.value) ?? stringOrNull(item.type) ?? "";
+    return name ? `${name}: ${value}` : value;
+  });
+  return `{${parts.join(", ")}${overflow ? ", …" : ""}}`;
+}
+
+function websocketFramePayloadIsBase64(
+  response: Record<string, unknown> | null,
+): boolean {
+  const opcode = numberOrNull(response?.opcode);
+  if (opcode == null) {
+    return false;
+  }
+  return opcode !== 0 && opcode !== 1;
 }
 
 function stringOrNull(value: unknown): string | null {
