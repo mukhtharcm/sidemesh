@@ -187,11 +187,174 @@ describe("browser preview", () => {
         finished: false,
         failed: false,
         servedFromCache: false,
+        webSocketMessageCount: 0,
       },
     });
     assert.equal(events[3].type, "network");
     assert.equal((events[3].entry as any).durationMs, 125);
     assert.equal((events[3].entry as any).servedFromCache, true);
+  });
+
+  it("tracks websocket handshakes and frames", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp);
+    const events: Array<Record<string, unknown>> = [];
+    registry.broadcast = (_preview: unknown, payload: Record<string, unknown>) => {
+      events.push(payload);
+    };
+
+    registry.registerNetworkHandlers(preview, "session-1");
+
+    cdp.emitSession("Network.webSocketWillSendHandshakeRequest", {
+      requestId: "socket-1",
+      timestamp: 10,
+      wallTime: 20,
+      request: {
+        url: "ws://127.0.0.1:3000/socket",
+        method: "GET",
+        headers: {
+          upgrade: "websocket",
+          connection: "Upgrade",
+        },
+      },
+    });
+    cdp.emitSession("Network.webSocketHandshakeResponseReceived", {
+      requestId: "socket-1",
+      response: {
+        status: 101,
+        statusText: "Switching Protocols",
+        headers: {
+          upgrade: "websocket",
+        },
+      },
+    });
+    cdp.emitSession("Network.webSocketFrameSent", {
+      requestId: "socket-1",
+      timestamp: 10.1,
+      response: {
+        opcode: 1,
+        payloadData: "ping",
+      },
+    });
+    cdp.emitSession("Network.webSocketFrameReceived", {
+      requestId: "socket-1",
+      timestamp: 10.2,
+      response: {
+        opcode: 1,
+        payloadData: "pong",
+      },
+    });
+    cdp.emitSession("Network.webSocketClosed", {
+      requestId: "socket-1",
+      timestamp: 10.5,
+    });
+
+    const entry = preview.networkEntries.get("socket-1");
+    assert.ok(entry);
+    assert.equal(entry.resourceType, "WebSocket");
+    assert.equal(entry.status, 101);
+    assert.equal(entry.finished, true);
+    assert.equal(entry.durationMs, 500);
+    assert.equal(entry.webSocketMessages.length, 2);
+    assert.deepEqual(entry.webSocketMessages[0], {
+      direction: "sent",
+      timestamp: 10_100,
+      opcode: 1,
+      payload: "ping",
+      base64Encoded: false,
+      error: null,
+    });
+    assert.equal((events.at(-1)?.entry as any).webSocketMessageCount, 2);
+
+    const messages: Array<Record<string, unknown>> = [];
+    const socket = createFakeSocket(messages);
+    await registry.sendNetworkDetail(preview, socket, "socket-1");
+
+    assert.equal(cdp.sent.length, 0);
+    assert.deepEqual(messages[0], {
+      type: "networkDetail",
+      requestId: "socket-1",
+      detail: {
+        requestId: "socket-1",
+        url: "ws://127.0.0.1:3000/socket",
+        method: "GET",
+        resourceType: "WebSocket",
+        status: 101,
+        mimeType: null,
+        encodedDataLength: null,
+        durationMs: 500,
+        startedAt: 20_000,
+        errorText: null,
+        finished: true,
+        failed: false,
+        servedFromCache: false,
+        statusText: "Switching Protocols",
+        requestHeaders: {
+          upgrade: "websocket",
+          connection: "Upgrade",
+        },
+        responseHeaders: {
+          upgrade: "websocket",
+        },
+        requestBody: null,
+        requestBodyError: null,
+        body: null,
+        bodyBase64Encoded: false,
+        bodyError: null,
+        webSocketMessages: [
+          {
+            direction: "sent",
+            timestamp: 10_100,
+            opcode: 1,
+            payload: "ping",
+            base64Encoded: false,
+            error: null,
+          },
+          {
+            direction: "received",
+            timestamp: 10_200,
+            opcode: 1,
+            payload: "pong",
+            base64Encoded: false,
+            error: null,
+          },
+        ],
+      },
+    });
+  });
+
+  it("hydrates websocket timing from the handshake after early creation", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp);
+    registry.broadcast = () => {};
+
+    registry.registerNetworkHandlers(preview, "session-1");
+
+    cdp.emitSession("Network.webSocketCreated", {
+      requestId: "socket-1",
+      url: "ws://127.0.0.1:3000/socket",
+    });
+    const provisionalEntry = preview.networkEntries.get("socket-1");
+    assert.ok(provisionalEntry);
+    assert.equal(provisionalEntry.startTimestampSeconds, null);
+
+    cdp.emitSession("Network.webSocketWillSendHandshakeRequest", {
+      requestId: "socket-1",
+      timestamp: 10,
+      wallTime: 20,
+      request: {
+        url: "ws://127.0.0.1:3000/socket",
+        method: "GET",
+        headers: {},
+      },
+    });
+
+    const entry = preview.networkEntries.get("socket-1");
+    assert.ok(entry);
+    assert.equal(entry.startedAt, 20_000);
+    assert.equal(entry.startTimestampSeconds, 10);
   });
 
   it("tracks redirect hops as separate network rows", () => {
@@ -318,6 +481,7 @@ describe("browser preview", () => {
       finished: true,
       failed: false,
       servedFromCache: false,
+      webSocketMessages: [],
     });
     cdp.sendResult = {
       body: '  console.log("ok")\n',
@@ -358,6 +522,7 @@ describe("browser preview", () => {
         body: '  console.log("ok")\n',
         bodyBase64Encoded: false,
         bodyError: null,
+        webSocketMessages: [],
       },
     });
   });
@@ -387,6 +552,7 @@ describe("browser preview", () => {
       finished: true,
       failed: false,
       servedFromCache: false,
+      webSocketMessages: [],
     });
     const messages: Array<Record<string, unknown>> = [];
     const socket = createFakeSocket(messages);
@@ -413,9 +579,121 @@ describe("browser preview", () => {
 
     assert.equal(socket.frames[0]?.type, "hello");
     assert.deepEqual(socket.frames[1], {
+      type: "consoleSnapshot",
+      entries: [],
+    });
+    assert.deepEqual(socket.frames[2], {
       type: "networkSnapshot",
       entries: [],
     });
+  });
+
+  it("sends a console snapshot on attach and flushes pending entries", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const preview = buildFakePreview(new FakeCdpConnection(), {
+      status: "starting",
+      starting: new Promise<void>(() => {}),
+      consoleHistory: [
+        {
+          seq: 1,
+          type: "console",
+          level: "log",
+          text: "ready",
+          args: [],
+          url: null,
+          lineNumber: null,
+          columnNumber: null,
+          source: null,
+          timestamp: 1,
+        },
+      ],
+      consoleBuffer: [
+        {
+          seq: 2,
+          type: "exception",
+          level: "error",
+          text: "boom",
+          args: [],
+          url: "http://127.0.0.1:3000/app.js",
+          lineNumber: 4,
+          columnNumber: 2,
+          source: null,
+          timestamp: 2,
+        },
+      ],
+    });
+    registry.previews.set(preview.id, preview);
+    const socket = new FakeAttachSocket();
+
+    registry.attach(socket as unknown as WebSocket, preview.id);
+
+    assert.deepEqual(socket.frames[1], {
+      type: "consoleSnapshot",
+      entries: [
+        {
+          seq: 1,
+          type: "console",
+          level: "log",
+          text: "ready",
+          args: [],
+          url: null,
+          lineNumber: null,
+          columnNumber: null,
+          source: null,
+          timestamp: 1,
+        },
+        {
+          seq: 2,
+          type: "exception",
+          level: "error",
+          text: "boom",
+          args: [],
+          url: "http://127.0.0.1:3000/app.js",
+          lineNumber: 4,
+          columnNumber: 2,
+          source: null,
+          timestamp: 2,
+        },
+      ],
+    });
+    assert.equal(preview.consoleBuffer.length, 0);
+    assert.equal(preview.consoleHistory.length, 2);
+  });
+
+  it("normalizes console timestamps from CDP seconds", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp);
+    registry.broadcast = () => {};
+
+    registry.registerConsoleHandlers(preview, "session-1");
+
+    cdp.emitSession("Runtime.exceptionThrown", {
+      timestamp: 10.5,
+      exceptionDetails: {
+        text: "boom",
+        url: "http://127.0.0.1:3000/app.js",
+        lineNumber: 4,
+        columnNumber: 2,
+      },
+    });
+    cdp.emitSession("Log.entryAdded", {
+      entry: {
+        level: "warning",
+        source: "network",
+        text: "late header",
+        url: "http://127.0.0.1:3000/app.js",
+        lineNumber: 8,
+        timestamp: 10.25,
+      },
+    });
+
+    registry.flushConsoleBuffer(preview);
+
+    assert.deepEqual(
+      preview.consoleHistory.map((entry: { timestamp: number }) => entry.timestamp),
+      [10_500, 10_250],
+    );
   });
 
   it("reports unavailable network inspection on attach", () => {
@@ -432,12 +710,16 @@ describe("browser preview", () => {
     registry.attach(socket as unknown as WebSocket, preview.id);
 
     assert.deepEqual(socket.frames[1], {
+      type: "consoleSnapshot",
+      entries: [],
+    });
+    assert.deepEqual(socket.frames[2], {
       type: "networkStatus",
       available: false,
       message:
         "Network inspection is unavailable: Network domain is not supported.",
     });
-    assert.deepEqual(socket.frames[2], {
+    assert.deepEqual(socket.frames[3], {
       type: "networkSnapshot",
       entries: [],
     });
@@ -524,6 +806,8 @@ function buildFakePreview(
     starting: null,
     capturingFrame: false,
     consoleBuffer: [],
+    consoleHistory: [],
+    nextConsoleSeq: 1,
     consoleFlushTimer: null,
     networkEntries: new Map(),
     networkEntryIdsByRequestId: new Map(),

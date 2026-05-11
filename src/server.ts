@@ -791,6 +791,9 @@ export async function startServer(
   }
 
   function scheduleRecentSessionUpsert(sessionId: string, delayMs = 150): void {
+    // Status/runtime changes should be visible to the next /api/sessions read
+    // immediately; the deferred upsert is only for live subscribers.
+    invalidateRecentSessionsCache();
     if (recentSessionBroadcastTimers.has(sessionId)) {
       return;
     }
