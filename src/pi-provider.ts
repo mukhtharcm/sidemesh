@@ -152,6 +152,7 @@ const DEFAULT_PI_STATE_DIR = nodePath.join(
 );
 const PI_PROMPT_COMPLETION_FALLBACK_DELAY_MS = 100;
 const PI_EVENT_QUEUE_DRAIN_TIMEOUT_MS = 1_000;
+const PI_SIDECAR_USER_MATCH_TOLERANCE_MS = 2_000;
 const PI_MODEL_REASONING_LEVELS = [
   "minimal",
   "low",
@@ -3031,11 +3032,15 @@ function findPreservedSidecarUserIndex(
   record: {
     previousUserText: string | null;
     previousUserOccurrence: number | null;
+    previousUserMessage?: SessionMessage | null;
+    message?: SessionMessage;
   },
 ): number {
   if (!record.previousUserText) {
     return -1;
   }
+  const anchorCreatedAt =
+    record.previousUserMessage?.createdAt ?? record.message?.createdAt ?? null;
   let occurrence = 0;
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
@@ -3043,6 +3048,9 @@ function findPreservedSidecarUserIndex(
       message?.role !== "user" ||
       message.text.trim() !== record.previousUserText
     ) {
+      continue;
+    }
+    if (!isPlausiblePreservedSidecarUserMatch(message, anchorCreatedAt)) {
       continue;
     }
     if (
@@ -3054,6 +3062,19 @@ function findPreservedSidecarUserIndex(
     occurrence += 1;
   }
   return -1;
+}
+
+function isPlausiblePreservedSidecarUserMatch(
+  message: SessionMessage,
+  anchorCreatedAt: number | null,
+): boolean {
+  if (anchorCreatedAt == null) {
+    return true;
+  }
+  return (
+    message.createdAt <=
+    anchorCreatedAt + PI_SIDECAR_USER_MATCH_TOLERANCE_MS
+  );
 }
 
 function nextUserMessageSeq(

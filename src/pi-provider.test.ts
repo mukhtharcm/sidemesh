@@ -1239,6 +1239,9 @@ describe("PiAgentProvider", () => {
       "sidecar history reload must not move updatedAt backward",
     );
 
+    const repeatedPromptAtMs = (thread.updatedAt + 10) * 1000;
+    const repeatedAnswerAtMs = repeatedPromptAtMs + 1_000;
+    const repeatedMtime = new Date(repeatedAnswerAtMs + 1_000).toISOString();
     await writePiSessionHistory(
       fakeSession.sessionFile,
       [
@@ -1253,18 +1256,18 @@ describe("PiAgentProvider", () => {
           type: "message",
           id: "later-user",
           parentId: null,
-          timestamp: "2026-05-01T10:00:02.000Z",
+          timestamp: new Date(repeatedPromptAtMs).toISOString(),
           message: {
             role: "user",
-            content: [{ type: "text", text: "Later persisted" }],
-            timestamp: 1_777_770_002_000,
+            content: [{ type: "text", text: "Prompt only" }],
+            timestamp: repeatedPromptAtMs,
           },
         }),
         JSON.stringify(
           minimalPiAssistantMessage(
             "later-assistant",
             "later-user",
-            "2026-05-01T10:00:03.000Z",
+            new Date(repeatedAnswerAtMs).toISOString(),
             "Later answer",
             10,
             20,
@@ -1272,13 +1275,13 @@ describe("PiAgentProvider", () => {
           ),
         ),
       ],
-      "2026-05-01T10:00:04.000Z",
+      repeatedMtime,
     );
 
     const laterLog = await provider.readSessionLog(created.thread);
     assert.deepEqual(
       laterLog.messages.map((message) => message.text),
-      ["Prompt only", "Later persisted", "Later answer"],
+      ["Prompt only", "Prompt only", "Later answer"],
     );
     const laterThread = await provider.readSessionThread(created.thread.id, false);
     assert.equal(laterThread.preview, "Later answer");
