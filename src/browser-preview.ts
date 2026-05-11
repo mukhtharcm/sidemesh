@@ -24,6 +24,40 @@ const CONSOLE_FLUSH_INTERVAL_MS = 500;
 const CONSOLE_FLUSH_THRESHOLD = 32;
 const MAX_NETWORK_ENTRIES = 300;
 const MAX_WEBSOCKET_MESSAGES_PER_ENTRY = 100;
+const INSPECTOR_MAX_CHILDREN = 24;
+const INSPECTOR_MAX_TEXT_PREVIEW = 160;
+const INSPECTOR_COMPUTED_STYLE_NAMES = [
+  "display",
+  "position",
+  "top",
+  "right",
+  "bottom",
+  "left",
+  "z-index",
+  "width",
+  "height",
+  "min-width",
+  "min-height",
+  "max-width",
+  "max-height",
+  "margin",
+  "padding",
+  "color",
+  "background-color",
+  "font-size",
+  "font-weight",
+  "line-height",
+  "text-align",
+  "opacity",
+  "overflow",
+  "transform",
+  "flex",
+  "flex-direction",
+  "justify-content",
+  "align-items",
+  "grid-template-columns",
+  "grid-template-rows",
+] as const;
 
 const SIDEMESH_BROWSER_PROFILE_DIR = "sidemesh";
 
@@ -123,6 +157,8 @@ interface BrowserPreviewRecord {
   networkEntryIdsByRequestId: Map<string, string>;
   networkRedirectCountsByRequestId: Map<string, number>;
   networkUnavailableMessage: string | null;
+  inspectorSnapshot: BrowserPreviewInspectorSnapshot | null;
+  inspectorSelectedPath: number[] | null;
   storageSnapshot: BrowserPreviewStorageSnapshot | null;
   storageRefreshTimer: NodeJS.Timeout | null;
   pageLoading: boolean;
@@ -249,6 +285,50 @@ interface BrowserPreviewIndexedDbDatabase {
   name: string;
   version: number | null;
   objectStores: BrowserPreviewIndexedDbObjectStore[];
+}
+
+interface BrowserPreviewInspectorNode {
+  path: number[];
+  nodeName: string;
+  selector: string;
+  textPreview: string | null;
+  childElementCount: number;
+  isSelected: boolean;
+  truncatedChildren: boolean;
+  children: BrowserPreviewInspectorNode[];
+}
+
+interface BrowserPreviewInspectorAttribute {
+  name: string;
+  value: string;
+}
+
+interface BrowserPreviewInspectorStyleProperty {
+  name: string;
+  value: string;
+}
+
+interface BrowserPreviewInspectorBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface BrowserPreviewInspectorSelectedNode extends BrowserPreviewInspectorNode {
+  attributes: BrowserPreviewInspectorAttribute[];
+  computedStyles: BrowserPreviewInspectorStyleProperty[];
+  inlineStyles: BrowserPreviewInspectorStyleProperty[];
+  box: BrowserPreviewInspectorBox | null;
+}
+
+interface BrowserPreviewInspectorSnapshot {
+  url: string;
+  refreshedAt: number;
+  selectedPath: number[];
+  treeRoot: BrowserPreviewInspectorNode | null;
+  selectedNode: BrowserPreviewInspectorSelectedNode | null;
+  warnings: string[];
 }
 
 interface BrowserPreviewStorageSnapshot {
@@ -401,6 +481,8 @@ export class BrowserPreviewRegistry {
       networkEntryIdsByRequestId: new Map(),
       networkRedirectCountsByRequestId: new Map(),
       networkUnavailableMessage: null,
+      inspectorSnapshot: null,
+      inspectorSelectedPath: null,
       storageSnapshot: null,
       storageRefreshTimer: null,
       pageLoading: false,
@@ -463,6 +545,12 @@ export class BrowserPreviewRegistry {
       sendJson(socket, {
         type: "storageSnapshot",
         snapshot: preview.storageSnapshot,
+      });
+    }
+    if (preview.inspectorSnapshot) {
+      sendJson(socket, {
+        type: "inspectorSnapshot",
+        snapshot: preview.inspectorSnapshot,
       });
     }
     if (preview.lastFramePayload) {
@@ -734,6 +822,18 @@ export class BrowserPreviewRegistry {
       }
       if (type === "storageRefreshRequest") {
         await this.sendStorageSnapshot(preview, socket);
+        return;
+      }
+      if (type === "inspectorSnapshotRequest") {
+        await this.sendInspectorSnapshot(preview, socket);
+        return;
+      }
+      if (type === "inspectorSelectPath") {
+        await this.selectInspectorPath(preview, socket, record);
+        return;
+      }
+      if (type === "inspectorInspectPoint") {
+        await this.inspectPreviewPoint(preview, socket, record);
         return;
       }
       if (type === "storageSetEntry") {
@@ -1626,6 +1726,129 @@ export class BrowserPreviewRegistry {
     };
   }
 
+  private async sendInspectorSnapshot(
+    preview: BrowserPreviewRecord,
+    socket: WebSocket,
+  ): Promise<void> {
+    try {
+      const snapshot = await this.refreshInspectorSnapshot(preview);
+      sendJson(socket, {
+        type: "inspectorSnapshot",
+        snapshot,
+      });
+    } catch (error) {
+      sendJson(socket, {
+        type: "inspectorSnapshot",
+        snapshot: preview.inspectorSnapshot ?? undefined,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async selectInspectorPath(
+    preview: BrowserPreviewRecord,
+    socket: WebSocket,
+    record: Record<string, unknown>,
+  ): Promise<void> {
+    const path = inspectorPathFromValue(record.path);
+    if (!path) {
+      sendJson(socket, {
+        type: "inspectorSnapshot",
+        snapshot: preview.inspectorSnapshot ?? undefined,
+        error: "Inspector path is invalid.",
+      });
+      return;
+    }
+    await this.handleInspectorRefresh(preview, socket, {
+      selectedPath: path,
+    });
+  }
+
+  private async inspectPreviewPoint(
+    preview: BrowserPreviewRecord,
+    socket: WebSocket,
+    record: Record<string, unknown>,
+  ): Promise<void> {
+    const point = normalizedPoint(record, preview);
+    await this.handleInspectorRefresh(preview, socket, {
+      inspectPoint: point,
+    });
+  }
+
+  private async handleInspectorRefresh(
+    preview: BrowserPreviewRecord,
+    socket: WebSocket,
+    options: {
+      selectedPath?: number[];
+      inspectPoint?: { x: number; y: number };
+    } = {},
+  ): Promise<void> {
+    try {
+      const snapshot = await this.refreshInspectorSnapshot(preview, options);
+      this.broadcastInspectorSnapshot(preview, snapshot);
+    } catch (error) {
+      sendJson(socket, {
+        type: "inspectorSnapshot",
+        snapshot: preview.inspectorSnapshot ?? undefined,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async refreshInspectorSnapshot(
+    preview: BrowserPreviewRecord,
+    options: {
+      selectedPath?: number[];
+      inspectPoint?: { x: number; y: number };
+    } = {},
+  ): Promise<BrowserPreviewInspectorSnapshot> {
+    const cdp = preview.cdp;
+    const sessionId = preview.sessionIdCdp;
+    if (!cdp || !sessionId || preview.status !== "running") {
+      throw new BrowserPreviewError(
+        "Browser preview is no longer running.",
+        409,
+      );
+    }
+    const snapshot = await this.buildInspectorSnapshot(preview, cdp, sessionId, {
+      selectedPath: options.selectedPath ?? preview.inspectorSelectedPath,
+      inspectPoint: options.inspectPoint ?? null,
+    });
+    preview.inspectorSnapshot = snapshot;
+    preview.inspectorSelectedPath = snapshot.selectedPath;
+    return snapshot;
+  }
+
+  private async buildInspectorSnapshot(
+    preview: BrowserPreviewRecord,
+    cdp: CdpConnection,
+    sessionId: string,
+    options: {
+      selectedPath: number[] | null;
+      inspectPoint: { x: number; y: number } | null;
+    },
+  ): Promise<BrowserPreviewInspectorSnapshot> {
+    const result = await runtimeEvaluateJson(
+      cdp,
+      sessionId,
+      buildInspectorSnapshotExpression({
+        selectedPath: options.selectedPath,
+        inspectPoint: options.inspectPoint,
+      }),
+    );
+    return inspectorSnapshotFromRuntimeValue(result, preview.url);
+  }
+
+  private broadcastInspectorSnapshot(
+    preview: BrowserPreviewRecord,
+    snapshot: BrowserPreviewInspectorSnapshot,
+  ): void {
+    this.broadcast(preview, {
+      type: "inspectorSnapshot",
+      snapshot,
+    });
+  }
+
   private async sendStorageSnapshot(
     preview: BrowserPreviewRecord,
     socket: WebSocket,
@@ -2150,6 +2373,11 @@ export class BrowserPreviewRegistry {
       cdp.onSessionEvent(sessionId, "Page.loadEventFired", () => {
         preview.pageLoading = false;
         this.broadcast(preview, { type: "loading", state: "complete" });
+        if (preview.inspectorSnapshot) {
+          void this.refreshInspectorSnapshot(preview)
+            .then((snapshot) => this.broadcastInspectorSnapshot(preview, snapshot))
+            .catch(() => {});
+        }
         this.scheduleStorageSnapshotRefresh(preview);
       }),
     );
@@ -2246,6 +2474,8 @@ export class BrowserPreviewRegistry {
   private updatePreviewUrl(preview: BrowserPreviewRecord, url: string): void {
     if (preview.url === url) return;
     preview.url = url;
+    preview.inspectorSnapshot = null;
+    preview.inspectorSelectedPath = null;
     preview.storageSnapshot = null;
     preview.updatedAt = Date.now();
     this.broadcast(preview, { type: "preview", preview: this.info(preview) });
@@ -2849,6 +3079,354 @@ function normalizedPoint(
   };
 }
 
+async function runtimeEvaluateJson(
+  cdp: CdpConnection,
+  sessionId: string,
+  expression: string,
+): Promise<unknown> {
+  const result = await cdp.send(
+    "Runtime.evaluate",
+    {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  const record = objectValue(result);
+  const exceptionDetails = objectValue(record?.exceptionDetails);
+  if (exceptionDetails) {
+    throw new BrowserPreviewError(
+      stringOrNull(exceptionDetails.text) || "Inspector evaluation failed.",
+      500,
+    );
+  }
+  const remoteResult = objectValue(record?.result);
+  return remoteResult?.value;
+}
+
+function buildInspectorSnapshotExpression(payload: {
+  selectedPath: number[] | null;
+  inspectPoint: { x: number; y: number } | null;
+}): string {
+  const input = JSON.stringify({
+    selectedPath: payload.selectedPath,
+    inspectPoint: payload.inspectPoint,
+    maxChildren: INSPECTOR_MAX_CHILDREN,
+    maxTextPreview: INSPECTOR_MAX_TEXT_PREVIEW,
+    computedStyleNames: INSPECTOR_COMPUTED_STYLE_NAMES,
+  });
+  return `(() => {
+    const input = ${input};
+    const maxChildren = Number(input.maxChildren) || 24;
+    const maxTextPreview = Number(input.maxTextPreview) || 160;
+    const computedStyleNames = Array.isArray(input.computedStyleNames)
+      ? input.computedStyleNames.map((item) => String(item))
+      : [];
+    const selectedPathInput = Array.isArray(input.selectedPath)
+      ? input.selectedPath.map((item) => Number(item))
+      : null;
+    const inspectPoint = input.inspectPoint &&
+      typeof input.inspectPoint === "object"
+      ? {
+          x: Number(input.inspectPoint.x),
+          y: Number(input.inspectPoint.y),
+        }
+      : null;
+    const warnings = [];
+
+    function trimText(value) {
+      const normalized = String(value ?? "").replace(/\\s+/g, " ").trim();
+      if (!normalized) return null;
+      return normalized.length > maxTextPreview
+        ? normalized.slice(0, maxTextPreview - 1) + "…"
+        : normalized;
+    }
+
+    function selectorFor(element) {
+      const tag = String(element.localName || element.nodeName || "").toLowerCase() || "node";
+      const id = element.id ? "#" + element.id : "";
+      const className = typeof element.className === "string"
+        ? element.className.trim().split(/\\s+/).filter(Boolean).slice(0, 3).join(".")
+        : "";
+      return tag + id + (className ? "." + className : "");
+    }
+
+    function elementPath(element) {
+      if (!(element instanceof Element)) return [];
+      const path = [];
+      let current = element;
+      while (current && current !== document.documentElement) {
+        const parent = current.parentElement;
+        if (!parent) return [];
+        const index = Array.prototype.indexOf.call(parent.children, current);
+        if (index < 0) return [];
+        path.unshift(index);
+        current = parent;
+      }
+      return path;
+    }
+
+    function resolvePath(path) {
+      if (!Array.isArray(path)) return null;
+      let current = document.documentElement;
+      for (const rawIndex of path) {
+        const index = Number(rawIndex);
+        if (!Number.isInteger(index) || index < 0) return null;
+        if (!current || !current.children || index >= current.children.length) {
+          return null;
+        }
+        current = current.children[index];
+      }
+      return current instanceof Element ? current : null;
+    }
+
+    function pathsEqual(left, right) {
+      if (!Array.isArray(left) || !Array.isArray(right)) return false;
+      if (left.length !== right.length) return false;
+      for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) return false;
+      }
+      return true;
+    }
+
+    function summarizeNode(element, path, selectedPath) {
+      return {
+        path,
+        nodeName: String(element.localName || element.nodeName || "").toLowerCase() || "node",
+        selector: selectorFor(element),
+        textPreview: trimText(element.textContent),
+        childElementCount: element.children.length,
+        isSelected: pathsEqual(path, selectedPath),
+        truncatedChildren: false,
+        children: [],
+      };
+    }
+
+    function buildTree(element, path, selectedPath) {
+      const node = summarizeNode(element, path, selectedPath);
+      const children = Array.from(element.children);
+      if (children.length === 0) return node;
+      const selectedHere = pathsEqual(path, selectedPath);
+      const nextIndex = Array.isArray(selectedPath) && selectedPath.length > path.length
+        ? selectedPath[path.length]
+        : null;
+      const indices = [];
+      for (let index = 0; index < Math.min(children.length, maxChildren); index += 1) {
+        indices.push(index);
+      }
+      if (
+        Number.isInteger(nextIndex) &&
+        nextIndex >= 0 &&
+        nextIndex < children.length &&
+        !indices.includes(nextIndex)
+      ) {
+        indices.push(nextIndex);
+      }
+      indices.sort((left, right) => left - right);
+      node.truncatedChildren = children.length > indices.length;
+      node.children = indices.map((childIndex) => {
+        const child = children[childIndex];
+        const childPath = path.concat(childIndex);
+        if (selectedHere || childIndex === nextIndex) {
+          return buildTree(child, childPath, selectedPath);
+        }
+        return summarizeNode(child, childPath, selectedPath);
+      });
+      return node;
+    }
+
+    function attributesFor(element) {
+      return element.getAttributeNames()
+        .map((name) => ({ name, value: element.getAttribute(name) ?? "" }))
+        .sort((left, right) => left.name.localeCompare(right.name));
+    }
+
+    function inlineStylesFor(element) {
+      return Array.from(element.style)
+        .map((name) => ({ name, value: element.style.getPropertyValue(name) }))
+        .filter((entry) => entry.value.trim().length > 0)
+        .sort((left, right) => left.name.localeCompare(right.name));
+    }
+
+    function computedStylesFor(element) {
+      const styles = window.getComputedStyle(element);
+      return computedStyleNames
+        .map((name) => ({ name, value: styles.getPropertyValue(name).trim() }))
+        .filter((entry) => entry.value.length > 0)
+        .sort((left, right) => left.name.localeCompare(right.name));
+    }
+
+    function boxFor(element) {
+      const rect = element.getBoundingClientRect();
+      if (!Number.isFinite(rect.x) || !Number.isFinite(rect.y)) return null;
+      return {
+        x: Math.round(rect.x * 100) / 100,
+        y: Math.round(rect.y * 100) / 100,
+        width: Math.round(rect.width * 100) / 100,
+        height: Math.round(rect.height * 100) / 100,
+      };
+    }
+
+    if (!(document.documentElement instanceof Element)) {
+      return {
+        selectedPath: [],
+        treeRoot: null,
+        selectedNode: null,
+        warnings: ["Inspector is unavailable on this page."],
+      };
+    }
+
+    let selected = null;
+    if (
+      inspectPoint &&
+      Number.isFinite(inspectPoint.x) &&
+      Number.isFinite(inspectPoint.y)
+    ) {
+      const picked = document.elementFromPoint(inspectPoint.x, inspectPoint.y);
+      if (picked instanceof Element) {
+        selected = picked;
+      } else {
+        warnings.push("No element was found at that point.");
+      }
+    }
+    if (!selected && Array.isArray(selectedPathInput)) {
+      selected = resolvePath(selectedPathInput);
+      if (!selected && selectedPathInput.length > 0) {
+        warnings.push("The selected element is no longer available.");
+      }
+    }
+    if (!selected) {
+      selected = document.body instanceof Element
+        ? document.body
+        : document.documentElement;
+    }
+
+    const selectedPath = elementPath(selected);
+    const treeRoot = buildTree(document.documentElement, [], selectedPath);
+    const selectedNode = Object.assign(
+      summarizeNode(selected, selectedPath, selectedPath),
+      {
+        attributes: attributesFor(selected),
+        computedStyles: computedStylesFor(selected),
+        inlineStyles: inlineStylesFor(selected),
+        box: boxFor(selected),
+      },
+    );
+
+    return {
+      selectedPath,
+      treeRoot,
+      selectedNode,
+      warnings,
+    };
+  })()`;
+}
+
+function inspectorSnapshotFromRuntimeValue(
+  value: unknown,
+  url: string,
+): BrowserPreviewInspectorSnapshot {
+  const record = objectValue(value);
+  return {
+    url,
+    refreshedAt: Date.now(),
+    selectedPath: inspectorPathFromValue(record?.selectedPath) ?? [],
+    treeRoot: inspectorNodeFromValue(record?.treeRoot),
+    selectedNode: inspectorSelectedNodeFromValue(record?.selectedNode),
+    warnings: stringList(record?.warnings),
+  };
+}
+
+function inspectorNodeFromValue(
+  value: unknown,
+): BrowserPreviewInspectorNode | null {
+  const record = objectValue(value);
+  if (!record) return null;
+  return {
+    path: inspectorPathFromValue(record.path) ?? [],
+    nodeName: stringValue(record.nodeName) || "node",
+    selector: stringValue(record.selector) || stringValue(record.nodeName) || "node",
+    textPreview: stringOrNull(record.textPreview),
+    childElementCount: numberValue(record.childElementCount, 0),
+    isSelected: record.isSelected === true,
+    truncatedChildren: record.truncatedChildren === true,
+    children: Array.isArray(record.children)
+      ? record.children
+          .map((item) => inspectorNodeFromValue(item))
+          .filter((item): item is BrowserPreviewInspectorNode => item !== null)
+      : [],
+  };
+}
+
+function inspectorSelectedNodeFromValue(
+  value: unknown,
+): BrowserPreviewInspectorSelectedNode | null {
+  const node = inspectorNodeFromValue(value);
+  const record = objectValue(value);
+  if (!node || !record) return null;
+  return {
+    ...node,
+    attributes: inspectorAttributeList(record.attributes),
+    computedStyles: inspectorStyleList(record.computedStyles),
+    inlineStyles: inspectorStyleList(record.inlineStyles),
+    box: inspectorBoxFromValue(record.box),
+  };
+}
+
+function inspectorAttributeList(
+  value: unknown,
+): BrowserPreviewInspectorAttribute[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => objectValue(item))
+    .filter((item): item is Record<string, unknown> => item !== null)
+    .map((item) => ({
+      name: stringValue(item.name),
+      value: stringValue(item.value),
+    }))
+    .filter((item) => item.name.length > 0);
+}
+
+function inspectorStyleList(
+  value: unknown,
+): BrowserPreviewInspectorStyleProperty[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => objectValue(item))
+    .filter((item): item is Record<string, unknown> => item !== null)
+    .map((item) => ({
+      name: stringValue(item.name),
+      value: stringValue(item.value),
+    }))
+    .filter((item) => item.name.length > 0 && item.value.length > 0);
+}
+
+function inspectorBoxFromValue(
+  value: unknown,
+): BrowserPreviewInspectorBox | null {
+  const record = objectValue(value);
+  if (!record) return null;
+  return {
+    x: numberValue(record.x, 0),
+    y: numberValue(record.y, 0),
+    width: numberValue(record.width, 0),
+    height: numberValue(record.height, 0),
+  };
+}
+
+function inspectorPathFromValue(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const path: number[] = [];
+  for (const item of value) {
+    if (!Number.isInteger(item) || item < 0) {
+      return null;
+    }
+    path.push(item);
+  }
+  return path;
+}
+
 function normalizePort(value: number | null): number {
   if (!Number.isInteger(value) || value == null || value < 1 || value > 65535) {
     throw new BrowserPreviewError("targetPort must be between 1 and 65535", 400);
@@ -3288,6 +3866,13 @@ function stringOrNull(value: unknown): string | null {
 
 function numberOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => stringValue(item).trim())
+    .filter((item) => item.length > 0);
 }
 
 function stringField(record: Record<string, unknown>, field: string): string {
