@@ -1203,13 +1203,16 @@ export class PiAgentProvider
         runtimeFromLoadedSession(session.session ?? null, assistantRuntime, active?.turnId ?? null),
       );
       if (active && isTerminalPiAssistantStopReason(stopReason)) {
+        const finalStatus = active.status ?? "completed";
         if (
           !completedMessage &&
           session.draftAssistantMessage?.turnId === active.turnId
         ) {
           completedMessage = materializeInterruptedPiDraftAssistantMessage(session);
-          if (completedMessage) {
+          if (completedMessage && finalStatus === "completed") {
             this.preserveMaterializedSidecarLog(session, completedMessage);
+          }
+          if (completedMessage) {
             this.emit("liveEvent", {
               type: "assistant_message_completed",
               sessionId: session.thread.id,
@@ -1222,7 +1225,7 @@ export class PiAgentProvider
             });
           }
         }
-        this.completeActiveTurn(session.thread.id, active.status ?? "completed");
+        this.completeActiveTurn(session.thread.id, finalStatus);
       }
       this.persistEventually();
       return;
