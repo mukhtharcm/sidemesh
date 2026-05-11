@@ -1234,6 +1234,10 @@ describe("PiAgentProvider", () => {
       false,
     );
     assert.equal(reloadedThread.preview, "Prompt only");
+    assert.ok(
+      reloadedThread.updatedAt >= thread.updatedAt,
+      "sidecar history reload must not move updatedAt backward",
+    );
 
     await writePiSessionHistory(
       fakeSession.sessionFile,
