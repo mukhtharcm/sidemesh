@@ -600,6 +600,251 @@ void main() {
     });
   });
 
+  testWidgets('browser preview renders inspector snapshots and selects tree nodes', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Inspector'));
+    await _pumpFrames(tester);
+
+    expect(api.sentMessages.last['type'], 'inspectorSnapshotRequest');
+
+    api.emit({
+      'type': 'inspectorSnapshot',
+      'snapshot': {
+        'url': 'http://127.0.0.1:3000/app',
+        'refreshedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+        'selectedPath': [0, 0],
+        'treeRoot': {
+          'path': const [],
+          'nodeName': 'html',
+          'selector': 'html',
+          'textPreview': null,
+          'childElementCount': 1,
+          'isSelected': false,
+          'truncatedChildren': false,
+          'children': [
+            {
+              'path': [0],
+              'nodeName': 'body',
+              'selector': 'body',
+              'textPreview': null,
+              'childElementCount': 2,
+              'isSelected': false,
+              'truncatedChildren': false,
+              'children': [
+                {
+                  'path': [0, 0],
+                  'nodeName': 'main',
+                  'selector': 'main#app.shell',
+                  'textPreview': 'Ship faster',
+                  'childElementCount': 0,
+                  'isSelected': true,
+                  'truncatedChildren': false,
+                  'children': const [],
+                },
+                {
+                  'path': [0, 1],
+                  'nodeName': 'button',
+                  'selector': 'button.cta',
+                  'textPreview': 'Deploy',
+                  'childElementCount': 0,
+                  'isSelected': false,
+                  'truncatedChildren': false,
+                  'children': const [],
+                },
+              ],
+            },
+          ],
+        },
+        'selectedNode': {
+          'path': [0, 0],
+          'nodeName': 'main',
+          'selector': 'main#app.shell',
+          'textPreview': 'Ship faster',
+          'childElementCount': 0,
+          'isSelected': true,
+          'truncatedChildren': false,
+          'children': const [],
+          'attributes': [
+            {'name': 'id', 'value': 'app'},
+          ],
+          'computedStyles': [
+            {'name': 'display', 'value': 'block'},
+          ],
+          'inlineStyles': [
+            {'name': 'color', 'value': 'red'},
+          ],
+          'box': {
+            'x': 20,
+            'y': 80,
+            'width': 320,
+            'height': 200,
+          },
+        },
+        'warnings': const [],
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(
+      find.byKey(const ValueKey('browserPreviewInspectorList')),
+      findsOneWidget,
+    );
+    expect(find.text('main#app.shell'), findsWidgets);
+    await tester.dragUntilVisible(
+      find.text('Computed styles'),
+      find.byKey(const ValueKey('browserPreviewInspectorList')),
+      const Offset(0, -220),
+    );
+    await _pumpFrames(tester);
+    expect(find.text('Computed styles'), findsOneWidget);
+    expect(find.text('display'), findsOneWidget);
+    await tester.dragUntilVisible(
+      find.text('button.cta'),
+      find.byKey(const ValueKey('browserPreviewInspectorList')),
+      const Offset(0, 220),
+    );
+    await _pumpFrames(tester);
+    expect(find.text('button.cta'), findsOneWidget);
+
+    await tester.tap(find.text('button.cta'));
+    await _pumpFrames(tester);
+
+    expect(api.sentMessages.last, {
+      'type': 'inspectorSelectPath',
+      'path': [0, 1],
+    });
+
+    await tester.tap(find.text('Network'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Inspector'));
+    await _pumpFrames(tester);
+
+    expect(api.sentMessages.last['type'], 'inspectorSnapshotRequest');
+  });
+
+  testWidgets('browser preview inspector pick mode sends inspect-point messages', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Inspector'));
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'inspectorSnapshot',
+      'snapshot': {
+        'url': 'http://127.0.0.1:3000/app',
+        'refreshedAt': DateTime(2026, 1, 1).millisecondsSinceEpoch,
+        'selectedPath': [0],
+        'treeRoot': {
+          'path': const [],
+          'nodeName': 'html',
+          'selector': 'html',
+          'textPreview': null,
+          'childElementCount': 1,
+          'isSelected': false,
+          'truncatedChildren': false,
+          'children': const [],
+        },
+        'selectedNode': {
+          'path': [0],
+          'nodeName': 'body',
+          'selector': 'body',
+          'textPreview': null,
+          'childElementCount': 0,
+          'isSelected': true,
+          'truncatedChildren': false,
+          'children': const [],
+          'attributes': const [],
+          'computedStyles': const [],
+          'inlineStyles': const [],
+          'box': {
+            'x': 0,
+            'y': 0,
+            'width': 390,
+            'height': 844,
+          },
+        },
+        'warnings': const [],
+      },
+    });
+    await _pumpFrames(tester);
+
+    await tester.tap(
+      find.byKey(const ValueKey('browserPreviewInspectorPickButton')),
+    );
+    await _pumpFrames(tester);
+    expect(
+      find.text('Tap the page preview to inspect an element'),
+      findsOneWidget,
+    );
+
+    final previewRect = tester.getRect(
+      find.byKey(const ValueKey('browserPreviewCanvas')),
+    );
+    await tester.tapAt(previewRect.center);
+    await _pumpFrames(tester);
+
+    expect(api.sentMessages.last['type'], 'inspectorInspectPoint');
+    expect(
+      (api.sentMessages.last['x'] as num).toDouble(),
+      closeTo(0.5, 0.000001),
+    );
+    expect(
+      (api.sentMessages.last['y'] as num).toDouble(),
+      closeTo(0.5, 0.000001),
+    );
+  });
+
   testWidgets('browser preview network tab supports search and sort', (
     tester,
   ) async {

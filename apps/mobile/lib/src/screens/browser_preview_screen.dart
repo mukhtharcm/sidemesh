@@ -124,6 +124,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   final Set<String> _networkClearedRequestIdsAtFloor = <String>{};
   bool _networkAvailable = true;
   String? _networkUnavailableMessage;
+  _InspectorSnapshot? _inspectorSnapshot;
+  bool _inspectorLoading = false;
+  String? _inspectorError;
+  bool _inspectorPickMode = false;
   _StorageSnapshot? _storageSnapshot;
   bool _storageLoading = false;
   String? _storageError;
@@ -282,12 +286,16 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       if (!mounted) return;
       setState(() {
         if (preview != null) {
-          final storageContextChanged = preview.url != _preview.url;
+          final browserContextChanged = preview.url != _preview.url;
           _preview = preview;
           _frameWidth = preview.width;
           _frameHeight = preview.height;
           _urlController.text = preview.url;
-          if (storageContextChanged) {
+          if (browserContextChanged) {
+            _inspectorSnapshot = null;
+            _inspectorLoading = false;
+            _inspectorError = null;
+            _inspectorPickMode = false;
             _storageSnapshot = null;
             _storageLoading = false;
             _storageError = null;
@@ -389,6 +397,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     }
     if (type == 'networkDetail') {
       _handleNetworkDetail(frame);
+      return;
+    }
+    if (type == 'inspectorSnapshot') {
+      _handleInspectorSnapshot(frame);
       return;
     }
     if (type == 'storageSnapshot') {
@@ -522,6 +534,26 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     setState(() {
       _storageLoading = false;
       _storageError = error ?? 'Storage snapshot is unavailable.';
+    });
+  }
+
+  void _handleInspectorSnapshot(Map<dynamic, dynamic> frame) {
+    if (!mounted) return;
+    final rawSnapshot = frame['snapshot'];
+    final error = frame['error']?.toString();
+    if (rawSnapshot is Map) {
+      setState(() {
+        _inspectorSnapshot = _InspectorSnapshot.fromJson(rawSnapshot);
+        _inspectorLoading = false;
+        _inspectorError = error;
+        _inspectorPickMode = false;
+      });
+      return;
+    }
+    setState(() {
+      _inspectorLoading = false;
+      _inspectorError = error ?? 'Inspector snapshot is unavailable.';
+      _inspectorPickMode = false;
     });
   }
 
@@ -893,7 +925,37 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     setState(() => _devToolsTabIndex = index);
     if (index == 2) {
       _requestStorageSnapshot(force: true);
+      return;
     }
+    if (index == 3) {
+      _requestInspectorSnapshot(force: true);
+    }
+  }
+
+  void _requestInspectorSnapshot({bool force = false}) {
+    if (_inspectorLoading && !force) return;
+    if (_inspectorSnapshot != null && !force) return;
+    if (_channel == null) {
+      setState(() {
+        _inspectorLoading = false;
+        _inspectorError =
+            'Viewer is disconnected. Resume the stream to inspect the page.';
+      });
+      return;
+    }
+    final sent = _sendMessage({'type': 'inspectorSnapshotRequest'});
+    if (!sent) {
+      setState(() {
+        _inspectorLoading = false;
+        _inspectorError =
+            'Viewer is disconnected. Resume the stream to inspect the page.';
+      });
+      return;
+    }
+    setState(() {
+      _inspectorLoading = true;
+      _inspectorError = null;
+    });
   }
 
   void _requestStorageSnapshot({bool force = false}) {
@@ -943,6 +1005,70 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     setState(() {
       _storageLoading = true;
       _storageError = null;
+    });
+  }
+
+  void _selectInspectorPath(List<int> path) {
+    if (_channel == null) {
+      setState(() {
+        _inspectorLoading = false;
+        _inspectorError =
+            'Viewer is disconnected. Resume the stream to inspect the page.';
+      });
+      return;
+    }
+    final sent = _sendMessage({
+      'type': 'inspectorSelectPath',
+      'path': path,
+    });
+    if (!sent) {
+      setState(() {
+        _inspectorLoading = false;
+        _inspectorError =
+            'Viewer is disconnected. Resume the stream to inspect the page.';
+      });
+      return;
+    }
+    setState(() {
+      _inspectorLoading = true;
+      _inspectorError = null;
+      _inspectorPickMode = false;
+    });
+  }
+
+  void _inspectPreviewPoint(Offset point) {
+    if (_channel == null) {
+      setState(() {
+        _inspectorLoading = false;
+        _inspectorError =
+            'Viewer is disconnected. Resume the stream to inspect the page.';
+      });
+      return;
+    }
+    final sent = _sendMessage({
+      'type': 'inspectorInspectPoint',
+      'x': point.dx,
+      'y': point.dy,
+    });
+    if (!sent) {
+      setState(() {
+        _inspectorLoading = false;
+        _inspectorError =
+            'Viewer is disconnected. Resume the stream to inspect the page.';
+      });
+      return;
+    }
+    setState(() {
+      _inspectorLoading = true;
+      _inspectorError = null;
+      _inspectorPickMode = false;
+    });
+  }
+
+  void _toggleInspectorPickMode() {
+    setState(() {
+      _inspectorPickMode = !_inspectorPickMode;
+      _inspectorError = null;
     });
   }
 
@@ -1119,6 +1245,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _sendTapDown(TapDownDetails details, Size size) {
     _browserFocusNode.requestFocus();
+    if (_inspectorPickActive) return;
     final point = _mapPoint(details.localPosition, size);
     if (point == null) return;
     _send({'type': 'tapDown', 'x': point.dx, 'y': point.dy});
@@ -1127,16 +1254,22 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   void _sendTapUp(TapUpDetails details, Size size) {
     final point = _mapPoint(details.localPosition, size);
     if (point == null) return;
+    if (_inspectorPickActive) {
+      _inspectPreviewPoint(point);
+      return;
+    }
     _send({'type': 'tapUp', 'x': point.dx, 'y': point.dy});
   }
 
   void _sendHover(PointerHoverEvent event, Size size) {
+    if (_inspectorPickActive) return;
     final point = _mapPoint(event.localPosition, size);
     if (point == null) return;
     _send({'type': 'hover', 'x': point.dx, 'y': point.dy});
   }
 
   void _sendScroll(DragUpdateDetails details, Size size) {
+    if (_inspectorPickActive) return;
     final point = _mapPoint(details.localPosition, size);
     if (point == null) return;
     _send({
@@ -1150,6 +1283,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _handlePointerSignal(PointerSignalEvent event, Size size) {
     if (event is! PointerScrollEvent) return;
+    if (_inspectorPickActive) return;
     final point = _mapPoint(event.localPosition, size);
     if (point == null) return;
     _send({
@@ -1188,6 +1322,29 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     final height = size.width / frameAspect;
     final top = (size.height - height) / 2;
     return Rect.fromLTWH(0, top, size.width, height);
+  }
+
+  bool get _inspectorPickActive {
+    return _devToolsOpen && _devToolsTabIndex == 3 && _inspectorPickMode;
+  }
+
+  Rect? _inspectorHighlightRect(Size size) {
+    if (!_devToolsOpen || _devToolsTabIndex != 3) return null;
+    final box = _inspectorSnapshot?.selectedNode?.box;
+    if (box == null) return null;
+    if (box.width <= 0 || box.height <= 0) return null;
+    final imageRect = _containedImageRect(size);
+    final scaleX = imageRect.width / _frameWidth;
+    final scaleY = imageRect.height / _frameHeight;
+    final mapped = Rect.fromLTWH(
+      imageRect.left + (box.x * scaleX),
+      imageRect.top + (box.y * scaleY),
+      box.width * scaleX,
+      box.height * scaleY,
+    );
+    final clipped = mapped.intersect(imageRect);
+    if (clipped.width <= 0 || clipped.height <= 0) return null;
+    return clipped;
   }
 
   @override
@@ -1245,6 +1402,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                             onPointerSignal: (event) =>
                                 _handlePointerSignal(event, size),
                             child: GestureDetector(
+                              key: const ValueKey('browserPreviewCanvas'),
                               behavior: HitTestBehavior.opaque,
                               onTapDown: (details) =>
                                   _sendTapDown(details, size),
@@ -1254,7 +1412,25 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                                   _sendScroll(details, size),
                               onHorizontalDragUpdate: (details) =>
                                   _sendScroll(details, size),
-                              child: _buildPreviewBody(colors),
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: _buildPreviewBody(colors),
+                                  ),
+                                  Positioned.fill(
+                                    child: IgnorePointer(
+                                      child: _InspectorSelectionOverlay(
+                                        highlightRect:
+                                            _inspectorHighlightRect(size),
+                                        pickMode: _inspectorPickActive,
+                                        hasSelection:
+                                            _inspectorSnapshot?.selectedNode !=
+                                            null,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -1332,6 +1508,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             networkSearchController: _networkSearchController,
             networkSearchQuery: _networkSearchQuery,
             networkSort: _networkSort,
+            inspectorSnapshot: _inspectorSnapshot,
+            inspectorLoading: _inspectorLoading,
+            inspectorError: _inspectorError,
+            inspectorPickMode: _inspectorPickMode,
             storageSnapshot: _storageSnapshot,
             storageLoading: _storageLoading,
             storageError: _storageError,
@@ -1348,6 +1528,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                 setState(() => _networkSort = value),
             onClearConsole: _clearConsole,
             onClearNetwork: _clearNetworkLog,
+            onRefreshInspector: () => _requestInspectorSnapshot(force: true),
+            onToggleInspectorPickMode: _toggleInspectorPickMode,
+            onSelectInspectorPath: _selectInspectorPath,
             onRefreshStorage: () => _requestStorageSnapshot(force: true),
             onAddStorageEntry: (area) =>
                 unawaited(_showStorageEntryEditor(area)),
@@ -1793,6 +1976,10 @@ class _DevToolsPanel extends StatelessWidget {
     required this.networkSearchController,
     required this.networkSearchQuery,
     required this.networkSort,
+    required this.inspectorSnapshot,
+    required this.inspectorLoading,
+    required this.inspectorError,
+    required this.inspectorPickMode,
     required this.storageSnapshot,
     required this.storageLoading,
     required this.storageError,
@@ -1801,6 +1988,9 @@ class _DevToolsPanel extends StatelessWidget {
     required this.onNetworkSortChanged,
     required this.onClearConsole,
     required this.onClearNetwork,
+    required this.onRefreshInspector,
+    required this.onToggleInspectorPickMode,
+    required this.onSelectInspectorPath,
     required this.onRefreshStorage,
     required this.onAddStorageEntry,
     required this.onEditStorageEntry,
@@ -1822,6 +2012,10 @@ class _DevToolsPanel extends StatelessWidget {
   final TextEditingController networkSearchController;
   final String networkSearchQuery;
   final String networkSort;
+  final _InspectorSnapshot? inspectorSnapshot;
+  final bool inspectorLoading;
+  final String? inspectorError;
+  final bool inspectorPickMode;
   final _StorageSnapshot? storageSnapshot;
   final bool storageLoading;
   final String? storageError;
@@ -1830,6 +2024,9 @@ class _DevToolsPanel extends StatelessWidget {
   final ValueChanged<String> onNetworkSortChanged;
   final VoidCallback onClearConsole;
   final VoidCallback onClearNetwork;
+  final VoidCallback onRefreshInspector;
+  final VoidCallback onToggleInspectorPickMode;
+  final ValueChanged<List<int>> onSelectInspectorPath;
   final VoidCallback onRefreshStorage;
   final ValueChanged<String> onAddStorageEntry;
   final void Function(String area, _StorageEntry entry) onEditStorageEntry;
@@ -1844,6 +2041,7 @@ class _DevToolsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final showingConsole = tabIndex == 0;
+    final showingInspector = tabIndex == 3;
     final showingStorage = tabIndex == 2;
     return Container(
       height: 380,
@@ -1879,23 +2077,37 @@ class _DevToolsPanel extends StatelessWidget {
                   active: showingStorage,
                   onTap: () => onTabChanged(2),
                 ),
-                const Spacer(),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    'Inspector later',
-                    style: TextStyle(
-                      color: colors.textTertiary,
-                      fontSize: 11,
-                    ),
-                  ),
+                _DevTab(
+                  label: 'Inspector',
+                  active: showingInspector,
+                  onTap: () => onTabChanged(3),
                 ),
-                if (showingStorage)
+                const Spacer(),
+                if (showingInspector)
                   IconButton(
-                    key: const ValueKey('browserPreviewStorageRefreshButton'),
+                    key: const ValueKey('browserPreviewInspectorPickButton'),
+                    icon: const Icon(Icons.ads_click_rounded, size: 18),
+                    tooltip: inspectorPickMode
+                        ? 'Cancel element pick'
+                        : 'Pick element from page',
+                    color: inspectorPickMode ? colors.accent : null,
+                    onPressed: onToggleInspectorPickMode,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                if (showingStorage || showingInspector)
+                  IconButton(
+                    key: ValueKey(
+                      showingStorage
+                          ? 'browserPreviewStorageRefreshButton'
+                          : 'browserPreviewInspectorRefreshButton',
+                    ),
                     icon: const Icon(Icons.refresh_rounded, size: 18),
-                    tooltip: 'Refresh storage',
-                    onPressed: onRefreshStorage,
+                    tooltip: showingStorage
+                        ? 'Refresh storage'
+                        : 'Refresh inspector',
+                    onPressed: showingStorage
+                        ? onRefreshStorage
+                        : onRefreshInspector,
                     visualDensity: VisualDensity.compact,
                   )
                 else
@@ -1929,6 +2141,16 @@ class _DevToolsPanel extends StatelessWidget {
                     onClearStorageArea: onClearStorageArea,
                     onDeleteCookie: onDeleteCookie,
                     onClearCookies: onClearCookies,
+                  )
+                : showingInspector
+                ? _InspectorTab(
+                    snapshot: inspectorSnapshot,
+                    loading: inspectorLoading,
+                    error: inspectorError,
+                    pickMode: inspectorPickMode,
+                    onRefresh: onRefreshInspector,
+                    onTogglePickMode: onToggleInspectorPickMode,
+                    onSelectPath: onSelectInspectorPath,
                   )
                 : _NetworkTab(
                     entries: networkEntries,
@@ -2085,6 +2307,484 @@ class _ConsoleRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _InspectorSelectionOverlay extends StatelessWidget {
+  const _InspectorSelectionOverlay({
+    required this.highlightRect,
+    required this.pickMode,
+    required this.hasSelection,
+  });
+
+  final Rect? highlightRect;
+  final bool pickMode;
+  final bool hasSelection;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (highlightRect == null && !pickMode && !hasSelection) {
+      return const SizedBox.shrink();
+    }
+    return Stack(
+      children: [
+        if (highlightRect != null)
+          Positioned.fromRect(
+            rect: highlightRect!,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: colors.accent, width: 2),
+              ),
+            ),
+          ),
+        if (pickMode)
+          Align(
+            alignment: Alignment.topCenter,
+            child: Container(
+              margin: const EdgeInsets.only(top: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.74),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: colors.border),
+              ),
+              child: Text(
+                'Tap the page preview to inspect an element',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _InspectorTab extends StatelessWidget {
+  const _InspectorTab({
+    required this.snapshot,
+    required this.loading,
+    required this.error,
+    required this.pickMode,
+    required this.onRefresh,
+    required this.onTogglePickMode,
+    required this.onSelectPath,
+  });
+
+  final _InspectorSnapshot? snapshot;
+  final bool loading;
+  final String? error;
+  final bool pickMode;
+  final VoidCallback onRefresh;
+  final VoidCallback onTogglePickMode;
+  final ValueChanged<List<int>> onSelectPath;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (loading && snapshot == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (snapshot == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                error ?? 'No inspector snapshot loaded yet.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: colors.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: onRefresh,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Load inspector'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: onTogglePickMode,
+                    icon: const Icon(Icons.ads_click_rounded),
+                    label: Text(
+                      pickMode ? 'Cancel pick mode' : 'Pick from page',
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final selectedNode = snapshot!.selectedNode;
+    return ListView(
+      key: const ValueKey('browserPreviewInspectorList'),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _StorageSummaryCard(
+              label: 'Selected',
+              value: selectedNode?.selector ?? 'None',
+            ),
+            _StorageSummaryCard(
+              label: 'Path',
+              value: _inspectorPathLabel(snapshot!.selectedPath),
+            ),
+            _StorageSummaryCard(
+              label: 'Warnings',
+              value: '${snapshot!.warnings.length}',
+            ),
+          ],
+        ),
+        if (pickMode) ...[
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colors.accent.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
+            ),
+            child: Text(
+              'Tap anywhere on the preview above to inspect an element.',
+              style: TextStyle(
+                color: colors.textSecondary,
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ],
+        if (loading) ...[
+          const SizedBox(height: 10),
+          const LinearProgressIndicator(minHeight: 2),
+        ],
+        if (error != null && error!.trim().isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colors.danger.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: colors.danger.withValues(alpha: 0.24),
+              ),
+            ),
+            child: Text(
+              error!,
+              style: TextStyle(
+                color: colors.textSecondary,
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ],
+        if (snapshot!.warnings.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          for (final warning in snapshot!.warnings)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.28),
+                  ),
+                ),
+                child: Text(
+                  warning,
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            ),
+        ],
+        const SizedBox(height: 14),
+        _StorageSection(
+          title: 'Selection',
+          child: selectedNode == null
+              ? const _StorageEmpty(message: 'No element selected.')
+              : _InspectorSelectedNodeCard(node: selectedNode),
+        ),
+        _StorageSection(
+          title: 'DOM tree',
+          child: snapshot!.treeRoot == null
+              ? const _StorageEmpty(message: 'DOM tree is unavailable.')
+              : _InspectorTreeNodeView(
+                  node: snapshot!.treeRoot!,
+                  depth: 0,
+                  onSelectPath: onSelectPath,
+                ),
+        ),
+        _StorageSection(
+          title: 'Attributes',
+          child: selectedNode == null || selectedNode.attributes.isEmpty
+              ? const _StorageEmpty(message: 'No attributes for this node.')
+              : _InspectorNameValueList(entries: selectedNode.attributes),
+        ),
+        _StorageSection(
+          title: 'Computed styles',
+          child: selectedNode == null || selectedNode.computedStyles.isEmpty
+              ? const _StorageEmpty(
+                  message: 'No computed styles were captured.',
+                )
+              : _InspectorNameValueList(entries: selectedNode.computedStyles),
+        ),
+        _StorageSection(
+          title: 'Inline styles',
+          child: selectedNode == null || selectedNode.inlineStyles.isEmpty
+              ? const _StorageEmpty(message: 'No inline styles on this node.')
+              : _InspectorNameValueList(entries: selectedNode.inlineStyles),
+        ),
+      ],
+    );
+  }
+}
+
+class _InspectorSelectedNodeCard extends StatelessWidget {
+  const _InspectorSelectedNodeCard({required this.node});
+
+  final _InspectorSelectedNode node;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final box = node.box;
+    final metadata = <String>[
+      _inspectorPathLabel(node.path),
+      '${node.childElementCount} ${node.childElementCount == 1 ? 'child' : 'children'}',
+      if (box != null)
+        '${box.width.toStringAsFixed(0)} × ${box.height.toStringAsFixed(0)} at ${box.x.toStringAsFixed(0)}, ${box.y.toStringAsFixed(0)}',
+    ];
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            node.selector,
+            style: monoStyle(
+              color: colors.textPrimary,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            metadata.join(' · '),
+            style: TextStyle(
+              color: colors.textTertiary,
+              fontSize: 10,
+            ),
+          ),
+          if (node.textPreview != null && node.textPreview!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            SelectableText(
+              node.textPreview!,
+              style: monoStyle(
+                color: colors.textSecondary,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _InspectorTreeNodeView extends StatelessWidget {
+  const _InspectorTreeNodeView({
+    required this.node,
+    required this.depth,
+    required this.onSelectPath,
+  });
+
+  final _InspectorNode node;
+  final int depth;
+  final ValueChanged<List<int>> onSelectPath;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.only(left: depth * 14.0, bottom: 8),
+          child: InkWell(
+            key: ValueKey(
+              'browserPreviewInspectorNode-${_inspectorPathKey(node.path)}',
+            ),
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => onSelectPath(node.path),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: node.isSelected
+                    ? colors.accent.withValues(alpha: 0.12)
+                    : colors.canvas,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: node.isSelected ? colors.accent : colors.border,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          node.selector,
+                          style: monoStyle(
+                            color: colors.textPrimary,
+                            fontSize: 11,
+                            fontWeight: node.isSelected
+                                ? FontWeight.w800
+                                : FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (node.isSelected)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colors.accent.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            'Selected',
+                            style: TextStyle(
+                              color: colors.accent,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _inspectorPathLabel(node.path),
+                    style: TextStyle(
+                      color: colors.textTertiary,
+                      fontSize: 10,
+                    ),
+                  ),
+                  if (node.textPreview != null && node.textPreview!.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      node.textPreview!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colors.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+        for (final child in node.children)
+          _InspectorTreeNodeView(
+            node: child,
+            depth: depth + 1,
+            onSelectPath: onSelectPath,
+          ),
+        if (node.truncatedChildren)
+          Padding(
+            padding: EdgeInsets.only(left: (depth + 1) * 14.0, bottom: 8),
+            child: Text(
+              'More children are present but not shown in this snapshot.',
+              style: TextStyle(
+                color: colors.textTertiary,
+                fontSize: 10,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _InspectorNameValueList extends StatelessWidget {
+  const _InspectorNameValueList({required this.entries});
+
+  final List<_InspectorNameValue> entries;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      children: entries.map((entry) {
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: colors.canvas,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                entry.name,
+                style: monoStyle(
+                  color: colors.textPrimary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              SelectableText(
+                entry.value,
+                style: monoStyle(
+                  color: colors.textSecondary,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(growable: false),
     );
   }
 }
@@ -3640,6 +4340,153 @@ class _ConsoleEntry {
   final int timestamp;
 }
 
+class _InspectorSnapshot {
+  const _InspectorSnapshot({
+    required this.url,
+    required this.refreshedAt,
+    required this.selectedPath,
+    required this.treeRoot,
+    required this.selectedNode,
+    required this.warnings,
+  });
+
+  factory _InspectorSnapshot.fromJson(Map<dynamic, dynamic> json) =>
+      _InspectorSnapshot(
+        url: json['url']?.toString() ?? '',
+        refreshedAt: _intValue(
+          json['refreshedAt'],
+          DateTime.now().millisecondsSinceEpoch,
+        ),
+        selectedPath: _inspectorPathList(json['selectedPath']),
+        treeRoot: _inspectorNodeOrNull(json['treeRoot']),
+        selectedNode: _inspectorSelectedNodeOrNull(json['selectedNode']),
+        warnings: _stringList(json['warnings']),
+      );
+
+  final String url;
+  final int refreshedAt;
+  final List<int> selectedPath;
+  final _InspectorNode? treeRoot;
+  final _InspectorSelectedNode? selectedNode;
+  final List<String> warnings;
+}
+
+class _InspectorNode {
+  const _InspectorNode({
+    required this.path,
+    required this.nodeName,
+    required this.selector,
+    required this.textPreview,
+    required this.childElementCount,
+    required this.isSelected,
+    required this.truncatedChildren,
+    required this.children,
+  });
+
+  factory _InspectorNode.fromJson(Map<dynamic, dynamic> json) => _InspectorNode(
+    path: _inspectorPathList(json['path']),
+    nodeName: json['nodeName']?.toString() ?? 'node',
+    selector: json['selector']?.toString() ?? 'node',
+    textPreview: json['textPreview']?.toString(),
+    childElementCount: _intValue(json['childElementCount'], 0),
+    isSelected: json['isSelected'] == true,
+    truncatedChildren: json['truncatedChildren'] == true,
+    children: _inspectorNodeList(json['children']),
+  );
+
+  final List<int> path;
+  final String nodeName;
+  final String selector;
+  final String? textPreview;
+  final int childElementCount;
+  final bool isSelected;
+  final bool truncatedChildren;
+  final List<_InspectorNode> children;
+}
+
+class _InspectorSelectedNode {
+  const _InspectorSelectedNode({
+    required this.path,
+    required this.nodeName,
+    required this.selector,
+    required this.textPreview,
+    required this.childElementCount,
+    required this.isSelected,
+    required this.truncatedChildren,
+    required this.children,
+    required this.attributes,
+    required this.computedStyles,
+    required this.inlineStyles,
+    required this.box,
+  });
+
+  factory _InspectorSelectedNode.fromJson(Map<dynamic, dynamic> json) =>
+      _InspectorSelectedNode(
+        path: _inspectorPathList(json['path']),
+        nodeName: json['nodeName']?.toString() ?? 'node',
+        selector: json['selector']?.toString() ?? 'node',
+        textPreview: json['textPreview']?.toString(),
+        childElementCount: _intValue(json['childElementCount'], 0),
+        isSelected: json['isSelected'] == true,
+        truncatedChildren: json['truncatedChildren'] == true,
+        children: _inspectorNodeList(json['children']),
+        attributes: _inspectorNameValueList(json['attributes']),
+        computedStyles: _inspectorNameValueList(json['computedStyles']),
+        inlineStyles: _inspectorNameValueList(json['inlineStyles']),
+        box: _inspectorBoxOrNull(json['box']),
+      );
+
+  final List<int> path;
+  final String nodeName;
+  final String selector;
+  final String? textPreview;
+  final int childElementCount;
+  final bool isSelected;
+  final bool truncatedChildren;
+  final List<_InspectorNode> children;
+  final List<_InspectorNameValue> attributes;
+  final List<_InspectorNameValue> computedStyles;
+  final List<_InspectorNameValue> inlineStyles;
+  final _InspectorBox? box;
+}
+
+class _InspectorNameValue {
+  const _InspectorNameValue({
+    required this.name,
+    required this.value,
+  });
+
+  factory _InspectorNameValue.fromJson(Map<dynamic, dynamic> json) =>
+      _InspectorNameValue(
+        name: json['name']?.toString() ?? '',
+        value: json['value']?.toString() ?? '',
+      );
+
+  final String name;
+  final String value;
+}
+
+class _InspectorBox {
+  const _InspectorBox({
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+
+  factory _InspectorBox.fromJson(Map<dynamic, dynamic> json) => _InspectorBox(
+    x: _doubleValue(json['x'], 0),
+    y: _doubleValue(json['y'], 0),
+    width: _doubleValue(json['width'], 0),
+    height: _doubleValue(json['height'], 0),
+  );
+
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+}
+
 class _StorageSnapshot {
   const _StorageSnapshot({
     required this.url,
@@ -4327,6 +5174,46 @@ List<_StorageCookie> _storageCookieList(Object? value) {
       .toList(growable: false);
 }
 
+List<int> _inspectorPathList(Object? value) {
+  if (value is! List) return const <int>[];
+  return value
+      .map(_intOrNull)
+      .whereType<int>()
+      .where((item) => item >= 0)
+      .toList(growable: false);
+}
+
+_InspectorNode? _inspectorNodeOrNull(Object? value) {
+  if (value is! Map) return null;
+  return _InspectorNode.fromJson(value);
+}
+
+_InspectorSelectedNode? _inspectorSelectedNodeOrNull(Object? value) {
+  if (value is! Map) return null;
+  return _InspectorSelectedNode.fromJson(value);
+}
+
+_InspectorBox? _inspectorBoxOrNull(Object? value) {
+  if (value is! Map) return null;
+  return _InspectorBox.fromJson(value);
+}
+
+List<_InspectorNode> _inspectorNodeList(Object? value) {
+  if (value is! List) return const <_InspectorNode>[];
+  return value
+      .whereType<Map>()
+      .map(_InspectorNode.fromJson)
+      .toList(growable: false);
+}
+
+List<_InspectorNameValue> _inspectorNameValueList(Object? value) {
+  if (value is! List) return const <_InspectorNameValue>[];
+  return value
+      .whereType<Map>()
+      .map(_InspectorNameValue.fromJson)
+      .toList(growable: false);
+}
+
 List<_IndexedDbDatabase> _indexedDbDatabaseList(Object? value) {
   if (value is! List) return const <_IndexedDbDatabase>[];
   return value
@@ -4498,6 +5385,22 @@ int? _intOrNull(Object? value) {
   if (value is int) return value;
   if (value is num) return value.round();
   return null;
+}
+
+double _doubleValue(Object? value, double fallback) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  return fallback;
+}
+
+String _inspectorPathLabel(List<int> path) {
+  if (path.isEmpty) return 'root';
+  return path.map((item) => item.toString()).join(' > ');
+}
+
+String _inspectorPathKey(List<int> path) {
+  if (path.isEmpty) return 'root';
+  return path.join('-');
 }
 
 class _ReconnectingChip extends StatelessWidget {
