@@ -1870,6 +1870,186 @@ describe("PiAgentProvider", () => {
     );
   });
 
+  it("does not preserve failed draft assistant output across history reloads", async () => {
+    const listeners = new Set<(event: unknown) => void>();
+    const cwd = nodePath.join(tempDir, "repo-terminal-error-draft");
+    await mkdir(cwd, { recursive: true });
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory(cwd);
+    const partialAssistant = {
+      role: "assistant",
+      content: [{ type: "text", text: "Failed draft." }],
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      usage: {
+        input: 5,
+        output: 10,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 15,
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0,
+        },
+      },
+      timestamp: 1_777_770_010_000,
+    };
+    const fakeSession = {
+      sessionId: "",
+      sessionFile: null as string | null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: false,
+      messages: [],
+      subscribe(listener: (event: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt(_text: string) {
+        for (const listener of listeners) {
+          listener({
+            type: "message_update",
+            message: partialAssistant,
+            assistantMessageEvent: {
+              type: "text_delta",
+              contentIndex: 0,
+              delta: "Failed draft.",
+              partial: partialAssistant,
+            },
+          });
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [],
+              provider: "anthropic",
+              model: "claude-sonnet-4-5",
+              usage: partialAssistant.usage,
+              stopReason: "error",
+              timestamp: 1_777_770_011_000,
+            },
+          });
+        }
+      },
+      async steer() {},
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd,
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async (options: { sessionManager: SessionManager }) => {
+        fakeSession.sessionId = options.sessionManager.getSessionId();
+        fakeSession.sessionFile = options.sessionManager.getSessionFile() ?? null;
+        fakeSession.sessionManager = options.sessionManager;
+        return {
+          session: fakeSession,
+          extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+        };
+      }) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd,
+      input: [{ type: "text", text: "Fail", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    assert.ok(created.activeTurnId);
+
+    await delay(0);
+
+    const liveLog = await provider.readSessionLog(created.thread);
+    assert.equal(liveLog.messages.at(-1)?.text, "Failed draft.");
+    const thread = await provider.readSessionThread(created.thread.id, true);
+    assert.equal(thread.status.type, "idle");
+    assert.equal(thread.turns?.at(-1)?.status, "failed");
+
+    assert.ok(fakeSession.sessionFile);
+    await writePiSessionHistory(
+      fakeSession.sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: created.thread.id,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          cwd,
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-05-01T10:00:01.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Fail" }],
+            timestamp: 1_777_770_001_000,
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m2",
+          parentId: "m1",
+          timestamp: "2026-05-01T10:00:02.000Z",
+          message: {
+            role: "assistant",
+            content: [],
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            usage: partialAssistant.usage,
+            stopReason: "error",
+            timestamp: 1_777_770_002_000,
+          },
+        }),
+      ],
+      "2026-05-01T10:00:02.000Z",
+    );
+
+    const reloadedLog = await provider.readSessionLog(created.thread);
+    assert.deepEqual(
+      reloadedLog.messages.map((message) => message.text),
+      ["Fail"],
+    );
+  });
+
   it("emits provider warnings when Pi auto-retry gives up", async () => {
     const listeners = new Set<(event: unknown) => void>();
     const fakeModel = {
