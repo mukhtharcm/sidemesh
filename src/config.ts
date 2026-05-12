@@ -198,12 +198,9 @@ async function resolveProviderConfigs(
     env.SIDEMESH_PROVIDER?.trim() || env.SIDEMESH_PROVIDERS?.trim(),
   );
   if (!hasExplicitProviderSelection && configuredKinds.length === 0) {
-    const detectAdditionalKinds: AgentProviderKind[] =
-      env.SIDEMESH_ENABLE_COPILOT?.trim() === "1" ? ["copilot"] : [];
     const inferred = await inferInstalledProviderConfigs({
       env,
       stateDir,
-      includeKinds: detectAdditionalKinds,
     });
     if (inferred.providers.length > 0 && inferred.defaultProviderKind) {
       return {
@@ -213,10 +210,7 @@ async function resolveProviderConfigs(
     }
   }
   const persistedDefaultProviderKind =
-    persisted?.defaultProviderKind &&
-    isProviderEnabled(persisted.defaultProviderKind, env)
-      ? persisted.defaultProviderKind
-      : null;
+    persisted?.defaultProviderKind ?? null;
   const defaultProviderKind = env.SIDEMESH_PROVIDER?.trim()
     ? parseProviderKind(env.SIDEMESH_PROVIDER, env)
     : persistedDefaultProviderKind ||
@@ -236,15 +230,10 @@ async function resolveProviderConfigs(
 
 function parseProviderKind(
   value: string | undefined,
-  env: Environment,
+  _env: Environment,
 ): AgentProviderKind {
   const provider = value?.trim() || DEFAULT_AGENT_PROVIDER_KIND;
   if (isAgentProviderKind(provider)) {
-    if (!isProviderEnabled(provider, env)) {
-      throw new Error(
-        `Sidemesh provider "${provider}" is disabled. Set SIDEMESH_ENABLE_COPILOT=1 to enable the experimental Copilot provider.`,
-      );
-    }
     return provider;
   }
   throw new Error(
@@ -255,13 +244,12 @@ function parseProviderKind(
 function parseProviderKinds(
   value: string | undefined,
   persisted: PersistedNodeConfig | null,
-  env: Environment,
+  _env: Environment,
 ): AgentProviderKind[] {
   if (!value?.trim()) {
     return persisted?.providers
       .map((provider) => provider.kind)
-      .filter(isAgentProviderKind)
-      .filter((provider) => isProviderEnabled(provider, env)) ?? [];
+      .filter(isAgentProviderKind) ?? [];
   }
   return value
     .split(",")
@@ -269,27 +257,12 @@ function parseProviderKinds(
     .filter(Boolean)
     .map((item) => {
       if (isAgentProviderKind(item)) {
-        if (!isProviderEnabled(item, env)) {
-          throw new Error(
-            `Sidemesh provider "${item}" is disabled. Set SIDEMESH_ENABLE_COPILOT=1 to enable the experimental Copilot provider.`,
-          );
-        }
         return item;
       }
       throw new Error(
         `Unsupported SIDEMESH_PROVIDERS entry "${item}". Supported providers: ${supportedAgentProviderKinds().join(", ")}`,
       );
     });
-}
-
-function isProviderEnabled(
-  kind: AgentProviderKind,
-  env: Environment,
-): boolean {
-  if (kind !== "copilot") {
-    return true;
-  }
-  return parseOptionalBoolean(env.SIDEMESH_ENABLE_COPILOT) === true;
 }
 
 function parseUpdateChannel(

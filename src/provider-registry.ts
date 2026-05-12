@@ -247,11 +247,10 @@ const PI_PROVIDER_DEFINITION: AgentProviderDefinition = {
 const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "copilot",
   displayName: "GitHub Copilot",
-  setupAudience: "dev",
+  setupAudience: "public",
   defaultCommand: COPILOT_DEFAULT_COMMAND,
   capabilities: COPILOT_PROVIDER_CAPABILITIES,
   commandEnvironmentVariables: [
-    "SIDEMESH_ENABLE_COPILOT",
     "SIDEMESH_COPILOT_BIN",
     "SIDEMESH_PROVIDER_COMMAND",
     "SIDEMESH_COPILOT_STATE_DIR",

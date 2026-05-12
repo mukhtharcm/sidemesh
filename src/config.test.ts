@@ -26,7 +26,6 @@ describe("loadConfig", () => {
       configPath,
       env: {
         SIDEMESH_TOKEN: "test-token",
-        SIDEMESH_ENABLE_COPILOT: "1",
         SIDEMESH_PROVIDER: "copilot",
         SIDEMESH_PROVIDERS: "codex,copilot",
       },
@@ -72,7 +71,7 @@ describe("loadConfig", () => {
     assert.equal(config.provider.kind, "fake");
     assert.deepEqual(
       config.providers.map((provider) => provider.kind),
-      ["fake"],
+      ["fake", "copilot"],
     );
     assert.equal(config.token, "file-token");
     assert.equal(config.tokenSource, "file");
@@ -383,7 +382,6 @@ describe("loadConfig", () => {
     const config = await loadConfig({
       configPath,
       env: {
-        SIDEMESH_ENABLE_COPILOT: "1",
         SIDEMESH_COPILOT_BIN: "/usr/local/bin/copilot",
         SIDEMESH_COPILOT_ALLOW_ALL: "1",
         SIDEMESH_COPILOT_MODEL: "auto",
@@ -400,7 +398,7 @@ describe("loadConfig", () => {
     assert.equal(config.provider.stateDir, "/tmp/old-state");
   });
 
-  it("ignores persisted Copilot config unless the experimental flag is enabled", async () => {
+  it("loads persisted Copilot config without an experimental flag", async () => {
     await writeFile(
       configPath,
       JSON.stringify({
@@ -421,24 +419,27 @@ describe("loadConfig", () => {
 
     const config = await loadConfig({ configPath, env: {} });
 
-    assert.equal(config.defaultProviderKind, "codex");
-    assert.equal(config.provider.kind, "codex");
+    assert.equal(config.defaultProviderKind, "copilot");
+    assert.equal(config.provider.kind, "copilot");
     assert.deepEqual(
       config.providers.map((provider) => provider.kind),
-      ["codex"],
+      ["copilot"],
     );
   });
 
-  it("rejects explicit Copilot selection unless the experimental flag is enabled", async () => {
-    await assert.rejects(
-      () =>
-        loadConfig({
-          configPath,
-          env: {
-            SIDEMESH_PROVIDER: "copilot",
-          },
-        }),
-      /Set SIDEMESH_ENABLE_COPILOT=1/,
+  it("accepts explicit Copilot selection without an experimental flag", async () => {
+    const config = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_PROVIDER: "copilot",
+      },
+    });
+
+    assert.equal(config.defaultProviderKind, "copilot");
+    assert.equal(config.provider.kind, "copilot");
+    assert.deepEqual(
+      config.providers.map((provider) => provider.kind),
+      ["copilot"],
     );
   });
 
