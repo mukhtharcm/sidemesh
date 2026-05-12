@@ -1170,6 +1170,10 @@ class _SessionScreenState extends State<SessionScreen>
                   host: widget.host,
                   api: widget.api,
                   preview: preview,
+                  onOpenInWindow:
+                      SidemeshBrowserPreviewWindowManager.instance.isSupported
+                      ? () => unawaited(_openBrowserPreviewWindow(preview))
+                      : null,
                 ),
               );
             },
@@ -4887,14 +4891,19 @@ class _SessionScreenState extends State<SessionScreen>
     return collectBrowserPreviewCandidates(_activities);
   }
 
-  Future<void> _openBrowserPreviewLauncher() async {
+  Future<void> _openBrowserPreviewLauncher({
+    bool openInWindow = false,
+  }) async {
     if (!_supportsBrowserPreview) {
       showAppSnackBar(context, 'This host does not expose browser previews.');
       return;
     }
     final suggestions = _browserPreviewCandidates;
     if (suggestions.length == 1) {
-      await _openBrowserPreviewTarget(suggestions.first);
+      await _openBrowserPreviewTarget(
+        suggestions.first,
+        openInWindow: openInWindow,
+      );
       return;
     }
     final selected = await showModalBottomSheet<BrowserPreviewTargetCandidate>(
@@ -4909,12 +4918,14 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted || selected == null) {
       return;
     }
-    await _openBrowserPreviewTarget(selected);
+    await _openBrowserPreviewTarget(selected, openInWindow: openInWindow);
   }
 
   Future<void> _openBrowserPreviewTarget(
     BrowserPreviewTargetCandidate candidate,
-  ) async {
+    {
+    bool openInWindow = false,
+  }) async {
     if (!_supportsBrowserPreview) {
       showAppSnackBar(context, 'This host does not expose browser previews.');
       return;
@@ -4944,8 +4955,15 @@ class _SessionScreenState extends State<SessionScreen>
             profileMode: 'sidemesh',
           );
       if (!mounted) return;
-      _showDockedBrowserPreview(preview: preview);
-      showAppSnackBar(context, 'Opened preview for ${candidate.endpointLabel}.');
+      if (openInWindow) {
+        await _openBrowserPreviewWindow(preview);
+      } else {
+        _showDockedBrowserPreview(preview: preview);
+        showAppSnackBar(
+          context,
+          'Opened preview for ${candidate.endpointLabel}.',
+        );
+      }
     } catch (error) {
       if (!mounted) return;
       showAppSnackBar(
@@ -4981,6 +4999,10 @@ class _SessionScreenState extends State<SessionScreen>
                 host: widget.host,
                 api: widget.api,
                 preview: preview,
+                onOpenInWindow:
+                    SidemeshBrowserPreviewWindowManager.instance.isSupported
+                    ? () => unawaited(_openBrowserPreviewWindow(preview))
+                    : null,
               ),
             );
           },
@@ -5019,6 +5041,10 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           api: widget.api,
           preview: preview,
+          onOpenInWindow:
+              SidemeshBrowserPreviewWindowManager.instance.isSupported
+              ? () => unawaited(_openBrowserPreviewWindow(preview))
+              : null,
         ),
       );
       return;
@@ -5026,6 +5052,22 @@ class _SessionScreenState extends State<SessionScreen>
     setState(() {
       _dockedBrowserPreview = _DockedBrowserPreview(preview: preview);
     });
+  }
+
+  Future<void> _openBrowserPreviewWindow(
+    HostBrowserPreviewInfo preview,
+  ) async {
+    final opened = await SidemeshBrowserPreviewWindowManager.instance
+        .openOrFocusBrowserPreviewWindow(host: widget.host, preview: preview);
+    if (!mounted || _disposed) {
+      return;
+    }
+    showAppSnackBar(
+      context,
+      opened
+          ? 'Opened ${preview.label} in a new window.'
+          : 'Browser preview windows are only available on the macOS desktop app.',
+    );
   }
 
   void _minimizeDockedBrowserPreview() {
@@ -5573,6 +5615,11 @@ class _SessionScreenState extends State<SessionScreen>
           unawaited(_openBrowserPreviewLauncher());
         }
         break;
+      case 'preview_window':
+        if (_supportsBrowserPreview) {
+          unawaited(_openBrowserPreviewLauncher(openInWindow: true));
+        }
+        break;
       case 'connections':
         if (_supportsConnections) {
           unawaited(_openConnections());
@@ -5686,6 +5733,14 @@ class _SessionScreenState extends State<SessionScreen>
               detail: 'Open a streamed browser preview for a localhost app.',
               icon: Icons.open_in_browser_rounded,
               tone: _SessionActionTone.accent,
+            ),
+          if (_supportsBrowserPreview &&
+              SidemeshBrowserPreviewWindowManager.instance.isSupported)
+            const _SessionActionSpec(
+              value: 'preview_window',
+              label: 'Open preview in new window',
+              detail: 'Detach a browser preview into its own macOS window.',
+              icon: Icons.open_in_new_rounded,
             ),
           if (_supportsConnections)
             _SessionActionSpec(

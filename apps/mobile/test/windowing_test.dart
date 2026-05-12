@@ -29,6 +29,26 @@ void main() {
     runtime: null,
     gitInfo: null,
   );
+  const preview = HostBrowserPreviewInfo(
+    id: 'preview-1',
+    label: 'Preview localhost:3000',
+    url: 'http://127.0.0.1:3000/',
+    targetHost: '127.0.0.1',
+    targetPort: 3000,
+    scheme: 'http',
+    cwd: '/tmp/project',
+    sessionId: 'session-1',
+    profileMode: 'sidemesh',
+    status: 'running',
+    width: 1280,
+    height: 900,
+    clients: 1,
+    createdAt: 1700000000000,
+    updatedAt: 1700000300000,
+    lastClientAt: 1700000300000,
+    lastFrameAt: 1700000300000,
+    lastError: null,
+  );
 
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -48,6 +68,22 @@ void main() {
     expect(decoded.hostId, host.id);
     expect(decoded.sessionId, session.id);
     expect(decoded.session?.title, session.title);
+  });
+
+  test('browser preview window arguments round-trip through json', () {
+    final arguments = SidemeshWindowArguments.browserPreviewWindow(
+      hostId: host.id,
+      preview: preview,
+    );
+
+    final decoded = SidemeshWindowArguments.fromJsonString(
+      arguments.toJsonString(),
+    );
+
+    expect(decoded.kind, SidemeshWindowKind.browserPreview);
+    expect(decoded.hostId, host.id);
+    expect(decoded.previewId, preview.id);
+    expect(decoded.preview?.url, preview.url);
   });
 
   test('invalid window arguments fall back to main window', () {
@@ -117,6 +153,68 @@ void main() {
       SidemeshWindowArguments.fromJsonString(
         platform.createdArguments.single,
       ).matchesSession(host, session),
+      isTrue,
+    );
+    expect(platform.createdWindows.single.showCalls, 1);
+  });
+
+  test(
+    'browser preview window manager focuses an existing matching window',
+    () async {
+      final existing = _FakeWindowHandle(
+        SidemeshWindowArguments.browserPreviewWindow(
+          hostId: host.id,
+          preview: preview,
+        ).toJsonString(),
+      );
+      final platform = _FakeWindowPlatform(
+        windows: <_FakeWindowHandle>[
+          _FakeWindowHandle(
+            const SidemeshWindowArguments.mainWindow().toJsonString(),
+          ),
+          existing,
+        ],
+      );
+      final manager = SidemeshBrowserPreviewWindowManager(
+        platform: platform,
+        isSupportedOverride: true,
+      );
+
+      final result = await manager.openOrFocusBrowserPreviewWindow(
+        host: host,
+        preview: preview,
+      );
+
+      expect(result, isTrue);
+      expect(existing.showCalls, 1);
+      expect(platform.createdArguments, isEmpty);
+    },
+  );
+
+  test('browser preview window manager creates a new window when missing', () async {
+    final platform = _FakeWindowPlatform(
+      windows: <_FakeWindowHandle>[
+        _FakeWindowHandle(
+          const SidemeshWindowArguments.mainWindow().toJsonString(),
+        ),
+      ],
+    );
+    final manager = SidemeshBrowserPreviewWindowManager(
+      platform: platform,
+      isSupportedOverride: true,
+    );
+
+    final result = await manager.openOrFocusBrowserPreviewWindow(
+      host: host,
+      preview: preview,
+    );
+
+    expect(result, isTrue);
+    expect(platform.createdArguments, hasLength(1));
+    expect(
+      SidemeshWindowArguments.fromJsonString(
+        platform.createdArguments.single,
+      ).matchesBrowserPreview(host, preview),
       isTrue,
     );
     expect(platform.createdWindows.single.showCalls, 1);

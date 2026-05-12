@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:macos_window_utils/macos_window_utils.dart';
 
 import 'src/onboarding_store.dart';
+import 'src/screens/browser_preview_window_screen.dart';
 import 'src/screens/desktop_shell.dart';
 import 'src/screens/home_screen.dart';
 import 'src/screens/onboarding_screen.dart';
@@ -121,6 +122,9 @@ class SidemeshApp extends StatelessWidget {
             SidemeshWindowKind.session => SessionWindowScreen(
               arguments: launchState.arguments,
               windowId: launchState.windowId,
+            ),
+            SidemeshWindowKind.browserPreview => BrowserPreviewWindowScreen(
+              arguments: launchState.arguments,
             ),
           };
           return AnnotatedRegion<SystemUiOverlayStyle>(

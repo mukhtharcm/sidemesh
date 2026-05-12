@@ -90,10 +90,42 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      expect(find.text('first log'), findsNothing);
-      expect(find.text('second log'), findsOneWidget);
-    },
+    expect(find.text('first log'), findsNothing);
+    expect(find.text('second log'), findsOneWidget);
+  },
   );
+
+  testWidgets('browser preview auto-resizes the remote viewport when enabled', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      Scaffold(
+        body: BrowserPreviewPane(
+          host: _host(),
+          api: api,
+          preview: _preview(),
+          showHeader: false,
+          autoResizeViewport: true,
+        ),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    await _pumpFrames(tester);
+
+    expect(
+      api.sentMessages,
+      contains(
+        containsPair('type', 'resize'),
+      ),
+    );
+    expect(api.sentMessages.last['width'], 1180);
+    expect(api.sentMessages.last['height'] as int, greaterThan(700));
+  });
 
   testWidgets('browser preview renders a live network tab and detail sheet', (
     tester,

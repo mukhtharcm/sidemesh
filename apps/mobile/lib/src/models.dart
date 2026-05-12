@@ -645,6 +645,27 @@ class HostBrowserPreviewInfo {
         lastFrameAt: _intOrNull(json['lastFrameAt']),
         lastError: _stringOrNull(json['lastError']),
       );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id,
+    'label': label,
+    'url': url,
+    'targetHost': targetHost,
+    'targetPort': targetPort,
+    'scheme': scheme,
+    'cwd': cwd,
+    'sessionId': sessionId,
+    'profileMode': profileMode,
+    'status': status,
+    'width': width,
+    'height': height,
+    'clients': clients,
+    'createdAt': createdAt,
+    'updatedAt': updatedAt,
+    'lastClientAt': lastClientAt,
+    'lastFrameAt': lastFrameAt,
+    'lastError': lastError,
+  };
 }
 
 class GitInfoSummary {
