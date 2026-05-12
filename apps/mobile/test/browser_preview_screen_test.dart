@@ -116,6 +116,13 @@ void main() {
     );
 
     await _pumpFrames(tester);
+    expect(
+      api.sentMessages.where((message) => message['type'] == 'resize'),
+      isEmpty,
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    await _pumpFrames(tester);
 
     expect(
       api.sentMessages,
@@ -147,6 +154,11 @@ void main() {
         size: const Size(1180, 900),
       );
 
+      await _pumpFrames(tester);
+      api.emit({
+        'type': 'hello',
+        'preview': _previewJson()..['clients'] = 2,
+      });
       await _pumpFrames(tester);
 
       expect(

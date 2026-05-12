@@ -90,6 +90,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     with WidgetsBindingObserver {
   static const _firstFrameTimeout = Duration(seconds: 18);
   static const _maxFirstFrameReconnects = 3;
+  static const _maxAutoResizeWidth = 3840;
+  static const _maxAutoResizeHeight = 2160;
 
   final _textController = TextEditingController();
   final _inputFocusNode = FocusNode();
@@ -114,6 +116,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   bool _clientPaused = false;
   bool _manualPause = false;
   bool _remoteClosed = false;
+  bool _hasLivePreviewSnapshot = false;
   int _firstFrameReconnects = 0;
   bool _devToolsOpen = false;
   int _devToolsTabIndex = 0;
@@ -283,12 +286,14 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   void _scheduleAutoResize(Size size) {
-    if (!widget.autoResizeViewport || _preview.clients > 1) {
+    if (!widget.autoResizeViewport ||
+        !_hasLivePreviewSnapshot ||
+        _preview.clients > 1) {
       _autoResizeTimer?.cancel();
       return;
     }
-    final width = size.width.round().clamp(240, 2200);
-    final height = size.height.round().clamp(240, 2200);
+    final width = size.width.round().clamp(240, _maxAutoResizeWidth);
+    final height = size.height.round().clamp(240, _maxAutoResizeHeight);
     if (_preview.width == width && _preview.height == height) {
       return;
     }
@@ -329,6 +334,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         if (preview != null) {
           final browserContextChanged = preview.url != _preview.url;
           _preview = preview;
+          _hasLivePreviewSnapshot = true;
           _frameWidth = preview.width;
           _frameHeight = preview.height;
           _urlController.text = preview.url;
