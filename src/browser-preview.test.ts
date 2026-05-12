@@ -143,6 +143,36 @@ describe("browser preview", () => {
     ]);
   });
 
+  it("refreshes inspector and storage on loadEventFired even when loading start was missed", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp, {
+      inspectorSnapshot: { selectedPath: [], warnings: [] },
+    });
+    let inspectorRefreshes = 0;
+    let inspectorBroadcasts = 0;
+    let storageRefreshes = 0;
+    registry.refreshInspectorSnapshot = async () => {
+      inspectorRefreshes += 1;
+      return { selectedPath: [], warnings: [] };
+    };
+    registry.broadcastInspectorSnapshot = () => {
+      inspectorBroadcasts += 1;
+    };
+    registry.scheduleStorageSnapshotRefresh = () => {
+      storageRefreshes += 1;
+    };
+
+    registry.registerPageLoadHandlers(preview, "session-1");
+    cdp.emitSession("Page.loadEventFired", {});
+    await Promise.resolve();
+
+    assert.equal(preview.pageLoading, false);
+    assert.equal(inspectorRefreshes, 1);
+    assert.equal(inspectorBroadcasts, 1);
+    assert.equal(storageRefreshes, 1);
+  });
+
   it("tracks network requests and emits summary updates", () => {
     const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
     const cdp = new FakeCdpConnection();

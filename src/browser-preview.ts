@@ -2380,7 +2380,7 @@ export class BrowserPreviewRegistry {
 
     preview.cleanupHandlers.push(
       cdp.onSessionEvent(sessionId, "Page.loadEventFired", () => {
-        this.setPreviewPageLoading(preview, false);
+        this.completePreviewPageLoad(preview);
       }),
     );
   }
@@ -2395,7 +2395,16 @@ export class BrowserPreviewRegistry {
       type: "loading",
       state: pageLoading ? "started" : "complete",
     });
-    if (pageLoading) return;
+  }
+
+  private completePreviewPageLoad(preview: BrowserPreviewRecord): void {
+    const wasLoading = preview.pageLoading;
+    this.setPreviewPageLoading(preview, false);
+    if (!wasLoading) {
+      // Keep refresh behavior aligned with Page.loadEventFired even when the
+      // browser did not emit a matching frameStartedLoading event we track.
+      preview.pageLoading = false;
+    }
     if (preview.inspectorSnapshot) {
       void this.refreshInspectorSnapshot(preview)
         .then((snapshot) => this.broadcastInspectorSnapshot(preview, snapshot))
