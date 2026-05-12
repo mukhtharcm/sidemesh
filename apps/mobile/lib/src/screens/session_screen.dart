@@ -61,6 +61,8 @@ import '../widgets/composer_paste_text_action.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/diff_view.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/mesh_status_line.dart';
+import '../widgets/mesh_command_palette.dart';
 import 'package:sidemesh_mobile/src/host_reconnect_scheduler.dart';
 import '../widgets/provider_badge.dart';
 import '../relative_time_ticker.dart';
@@ -5142,6 +5144,21 @@ class _SessionScreenState extends State<SessionScreen>
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
+  String _shortSessionId(String id) {
+    if (id.length <= 8) return id;
+    return id.substring(0, 8);
+  }
+
+  String _sessionStateLabel(SessionSummary session) {
+    if (_running) return 'running';
+    return switch (session.status) {
+      'completed' => 'done',
+      'failed' => 'failed',
+      'pendingApproval' => 'needs approval',
+      _ => 'idle',
+    };
+  }
+
   void _openWorkspaceFile(String path) {
     if (!_supportsFilesystem) {
       showAppSnackBar(context, 'This host does not expose workspace files.');
@@ -5934,6 +5951,39 @@ class _SessionScreenState extends State<SessionScreen>
         !_loading && timelineEntries.isEmpty && _running;
     final bodyContent = Column(
       children: [
+        Builder(
+          builder: (ctx) => MeshStatusLine(
+            live: _running,
+            liveColor: context.colors.success,
+            segments: [
+              MeshStatusSegment(widget.host.label, mono: true),
+              MeshStatusSegment(_shortSessionId(session.id), mono: true),
+              if (_gitHeaderLabel(session, _gitStatus) != null)
+                MeshStatusSegment(
+                  _gitHeaderLabel(session, _gitStatus)!,
+                  mono: true,
+                  color: (_gitStatus?.dirty ?? false)
+                      ? context.colors.warning
+                      : null,
+                ),
+              MeshStatusSegment(_sessionStateLabel(session)),
+            ],
+            actions: [
+              if (_running && _supportsSessionInterrupt)
+                MeshIconButton(
+                  icon: Icons.stop_circle_rounded,
+                  tooltip: 'Stop',
+                  color: context.colors.danger,
+                  onTap: _stopSession,
+                ),
+            ],
+            onLongPress: () {
+              try {
+                MeshCommandPaletteScope.of(ctx).open();
+              } catch (_) {}
+            },
+          ),
+        ),
         if (!isCompact)
           ListenableBuilder(
             listenable: SessionLocalStore.instance,
@@ -6241,448 +6291,9 @@ class _SessionScreenState extends State<SessionScreen>
         ),
       ],
     );
-    final layoutBody = bodyContent;
-    final inspectorScope = InspectorScope.maybeOf(context);
-    final searchOpenInInspector =
-        inspectorScope != null && _isSearchInspectorOpen(inspectorScope);
-    final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
-    final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
-    final portsOpenInInspector = _isPortsInspectorOpen(inspectorScope);
+    final layoutBody = MeshCommandPaletteScope(child: bodyContent);
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
-      appBar: AppBar(
-        backgroundColor: colors.canvas,
-        toolbarHeight: isCompact ? 52 : null,
-        bottom: isCompact
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(30),
-                child: _SessionAppBarSubtitle(
-                  host: widget.host,
-                  session: session,
-                  gitStatus: _gitStatus,
-                  showGit: _supportsGitStatus,
-                  running: _running,
-                  pinnedCount: pinnedMessages.length,
-                  pinnedActive: pinnedActive,
-                  onPinnedTap: _openPinnedPanel,
-                  onDetails: () => _showSessionDetailsSheet(session),
-                  onGitDetails: () => _showGitSheet(session),
-                ),
-              )
-            : null,
-        title: Row(
-          children: [
-            if (_running) ...[const LivePulse(), const SizedBox(width: 10)],
-            Expanded(
-              child: _supportsSessionRename && !isCompact
-                  ? GestureDetector(
-                      onTap: () => unawaited(_renameSession()),
-                      behavior: HitTestBehavior.opaque,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              session.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.edit_rounded,
-                            size: 13,
-                            color: colors.textTertiary,
-                          ),
-                        ],
-                      ),
-                    )
-                  : Text(
-                      session.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-            ),
-          ],
-        ),
-        actions: [
-          // Reserve a permanent slot for interrupt — this prevents all other
-          // action buttons from jumping left/right when the agent starts/stops.
-          if (!isCompact && _supportsSessionInterrupt)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 200),
-                opacity: _running ? 1.0 : 0.3,
-                child: IgnorePointer(
-                  ignoring: !_running,
-                  child: MeshIconButton(
-                    icon: Icons.stop_circle_rounded,
-                    tooltip: 'Interrupt agent',
-                    color: colors.danger,
-                    onTap: _stopSession,
-                    semanticLabel: 'Interrupt agent',
-                  ),
-                ),
-              ),
-            ),
-          if (!isCompact)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: Icons.refresh_rounded,
-                tooltip: 'Reload session',
-                color: colors.textSecondary,
-                onTap: _reloadSnapshot,
-              ),
-            ),
-          if (!isCompact)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: Icons.add_circle_outline_rounded,
-                tooltip: 'New session',
-                color: colors.textSecondary,
-                onTap: _startSessionFromCurrent,
-              ),
-            ),
-          if (!isCompact && _supportsTerminal)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: Icons.terminal_rounded,
-                tooltip: terminalOpenInInspector
-                    ? 'Terminal is open'
-                    : 'Open terminal',
-                color: terminalOpenInInspector
-                    ? colors.accent
-                    : colors.textSecondary,
-                onTap: () => unawaited(_openTerminal()),
-              ),
-            ),
-          if (!isCompact && _supportsConnections)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: Icons.open_in_browser_rounded,
-                tooltip: portsOpenInInspector
-                    ? 'Browser previews are open'
-                    : 'Manage browser previews',
-                color: portsOpenInInspector
-                    ? colors.accent
-                    : colors.textSecondary,
-                onTap: () => unawaited(_openConnections()),
-              ),
-            ),
-          if (!isCompact &&
-              _supportsGitStatus &&
-              _gitHeaderLabel(session, _gitStatus) != null &&
-              (_gitStatus?.dirty ?? false))
-            Padding(
-              padding: const EdgeInsets.only(right: 10),
-              child: MeshIconButton(
-                icon: Icons.account_tree_rounded,
-                tooltip: 'Git details',
-                color: colors.warning,
-                onTap: () => _showGitSheet(session),
-              ),
-            ),
-          if (!isCompact)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: searchOpenInInspector
-                    ? Icons.search_off_rounded
-                    : Icons.search_rounded,
-                tooltip: searchOpenInInspector ? 'Close search' : 'Search',
-                color: searchOpenInInspector
-                    ? colors.accent
-                    : colors.textSecondary,
-                onTap: _toggleSearchPanel,
-              ),
-            ),
-          if (!isCompact && _supportsSessionResources)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: resourcesOpenInInspector
-                    ? Icons.perm_media_rounded
-                    : Icons.perm_media_rounded,
-                tooltip: resourcesOpenInInspector
-                    ? 'Close resources'
-                    : 'Open resources',
-                color: resourcesOpenInInspector
-                    ? colors.accent
-                    : colors.textSecondary,
-                onTap: _openResourcesPanel,
-              ),
-            ),
-          if (!isCompact)
-            Padding(
-              padding: const EdgeInsets.only(right: 10),
-              child: ListenableBuilder(
-                listenable: Listenable.merge([_policyStore, _turnConfigStore]),
-                builder: (context, _) {
-                  final policy = _policyStore.policyFor(widget.host, session.id);
-                  final turnConfig = _turnConfigStore.configFor(
-                    widget.host,
-                    session.id,
-                  );
-                  final runtime = session.runtime;
-                  final runtimeLoosened = SessionPolicy.runtimeIsLoosened(
-                    approvalPolicy: runtime?.approvalPolicy,
-                    sandboxMode: runtime?.sandboxMode,
-                    networkAccess: runtime?.networkAccess,
-                  );
-                  final customised =
-                      !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
-                  return MeshIconButton(
-                    icon: customised ? Icons.tune_rounded : Icons.tune_rounded,
-                    tooltip: 'Session controls',
-                    color: customised ? colors.accent : colors.textSecondary,
-                    onTap: () => _showSessionPolicySheet(session),
-                  );
-                },
-              ),
-            ),
-          ListenableBuilder(
-            listenable: Listenable.merge([
-              SessionLocalStore.instance,
-              _policyStore,
-              _turnConfigStore,
-            ]),
-            builder: (context, _) {
-              final favorite = _localStore.isFavorite(widget.host, session.id);
-              final gitAvailable =
-                  _supportsGitStatus &&
-                  _gitHeaderLabel(session, _gitStatus) != null;
-              final gitDirty = _gitStatus?.dirty ?? false;
-              final policy = _policyStore.policyFor(widget.host, session.id);
-              final turnConfig = _turnConfigStore.configFor(
-                widget.host,
-                session.id,
-              );
-              final runtime = session.runtime;
-              final runtimeLoosened = SessionPolicy.runtimeIsLoosened(
-                approvalPolicy: runtime?.approvalPolicy,
-                sandboxMode: runtime?.sandboxMode,
-                networkAccess: runtime?.networkAccess,
-              );
-              final sessionControlsCustomized =
-                  !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
-              // Hide the 'Git details' menu item when it's already a visible
-              // icon (dirty state). Keep it hidden entirely if there is no
-              // git info to show.
-              final showGitInMenu = gitAvailable && !gitDirty;
-              if (isCompact) {
-                return Padding(
-                  padding: const EdgeInsets.only(right: AppSpacing.sm),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      MeshIconButton(
-                        icon: Icons.tune_rounded,
-                        tooltip: 'Session controls',
-                        color: sessionControlsCustomized
-                            ? colors.accent
-                            : colors.textSecondary,
-                        onTap: () => _showSessionPolicySheet(session),
-                      ),
-                      const SizedBox(width: AppSpacing.xs),
-                      MeshIconButton(
-                        icon: favorite
-                            ? Icons.star_rounded
-                            : Icons.star_outline_rounded,
-                        tooltip: favorite ? 'Unpin session' : 'Pin session',
-                        color:
-                            favorite ? colors.warning : colors.textSecondary,
-                        onTap: _toggleFavorite,
-                      ),
-                      const SizedBox(width: AppSpacing.xs),
-                      MeshIconButton(
-                        icon: Icons.more_vert_rounded,
-                        tooltip: _running
-                            ? 'Session actions (agent running)'
-                            : 'Session actions',
-                        color:
-                            _running ? colors.warning : colors.textPrimary,
-                        onTap: () => unawaited(
-                          _showSessionActionsSheet(
-                            session: session,
-                            favorite: favorite,
-                            gitAvailable: gitAvailable,
-                            gitDirty: gitDirty,
-                            terminalOpen: terminalOpenInInspector,
-                            portsOpen: portsOpenInInspector,
-                            searchOpen: searchOpenInInspector,
-                            resourcesOpen: resourcesOpenInInspector,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }
-              return PopupMenuButton<String>(
-                tooltip: 'Session actions',
-                constraints: const BoxConstraints(minWidth: 280, maxWidth: 360),
-                icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
-                onSelected: (value) => _handleSessionAction(value, session),
-                itemBuilder: (context) => [
-                  if (_supportsSessionResources)
-                    const PopupMenuItem<String>(
-                      value: 'resources',
-                      child: Row(
-                        children: [
-                          Icon(Icons.perm_media_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Resources'),
-                        ],
-                      ),
-                    ),
-                  PopupMenuItem<String>(
-                    value: 'favorite',
-                    child: Row(
-                      children: [
-                        Icon(
-                          favorite
-                              ? Icons.star_rounded
-                              : Icons.star_outline_rounded,
-                          size: 18,
-                          color: favorite ? colors.warning : null,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(favorite ? 'Remove favorite' : 'Add favorite'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'unread',
-                    child: Row(
-                      children: [
-                        Icon(Icons.flag_rounded, size: 18),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'Flag for follow-up',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (showGitInMenu)
-                    const PopupMenuItem<String>(
-                      value: 'git',
-                      child: Row(
-                        children: [
-                          Icon(Icons.account_tree_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Git details'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsSessionCompact)
-                    const PopupMenuItem<String>(
-                      value: 'compact',
-                      child: Row(
-                        children: [
-                          Icon(Icons.compress_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Compact context'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsFilesystem)
-                    const PopupMenuItem<String>(
-                      value: 'browse',
-                      child: Row(
-                        children: [
-                          Icon(Icons.folder_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Browse files'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsBrowserPreview)
-                    const PopupMenuItem<String>(
-                      value: 'preview',
-                      child: Row(
-                        children: [
-                          Icon(Icons.open_in_browser_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Open browser preview',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (_supportsConnections)
-                    const PopupMenuItem<String>(
-                      value: 'connections',
-                      child: Row(
-                        children: [
-                          Icon(Icons.open_in_browser_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Manage browser previews',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (widget.topPadding != null &&
-                      SidemeshSessionWindowManager.instance.isSupported)
-                    const PopupMenuItem<String>(
-                      value: 'popout',
-                      child: Row(
-                        children: [
-                          Icon(Icons.open_in_new_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Open in new window',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (_supportsSessionRename || _supportsSessionArchive)
-                    const PopupMenuDivider(),
-                  if (_supportsSessionRename)
-                    const PopupMenuItem<String>(
-                      value: 'rename',
-                      child: Row(
-                        children: [
-                          Icon(Icons.drive_file_rename_outline, size: 18),
-                          SizedBox(width: 10),
-                          Text('Rename'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsSessionArchive)
-                    const PopupMenuItem<String>(
-                      value: 'archive',
-                      child: Row(
-                        children: [
-                          Icon(Icons.archive_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Archive'),
-                        ],
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
       body: widget.desktopMode
           ? layoutBody
           : GestureDetector(
