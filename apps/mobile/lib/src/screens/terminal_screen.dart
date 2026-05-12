@@ -12,6 +12,7 @@ import '../terminal_key_models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/mesh_status_line.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/terminal_keybar.dart';
 import '../host_reconnect_scheduler.dart';
@@ -44,31 +45,31 @@ class _TerminalScreenState extends State<TerminalScreen> {
     final colors = context.colors;
     return Scaffold(
       backgroundColor: colors.canvas,
-      appBar: AppBar(
-        backgroundColor: colors.canvas,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.title ?? 'Terminal'),
-            Text(
-              widget.cwd,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: colors.textSecondary,
-                fontFamily: 'SpaceMono',
-              ),
+      body: Column(
+        children: [
+          SafeArea(
+            bottom: false,
+            child: MeshStatusLine(
+              segments: [
+                MeshStatusSegment(widget.host.label, mono: true),
+                if (widget.title != null && widget.title!.isNotEmpty)
+                  MeshStatusSegment(widget.title!),
+                MeshStatusSegment('terminal'),
+                MeshStatusSegment(widget.cwd, mono: true),
+              ],
             ),
-          ],
-        ),
-      ),
-      body: TerminalPane(
-        host: widget.host,
-        api: widget.api,
-        cwd: widget.cwd,
-        sessionId: widget.sessionId,
-        title: widget.title,
-        reuseExisting: true,
+          ),
+          Expanded(
+            child: TerminalPane(
+              host: widget.host,
+              api: widget.api,
+              cwd: widget.cwd,
+              sessionId: widget.sessionId,
+              title: widget.title,
+              reuseExisting: true,
+            ),
+          ),
+        ],
       ),
     );
   }
