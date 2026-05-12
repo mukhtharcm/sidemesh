@@ -8,7 +8,7 @@ part of 'session_screen.dart';
 //   Zone 1 — The bar          (+ button | text pill | send button)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _Composer extends StatelessWidget {
+class _Composer extends StatefulWidget {
   const _Composer({
     required this.controller,
     required this.focusNode,
@@ -90,22 +90,105 @@ class _Composer extends StatelessWidget {
   final bool submitOnEnter;
 
   @override
+  State<_Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends State<_Composer> {
+  final _overlayController = OverlayPortalController();
+  final _composerKey = GlobalKey();
+  bool _overlayShowing = false;
+
+  void _syncOverlay(bool shouldShow) {
+    if (shouldShow && !_overlayShowing) {
+      _overlayController.show();
+      _overlayShowing = true;
+    } else if (!shouldShow && _overlayShowing) {
+      _overlayController.hide();
+      _overlayShowing = false;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final showSuggestions =
+        (widget.supportsSkillInput && widget.activeSkillQuery != null) ||
+        widget.activeFileQuery != null;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncOverlay(showSuggestions);
+    });
+
+    return OverlayPortal(
+      controller: _overlayController,
+      overlayChildBuilder: _buildOverlayChild,
+      child: KeyedSubtree(
+        key: _composerKey,
+        child: _buildComposerBody(context),
+      ),
+    );
+  }
+
+  Widget _buildOverlayChild(BuildContext context) {
+    final renderBox =
+        _composerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null || !renderBox.attached) return const SizedBox.shrink();
+    final offset = renderBox.localToGlobal(Offset.zero);
+    final screenHeight = MediaQuery.of(context).size.height;
+    return Stack(
+      children: [
+        Positioned(
+          bottom: screenHeight - offset.dy + 4,
+          left: 14,
+          right: 14,
+          child: Material(
+            color: Colors.transparent,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (widget.supportsSkillInput &&
+                    widget.activeSkillQuery != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: _ComposerSkillSuggestionTray(
+                      query: widget.activeSkillQuery!,
+                      suggestions: widget.skillSuggestions,
+                      loading: widget.loadingSkills,
+                      error: widget.skillError,
+                      onSelectSkill: widget.onSelectSkill,
+                    ),
+                  ),
+                if (widget.activeFileQuery != null)
+                  _ComposerFileSuggestionTray(
+                    query: widget.activeFileQuery!,
+                    suggestions: widget.fileSuggestions,
+                    loading: widget.loadingFileSearch,
+                    error: widget.fileError,
+                    onSelectFile: widget.onSelectFile,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildComposerBody(BuildContext context) {
     final colors = context.colors;
     final isMacDesktop =
-        submitOnEnter && defaultTargetPlatform == TargetPlatform.macOS;
-    final isDesktop = submitOnEnter;
+        widget.submitOnEnter && defaultTargetPlatform == TargetPlatform.macOS;
+    final isDesktop = widget.submitOnEnter;
 
     // ── Zone 1: text field ──────────────────────────────────────────────────
     Widget field = TextField(
-      controller: controller,
-      focusNode: focusNode,
+      controller: widget.controller,
+      focusNode: widget.focusNode,
       minLines: 1,
       maxLines: 6,
-      onTapOutside: isMacDesktop ? null : (_) => onDismiss(),
+      onTapOutside: isMacDesktop ? null : (_) => widget.onDismiss(),
       style: Theme.of(context).textTheme.bodyMedium,
       decoration: InputDecoration(
-        hintText: submitOnEnter
+        hintText: widget.submitOnEnter
             ? 'Message this session — Enter to send, Shift+Enter for newline'
             : 'Message this session',
         hintStyle: TextStyle(color: colors.textTertiary),
@@ -120,26 +203,27 @@ class _Composer extends StatelessWidget {
 
     field = Actions(
       actions: <Type, Action<Intent>>{
-        PasteTextIntent: ComposerPasteTextAction(onPasteImage: onNativePaste),
+        PasteTextIntent:
+            ComposerPasteTextAction(onPasteImage: widget.onNativePaste),
       },
       child: field,
     );
 
-    if (submitOnEnter) {
+    if (widget.submitOnEnter) {
       field = CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
           const SingleActivator(LogicalKeyboardKey.enter): () {
-            if (!sending) onSend();
+            if (!widget.sending) widget.onSend();
           },
           const SingleActivator(LogicalKeyboardKey.enter, shift: true): () {
-            final selection = controller.selection;
-            final text = controller.text;
+            final selection = widget.controller.selection;
+            final text = widget.controller.text;
             final start = selection.start < 0 ? text.length : selection.start;
             final end = selection.end < 0 ? text.length : selection.end;
             final before = text.substring(0, start);
             final after = text.substring(end);
             final next = '$before\n$after';
-            controller.value = TextEditingValue(
+            widget.controller.value = TextEditingValue(
               text: next,
               selection: TextSelection.collapsed(offset: start + 1),
             );
@@ -157,7 +241,7 @@ class _Composer extends StatelessWidget {
         color: colors.composerBackground,
         borderRadius: AppShapes.input,
         border: Border.all(
-          color: isFocused
+          color: widget.isFocused
               ? colors.accent.withValues(alpha: 0.65)
               : colors.border,
         ),
@@ -165,56 +249,62 @@ class _Composer extends StatelessWidget {
       // Subtle vertical expansion on focus signals "ready to type".
       padding: EdgeInsets.symmetric(
         horizontal: 14,
-        vertical: isFocused ? 13 : 9,
+        vertical: widget.isFocused ? 13 : 9,
       ),
       child: field,
     );
 
     // ── Zone 1: bar row ─────────────────────────────────────────────────────
     final bool showPlusButton = !isDesktop &&
-        (supportsImageInput || supportsSkillInput || supportsFileMentions);
+        (widget.supportsImageInput ||
+            widget.supportsSkillInput ||
+            widget.supportsFileMentions);
 
     final barRow = Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         // Desktop keeps dedicated attach + paste buttons (only when the
         // current provider supports image input).
-        if (isDesktop && supportsImageInput) ...[
-          _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
+        if (isDesktop && widget.supportsImageInput) ...[
+          _ComposerAttachButton(
+            enabled: !widget.sending,
+            onPressed: widget.onPickImages,
+          ),
           const SizedBox(width: 4),
           _ComposerPasteButton(
-            enabled: !sending,
-            onPressed: () => unawaited(onPasteImage()),
+            enabled: !widget.sending,
+            onPressed: () => unawaited(widget.onPasteImage()),
           ),
           const SizedBox(width: 6),
         ]
         // Mobile: single + button that opens a context sheet.
         else if (showPlusButton) ...[
           _ComposerPlusButton(
-            enabled: !sending,
-            supportsImageInput: supportsImageInput,
-            supportsSkillInput: supportsSkillInput,
-            supportsFileMentions: supportsFileMentions,
-            onPickImages: onPickImages,
-            onAddSkillTrigger: onAddSkillTrigger,
-            onAddFileTrigger: onAddFileTrigger,
+            enabled: !widget.sending,
+            supportsImageInput: widget.supportsImageInput,
+            supportsSkillInput: widget.supportsSkillInput,
+            supportsFileMentions: widget.supportsFileMentions,
+            onPickImages: widget.onPickImages,
+            onAddSkillTrigger: widget.onAddSkillTrigger,
+            onAddFileTrigger: widget.onAddFileTrigger,
           ),
           const SizedBox(width: 6),
         ],
         Expanded(child: pill),
         const SizedBox(width: 8),
         _SendButton(
-          sending: sending,
-          controller: controller,
-          hasAttachments: attachments.isNotEmpty,
-          hasSkills: skills.isNotEmpty || files.isNotEmpty,
-          onSend: onSend,
+          sending: widget.sending,
+          controller: widget.controller,
+          hasAttachments: widget.attachments.isNotEmpty,
+          hasSkills: widget.skills.isNotEmpty || widget.files.isNotEmpty,
+          onSend: widget.onSend,
         ),
       ],
     );
 
-    final hasContext =
-        attachments.isNotEmpty || skills.isNotEmpty || files.isNotEmpty;
+    final hasContext = widget.attachments.isNotEmpty ||
+        widget.skills.isNotEmpty ||
+        widget.files.isNotEmpty;
 
     return SafeArea(
       top: false,
@@ -228,45 +318,6 @@ class _Composer extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-
-            // ── Zone 3a: Skill suggestion tray ─────────────────────────────
-            // Lives *above* the context shelf so it overlays the conversation
-            // list visually without being clipped by the pill.
-            AnimatedSize(
-              duration: const Duration(milliseconds: 150),
-              curve: Curves.easeOut,
-              child: (supportsSkillInput && activeSkillQuery != null)
-                  ? Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
-                      child: _ComposerSkillSuggestionTray(
-                        query: activeSkillQuery!,
-                        suggestions: skillSuggestions,
-                        loading: loadingSkills,
-                        error: skillError,
-                        onSelectSkill: onSelectSkill,
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-
-            // ── Zone 3b: File suggestion tray ──────────────────────────────
-            AnimatedSize(
-              duration: const Duration(milliseconds: 150),
-              curve: Curves.easeOut,
-              child: activeFileQuery != null
-                  ? Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
-                      child: _ComposerFileSuggestionTray(
-                        query: activeFileQuery!,
-                        suggestions: fileSuggestions,
-                        loading: loadingFileSearch,
-                        error: fileError,
-                        onSelectFile: onSelectFile,
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-
             // ── Zone 2: Context shelf ──────────────────────────────────────
             // Horizontal scroll row of flat chips; smoothly animates in/out.
             AnimatedSize(
@@ -274,12 +325,12 @@ class _Composer extends StatelessWidget {
               curve: Curves.easeInOut,
               child: hasContext
                   ? _ComposerContextShelf(
-                      attachments: attachments,
-                      skills: skills,
-                      files: files,
-                      onRemoveAttachment: onRemoveAttachment,
-                      onRemoveSkill: onRemoveSkill,
-                      onRemoveFile: onRemoveFile,
+                      attachments: widget.attachments,
+                      skills: widget.skills,
+                      files: widget.files,
+                      onRemoveAttachment: widget.onRemoveAttachment,
+                      onRemoveSkill: widget.onRemoveSkill,
+                      onRemoveFile: widget.onRemoveFile,
                       isDesktop: isDesktop,
                     )
                   : const SizedBox.shrink(),
