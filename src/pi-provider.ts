@@ -4,6 +4,7 @@ import { constants as fsConstants } from "node:fs";
 import { access, mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import nodePath from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   SessionManager,
@@ -105,6 +106,8 @@ interface PiSessionState {
   sessionManager?: SessionManager | null;
   unsubscribe?: (() => void) | null;
   pendingCompactionActivityId?: string | null;
+  preservedSidecarMessages?: PiPreservedSidecarMessage[];
+  preservedSidecarUserMessages?: PiPreservedSidecarUserMessage[];
 }
 
 interface ActivePiTurn {
@@ -121,6 +124,19 @@ interface PiDraftAssistantMessage {
   createdAt: number;
 }
 
+interface PiPreservedSidecarMessage {
+  message: SessionMessage;
+  previousUserText: string | null;
+  previousUserOccurrence: number | null;
+  previousUserMessage: SessionMessage | null;
+}
+
+interface PiPreservedSidecarUserMessage {
+  message: SessionMessage;
+  previousUserText: string;
+  previousUserOccurrence: number;
+}
+
 export interface PiAgentProviderOptions {
   agentDir?: string | null;
   stateDir?: string | null;
@@ -134,6 +150,9 @@ const DEFAULT_PI_STATE_DIR = nodePath.join(
   ".sidemesh",
   "pi-provider",
 );
+const PI_PROMPT_COMPLETION_FALLBACK_DELAY_MS = 100;
+const PI_EVENT_QUEUE_DRAIN_TIMEOUT_MS = 1_000;
+const PI_SIDECAR_USER_MATCH_TOLERANCE_MS = 2_000;
 const PI_MODEL_REASONING_LEVELS = [
   "minimal",
   "low",
@@ -318,9 +337,7 @@ export class PiAgentProvider
     thread: ThreadRecord,
     options: AgentSessionLogOptions = {},
   ): Promise<SessionLogSnapshot> {
-    const state = this.activeTurns.has(thread.id)
-      ? await this.ensureLoadedSession(thread.id)
-      : await this.loadSessionStateFromHistory(thread.id);
+    const state = await this.readableSessionState(thread.id);
     const messages = limitTail(state.messages, options.messageLimit ?? null);
     const activities = limitTail(
       [...state.activities.values()].sort((left, right) => left.seq - right.seq),
@@ -339,14 +356,38 @@ export class PiAgentProvider
   public async readSessionRuntime(
     thread: ThreadRecord,
   ): Promise<SessionRuntimeSummary | null> {
-    const state = this.activeTurns.has(thread.id)
-      ? await this.ensureLoadedSession(thread.id)
-      : await this.loadSessionStateFromHistory(thread.id);
+    const state = await this.readableSessionState(thread.id);
     return cloneRuntime(state.runtime);
   }
 
   public async listLoadedSessionIds(): Promise<string[]> {
     return [...this.loadedSessionIds];
+  }
+
+  private async readableSessionState(threadId: string): Promise<PiSessionState> {
+    if (this.activeTurns.has(threadId)) {
+      return this.ensureLoadedSession(threadId);
+    }
+    const existing = this.sessions.get(threadId);
+    const hasPreservedSidecar =
+      (existing?.preservedSidecarMessages?.length ?? 0) > 0 ||
+      (existing?.preservedSidecarUserMessages?.length ?? 0) > 0;
+    if (existing && hasPreservedSidecar) {
+      const summary = await this.findPiSessionSummary(threadId);
+      const fingerprint = summary
+        ? this.sessionSummaryFingerprints.get(summary.path) ?? null
+        : null;
+      if (!summary) {
+        return existing;
+      }
+      if (
+        existing.historyFingerprint !== null &&
+        existing.historyFingerprint === fingerprint
+      ) {
+        return existing;
+      }
+    }
+    return this.loadSessionStateFromHistory(threadId);
   }
 
   public async resumeSessionThread(
@@ -576,6 +617,8 @@ export class PiAgentProvider
       sessionManager,
       unsubscribe: null,
       pendingCompactionActivityId: null,
+      preservedSidecarMessages: [],
+      preservedSidecarUserMessages: [],
     };
     this.sessions.set(thread.id, state);
     if (thread.path) {
@@ -686,11 +729,20 @@ export class PiAgentProvider
       nextSeq: 0,
       draftAssistantMessage: null,
       pendingCompactionActivityId: null,
+      preservedSidecarMessages: [],
+      preservedSidecarUserMessages: [],
     };
     state.thread = mergeThreadWithSummary(summary, state, false);
-    state.messages = parsed.messages;
+    const merged = mergePreservedSidecarMessages(
+      parsed.messages,
+      parsed.activities,
+      parsed.nonFinalAssistantMessageIds,
+      state.preservedSidecarMessages ?? [],
+      state.preservedSidecarUserMessages ?? [],
+    );
+    state.messages = merged.messages;
     state.activities = new Map(
-      parsed.activities.map((activity) => [
+      merged.activities.map((activity) => [
         activity.id,
         normalizeStoredSessionActivity(activity),
       ]),
@@ -719,12 +771,19 @@ export class PiAgentProvider
         // Ignore missing services or registry lookup failures for history-only sessions
       }
     }
-    state.nextSeq = parsed.nextSeq;
+    state.nextSeq = Math.max(parsed.nextSeq, merged.nextSeq);
     state.thread.name = parsed.threadName ?? state.thread.name;
-    state.thread.preview = parsed.preview || state.thread.preview;
+    state.thread.preview =
+      latestPreviewMessage(state.messages) ?? (parsed.preview || state.thread.preview);
     state.thread.path = summary.path;
-    state.thread.updatedAt = summary.updatedAt;
+    state.thread.updatedAt = latestThreadUpdatedAt(
+      summary.updatedAt,
+      state.thread.updatedAt,
+      state.messages,
+    );
     state.historyFingerprint = summaryFingerprint;
+    state.preservedSidecarMessages = merged.preservedSidecarMessages;
+    state.preservedSidecarUserMessages = merged.preservedSidecarUserMessages;
     state.archived = this.isArchived(threadId);
     normalizeInactivePiSessionState(state);
     this.sessions.set(threadId, state);
@@ -786,6 +845,11 @@ export class PiAgentProvider
             } as Parameters<AgentSession["prompt"]>[1])
           : undefined;
       await loadedSession.prompt(prepared.text, options);
+      await this.completeResolvedPromptTurn(
+        session.thread.id,
+        turnId,
+        loadedSession,
+      );
     } catch (error) {
       if (this.activeTurns.get(session.thread.id)?.turnId !== turnId) {
         return;
@@ -802,6 +866,57 @@ export class PiAgentProvider
     } finally {
       this.persistEventually();
     }
+  }
+
+  private async completeResolvedPromptTurn(
+    threadId: string,
+    turnId: string,
+    loadedSession: AgentSession,
+  ): Promise<void> {
+    const eventQueue = piEventQueueFor(loadedSession);
+    if (!eventQueue) {
+      await sleep(PI_PROMPT_COMPLETION_FALLBACK_DELAY_MS);
+      await this.finishResolvedPromptTurn(threadId, turnId);
+      return;
+    }
+    const drained = await waitForPiEventQueueToDrain(eventQueue);
+    if (!drained) {
+      void this.completeResolvedPromptTurnAfterQueueDrain(
+        threadId,
+        turnId,
+        eventQueue,
+      );
+      return;
+    }
+    await this.finishResolvedPromptTurn(threadId, turnId);
+  }
+
+  private async completeResolvedPromptTurnAfterQueueDrain(
+    threadId: string,
+    turnId: string,
+    eventQueue: Promise<unknown>,
+  ): Promise<void> {
+    try {
+      await settlePiEventQueue(eventQueue);
+      await this.finishResolvedPromptTurn(threadId, turnId);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "unknown completion error";
+      this.emit("stderr", `Pi prompt completion fallback failed: ${message}`);
+    }
+  }
+
+  private async finishResolvedPromptTurn(
+    threadId: string,
+    turnId: string,
+  ): Promise<void> {
+    const active = this.activeTurns.get(threadId);
+    const session = this.sessions.get(threadId);
+    if (!active || active.turnId !== turnId || !session) {
+      return;
+    }
+    this.completeActiveTurn(threadId, active.status ?? "completed");
+    this.persistEventually();
   }
 
   private async applyOverrides(
@@ -1093,11 +1208,15 @@ export class PiAgentProvider
         runtimeFromLoadedSession(session.session ?? null, assistantRuntime, active?.turnId ?? null),
       );
       if (active && isTerminalPiAssistantStopReason(stopReason)) {
+        const finalStatus = active.status ?? "completed";
         if (
           !completedMessage &&
           session.draftAssistantMessage?.turnId === active.turnId
         ) {
           completedMessage = materializeInterruptedPiDraftAssistantMessage(session);
+          if (completedMessage && finalStatus === "completed") {
+            this.preserveMaterializedSidecarLog(session, completedMessage);
+          }
           if (completedMessage) {
             this.emit("liveEvent", {
               type: "assistant_message_completed",
@@ -1111,7 +1230,7 @@ export class PiAgentProvider
             });
           }
         }
-        this.completeActiveTurn(session.thread.id, active.status ?? "completed");
+        this.completeActiveTurn(session.thread.id, finalStatus);
       }
       this.persistEventually();
       return;
@@ -1442,14 +1561,18 @@ export class PiAgentProvider
       return;
     }
     const draftMessage =
-      session.draftAssistantMessage?.turnId === active.turnId && status !== "completed"
+      session.draftAssistantMessage?.turnId === active.turnId
         ? materializeInterruptedPiDraftAssistantMessage(session)
         : null;
-    if (
-      status === "completed" &&
-      session.draftAssistantMessage?.turnId === active.turnId
-    ) {
-      session.draftAssistantMessage = null;
+    if (draftMessage && status === "completed") {
+      this.preserveMaterializedSidecarLog(session, draftMessage);
+    } else if (status === "completed") {
+      const userMessage = latestUserMessageWithoutAssistantResponse(
+        session.messages,
+      );
+      if (userMessage) {
+        this.preserveUserSidecarLog(session, userMessage);
+      }
     }
     const turn = session.turns.find((candidate) => candidate.id === active.turnId);
     if (turn) {
@@ -1465,12 +1588,6 @@ export class PiAgentProvider
         null,
       ),
     );
-    this.emit("liveEvent", {
-      type: "turn_completed",
-      sessionId: threadId,
-      turnId: active.turnId,
-      status,
-    });
     if (draftMessage) {
       this.emit("liveEvent", {
         type: "assistant_message_completed",
@@ -1483,7 +1600,56 @@ export class PiAgentProvider
         },
       });
     }
+    this.emit("liveEvent", {
+      type: "turn_completed",
+      sessionId: threadId,
+      turnId: active.turnId,
+      status,
+    });
     this.touch(session);
+  }
+
+  private preserveMaterializedSidecarLog(
+    session: PiSessionState,
+    message: SessionMessage,
+  ): void {
+    const shouldInitializeFingerprint =
+      (session.preservedSidecarMessages?.length ?? 0) === 0;
+    if (shouldInitializeFingerprint) {
+      session.historyFingerprint = null;
+    }
+    const records = session.preservedSidecarMessages ?? [];
+    if (records.some((record) => record.message.id === message.id)) {
+      return;
+    }
+    session.preservedSidecarMessages = [
+      ...records,
+      {
+        message: cloneMessage(message),
+        ...previousUserAnchorForMessage(session.messages, message.id),
+      },
+    ];
+  }
+
+  private preserveUserSidecarLog(
+    session: PiSessionState,
+    message: SessionMessage,
+  ): void {
+    const record = preservedSidecarUserRecordForMessage(
+      session.messages,
+      message.id,
+    );
+    if (!record) {
+      return;
+    }
+    if ((session.preservedSidecarUserMessages?.length ?? 0) === 0) {
+      session.historyFingerprint = null;
+    }
+    const records = session.preservedSidecarUserMessages ?? [];
+    if (records.some((candidate) => candidate.message.id === message.id)) {
+      return;
+    }
+    session.preservedSidecarUserMessages = [...records, record];
   }
 
   private touch(session: PiSessionState): void {
@@ -1520,9 +1686,21 @@ export class PiAgentProvider
           activities?: SessionActivity[];
           turns?: TurnRecord[];
           runtime?: SessionRuntimeSummary | null;
+          historyFingerprint?: string | null;
           archived?: boolean;
           nextSeq?: number;
           draftAssistantMessage?: PiDraftAssistantMessage | null;
+          preservedSidecarMessages?: Array<{
+            message?: SessionMessage;
+            previousUserText?: string | null;
+            previousUserOccurrence?: number | null;
+            previousUserMessage?: SessionMessage | null;
+          }>;
+          preservedSidecarUserMessages?: Array<{
+            message?: SessionMessage;
+            previousUserText?: string | null;
+            previousUserOccurrence?: number | null;
+          }>;
         }>;
       };
       const archivedSessionIds = new Set<string>();
@@ -1542,7 +1720,9 @@ export class PiAgentProvider
           ),
           turns: item.turns ?? [],
           runtime: item.runtime ?? null,
-          historyFingerprint: null,
+          historyFingerprint: typeof item.historyFingerprint === "string"
+            ? item.historyFingerprint
+            : null,
           archived: item.archived === true,
           nextSeq:
             item.nextSeq ??
@@ -1557,6 +1737,45 @@ export class PiAgentProvider
             item.draftAssistantMessage ?? null,
           ),
           pendingCompactionActivityId: null,
+          preservedSidecarMessages: Array.isArray(item.preservedSidecarMessages)
+            ? item.preservedSidecarMessages.flatMap((record) => {
+                if (!record.message) {
+                  return [];
+                }
+                return [{
+                  message: cloneMessage(record.message),
+                  previousUserText:
+                    typeof record.previousUserText === "string"
+                      ? record.previousUserText
+                      : null,
+                  previousUserOccurrence:
+                    typeof record.previousUserOccurrence === "number"
+                      ? record.previousUserOccurrence
+                      : null,
+                  previousUserMessage: record.previousUserMessage
+                    ? cloneMessage(record.previousUserMessage)
+                    : null,
+                }];
+              })
+            : [],
+          preservedSidecarUserMessages: Array.isArray(
+            item.preservedSidecarUserMessages,
+          )
+            ? item.preservedSidecarUserMessages.flatMap((record) => {
+                if (
+                  !record.message ||
+                  typeof record.previousUserText !== "string" ||
+                  typeof record.previousUserOccurrence !== "number"
+                ) {
+                  return [];
+                }
+                return [{
+                  message: cloneMessage(record.message),
+                  previousUserText: record.previousUserText,
+                  previousUserOccurrence: record.previousUserOccurrence,
+                }];
+              })
+            : [],
         };
         normalizeInactivePiSessionState(state);
         restoredSessions.set(state.thread.id, state);
@@ -1619,11 +1838,29 @@ export class PiAgentProvider
         activities: [...session.activities.values()].map(cloneActivity),
         turns: session.turns.map(cloneTurn),
         runtime: cloneRuntime(session.runtime),
+        historyFingerprint: session.historyFingerprint,
         archived: session.archived,
         nextSeq: session.nextSeq,
         draftAssistantMessage: clonePiDraftAssistantMessage(
           session.draftAssistantMessage ?? null,
         ),
+        preservedSidecarMessages: (session.preservedSidecarMessages ?? []).map(
+          (record) => ({
+            message: cloneMessage(record.message),
+            previousUserText: record.previousUserText,
+            previousUserOccurrence: record.previousUserOccurrence,
+            previousUserMessage: record.previousUserMessage
+              ? cloneMessage(record.previousUserMessage)
+              : null,
+          }),
+        ),
+        preservedSidecarUserMessages: (
+          session.preservedSidecarUserMessages ?? []
+        ).map((record) => ({
+          message: cloneMessage(record.message),
+          previousUserText: record.previousUserText,
+          previousUserOccurrence: record.previousUserOccurrence,
+        })),
       })),
     };
     await writeFile(this.statePath, JSON.stringify(payload, null, 2));
@@ -1692,6 +1929,28 @@ export class PiAgentProvider
     this.sessionSummariesByPath.set(summary.path, summary);
     this.sessionSummariesById.set(summary.id, summary);
   }
+}
+
+function piEventQueueFor(session: AgentSession): Promise<unknown> | null {
+  const queue = (session as unknown as { _agentEventQueue?: Promise<unknown> })
+    ._agentEventQueue;
+  if (!queue || typeof queue.then !== "function") {
+    return null;
+  }
+  return queue;
+}
+
+async function waitForPiEventQueueToDrain(
+  eventQueue: Promise<unknown>,
+): Promise<boolean> {
+  return Promise.race([
+    settlePiEventQueue(eventQueue).then(() => true),
+    sleep(PI_EVENT_QUEUE_DRAIN_TIMEOUT_MS).then(() => false),
+  ]);
+}
+
+async function settlePiEventQueue(eventQueue: Promise<unknown>): Promise<void> {
+  await eventQueue.catch(() => undefined);
 }
 
 function runtimeFromLoadedSession(
@@ -1812,6 +2071,7 @@ function parsePiSessionHistory(
 ): {
   messages: SessionMessage[];
   activities: SessionActivity[];
+  nonFinalAssistantMessageIds: Set<string>;
   runtime: SessionRuntimeSummary | null;
   nextSeq: number;
   threadName: string | null;
@@ -1821,6 +2081,7 @@ function parsePiSessionHistory(
   const messages: SessionMessage[] = [];
   const activities = new Map<string, SessionActivity>();
   const toolCalls = new Map<string, { toolName: string; args: unknown }>();
+  const nonFinalAssistantMessageIds = new Set<string>();
   let runtime: SessionRuntimeSummary | null = null;
   let seq = 0;
   let threadName = sessionManager.getSessionName() ?? null;
@@ -1945,6 +2206,10 @@ function parsePiSessionHistory(
       const text = extractPiMessageText(message);
       const blocks = extractPiMessageContentBlocks(message);
       const errorMessage = stringValue(message.errorMessage);
+      const stopReason = stringValue(message.stopReason);
+      if (errorMessage || isNonFinalPiAssistantStopReason(stopReason)) {
+        nonFinalAssistantMessageIds.add(entry.id);
+      }
       if (text || errorMessage || blocks.length > 0) {
         const derivedBlocks = blocks.length > 0
           ? blocks
@@ -2029,6 +2294,7 @@ function parsePiSessionHistory(
   return {
     messages,
     activities: [...activities.values()].sort((left, right) => left.seq - right.seq),
+    nonFinalAssistantMessageIds,
     runtime,
     nextSeq: seq,
     threadName,
@@ -2214,6 +2480,16 @@ function inferPiToolSemantic(
         targets: [],
       };
   }
+}
+
+function isNonFinalPiAssistantStopReason(
+  stopReason: string | null | undefined,
+): boolean {
+  return (
+    stopReason === "toolUse" ||
+    stopReason === "error" ||
+    stopReason === "aborted"
+  );
 }
 
 function bashExecutionToActivity(
@@ -2407,6 +2683,411 @@ function hasPiDraftAssistantContent(draft: PiDraftAssistantMessage): boolean {
       (block.type === "text" && block.text.trim().length > 0) ||
       (block.type === "thinking" && block.thinking.trim().length > 0),
   );
+}
+
+function previousUserAnchorForMessage(
+  messages: SessionMessage[],
+  messageId: string,
+): Pick<
+  PiPreservedSidecarMessage,
+  "previousUserText" | "previousUserOccurrence" | "previousUserMessage"
+> {
+  const index = messages.findIndex((message) => message.id === messageId);
+  if (index === -1) {
+    return {
+      previousUserText: null,
+      previousUserOccurrence: null,
+      previousUserMessage: null,
+    };
+  }
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const message = messages[cursor];
+    if (message?.role === "user") {
+      const text = message.text.trim();
+      let occurrence = 0;
+      for (let prior = 0; prior < cursor; prior += 1) {
+        const priorMessage = messages[prior];
+        if (priorMessage?.role === "user" && priorMessage.text.trim() === text) {
+          occurrence += 1;
+        }
+      }
+      return {
+        previousUserText: text,
+        previousUserOccurrence: occurrence,
+        previousUserMessage: cloneMessage(message),
+      };
+    }
+  }
+  return {
+    previousUserText: null,
+    previousUserOccurrence: null,
+    previousUserMessage: null,
+  };
+}
+
+function latestUserMessageWithoutAssistantResponse(
+  messages: SessionMessage[],
+): SessionMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message) {
+      continue;
+    }
+    if (message.role === "assistant") {
+      return null;
+    }
+    if (message.role === "user") {
+      return message;
+    }
+  }
+  return null;
+}
+
+function preservedSidecarUserRecordForMessage(
+  messages: SessionMessage[],
+  messageId: string,
+): PiPreservedSidecarUserMessage | null {
+  const index = messages.findIndex((message) => message.id === messageId);
+  const message = messages[index];
+  if (!message || message.role !== "user") {
+    return null;
+  }
+  const text = message.text.trim();
+  let occurrence = 0;
+  for (let prior = 0; prior < index; prior += 1) {
+    const priorMessage = messages[prior];
+    if (priorMessage?.role === "user" && priorMessage.text.trim() === text) {
+      occurrence += 1;
+    }
+  }
+  return {
+    message: cloneMessage(message),
+    previousUserText: text,
+    previousUserOccurrence: occurrence,
+  };
+}
+
+function mergePreservedSidecarMessages(
+  parsedMessages: SessionMessage[],
+  parsedActivities: SessionActivity[],
+  nonFinalAssistantMessageIds: ReadonlySet<string>,
+  preservedSidecarMessages: PiPreservedSidecarMessage[],
+  preservedSidecarUserMessages: PiPreservedSidecarUserMessage[],
+): {
+  messages: SessionMessage[];
+  activities: SessionActivity[];
+  preservedSidecarMessages: PiPreservedSidecarMessage[];
+  preservedSidecarUserMessages: PiPreservedSidecarUserMessage[];
+  nextSeq: number;
+} {
+  const messages = parsedMessages.map(cloneMessage);
+  const activities = parsedActivities.map(cloneActivity);
+  const preservedUsers = mergePreservedSidecarUserMessages(
+    messages,
+    activities,
+    preservedSidecarUserMessages,
+  );
+  const preserved: PiPreservedSidecarMessage[] = [];
+  for (const record of preservedSidecarMessages) {
+    const anchoredRecord = ensurePreservedSidecarUser(
+      messages,
+      activities,
+      record,
+    );
+    if (
+      hasPiAssistantReplacement(
+        messages,
+        nonFinalAssistantMessageIds,
+        anchoredRecord,
+      )
+    ) {
+      continue;
+    }
+    const insertion = preservedSidecarInsertion(
+      messages,
+      activities,
+      anchoredRecord,
+    );
+    const seq = insertion.seq;
+    for (const message of messages) {
+      if (message.seq >= seq) {
+        message.seq += 1;
+      }
+    }
+    for (const activity of activities) {
+      if (activity.seq >= seq) {
+        activity.seq += 1;
+      }
+    }
+    const message = {
+      ...cloneMessage(record.message),
+      seq,
+    };
+    messages.splice(insertion.insertAt, 0, message);
+    preserved.push({
+      message: cloneMessage(message),
+      previousUserText: record.previousUserText,
+      previousUserOccurrence: record.previousUserOccurrence,
+      previousUserMessage: record.previousUserMessage
+        ? cloneMessage(record.previousUserMessage)
+        : null,
+    });
+  }
+  const nextSeq = Math.max(
+    0,
+    ...messages.map((message) => message.seq + 1),
+    ...activities.map((activity) => activity.seq + 1),
+  );
+  return {
+    messages,
+    activities,
+    preservedSidecarMessages: preserved,
+    preservedSidecarUserMessages: preservedUsers,
+    nextSeq,
+  };
+}
+
+function mergePreservedSidecarUserMessages(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+  records: PiPreservedSidecarUserMessage[],
+): PiPreservedSidecarUserMessage[] {
+  const preserved: PiPreservedSidecarUserMessage[] = [];
+  for (const record of records) {
+    if (findPreservedSidecarUserIndex(messages, record) !== -1) {
+      continue;
+    }
+    preserved.push(
+      insertPreservedSidecarUserMessage(messages, activities, record),
+    );
+  }
+  return preserved;
+}
+
+function ensurePreservedSidecarUser(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+  record: PiPreservedSidecarMessage,
+): PiPreservedSidecarMessage {
+  if (
+    findPreservedSidecarUserIndex(messages, record) !== -1 ||
+    !record.previousUserMessage
+  ) {
+    return record;
+  }
+  const inserted = insertPreservedSidecarUserMessage(messages, activities, {
+    message: record.previousUserMessage,
+    previousUserText: record.previousUserMessage.text.trim(),
+    previousUserOccurrence: 0,
+  });
+  return {
+    ...record,
+    previousUserText: inserted.previousUserText,
+    previousUserOccurrence: inserted.previousUserOccurrence,
+    previousUserMessage: cloneMessage(inserted.message),
+  };
+}
+
+function insertPreservedSidecarUserMessage(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+  record: PiPreservedSidecarUserMessage,
+): PiPreservedSidecarUserMessage {
+  const seq = preservedSidecarUserInsertionSeq(
+    messages,
+    activities,
+    record.message,
+  );
+  shiftTranscriptSeqsAtOrAfter(messages, activities, seq);
+  const message = {
+    ...cloneMessage(record.message),
+    seq,
+  };
+  const insertAt = messages.findIndex((candidate) => candidate.seq >= seq);
+  messages.splice(insertAt === -1 ? messages.length : insertAt, 0, message);
+  return (
+    preservedSidecarUserRecordForMessage(messages, message.id) ?? {
+      message: cloneMessage(message),
+      previousUserText: record.previousUserText,
+      previousUserOccurrence: record.previousUserOccurrence,
+    }
+  );
+}
+
+function preservedSidecarUserInsertionSeq(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+  message: SessionMessage,
+): number {
+  const nextSeq = maxTranscriptNextSeq(messages, activities);
+  if (!Number.isFinite(message.seq)) {
+    return nextSeq;
+  }
+  return Math.min(Math.max(0, Math.trunc(message.seq)), nextSeq);
+}
+
+function maxTranscriptNextSeq(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+): number {
+  return Math.max(
+    0,
+    ...messages.map((message) => message.seq + 1),
+    ...activities.map((activity) => activity.seq + 1),
+  );
+}
+
+function shiftTranscriptSeqsAtOrAfter(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+  seq: number,
+): void {
+  for (const message of messages) {
+    if (message.seq >= seq) {
+      message.seq += 1;
+    }
+  }
+  for (const activity of activities) {
+    if (activity.seq >= seq) {
+      activity.seq += 1;
+    }
+  }
+}
+
+function hasPiAssistantReplacement(
+  messages: SessionMessage[],
+  nonFinalAssistantMessageIds: ReadonlySet<string>,
+  record: PiPreservedSidecarMessage,
+): boolean {
+  const userIndex = findPreservedSidecarUserIndex(
+    messages,
+    record,
+  );
+  if (userIndex === -1) {
+    return false;
+  }
+  const nextUserSeq = nextUserMessageSeq(messages, userIndex);
+  for (let index = userIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message || message.role === "user") {
+      return false;
+    }
+    if (
+      message.role === "assistant" &&
+      message.text.trim().length > 0 &&
+      !nonFinalAssistantMessageIds.has(message.id)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function preservedSidecarInsertion(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+  record: PiPreservedSidecarMessage,
+): { insertAt: number; seq: number } {
+  const userIndex = findPreservedSidecarUserIndex(messages, record);
+  if (userIndex === -1) {
+    const seq = Math.max(
+      0,
+      ...messages.map((message) => message.seq + 1),
+      ...activities.map((activity) => activity.seq + 1),
+    );
+    return {
+      insertAt: messages.length,
+      seq,
+    };
+  }
+  const userSeq = messages[userIndex]?.seq ?? -1;
+  const nextUserSeq = nextUserMessageSeq(messages, userIndex);
+  let lastTurnSeq = userSeq;
+  for (const message of messages) {
+    if (
+      message.seq > userSeq &&
+      (nextUserSeq === null || message.seq < nextUserSeq)
+    ) {
+      lastTurnSeq = Math.max(lastTurnSeq, message.seq);
+    }
+  }
+  for (const activity of activities) {
+    if (
+      activity.seq > userSeq &&
+      (nextUserSeq === null || activity.seq < nextUserSeq)
+    ) {
+      lastTurnSeq = Math.max(lastTurnSeq, activity.seq);
+    }
+  }
+  const seq = lastTurnSeq + 1;
+  const insertAt = messages.findIndex((message) => message.seq >= seq);
+  return {
+    insertAt: insertAt === -1 ? messages.length : insertAt,
+    seq,
+  };
+}
+
+function findPreservedSidecarUserIndex(
+  messages: SessionMessage[],
+  record: {
+    previousUserText: string | null;
+    previousUserOccurrence: number | null;
+    previousUserMessage?: SessionMessage | null;
+    message?: SessionMessage;
+  },
+): number {
+  if (record.previousUserText === null) {
+    return -1;
+  }
+  const anchorCreatedAt =
+    record.previousUserMessage?.createdAt ?? record.message?.createdAt ?? null;
+  let occurrence = 0;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (
+      message?.role !== "user" ||
+      message.text.trim() !== record.previousUserText
+    ) {
+      continue;
+    }
+    if (!isPlausiblePreservedSidecarUserMatch(message, anchorCreatedAt)) {
+      continue;
+    }
+    if (
+      record.previousUserOccurrence === null ||
+      occurrence === record.previousUserOccurrence
+    ) {
+      return index;
+    }
+    occurrence += 1;
+  }
+  return -1;
+}
+
+function isPlausiblePreservedSidecarUserMatch(
+  message: SessionMessage,
+  anchorCreatedAt: number | null,
+): boolean {
+  if (anchorCreatedAt == null) {
+    return true;
+  }
+  return (
+    message.createdAt <=
+    anchorCreatedAt + PI_SIDECAR_USER_MATCH_TOLERANCE_MS
+  );
+}
+
+function nextUserMessageSeq(
+  messages: SessionMessage[],
+  userIndex: number,
+): number | null {
+  for (let index = userIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message?.role === "user") {
+      return message.seq;
+    }
+  }
+  return null;
 }
 
 function cloneSessionMessageContentBlocks(
@@ -3092,6 +3773,25 @@ function latestPreviewMessage(messages: SessionMessage[]): string | null {
     }
   }
   return null;
+}
+
+function latestThreadUpdatedAt(
+  summaryUpdatedAt: number,
+  currentUpdatedAt: number,
+  messages: SessionMessage[],
+): number {
+  let latest = Math.max(summaryUpdatedAt, currentUpdatedAt);
+  for (const message of messages) {
+    latest = Math.max(latest, messageCreatedAtSeconds(message.createdAt));
+  }
+  return latest;
+}
+
+function messageCreatedAtSeconds(createdAt: number): number {
+  const timestamp = Math.trunc(createdAt);
+  return timestamp >= 1_000_000_000_000
+    ? Math.trunc(timestamp / 1000)
+    : timestamp;
 }
 
 function parseExitCode(output: string | null): number | null {
