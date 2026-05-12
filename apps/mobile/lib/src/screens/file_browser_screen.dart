@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api_client.dart';
 import '../fs_models.dart';
@@ -49,6 +50,34 @@ class _FileBrowserTreeState extends State<FileBrowserTree> {
   WorkspaceLiveHandle? _live;
   final _changed = <String>{};
   StreamSubscription<FsChangeEvent>? _sub;
+
+  bool _selectionMode = false;
+  final Set<String> _selectedPaths = {};
+
+  void _enterSelection(String path) {
+    setState(() {
+      _selectionMode = true;
+      _selectedPaths.add(path);
+    });
+  }
+
+  void _toggleSelection(String path) {
+    setState(() {
+      if (_selectedPaths.contains(path)) {
+        _selectedPaths.remove(path);
+        if (_selectedPaths.isEmpty) _selectionMode = false;
+      } else {
+        _selectedPaths.add(path);
+      }
+    });
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selectionMode = false;
+      _selectedPaths.clear();
+    });
+  }
 
   @override
   void initState() {
@@ -104,22 +133,46 @@ class _FileBrowserTreeState extends State<FileBrowserTree> {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 24),
+    return Column(
       children: [
-        _DirectoryNode(
-          host: widget.host,
-          api: widget.api,
-          path: widget.root,
-          agentProvider: widget.agentProvider,
-          sessionId: widget.sessionId,
-          depth: 0,
-          initiallyExpanded: true,
-          changedPaths: _changed,
-          selectedPath: widget.selectedPath,
-          onOpenFile: _open,
-          onEntryChanged: (p) => setState(() => _changed.remove(p)),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(8, 6, 8, 24),
+            children: [
+              _DirectoryNode(
+                host: widget.host,
+                api: widget.api,
+                path: widget.root,
+                agentProvider: widget.agentProvider,
+                sessionId: widget.sessionId,
+                depth: 0,
+                initiallyExpanded: true,
+                changedPaths: _changed,
+                selectedPath: widget.selectedPath,
+                onOpenFile: _open,
+                onEntryChanged: (p) => setState(() => _changed.remove(p)),
+                selectionMode: _selectionMode,
+                selectedPaths: _selectedPaths,
+                onLongPressFile: _enterSelection,
+                onTapFileInSelection: _toggleSelection,
+              ),
+            ],
+          ),
         ),
+        if (_selectionMode)
+          _SelectionBar(
+            selectedCount: _selectedPaths.length,
+            selectedPaths: _selectedPaths,
+            onCopyPaths: () {
+              final text = _selectedPaths.join('\n');
+              Clipboard.setData(ClipboardData(text: text));
+              _exitSelection();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Paths copied')),
+              );
+            },
+            onCancel: _exitSelection,
+          ),
       ],
     );
   }
@@ -222,6 +275,10 @@ class _DirectoryNode extends StatefulWidget {
     required this.onEntryChanged,
     this.initiallyExpanded = false,
     this.selectedPath,
+    this.selectionMode = false,
+    this.selectedPaths,
+    this.onLongPressFile,
+    this.onTapFileInSelection,
   });
 
   final HostProfile host;
@@ -235,6 +292,10 @@ class _DirectoryNode extends StatefulWidget {
   final String? selectedPath;
   final void Function(String path) onOpenFile;
   final void Function(String path) onEntryChanged;
+  final bool selectionMode;
+  final Set<String>? selectedPaths;
+  final void Function(String path)? onLongPressFile;
+  final void Function(String path)? onTapFileInSelection;
 
   @override
   State<_DirectoryNode> createState() => _DirectoryNodeState();
@@ -313,10 +374,20 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
           Padding(
             padding: EdgeInsets.fromLTRB(indent + 22, 4, 8, 8),
             child: Text(
-              friendlyError(_error!),
+              'Could not load: ${friendlyError(_error!)}',
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: colors.danger),
+            ),
+          ),
+        if (_expanded && _listing != null && _listing!.entries.isEmpty)
+          Padding(
+            padding: EdgeInsets.fromLTRB(indent + 22, 8, 8, 8),
+            child: Text(
+              'No files here.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
             ),
           ),
         if (_expanded && _listing != null)
@@ -333,6 +404,10 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
                 selectedPath: widget.selectedPath,
                 onOpenFile: widget.onOpenFile,
                 onEntryChanged: widget.onEntryChanged,
+                selectionMode: widget.selectionMode,
+                selectedPaths: widget.selectedPaths,
+                onLongPressFile: widget.onLongPressFile,
+                onTapFileInSelection: widget.onTapFileInSelection,
               );
             }
             return _Row(
@@ -341,11 +416,19 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
               iconColor: colors.textSecondary,
               title: entry.name,
               modified: widget.changedPaths.contains(entry.path),
-              selected: widget.selectedPath == entry.path,
-              onTap: () {
-                widget.onEntryChanged(entry.path);
-                widget.onOpenFile(entry.path);
-              },
+              selected: widget.selectionMode
+                  ? (widget.selectedPaths?.contains(entry.path) ?? false)
+                  : widget.selectedPath == entry.path,
+              selectionMode: widget.selectionMode,
+              onTap: widget.selectionMode
+                  ? () => widget.onTapFileInSelection?.call(entry.path)
+                  : () {
+                      widget.onEntryChanged(entry.path);
+                      widget.onOpenFile(entry.path);
+                    },
+              onLongPress: widget.selectionMode
+                  ? null
+                  : () => widget.onLongPressFile?.call(entry.path),
             );
           }),
       ],
@@ -363,6 +446,8 @@ class _Row extends StatelessWidget {
     this.trailing,
     this.modified = false,
     this.selected = false,
+    this.selectionMode = false,
+    this.onLongPress,
   });
 
   final double indent;
@@ -373,45 +458,74 @@ class _Row extends StatelessWidget {
   final Widget? trailing;
   final bool modified;
   final bool selected;
+  final bool selectionMode;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Material(
-      color: selected ? colors.accentMuted : Colors.transparent,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
-        onTap: onTap,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: colors.border.withValues(alpha: 0.5),
+            width: 0.5,
+          ),
+        ),
+      ),
+      child: Material(
+        color: selected && !selectionMode
+            ? colors.accentMuted
+            : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(indent + 8, 6, 8, 6),
-          child: Row(
-            children: [
-              Icon(icon, size: 16, color: iconColor),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(indent + 8, 6, 8, 6),
+            child: Row(
+              children: [
+                if (selectionMode)
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: Checkbox(
+                      value: selected,
+                      onChanged: (_) => onTap(),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  )
+                else
+                  Icon(icon, size: 16, color: iconColor),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: selected && !selectionMode
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                    ),
                   ),
                 ),
-              ),
-              if (modified) ...[
-                const SizedBox(width: 6),
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: colors.accent,
-                    shape: BoxShape.circle,
+                if (modified) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: colors.accent,
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                ),
+                ],
+                if (trailing != null) ...[const SizedBox(width: 6), trailing!],
               ],
-              if (trailing != null) ...[const SizedBox(width: 6), trailing!],
-            ],
+            ),
           ),
         ),
       ),
@@ -425,4 +539,55 @@ String _baseName(String path) {
       : path;
   final idx = trimmed.lastIndexOf('/');
   return idx >= 0 ? trimmed.substring(idx + 1) : trimmed;
+}
+
+class _SelectionBar extends StatelessWidget {
+  const _SelectionBar({
+    required this.selectedCount,
+    required this.selectedPaths,
+    required this.onCopyPaths,
+    required this.onCancel,
+  });
+
+  final int selectedCount;
+  final Set<String> selectedPaths;
+  final VoidCallback onCopyPaths;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(top: BorderSide(color: colors.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            Text(
+              '$selectedCount selected',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                fontWeight: AppWeights.emphasis,
+                color: colors.textPrimary,
+              ),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: onCopyPaths,
+              icon: const Icon(Icons.copy_rounded, size: 16),
+              label: const Text('Copy path'),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: onCancel,
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
