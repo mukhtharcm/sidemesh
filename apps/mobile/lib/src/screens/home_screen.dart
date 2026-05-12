@@ -1309,13 +1309,30 @@ class _RecentPaneState extends State<RecentPane> {
         widget.query.trim() != query) {
       return;
     }
-    results.sort(_compareSearchEntryRank);
+    final dedupedResults = _dedupeSearchEntries(results)..sort(_compareSearchEntryRank);
 
     setState(() {
-      _searchEntries = results;
+      _searchEntries = dedupedResults;
       _searchFailedHostLabels = failedHostLabels.toSet().toList()..sort();
       _searchLoading = false;
     });
+  }
+
+  List<RemoteSessionEntry> _dedupeSearchEntries(List<RemoteSessionEntry> entries) {
+    final bestByKey = <String, RemoteSessionEntry>{};
+    for (final entry in entries) {
+      final key = _searchDedupKey(entry);
+      final existing = bestByKey[key];
+      if (existing == null || _compareSearchEntryRank(entry, existing) < 0) {
+        bestByKey[key] = entry;
+      }
+    }
+    return bestByKey.values.toList(growable: false);
+  }
+
+  String _searchDedupKey(RemoteSessionEntry entry) {
+    final session = entry.session;
+    return [session.provider ?? '', session.id].join('\n');
   }
 
   int _compareSearchEntryRank(

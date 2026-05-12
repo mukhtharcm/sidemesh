@@ -455,11 +455,11 @@ export class MultiAgentProvider
   }
 }
 
-function wrapProviderScopedId(kind: AgentProviderKind, rawId: string): string {
+export function wrapProviderScopedId(kind: AgentProviderKind, rawId: string): string {
   return `${kind}:${Buffer.from(rawId, "utf8").toString("base64url")}`;
 }
 
-function unwrapProviderScopedId(
+export function unwrapProviderScopedId(
   value: string,
 ): { kind: AgentProviderKind; rawId: string } | null {
   const separator = value.indexOf(":");

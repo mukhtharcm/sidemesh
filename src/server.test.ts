@@ -4201,12 +4201,14 @@ describe("GET /api/sessions/search", () => {
 
       const searchRes = await request({
         ...baseRequest,
-        path: `/api/sessions/search?q=${encodeURIComponent("seed")}`,
+        path: `/api/sessions/search?q=${encodeURIComponent("walkthrough")}`,
         method: "GET",
       });
       assert.equal(searchRes.statusCode, 200);
       const results = searchRes.body as any[];
-      assert.ok(results.length >= 1, "expected at least one seeded session");
+      assert.equal(results.length, 2);
+      assert.ok(results.some((session) => String(session.id).startsWith("fake:")));
+      assert.ok(results.some((session) => String(session.id).startsWith("codex:")));
       for (const session of results) {
         assert.ok(session.id.includes(":"), `expected namespaced ID: ${session.id}`);
       }
