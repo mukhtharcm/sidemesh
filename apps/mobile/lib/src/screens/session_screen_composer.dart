@@ -109,6 +109,15 @@ class _ComposerState extends State<_Composer> {
   }
 
   @override
+  void dispose() {
+    if (_overlayShowing) {
+      _overlayController.hide();
+      _overlayShowing = false;
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final showSuggestions =
         (widget.supportsSkillInput && widget.activeSkillQuery != null) ||
