@@ -500,6 +500,27 @@ export async function startServer(
     return observedStatus;
   }
 
+  async function shouldTrackProviderTurn(
+    agentProvider: AgentProvider,
+    sessionId: string,
+    turnId: string | null | undefined,
+  ): Promise<boolean> {
+    if (!turnId) {
+      return false;
+    }
+    const observedStatus = latestThreadStatusForSession(sessionId);
+    const state = await loadFastRunState(
+      agentProvider,
+      sessionId,
+      new Map<string, ActiveTurnState>(),
+      isRunningThreadStatus(observedStatus) ? observedStatus : null,
+    );
+    if (state.isRunning) {
+      return state.turnId == null || state.turnId === turnId;
+    }
+    return !(await providerReportsTerminalTurn(agentProvider, sessionId, turnId));
+  }
+
   function persistSessionRuntimeSignalsEventually(): void {
     sessionRuntimeSignalsSaveChain = sessionRuntimeSignalsSaveChain
       .catch(() => undefined)
@@ -2530,9 +2551,15 @@ export async function startServer(
         overrides,
         provider: selectedProvider.kind,
       });
-      if (started.activeTurnId) {
+      if (
+        await shouldTrackProviderTurn(
+          provider,
+          started.thread.id,
+          started.activeTurnId,
+        )
+      ) {
         activeTurns.set(started.thread.id, {
-          turnId: started.activeTurnId,
+          turnId: started.activeTurnId!,
           startedAt: Date.now(),
         });
         setLatestThreadStatusForSession(
@@ -2696,12 +2723,18 @@ export async function startServer(
           activeTurnId: state.turnId,
           overrides: turnOverrides,
         });
-        if (submitted.turnId) {
+        if (
+          await shouldTrackProviderTurn(
+            provider,
+            sessionId,
+            submitted.turnId,
+          )
+        ) {
           const previousStartedAt = state.turnId
             ? activeTurns.get(sessionId)?.startedAt
             : undefined;
           activeTurns.set(sessionId, {
-            turnId: submitted.turnId,
+            turnId: submitted.turnId!,
             startedAt: previousStartedAt ?? Date.now(),
           });
           setLatestThreadStatusForSession(
@@ -3938,10 +3971,7 @@ async function loadRunState(
     }
     session = await readSession(provider, sessionId, true);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    if (
-      message.includes("includeTurns is unavailable before first user message")
-    ) {
+    if (isTransientTurnSnapshotReadError(error)) {
       return { turnId: null };
     }
     throw error;
@@ -3998,15 +4028,37 @@ async function loadFastRunState(
       }
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    if (
-      message.includes("includeTurns is unavailable before first user message")
-    ) {
+    if (isTransientTurnSnapshotReadError(error)) {
       return { status, isRunning: false, turnId: null };
     }
     throw error;
   }
   return { status, isRunning: false, turnId: null };
+}
+
+async function providerReportsTerminalTurn(
+  provider: AgentProvider,
+  sessionId: string,
+  turnId: string,
+): Promise<boolean> {
+  if (!hasProviderMethod(provider, "readSessionThread")) {
+    return false;
+  }
+  let session: ThreadRecord;
+  try {
+    session = await readSession(provider, sessionId, true);
+  } catch (error) {
+    if (isTransientTurnSnapshotReadError(error)) {
+      return false;
+    }
+    throw error;
+  }
+  const turns = Array.isArray(session.turns) ? session.turns : [];
+  const turn = turns.find((candidate) => candidate.id === turnId);
+  if (!turn) {
+    return false;
+  }
+  return turn.completedAt != null || isTerminalTurnStatus(turn.status);
 }
 
 async function isThreadLoaded(
@@ -4402,6 +4454,27 @@ async function loadCachedSessionRuntime(
 
 function isActiveTurnStatus(status: string | null | undefined): boolean {
   return status === "inProgress" || status === "in_progress";
+}
+
+function isTransientTurnSnapshotReadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return (
+    message.includes("includeturns is unavailable before first user message") ||
+    message.includes("rollout file not found") ||
+    (message.includes("rollout") && message.includes("is empty"))
+  );
+}
+
+function isTerminalTurnStatus(status: string | null | undefined): boolean {
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "interrupted" ||
+    status === "error" ||
+    status === "errored" ||
+    status === "cancelled" ||
+    status === "canceled"
+  );
 }
 
 function isActiveThread(thread: ThreadRecord): boolean {
