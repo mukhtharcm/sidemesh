@@ -1,10 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import http from "node:http";
+import { createServer as createNetServer } from "node:net";
 
 import { WebSocket } from "ws";
 
@@ -31,6 +33,7 @@ import type {
   AgentProviderCapabilities,
   AgentSessionListOptions,
   AgentSessionLogOptions,
+  AgentSessionInputItem,
   AgentSubmitInputRequest,
   AgentSubmitInputResult,
 } from "./agent-provider.js";
@@ -136,6 +139,49 @@ function request(options: http.RequestOptions & { body?: string }): Promise<{
     if (options.body) req.write(options.body);
     req.end();
   });
+}
+
+async function writeLegacyDedupeReceipt(
+  stateDir: string,
+  key: string,
+  signatureHash: string,
+  receipt: { mode: string; turnId: string | null; messageId: string },
+): Promise<void> {
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(
+    nodePath.join(stateDir, "session-input-dedupe-v1.json"),
+    JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          key,
+          signatureHash,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          receipt,
+        },
+      ],
+    }),
+    "utf8",
+  );
+}
+
+function legacyInputSignature(input: AgentSessionInputItem[]): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        input,
+        overrides: {
+          model: null,
+          reasoningEffort: null,
+          fastMode: null,
+          approvalPolicy: null,
+          sandboxMode: null,
+          networkAccess: null,
+        },
+      }),
+    )
+    .digest("hex");
 }
 
 async function withServer(config: NodeConfig, fn: (server: RunningServer, config: NodeConfig) => Promise<void>): Promise<void> {
@@ -301,8 +347,9 @@ class RestartableFakeProvider
   implements AgentProvider
 {
   public readonly kind = "fake";
-  public readonly displayName = "Restartable Fake Test Provider";
-  public readonly capabilities = RESTARTABLE_FAKE_CAPABILITIES;
+  public readonly displayName: string = "Restartable Fake Test Provider";
+  public readonly capabilities: AgentProviderCapabilities =
+    RESTARTABLE_FAKE_CAPABILITIES;
 
   private readonly sessionId = "fake-restart-session";
   private readonly initialTurnId = "fake-restart-turn";
@@ -312,9 +359,19 @@ class RestartableFakeProvider
   private restarted = false;
   private currentTurnId: string | null = null;
   private submitCount = 0;
+  private createInput: AgentSessionInputItem[] | null = null;
+  private submitInputItems: AgentSessionInputItem[] | null = null;
 
   public get submittedInputs(): number {
     return this.submitCount;
+  }
+
+  public get lastCreateInput(): AgentSessionInputItem[] | null {
+    return this.createInput;
+  }
+
+  public get lastSubmitInput(): AgentSessionInputItem[] | null {
+    return this.submitInputItems;
   }
 
   public async start(): Promise<void> {}
@@ -336,6 +393,7 @@ class RestartableFakeProvider
     this.created = true;
     this.restarted = false;
     this.cwd = request.cwd;
+    this.createInput = request.input;
     this.currentTurnId = this.initialTurnId;
     const action: AgentPendingAction = {
       id: this.actionId,
@@ -372,6 +430,7 @@ class RestartableFakeProvider
     request: AgentSubmitInputRequest,
   ): Promise<AgentSubmitInputResult> {
     assert.equal(request.sessionId, this.sessionId);
+    this.submitInputItems = request.input;
     this.submitCount += 1;
     this.restarted = false;
     if (request.activeTurnId) {
@@ -462,6 +521,29 @@ class RestartableFakeProvider
           }
         : {}),
     };
+  }
+}
+
+const NO_FILE_MENTION_CAPABILITIES: AgentProviderCapabilities = {
+  ...RESTARTABLE_FAKE_CAPABILITIES,
+  input: {
+    ...RESTARTABLE_FAKE_CAPABILITIES.input,
+    fileMentions: false,
+  },
+};
+
+class NoFileMentionProvider extends RestartableFakeProvider {
+  public override readonly displayName = "No File Mention Provider";
+  public override readonly capabilities = NO_FILE_MENTION_CAPABILITIES;
+}
+
+class SlowReadFakeProvider extends RestartableFakeProvider {
+  public override async readSessionThread(
+    threadId: string,
+    includeTurns: boolean,
+  ): Promise<ThreadRecord> {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return super.readSessionThread(threadId, includeTurns);
   }
 }
 
@@ -842,6 +924,399 @@ describe("/healthz", () => {
     }
   });
 
+});
+
+describe("session input item parsing", () => {
+  async function prepareFileInputWorkspace(stateDir: string): Promise<string> {
+    const cwd = nodePath.join(stateDir, "workspace");
+    await mkdir(nodePath.join(cwd, "src"), { recursive: true });
+    await writeFile(nodePath.join(cwd, "README.md"), "readme\n", "utf8");
+    await writeFile(nodePath.join(cwd, "package.json"), "{}\n", "utf8");
+    return cwd;
+  }
+
+  it("passes file input items through create and submit routes", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd,
+          input: [
+            { type: "file", path: "README.md" },
+            { type: "file", path: "src", isDirectory: true },
+            { type: "text", text: "inspect these files" },
+          ],
+        }),
+      });
+      assert.equal(created.statusCode, 201);
+      assert.deepEqual(provider.lastCreateInput, [
+        { type: "file", path: nodePath.join(cwd, "README.md") },
+        { type: "file", path: nodePath.join(cwd, "src"), isDirectory: true },
+        { type: "text", text: "inspect these files", text_elements: [] },
+      ]);
+
+      const sessionId = (created.body as any).session.id as string;
+      const submitted = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          input: [
+            { type: "file", path: "package.json" },
+            { type: "text", text: "now inspect this manifest" },
+          ],
+        }),
+      });
+      assert.equal(submitted.statusCode, 200);
+      assert.deepEqual(provider.lastSubmitInput, [
+        { type: "file", path: nodePath.join(cwd, "package.json") },
+        { type: "text", text: "now inspect this manifest", text_elements: [] },
+      ]);
+    });
+  });
+
+  it("derives file input directory metadata from the filesystem", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd,
+          input: [
+            { type: "file", path: "README.md", isDirectory: true },
+            { type: "file", path: "src" },
+          ],
+        }),
+      });
+      assert.equal(res.statusCode, 201);
+      assert.deepEqual(provider.lastCreateInput, [
+        { type: "file", path: nodePath.join(cwd, "README.md") },
+        { type: "file", path: nodePath.join(cwd, "src"), isDirectory: true },
+      ]);
+    });
+  });
+
+  it("replays deduped file input retries without resolving moved files", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd,
+          prompt: "start",
+        }),
+      });
+      assert.equal(created.statusCode, 201);
+      const sessionId = (created.body as any).session.id as string;
+      const body = {
+        clientMessageId: "file-retry-1",
+        input: [
+          { type: "file", path: "package.json" },
+          { type: "text", text: "retry this file mention" },
+        ],
+      };
+
+      const first = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      assert.equal(first.statusCode, 200);
+      assert.equal((first.body as any).replayed, false);
+      assert.equal(provider.submittedInputs, 1);
+
+      await rm(nodePath.join(cwd, "package.json"));
+      const retry = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      assert.equal(retry.statusCode, 200);
+      assert.equal((retry.body as any).replayed, true);
+      assert.equal((retry.body as any).messageId, (first.body as any).messageId);
+      assert.equal(provider.submittedInputs, 1);
+    });
+  });
+
+  it("replays legacy dedupe receipts that ignored file inputs", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const clientMessageId = "legacy-file-retry";
+    const legacyReceipt = {
+      mode: "turn",
+      turnId: "legacy-turn",
+      messageId: "legacy-message",
+    };
+    await writeLegacyDedupeReceipt(
+      stateDir,
+      `fake-restart-session:${clientMessageId}`,
+      legacyInputSignature([
+        {
+          type: "text",
+          text: "legacy retry",
+          text_elements: [],
+        },
+      ]),
+      legacyReceipt,
+    );
+    await rm(nodePath.join(cwd, "package.json"));
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd,
+          prompt: "start",
+        }),
+      });
+      assert.equal(created.statusCode, 201);
+      const sessionId = (created.body as any).session.id as string;
+
+      const retry = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          clientMessageId,
+          input: [
+            { type: "file", path: "package.json" },
+            { type: "text", text: "legacy retry" },
+          ],
+        }),
+      });
+      assert.equal(retry.statusCode, 200);
+      assert.deepEqual(retry.body, {
+        ...legacyReceipt,
+        replayed: true,
+      });
+      assert.equal(provider.submittedInputs, 0);
+    });
+  });
+
+  it("deduplicates concurrent file input retries before file resolution", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const provider = new SlowReadFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd,
+          prompt: "start",
+        }),
+      });
+      assert.equal(created.statusCode, 201);
+      const sessionId = (created.body as any).session.id as string;
+      const body = JSON.stringify({
+        clientMessageId: "file-concurrent-1",
+        input: [
+          { type: "file", path: "package.json" },
+          { type: "text", text: "dedupe this concurrent file mention" },
+        ],
+      });
+      const send = () =>
+        request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "content-type": "application/json",
+          },
+          body,
+        });
+
+      const [first, second] = await Promise.all([send(), send()]);
+      assert.equal(first.statusCode, 200);
+      assert.equal(second.statusCode, 200);
+      assert.deepEqual(
+        [(first.body as any).replayed, (second.body as any).replayed].sort(),
+        [false, true],
+      );
+      assert.equal((first.body as any).messageId, (second.body as any).messageId);
+      assert.equal(provider.submittedInputs, 1);
+    });
+  });
+
+  it("rejects non-regular file input targets inside the workspace", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const socketPath = nodePath.join(cwd, "agent.sock");
+    const socketServer = createNetServer();
+    await new Promise<void>((resolve, reject) => {
+      socketServer.once("error", reject);
+      socketServer.listen(socketPath, resolve);
+    });
+    let socketClosed = false;
+    const closeSocket = async (): Promise<void> => {
+      if (socketClosed) return;
+      socketClosed = true;
+      await new Promise<void>((resolve) => socketServer.close(() => resolve()));
+    };
+    try {
+      const provider = new RestartableFakeProvider();
+      const runtime = makeCustomSingleProviderRuntime(provider);
+      await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+        try {
+          const res = await request({
+            hostname: "127.0.0.1",
+            port: server.port,
+            path: "/api/sessions/create",
+            method: "POST",
+            headers: {
+              Authorization: "Bearer " + config.token,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              cwd,
+              input: [{ type: "file", path: "agent.sock" }],
+            }),
+          });
+          assert.equal(res.statusCode, 400);
+          assert.equal(
+            (res.body as any).error,
+            "file mention path must be a regular file or directory",
+          );
+          assert.equal(provider.lastCreateInput, null);
+        } finally {
+          await closeSocket();
+        }
+      });
+    } finally {
+      await closeSocket();
+    }
+  });
+
+  it("rejects file inputs when the selected provider lacks file mention support", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const provider = new NoFileMentionProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd,
+          prompt: "fallback text must not hide unsupported file input",
+          input: [{ type: "file", path: "README.md" }],
+        }),
+      });
+      assert.equal(res.statusCode, 501);
+      assert.equal(
+        (res.body as any).error,
+        "No File Mention Provider does not support file mentions",
+      );
+      assert.equal(provider.lastCreateInput, null);
+    });
+  });
+
+  it("rejects file inputs outside the session workspace", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const outsidePath = nodePath.join(stateDir, "outside.txt");
+    await writeFile(outsidePath, "outside\n", "utf8");
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd,
+          input: [{ type: "file", path: outsidePath }],
+        }),
+      });
+      assert.equal(res.statusCode, 403);
+      assert.equal((res.body as any).error, "path is outside any workspace");
+      assert.equal(provider.lastCreateInput, null);
+    });
+  });
 });
 
 describe("POST /api/admin/provider/:kind/restart", () => {
