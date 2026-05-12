@@ -184,4 +184,16 @@ describe("searchFiles", () => {
     const results = await searchFiles("foo", []);
     assert.deepStrictEqual(results, []);
   });
+
+  it("deduplicates matches that appear through overlapping roots", async () => {
+    const nested = path.join(tmpDir, "src");
+    await mkdir(nested, { recursive: true });
+    await writeFile(path.join(nested, "server.ts"), "");
+
+    const results = await searchFiles("server", [tmpDir, nested]);
+    const serverMatches = results.filter((result) => result.name === "server.ts");
+
+    assert.equal(serverMatches.length, 1);
+    assert.equal(serverMatches[0]?.path, path.join("src", "server.ts"));
+  });
 });

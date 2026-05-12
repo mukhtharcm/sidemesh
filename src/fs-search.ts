@@ -14,6 +14,7 @@ interface SearchEntry {
   path: string;
   name: string;
   isDirectory: boolean;
+  absolutePath: string;
 }
 
 interface CacheEntry {
@@ -49,7 +50,8 @@ export async function searchFiles(
     allEntries.push(...entries);
   }
 
-  const scored = allEntries
+  const dedupedEntries = dedupeEntries(allEntries);
+  const scored = dedupedEntries
     .map((entry) => ({
       path: entry.isDirectory ? `${entry.path}/` : entry.path,
       name: entry.name,
@@ -61,6 +63,17 @@ export async function searchFiles(
     .slice(0, limit);
 
   return scored;
+}
+
+function dedupeEntries(entries: SearchEntry[]): SearchEntry[] {
+  const deduped = new Map<string, SearchEntry>();
+  for (const entry of entries) {
+    const key = `${entry.absolutePath}\n${entry.isDirectory ? "dir" : "file"}`;
+    if (!deduped.has(key)) {
+      deduped.set(key, entry);
+    }
+  }
+  return [...deduped.values()];
 }
 
 async function walkWithCache(root: string): Promise<SearchEntry[]> {
@@ -102,6 +115,7 @@ async function walkDirectory(root: string): Promise<SearchEntry[]> {
           path: relative,
           name: entry.name,
           isDirectory: true,
+          absolutePath: path.join(dir, entry.name),
         });
         const subIg = await loadGitignore(path.join(dir, entry.name), ig);
         stack.push({ dir: path.join(dir, entry.name), ig: subIg });
@@ -110,6 +124,7 @@ async function walkDirectory(root: string): Promise<SearchEntry[]> {
           path: relative,
           name: entry.name,
           isDirectory: false,
+          absolutePath: path.join(dir, entry.name),
         });
       }
     }
