@@ -24,6 +24,9 @@ const CONSOLE_FLUSH_INTERVAL_MS = 500;
 const CONSOLE_FLUSH_THRESHOLD = 32;
 const MAX_NETWORK_ENTRIES = 300;
 const MAX_WEBSOCKET_MESSAGES_PER_ENTRY = 100;
+const MIN_VIEWPORT_SIZE = 240;
+const MAX_VIEWPORT_WIDTH = 3840;
+const MAX_VIEWPORT_HEIGHT = 2160;
 const INSPECTOR_MAX_CHILDREN = 24;
 const INSPECTOR_MAX_TEXT_PREVIEW = 160;
 const INSPECTOR_COMPUTED_STYLE_NAMES = [
@@ -404,8 +407,16 @@ export class BrowserPreviewRegistry {
     const targetHost = normalizeTargetHost(request.targetHost);
     const targetPort = normalizePort(request.targetPort);
     const scheme = normalizeScheme(request.scheme);
-    const width = normalizeViewportSize(request.width, DEFAULT_WIDTH);
-    const height = normalizeViewportSize(request.height, DEFAULT_HEIGHT);
+    const width = normalizeViewportSize(
+      request.width,
+      DEFAULT_WIDTH,
+      MAX_VIEWPORT_WIDTH,
+    );
+    const height = normalizeViewportSize(
+      request.height,
+      DEFAULT_HEIGHT,
+      MAX_VIEWPORT_HEIGHT,
+    );
     const cwd = request.cwd?.trim() || null;
     const sessionId = request.sessionId?.trim() || null;
     const profileMode = normalizeProfileMode(request.profileMode);
@@ -1027,8 +1038,16 @@ export class BrowserPreviewRegistry {
     if (type === "resize") {
       await this.updatePreviewViewport(
         preview,
-        normalizeViewportSize(message.width, preview.width),
-        normalizeViewportSize(message.height, preview.height),
+        normalizeViewportSize(
+          message.width,
+          preview.width,
+          MAX_VIEWPORT_WIDTH,
+        ),
+        normalizeViewportSize(
+          message.height,
+          preview.height,
+          MAX_VIEWPORT_HEIGHT,
+        ),
       );
     }
   }
@@ -3510,10 +3529,14 @@ function formatUrlHost(host: string): string {
   return host.includes(":") ? `[${host.replace(/^\[|\]$/g, "")}]` : host;
 }
 
-function normalizeViewportSize(value: unknown, fallback: number): number {
+function normalizeViewportSize(
+  value: unknown,
+  fallback: number,
+  max: number,
+): number {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(240, Math.min(2200, Math.round(parsed)));
+  return Math.max(MIN_VIEWPORT_SIZE, Math.min(max, Math.round(parsed)));
 }
 
 function isTrackedBrowserPreviewNetworkUrl(url: string): boolean {

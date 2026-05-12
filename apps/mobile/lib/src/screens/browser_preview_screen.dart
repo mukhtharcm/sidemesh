@@ -24,12 +24,16 @@ class BrowserPreviewScreen extends StatelessWidget {
     required this.api,
     required this.preview,
     this.stopOnDispose = false,
+    this.autoResizeViewport = false,
+    this.onOpenInWindow,
   });
 
   final HostProfile host;
   final ApiClient api;
   final HostBrowserPreviewInfo preview;
   final bool stopOnDispose;
+  final bool autoResizeViewport;
+  final VoidCallback? onOpenInWindow;
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +47,8 @@ class BrowserPreviewScreen extends StatelessWidget {
           api: api,
           preview: preview,
           stopOnDispose: stopOnDispose,
+          autoResizeViewport: autoResizeViewport,
+          onOpenInWindow: onOpenInWindow,
           onBack: () => Navigator.of(context).pop(),
         ),
       ),
@@ -58,8 +64,10 @@ class BrowserPreviewPane extends StatefulWidget {
     required this.preview,
     this.stopOnDispose = false,
     this.showHeader = true,
+    this.autoResizeViewport = false,
     this.onBack,
     this.onMinimize,
+    this.onOpenInWindow,
     this.onStopped,
   });
 
@@ -68,8 +76,10 @@ class BrowserPreviewPane extends StatefulWidget {
   final HostBrowserPreviewInfo preview;
   final bool stopOnDispose;
   final bool showHeader;
+  final bool autoResizeViewport;
   final VoidCallback? onBack;
   final VoidCallback? onMinimize;
+  final VoidCallback? onOpenInWindow;
   final void Function(HostBrowserPreviewInfo preview)? onStopped;
 
   @override
@@ -80,6 +90,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     with WidgetsBindingObserver {
   static const _firstFrameTimeout = Duration(seconds: 18);
   static const _maxFirstFrameReconnects = 3;
+  static const _maxAutoResizeWidth = 3840;
+  static const _maxAutoResizeHeight = 2160;
 
   final _textController = TextEditingController();
   final _inputFocusNode = FocusNode();
@@ -90,6 +102,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   Timer? _firstFrameTimer;
+  Timer? _autoResizeTimer;
   late HostBrowserPreviewInfo _preview;
   late final String _reconnectSlotId;
   Uint8List? _frameBytes;
@@ -103,6 +116,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   bool _clientPaused = false;
   bool _manualPause = false;
   bool _remoteClosed = false;
+  bool _hasLivePreviewSnapshot = false;
   int _firstFrameReconnects = 0;
   bool _devToolsOpen = false;
   int _devToolsTabIndex = 0;
@@ -165,6 +179,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _urlFocusNode.dispose();
     _networkSearchController.dispose();
     _firstFrameTimer?.cancel();
+    _autoResizeTimer?.cancel();
     HostReconnectScheduler.instance.unregisterSlot(
       widget.host.id,
       _reconnectSlotId,
@@ -270,6 +285,35 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _connect();
   }
 
+  void _scheduleAutoResize(Size size) {
+    if (!widget.autoResizeViewport || !_hasLivePreviewSnapshot) {
+      _autoResizeTimer?.cancel();
+      return;
+    }
+    final width = size.width.round().clamp(240, _maxAutoResizeWidth);
+    final height = size.height.round().clamp(240, _maxAutoResizeHeight);
+    if (_preview.width == width && _preview.height == height) {
+      return;
+    }
+    _autoResizeTimer?.cancel();
+    _autoResizeTimer = Timer(const Duration(milliseconds: 160), () {
+      if (!mounted) return;
+      if (_preview.width == width && _preview.height == height) {
+        return;
+      }
+      setState(() {
+        _preview = _preview.copyWith(width: width, height: height);
+        _frameWidth = width;
+        _frameHeight = height;
+      });
+      _send({
+        'type': 'resize',
+        'width': width,
+        'height': height,
+      });
+    });
+  }
+
   void _handleFrame(dynamic payload) {
     if (payload is! String) return;
     final Object? decoded;
@@ -288,6 +332,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         if (preview != null) {
           final browserContextChanged = preview.url != _preview.url;
           _preview = preview;
+          _hasLivePreviewSnapshot = true;
           _frameWidth = preview.width;
           _frameHeight = preview.height;
           _urlController.text = preview.url;
@@ -1376,6 +1421,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
           onTogglePause: () => _clientPaused
               ? _resumeStream()
               : _pauseStream(manual: true),
+          onOpenInWindow: widget.onOpenInWindow,
           onStop: widget.showHeader
               ? () => unawaited(_stopRemoteBrowser())
               : null,
@@ -1390,6 +1436,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                     builder: (context, constraints) {
                       final size = constraints.biggest;
                       _lastPreviewBoxSize = size;
+                      _scheduleAutoResize(size);
                       return Focus(
                         focusNode: _browserFocusNode,
                         autofocus: desktopLike,
@@ -1619,6 +1666,7 @@ class _BrowserChromeBar extends StatelessWidget {
     required this.onToggleInput,
     required this.onToggleDevTools,
     required this.onTogglePause,
+    this.onOpenInWindow,
     this.onStop,
   });
 
@@ -1640,6 +1688,7 @@ class _BrowserChromeBar extends StatelessWidget {
   final VoidCallback onToggleInput;
   final VoidCallback onToggleDevTools;
   final VoidCallback onTogglePause;
+  final VoidCallback? onOpenInWindow;
   final VoidCallback? onStop;
 
   bool get _isHttps {
@@ -1791,6 +1840,15 @@ class _BrowserChromeBar extends StatelessWidget {
                 color: streamPaused ? colors.success : null,
                 onTap: onTogglePause,
               ),
+              if (onOpenInWindow != null) ...[
+                const SizedBox(width: 2),
+                _ChromeButton(
+                  icon: Icons.open_in_new_rounded,
+                  tooltip: 'Open in new window',
+                  color: colors.accent,
+                  onTap: onOpenInWindow!,
+                ),
+              ],
               const SizedBox(width: 4),
             ],
             if (onMinimize != null) ...[
