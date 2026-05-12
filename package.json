@@ -95,6 +95,9 @@
     "ws": "^8.18.3",
     "zod": "^4.1.5"
   },
+  "overrides": {
+    "@github/copilot": "^1.0.43"
+  },
   "devDependencies": {
     "@types/node": "^25.6.0",
     "@types/qrcode": "^1.5.6",
