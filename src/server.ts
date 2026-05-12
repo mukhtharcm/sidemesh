@@ -3971,10 +3971,7 @@ async function loadRunState(
     }
     session = await readSession(provider, sessionId, true);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    if (
-      message.includes("includeTurns is unavailable before first user message")
-    ) {
+    if (isTransientTurnSnapshotReadError(error)) {
       return { turnId: null };
     }
     throw error;
@@ -4031,10 +4028,7 @@ async function loadFastRunState(
       }
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    if (
-      message.includes("includeTurns is unavailable before first user message")
-    ) {
+    if (isTransientTurnSnapshotReadError(error)) {
       return { status, isRunning: false, turnId: null };
     }
     throw error;
@@ -4054,10 +4048,7 @@ async function providerReportsTerminalTurn(
   try {
     session = await readSession(provider, sessionId, true);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    if (
-      message.includes("includeTurns is unavailable before first user message")
-    ) {
+    if (isTransientTurnSnapshotReadError(error)) {
       return false;
     }
     throw error;
@@ -4463,6 +4454,15 @@ async function loadCachedSessionRuntime(
 
 function isActiveTurnStatus(status: string | null | undefined): boolean {
   return status === "inProgress" || status === "in_progress";
+}
+
+function isTransientTurnSnapshotReadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return (
+    message.includes("includeturns is unavailable before first user message") ||
+    message.includes("rollout file not found") ||
+    (message.includes("rollout") && message.includes("is empty"))
+  );
 }
 
 function isTerminalTurnStatus(status: string | null | undefined): boolean {

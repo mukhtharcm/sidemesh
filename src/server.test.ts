@@ -873,6 +873,100 @@ class LaggingCreateTurnProvider extends EventEmitter implements AgentProvider {
   }
 }
 
+class TransientUnreadableCreateTurnProvider
+  extends EventEmitter
+  implements AgentProvider
+{
+  public readonly kind = "fake";
+  public readonly displayName = "Transient Unreadable Create Turn Provider";
+  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
+
+  private readonly sessionId = "fake-transient-create-session";
+  private readonly createTurnId = "fake-transient-create-turn";
+  private cwd = "/tmp";
+  private created = false;
+
+  public async start(): Promise<void> {}
+
+  public async close(): Promise<void> {}
+
+  public async getVersion(): Promise<string> {
+    return "transient-unreadable-create-turn-test";
+  }
+
+  public async createSession(
+    request: AgentCreateSessionRequest,
+  ): Promise<AgentCreateSessionResult> {
+    this.created = true;
+    this.cwd = request.cwd;
+    return {
+      thread: this.buildThread(),
+      activeTurnId: request.input.length > 0 ? this.createTurnId : null,
+      runtime: null,
+    };
+  }
+
+  public async listSessionThreads(
+    options: AgentSessionListOptions,
+  ): Promise<ThreadRecord[]> {
+    if (!this.created || options.archived) {
+      return [];
+    }
+    return [this.buildThread()].slice(0, options.limit);
+  }
+
+  public async readSessionThread(
+    threadId: string,
+    includeTurns: boolean,
+  ): Promise<ThreadRecord> {
+    assert.equal(threadId, this.sessionId);
+    if (includeTurns) {
+      throw new Error(
+        `failed to read thread ${threadId}: rollout /tmp/${threadId}.jsonl is empty`,
+      );
+    }
+    return this.buildThread();
+  }
+
+  public async listRecentUnindexedSessionThreads(
+    limit: number,
+  ): Promise<ThreadRecord[]> {
+    if (!this.created) {
+      return [];
+    }
+    return [this.buildThread()].slice(0, limit);
+  }
+
+  public async readSessionLog(): Promise<SessionLogSnapshot> {
+    return {
+      messages: [],
+      activities: [],
+      runtime: null,
+      totalMessages: 0,
+      totalActivities: 0,
+      nextSeq: 1,
+    };
+  }
+
+  public async readSessionRuntime(): Promise<null> {
+    return null;
+  }
+
+  private buildThread(): ThreadRecord {
+    return {
+      id: this.sessionId,
+      name: "Transient unreadable create session",
+      preview: "Transient unreadable create session",
+      createdAt: 1,
+      updatedAt: 1,
+      cwd: this.cwd,
+      source: "fake",
+      path: null,
+      status: { type: "idle" },
+    };
+  }
+}
+
 class SearchFixtureProvider extends EventEmitter implements AgentProvider {
   public readonly kind = "fake";
   public readonly displayName = "Search Fixture Provider";
@@ -3842,6 +3936,50 @@ describe("GET /api/sessions/:sessionId/status", () => {
       assert.equal(
         (statusRes.body as any).activeTurnId,
         "fake-lagging-create-turn",
+      );
+    });
+  });
+
+  it("tracks returned turn ids when turn snapshots are temporarily unreadable", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new TransientUnreadableCreateTurnProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const createRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd: "/tmp/transient-unreadable-create-turn-test",
+          prompt: "start while rollout is still empty",
+        }),
+      });
+      assert.equal(createRes.statusCode, 201);
+      const sessionId = (createRes.body as any).session.id as string;
+      assert.equal(
+        (createRes.body as any).activeTurnId,
+        "fake-transient-create-turn",
+      );
+      assert.equal((createRes.body as any).session.status, "running");
+
+      const statusRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(statusRes.statusCode, 200);
+      assert.equal((statusRes.body as any).status, "running");
+      assert.equal((statusRes.body as any).isRunning, true);
+      assert.equal(
+        (statusRes.body as any).activeTurnId,
+        "fake-transient-create-turn",
       );
     });
   });
