@@ -188,6 +188,54 @@ void main() {
     expect(find.textContaining('Broken VPS is unreachable.'), findsOneWidget);
     expect(find.text('Best Match'), findsOneWidget);
   });
+
+  testWidgets('deduplicates mirrored search results returned by multiple hosts', (
+    tester,
+  ) async {
+    final now = DateTime(2026, 1, 1, 12);
+    final api = _FakeSearchApiClient(
+      sessions: const <SessionSummary>[],
+      searchResults: <String, List<SessionSummary>>{
+        'host-1::ng': <SessionSummary>[
+          _session(
+            id: 'shared',
+            title: 'Shared Match',
+            updatedAt: now,
+            matchRank: 1,
+          ),
+        ],
+        'host-2::ng': <SessionSummary>[
+          _session(
+            id: 'shared',
+            title: 'Shared Match',
+            updatedAt: now.add(const Duration(seconds: 1)),
+            matchRank: 2,
+          ),
+        ],
+      },
+    );
+
+    await _pumpRecentPane(
+      tester,
+      api: api,
+      hosts: const <HostProfile>[host, brokenHost],
+      query: '',
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await _pumpRecentPane(
+      tester,
+      api: api,
+      hosts: const <HostProfile>[host, brokenHost],
+      query: 'ng',
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+
+    expect(find.text('Shared Match'), findsOneWidget);
+  });
 }
 
 Future<void> _pumpRecentPane(
