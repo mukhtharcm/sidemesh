@@ -82,7 +82,7 @@
     "secret:scan": "bash scripts/secret-scan.sh"
   },
   "dependencies": {
-    "@clack/prompts": "^0.11.0",
+    "@clack/prompts": "^1.3.0",
     "@github/copilot-sdk": "^0.3.0",
     "@hono/node-server": "^2.0.1",
     "@hono/zod-validator": "^0.7.6",
