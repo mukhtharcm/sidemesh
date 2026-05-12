@@ -18,6 +18,7 @@ import '../theme/app_tokens.dart';
 import '../widgets/launch_controls.dart';
 import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/mesh_status_line.dart';
 
 enum CreateSessionPresentation { sheet, dialog }
 
@@ -54,13 +55,42 @@ Future<SessionSummary?> showCreateSessionLauncher(
       ),
     );
   }
-  return showModalBottomSheet<SessionSummary>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) => FractionallySizedBox(
-      heightFactor: 0.94,
-      child: CreateSessionSheet(host: host, api: api, initialCwd: initialCwd),
+  // Mobile: full-screen push
+  return Navigator.of(context).push<SessionSummary>(
+    MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (pageContext) {
+        final colors = pageContext.colors;
+        return Scaffold(
+          backgroundColor: colors.canvas,
+          body: SafeArea(
+            child: Column(
+              children: [
+                MeshStatusLine(
+                  segments: [
+                    MeshStatusSegment('New session'),
+                    MeshStatusSegment(host.label, mono: true),
+                  ],
+                  actions: [
+                    MeshIconButton(
+                      icon: Icons.close_rounded,
+                      tooltip: 'Cancel',
+                      onTap: () => Navigator.of(pageContext).pop(),
+                    ),
+                  ],
+                ),
+                Expanded(
+                  child: CreateSessionSheet(
+                    host: host,
+                    api: api,
+                    initialCwd: initialCwd,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     ),
   );
 }
