@@ -90,9 +90,9 @@ void main() {
       });
       await _pumpFrames(tester);
 
-    expect(find.text('first log'), findsNothing);
-    expect(find.text('second log'), findsOneWidget);
-  },
+      expect(find.text('first log'), findsNothing);
+      expect(find.text('second log'), findsOneWidget);
+    },
   );
 
   testWidgets('browser preview auto-resizes the remote viewport when enabled', (
@@ -126,6 +126,35 @@ void main() {
     expect(api.sentMessages.last['width'], 1180);
     expect(api.sentMessages.last['height'] as int, greaterThan(700));
   });
+
+  testWidgets(
+    'browser preview does not auto-resize while another viewer is attached',
+    (tester) async {
+      final api = _BrowserPreviewFakeApi();
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        Scaffold(
+          body: BrowserPreviewPane(
+            host: _host(),
+            api: api,
+            preview: _preview(clients: 2),
+            showHeader: false,
+            autoResizeViewport: true,
+          ),
+        ),
+        size: const Size(1180, 900),
+      );
+
+      await _pumpFrames(tester);
+
+      expect(
+        api.sentMessages.where((message) => message['type'] == 'resize'),
+        isEmpty,
+      );
+    },
+  );
 
   testWidgets('browser preview renders a live network tab and detail sheet', (
     tester,
@@ -1392,7 +1421,7 @@ Map<String, Object?> _previewJson() => <String, Object?>{
   'lastError': null,
 };
 
-HostBrowserPreviewInfo _preview() => HostBrowserPreviewInfo(
+HostBrowserPreviewInfo _preview({int clients = 1}) => HostBrowserPreviewInfo(
   id: 'preview-1',
   label: 'Preview',
   url: 'http://127.0.0.1:3000/',
@@ -1405,7 +1434,7 @@ HostBrowserPreviewInfo _preview() => HostBrowserPreviewInfo(
   status: 'running',
   width: 390,
   height: 844,
-  clients: 1,
+  clients: clients,
   createdAt: DateTime(2026, 1, 1).millisecondsSinceEpoch,
   updatedAt: DateTime(2026, 1, 1).millisecondsSinceEpoch,
   lastClientAt: DateTime(2026, 1, 1).millisecondsSinceEpoch,

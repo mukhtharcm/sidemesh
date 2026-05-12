@@ -283,7 +283,10 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   void _scheduleAutoResize(Size size) {
-    if (!widget.autoResizeViewport) return;
+    if (!widget.autoResizeViewport || _preview.clients > 1) {
+      _autoResizeTimer?.cancel();
+      return;
+    }
     final width = size.width.round().clamp(240, 2200);
     final height = size.height.round().clamp(240, 2200);
     if (_preview.width == width && _preview.height == height) {
