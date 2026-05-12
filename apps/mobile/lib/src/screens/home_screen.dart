@@ -86,7 +86,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   static const Duration _heartbeatInterval = Duration(minutes: 5);
   List<HostProfile> _hosts = const [];
   bool _loading = true;
-  int _activeCount = 0;
   int _inboxCount = 0;
   String _query = '';
   SessionViewMode _recentViewMode = SessionViewMode.flat;
@@ -96,11 +95,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
 
   List<HostProfile> get _enabledHosts =>
       _hosts.where((host) => host.enabled).toList(growable: false);
-
-  bool _searchVisibleForTab(_TabDef tab, int enabledHostCount) {
-    if (tab.title == 'Usage') return false;
-    return tab.title != 'Hosts' || enabledHostCount >= 4;
-  }
 
   @override
   void initState() {
@@ -526,7 +520,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
             _HomeStickyHeader(
               tab: _tabs[0],
               searchController: _searchController,
-              searchVisible: enabledHosts.length >= 1,
+              searchVisible: enabledHosts.isNotEmpty,
               viewMode: _recentViewMode,
               onViewModeChanged: _setRecentViewMode,
               onRefresh: _refreshHosts,
@@ -579,10 +573,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
             screenAwakeSourceKey: 'mobile-recent-sessions',
             onOpenSession: _openSession,
             onAddHost: () => _showHostEditor(),
-            onActiveCountChanged: (count) {
-              if (!mounted) return;
-              setState(() => _activeCount = count);
-            },
+            onActiveCountChanged: (_) {},
             viewMode: _recentViewMode,
             onViewModeChanged: _setRecentViewMode,
           ),
@@ -906,140 +897,6 @@ class _HomeSearchField extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _MeshNavBar extends StatelessWidget {
-  const _MeshNavBar({
-    required this.tabs,
-    required this.currentIndex,
-    required this.onTap,
-    required this.badges,
-  });
-
-  final List<_TabDef> tabs;
-  final int currentIndex;
-  final ValueChanged<int> onTap;
-  final List<int> badges;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
-      decoration: BoxDecoration(
-        color: colors.canvas,
-        border: Border(top: BorderSide(color: colors.border)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Row(
-          children: List.generate(tabs.length, (index) {
-            final tab = tabs[index];
-            final selected = index == currentIndex;
-            final badge = index < badges.length ? badges[index] : 0;
-            return Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 3),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: AppShapes.input,
-                    onTap: () => onTap(index),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOut,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? colors.accentMuted
-                            : Colors.transparent,
-                        borderRadius: AppShapes.input,
-                        border: Border.all(
-                          color: selected
-                              ? colors.accent.withValues(alpha: 0.4)
-                              : Colors.transparent,
-                        ),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _NavIconWithBadge(
-                            icon: selected ? tab.selectedIcon : tab.icon,
-                            selected: selected,
-                            badge: badge,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            tab.title,
-                            style: monoStyle(
-                              color: selected
-                                  ? colors.accent
-                                  : colors.textSecondary,
-                              fontSize: 11,
-                              fontWeight: AppWeights.emphasis,
-                            ).copyWith(letterSpacing: 0.3),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
-        ),
-      ),
-    );
-  }
-}
-
-class _NavIconWithBadge extends StatelessWidget {
-  const _NavIconWithBadge({
-    required this.icon,
-    required this.selected,
-    required this.badge,
-  });
-
-  final IconData icon;
-  final bool selected;
-  final int badge;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final iconColor = selected ? colors.accent : colors.textSecondary;
-    final label = badge > 99 ? '99+' : '$badge';
-    return Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.center,
-      children: [
-        Icon(icon, size: 22, color: iconColor),
-        if (badge > 0)
-          Positioned(
-            top: -6,
-            right: -10,
-            child: Container(
-              constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: colors.danger,
-                borderRadius: BorderRadius.circular(9),
-                border: Border.all(color: colors.canvas, width: 2),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                label,
-                style: monoStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: AppWeights.emphasis,
-                ).copyWith(height: 1.1),
-              ),
-            ),
-          ),
-      ],
     );
   }
 }

@@ -1386,7 +1386,8 @@ class _SessionScreenState extends State<SessionScreen>
     return '${widget.host.id}|${s.id}';
   }
 
-  bool _isSearchInspectorOpen(InspectorController scope) {
+  bool _isSearchInspectorOpen(InspectorController? scope) {
+    if (scope == null) return false;
     final cur = scope.current;
     return cur != null &&
         cur.kind == InspectorSurfaceKind.search &&
@@ -5628,6 +5629,9 @@ class _SessionScreenState extends State<SessionScreen>
       case 'reload':
         _reloadSnapshot();
         break;
+      case 'controls':
+        unawaited(_showSessionPolicySheet(_session ?? widget.session));
+        break;
       case 'new':
         _startSessionFromCurrent();
         break;
@@ -5686,6 +5690,26 @@ class _SessionScreenState extends State<SessionScreen>
         _archiveSession();
         break;
     }
+  }
+
+  // Opens _showSessionActionsSheet by reading current inspector/favorite state.
+  Future<void> _openSessionActions() async {
+    final session = _session ?? widget.session;
+    final favorite = _localStore.isFavorite(widget.host, session.id);
+    final inspectorScope = InspectorScope.maybeOf(context);
+    final gitAvailable =
+        _supportsGitStatus && _gitHeaderLabel(session, _gitStatus) != null;
+    final gitDirty = _gitStatus?.dirty ?? false;
+    await _showSessionActionsSheet(
+      session: session,
+      favorite: favorite,
+      gitAvailable: gitAvailable,
+      gitDirty: gitDirty,
+      terminalOpen: _isTerminalInspectorOpen(inspectorScope),
+      portsOpen: _isPortsInspectorOpen(inspectorScope),
+      searchOpen: _isSearchInspectorOpen(inspectorScope),
+      resourcesOpen: _isResourcesInspectorOpen(inspectorScope),
+    );
   }
 
   List<_SessionActionGroup> _sessionActionGroups({
@@ -5827,6 +5851,12 @@ class _SessionScreenState extends State<SessionScreen>
             label: 'Reload',
             detail: 'Refresh this transcript from the host.',
             icon: Icons.refresh_rounded,
+          ),
+          const _SessionActionSpec(
+            value: 'controls',
+            label: 'Session controls',
+            detail: 'Approval policy, model, and turn settings.',
+            icon: Icons.tune_rounded,
           ),
           _SessionActionSpec(
             value: 'favorite',
@@ -5976,6 +6006,14 @@ class _SessionScreenState extends State<SessionScreen>
                   color: context.colors.danger,
                   onTap: _stopSession,
                 ),
+              MeshIconButton(
+                icon: Icons.more_vert_rounded,
+                tooltip: 'Session actions',
+                color: _running
+                    ? context.colors.warning
+                    : context.colors.textPrimary,
+                onTap: () => unawaited(_openSessionActions()),
+              ),
             ],
             onLongPress: () {
               try {
