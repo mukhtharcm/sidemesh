@@ -15,6 +15,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/mesh_status_line.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/session_row_card.dart';
 import 'create_session_sheet.dart';
@@ -311,22 +312,47 @@ class _HostDetailScreenState extends State<HostDetailScreen>
     }
     return Scaffold(
       backgroundColor: colors.canvas,
-      appBar: AppBar(
-        title: Text(widget.host.label),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh_rounded),
+      body: Column(
+        children: [
+          SafeArea(
+            bottom: false,
+            child: ListenableBuilder(
+              listenable: HostStatusStore.instance,
+              builder: (context, _) {
+                final status =
+                    HostStatusStore.instance.statusFor(widget.host.id);
+                final isConnected =
+                    status.reachability == HostReachability.online;
+                return MeshStatusLine(
+                  segments: [
+                    MeshStatusSegment(widget.host.label, mono: true),
+                    MeshStatusSegment(
+                      isConnected ? 'connected' : 'disconnected',
+                      color:
+                          isConnected ? colors.success : colors.textTertiary,
+                    ),
+                  ],
+                  live: isConnected,
+                  liveColor: colors.success,
+                  actions: [
+                    MeshIconButton(
+                      icon: Icons.refresh_rounded,
+                      tooltip: 'Refresh',
+                      onTap: _refresh,
+                    ),
+                    MeshIconButton(
+                      icon: Icons.play_arrow_rounded,
+                      tooltip: 'New session',
+                      onTap: () => _startSession(),
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
+          Expanded(child: _buildBody(context)),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _startSession(),
-        icon: const Icon(Icons.play_arrow_rounded),
-        label: const Text('New session'),
-      ),
-      body: _buildBody(context),
     );
   }
 
