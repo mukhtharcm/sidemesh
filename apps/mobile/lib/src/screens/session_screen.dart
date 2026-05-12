@@ -591,6 +591,7 @@ class _SessionScreenState extends State<SessionScreen>
   LiveEvent? _latestQueueUpdate;
   LiveEvent? _latestAutoRetryUpdate;
   _DockedBrowserPreview? _dockedBrowserPreview;
+  String? _activeInspectorBrowserPreviewId;
   int _messageLimit = _initialMessageLimit;
   int _activityLimit = _initialActivityLimit;
   bool _running = false;
@@ -5024,6 +5025,7 @@ class _SessionScreenState extends State<SessionScreen>
     }
     final scope = InspectorScope.maybeOf(context);
     if (widget.desktopMode && scope != null) {
+      _activeInspectorBrowserPreviewId = preview.id;
       scope.show(
         buildInspectorBrowserPreviewSurface(
           ownerKey: _inspectorOwnerKey(),
@@ -5039,6 +5041,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     setState(() {
+      _activeInspectorBrowserPreviewId = null;
       _dockedBrowserPreview = _DockedBrowserPreview(preview: preview);
     });
   }
@@ -5051,7 +5054,9 @@ class _SessionScreenState extends State<SessionScreen>
     final scope = InspectorScope.maybeOf(context);
     final active = scope?.current;
     if (active?.kind == InspectorSurfaceKind.browserPreview &&
-        active?.ownerKey == _inspectorOwnerKey()) {
+        active?.ownerKey == _inspectorOwnerKey() &&
+        _activeInspectorBrowserPreviewId == preview.id) {
+      _activeInspectorBrowserPreviewId = null;
       scope?.close();
     }
   }
