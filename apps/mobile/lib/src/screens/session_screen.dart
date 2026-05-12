@@ -6077,6 +6077,10 @@ class _SessionScreenState extends State<SessionScreen>
                                             _openTerminal(cwdOverride: cwd),
                                           )
                                         : null,
+                                    approvalAction: (_pendingAction?.isApproval ?? false) ? _pendingAction : null,
+                                    onApprovalRespond: (_pendingAction?.isApproval ?? false)
+                                        ? (draft) => unawaited(_respondAction(draft))
+                                        : null,
                                   ),
                                   _TimelineEntryKind.providerWarning =>
                                     _ProviderWarningRow(

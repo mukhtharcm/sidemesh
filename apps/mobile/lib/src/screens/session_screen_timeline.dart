@@ -1825,6 +1825,8 @@ class _ActivityCard extends StatefulWidget {
     this.onBrowsePath,
     this.onOpenBrowserPreview,
     this.onOpenTerminal,
+    this.approvalAction,
+    this.onApprovalRespond,
   });
 
   final HostProfile host;
@@ -1836,6 +1838,8 @@ class _ActivityCard extends StatefulWidget {
   final void Function(String path)? onBrowsePath;
   final void Function(BrowserPreviewTargetCandidate target)? onOpenBrowserPreview;
   final void Function(String? cwd)? onOpenTerminal;
+  final PendingAction? approvalAction;
+  final ValueChanged<PendingActionResponseDraft>? onApprovalRespond;
 
   @override
   State<_ActivityCard> createState() => _ActivityCardState();
@@ -2293,6 +2297,11 @@ class _ActivityCardState extends State<_ActivityCard> {
                     _ActivityActionRow(actions: contextActions),
                   ],
                 ],
+                if (widget.approvalAction != null && widget.onApprovalRespond != null)
+                  _ApprovalFooter(
+                    action: widget.approvalAction!,
+                    onRespond: widget.onApprovalRespond!,
+                  ),
               ],
             ),
           ),
@@ -3790,6 +3799,118 @@ class _SessionWaitingState extends StatelessWidget {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ApprovalFooter extends StatefulWidget {
+  const _ApprovalFooter({required this.action, required this.onRespond});
+  final PendingAction action;
+  final ValueChanged<PendingActionResponseDraft> onRespond;
+
+  @override
+  State<_ApprovalFooter> createState() => _ApprovalFooterState();
+}
+
+enum _ApprovalFooterStatus { pending, accepted, declined }
+
+class _ApprovalFooterState extends State<_ApprovalFooter> {
+  _ApprovalFooterStatus _status = _ApprovalFooterStatus.pending;
+
+  void _approve() {
+    widget.onRespond(PendingActionResponseDraft.approval('accept'));
+    setState(() => _status = _ApprovalFooterStatus.accepted);
+  }
+
+  void _decline() {
+    widget.onRespond(PendingActionResponseDraft.approval('decline'));
+    setState(() => _status = _ApprovalFooterStatus.declined);
+  }
+
+  void _approveForSession() {
+    widget.onRespond(PendingActionResponseDraft.approval('acceptForSession'));
+    setState(() => _status = _ApprovalFooterStatus.accepted);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+
+    if (_status == _ApprovalFooterStatus.accepted) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Icon(Icons.check_rounded, size: 14, color: colors.success),
+            const SizedBox(width: 6),
+            Text(
+              'Approved',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colors.success),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_status == _ApprovalFooterStatus.declined) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Icon(Icons.close_rounded, size: 14, color: colors.danger),
+            const SizedBox(width: 6),
+            Text(
+              'Declined',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colors.danger),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Divider(height: 1, color: colors.border),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton(
+                  onPressed: _approve,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colors.success,
+                    foregroundColor: Colors.white,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  child: const Text('Approve'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: _decline,
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text('Decline'),
+              ),
+              const SizedBox(width: 4),
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_horiz_rounded, size: 18, color: colors.textSecondary),
+                padding: EdgeInsets.zero,
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'session', child: Text('Approve for session')),
+                ],
+                onSelected: (v) {
+                  if (v == 'session') _approveForSession();
+                },
+              ),
+            ],
+          ),
         ],
       ),
     );
