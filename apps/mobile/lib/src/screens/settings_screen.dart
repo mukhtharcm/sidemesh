@@ -18,6 +18,7 @@ import '../theme/theme_controller.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/appearance_sheet.dart';
 import '../widgets/launch_options_form.dart';
+import '../widgets/mesh_status_line.dart';
 import '../widgets/mesh_widgets.dart';
 import '../onboarding_store.dart';
 import 'onboarding_screen.dart';
@@ -305,8 +306,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     return Scaffold(
       backgroundColor: colors.canvas,
-      appBar: AppBar(title: const Text('Settings')),
-      body: content,
+      body: Column(
+        children: [
+          SafeArea(
+            bottom: false,
+            child: MeshStatusLine(
+              segments: [
+                MeshStatusSegment('Settings'),
+              ],
+              actions: [
+                MeshIconButton(
+                  icon: Icons.arrow_back_ios_rounded,
+                  tooltip: 'Back',
+                  onTap: () => Navigator.of(context).maybePop(),
+                ),
+              ],
+            ),
+          ),
+          Expanded(child: content),
+        ],
+      ),
     );
   }
 }
@@ -530,11 +549,9 @@ class _SettingsContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final list = ListView(
-      padding: EdgeInsets.fromLTRB(
-        embedded ? AppSpacing.xl : AppSpacing.lg,
-        AppSpacing.lg,
-        embedded ? AppSpacing.xl : AppSpacing.lg,
-        AppSpacing.xxl,
+      padding: const EdgeInsets.only(
+        top: AppSpacing.lg,
+        bottom: AppSpacing.xxl,
       ),
       children: [
         _SettingsSection(
@@ -555,7 +572,6 @@ class _SettingsContent extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: AppSpacing.md),
             ListenableBuilder(
               listenable: screenAwakeStore,
               builder: (context, _) {
@@ -583,7 +599,7 @@ class _SettingsContent extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: AppSpacing.lg),
+        const SizedBox(height: 16),
         _SettingsSection(
           icon: Icons.notifications_rounded,
           title: 'Alerts & background',
@@ -659,7 +675,7 @@ class _SettingsContent extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: AppSpacing.lg),
+        const SizedBox(height: 16),
         _SettingsSection(
           icon: Icons.rocket_launch_rounded,
           title: 'Session defaults',
@@ -707,7 +723,7 @@ class _SettingsContent extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: AppSpacing.lg),
+        const SizedBox(height: 16),
         _SettingsSection(
           icon: Icons.warning_amber_rounded,
           title: 'Data & storage',
@@ -858,7 +874,7 @@ class _SettingsContent extends StatelessWidget {
   }
 }
 
-class _SettingsSection extends StatefulWidget {
+class _SettingsSection extends StatelessWidget {
   const _SettingsSection({
     required this.icon,
     required this.title,
@@ -872,91 +888,24 @@ class _SettingsSection extends StatefulWidget {
   final List<Widget> children;
 
   @override
-  State<_SettingsSection> createState() => _SettingsSectionState();
-}
-
-class _SettingsSectionState extends State<_SettingsSection>
-    with SingleTickerProviderStateMixin {
-  bool _expanded = true;
-
-  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        InkWell(
-          onTap: () => setState(() => _expanded = !_expanded),
-          borderRadius: AppShapes.input,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.xs,
-              vertical: AppSpacing.sm,
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: colors.accentMuted,
-                    borderRadius: AppShapes.input,
-                    border: Border.all(
-                      color: colors.accent.withValues(alpha: 0.28),
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(widget.icon, size: 17, color: colors.accent),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.title,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: AppWeights.title,
-                          letterSpacing: AppLetterSpacing.headline,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.subtitle,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                AnimatedRotation(
-                  duration: const Duration(milliseconds: 180),
-                  turns: _expanded ? 0.5 : 0,
-                  child: Icon(
-                    Icons.expand_more_rounded,
-                    color: colors.textSecondary,
-                    size: 22,
-                  ),
-                ),
-              ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+          child: Text(
+            title.toUpperCase(),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: AppWeights.title,
+              color: colors.textTertiary,
+              letterSpacing: 0.5,
             ),
           ),
         ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-          alignment: Alignment.topCenter,
-          child: _expanded
-              ? Padding(
-                  padding: const EdgeInsets.only(top: AppSpacing.sm),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: widget.children,
-                  ),
-                )
-              : const SizedBox.shrink(),
-        ),
+        ...children,
       ],
     );
   }
@@ -1061,70 +1010,53 @@ class _SettingsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      showBorder: true,
-      padding: AppPadding.card,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: colors.surfaceMuted,
-                  borderRadius: AppShapes.input,
-                  border: Border.all(color: colors.border),
-                ),
-                alignment: Alignment.center,
-                child: Icon(icon, size: 18, color: colors.accent),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (trailing != null) ...[
-                const SizedBox(width: AppSpacing.md),
-                trailing!,
-              ],
-            ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+          leading: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: colors.surfaceMuted,
+              borderRadius: AppShapes.input,
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 17, color: colors.accent),
           ),
-          if (body != null) ...[
-            const SizedBox(height: AppSpacing.md),
-            Text(
+          title: Text(
+            title,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: AppWeights.title,
+            ),
+          ),
+          subtitle: Text(
+            subtitle,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+            ),
+          ),
+          trailing: trailing,
+        ),
+        if (body != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
               body!,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colors.textSecondary,
                 height: 1.35,
               ),
             ),
-          ],
-          if (footer != null) ...[
-            const SizedBox(height: AppSpacing.md),
-            footer!,
-          ],
-        ],
-      ),
+          ),
+        if (footer != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: footer!,
+          ),
+        Divider(height: 1, color: colors.border, indent: 16),
+      ],
     );
   }
 }
