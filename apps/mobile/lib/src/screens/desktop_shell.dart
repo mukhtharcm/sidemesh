@@ -20,7 +20,7 @@ import '../widgets/mesh_widgets.dart';
 import '../widgets/notification_permission_banner.dart';
 import '../onboarding_store.dart';
 import '../theme/theme_controller.dart';
-import 'desktop_welcome_overlay.dart';
+import 'onboarding_screen.dart';
 import 'create_session_sheet.dart';
 import 'home_screen.dart';
 import 'host_detail_screen.dart';
@@ -211,7 +211,6 @@ class _DesktopShellState extends State<DesktopShell> {
   // Used to trigger refresh of sidebar panes after a host/session mutation.
   int _refreshTick = 0;
   bool _handlingNotificationIntent = false;
-  bool _showWelcome = false;
 
   List<HostProfile> get _enabledHosts =>
       _hosts.where((host) => host.enabled).toList(growable: false);
@@ -294,8 +293,8 @@ class _DesktopShellState extends State<DesktopShell> {
 
   Future<void> _checkOnboarding() async {
     final completed = await OnboardingStore.instance.isCompleted;
-    if (!mounted) return;
-    setState(() => _showWelcome = !completed);
+    if (!mounted || completed) return;
+    await showOnboardingScreen(context, themeController: ThemeScope.of(context));
   }
 
   Future<void> _loadHosts() async {
@@ -1024,14 +1023,6 @@ class _DesktopShellState extends State<DesktopShell> {
           ),
         ),
       ),
-          if (_showWelcome)
-            DesktopWelcomeOverlay(
-              themeController: ThemeScope.of(context),
-              onDismissed: () {
-                setState(() => _showWelcome = false);
-              },
-              onAddHost: () => _showHostEditor(),
-            ),
         ],
       ),
     );

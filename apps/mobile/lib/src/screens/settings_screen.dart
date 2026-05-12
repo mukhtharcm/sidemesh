@@ -20,7 +20,6 @@ import '../widgets/appearance_sheet.dart';
 import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
 import '../onboarding_store.dart';
-import 'desktop_welcome_overlay.dart';
 import 'onboarding_screen.dart';
 
 Future<void> openSettingsScreen(
@@ -248,19 +247,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirmed != true || !mounted) return;
     await OnboardingStore.instance.reset();
     if (!mounted) return;
-    final desktop = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
-    if (desktop) {
-      await showDialog<void>(
-        context: context,
-        barrierColor: Colors.transparent,
-        builder: (_) => DesktopWelcomeOverlay(
-          themeController: ThemeScope.of(context),
-          onDismissed: () => Navigator.of(context).pop(),
-        ),
-      );
-    } else {
-      await showOnboardingScreen(context, themeController: ThemeScope.of(context));
-    }
+    await showOnboardingScreen(context, themeController: ThemeScope.of(context));
   }
 
   String _platformLabel() {
