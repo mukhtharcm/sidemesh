@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart' hide Uint8List;
+import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../api_client.dart';
@@ -120,6 +121,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   int _firstFrameReconnects = 0;
   bool _devToolsOpen = false;
   int _devToolsTabIndex = 0;
+  bool _devToolsStripOpen = false;
+  final List<String> _devLog = [];
+  static const int _maxDevLogEntries = 50;
   bool _pageLoading = false;
   final List<_ConsoleEntry> _consoleEntries = [];
   final int _maxConsoleEntries = 256;
@@ -643,6 +647,12 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       _networkEntries.remove(removedRequestId);
       _networkDetails.remove(removedRequestId);
     }
+    if (entry.finished || entry.failed) {
+      final status = entry.status != null ? ' ${entry.status}' : '';
+      final dur = entry.durationMs != null ? ' ${entry.durationMs}ms' : '';
+      final label = entry.failed ? ' ✕' : '';
+      _addDevLogEntry('${entry.method}$status$dur$label ${entry.url}');
+    }
   }
 
   List<_NetworkEntry> get _filteredNetworkEntries {
@@ -965,6 +975,17 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _toggleDevTools() {
     setState(() => _devToolsOpen = !_devToolsOpen);
+  }
+
+  void _toggleDevToolsStrip() {
+    setState(() => _devToolsStripOpen = !_devToolsStripOpen);
+  }
+
+  void _addDevLogEntry(String entry) {
+    _devLog.add(entry);
+    if (_devLog.length > _maxDevLogEntries) {
+      _devLog.removeAt(0);
+    }
   }
 
   void _setDevToolsTab(int index) {
@@ -1517,6 +1538,30 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             ],
           ),
         ),
+        _DevToolsStrip(
+          open: _devToolsStripOpen,
+          currentUrl: _urlController.text,
+          devLog: _devLog,
+          onToggle: _toggleDevToolsStrip,
+          onReload: () => _sendNavigation('reload'),
+          onCopyUrl: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            await Clipboard.setData(
+              ClipboardData(text: _urlController.text),
+            );
+            if (!mounted) return;
+            messenger.showSnackBar(const SnackBar(
+              content: Text('URL copied'),
+              duration: Duration(seconds: 2),
+            ));
+          },
+          onOpenInBrowser: () async {
+            final uri = Uri.tryParse(_urlController.text);
+            if (uri != null && uri.hasScheme) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            }
+          },
+        ),
         if (!desktopLike)
           _BrowserBottomToolbar(
             preview: _preview,
@@ -2017,6 +2062,153 @@ class _BrowserBottomToolbar extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DevToolsStrip extends StatelessWidget {
+  const _DevToolsStrip({
+    required this.open,
+    required this.currentUrl,
+    required this.devLog,
+    required this.onToggle,
+    required this.onReload,
+    required this.onCopyUrl,
+    required this.onOpenInBrowser,
+  });
+
+  final bool open;
+  final String currentUrl;
+  final List<String> devLog;
+  final VoidCallback onToggle;
+  final VoidCallback onReload;
+  final VoidCallback onCopyUrl;
+  final VoidCallback onOpenInBrowser;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final lastFive = devLog.length > 5
+        ? devLog.sublist(devLog.length - 5)
+        : List<String>.from(devLog);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOut,
+      height: open ? 120.0 : 44.0,
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted,
+        border: Border(top: BorderSide(color: colors.border)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: 44,
+            child: Row(
+              children: [
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    currentUrl.isEmpty ? '—' : currentUrl,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: colors.textTertiary,
+                    ),
+                  ),
+                ),
+                _StripIconButton(
+                  icon: Icons.refresh_rounded,
+                  tooltip: 'Reload',
+                  onTap: onReload,
+                  colors: colors,
+                ),
+                _StripIconButton(
+                  icon: Icons.open_in_browser_rounded,
+                  tooltip: 'Open in browser',
+                  onTap: onOpenInBrowser,
+                  colors: colors,
+                ),
+                _StripIconButton(
+                  icon: Icons.copy_rounded,
+                  tooltip: 'Copy URL',
+                  onTap: onCopyUrl,
+                  colors: colors,
+                ),
+                _StripIconButton(
+                  icon: open
+                      ? Icons.expand_more_rounded
+                      : Icons.expand_less_rounded,
+                  tooltip: open ? 'Collapse' : 'Expand',
+                  onTap: onToggle,
+                  colors: colors,
+                ),
+                const SizedBox(width: 4),
+              ],
+            ),
+          ),
+          if (open)
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: lastFive.isEmpty
+                    ? Text(
+                        'No requests yet',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          color: colors.textTertiary,
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: EdgeInsets.zero,
+                        itemCount: lastFive.length,
+                        itemBuilder: (context, index) => Text(
+                          lastFive[index],
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontFamily: 'monospace',
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StripIconButton extends StatelessWidget {
+  const _StripIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    required this.colors,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          child: Icon(icon, size: 18, color: colors.textTertiary),
         ),
       ),
     );
