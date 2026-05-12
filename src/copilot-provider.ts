@@ -113,6 +113,7 @@ interface CopilotStateFile {
     archived?: boolean;
     nextSeq: number;
     draftAssistantMessages?: CopilotDraftAssistantMessage[];
+    pendingActions?: AgentPendingAction[];
     copilotSessionId?: string | null;
     copilotSessionCreated?: boolean;
   }>;
@@ -594,6 +595,7 @@ export class CopilotAgentProvider
         return false;
       }
       this.pendingPermissions.delete(action.id);
+      this.persistEventually();
       pending.resolve(result);
       return true;
     }
@@ -604,6 +606,7 @@ export class CopilotAgentProvider
         return false;
       }
       this.pendingUserInputs.delete(action.id);
+      this.persistEventually();
       inputRequest.resolve(decision);
       return true;
     }
@@ -614,6 +617,7 @@ export class CopilotAgentProvider
         return false;
       }
       this.pendingElicitations.delete(action.id);
+      this.persistEventually();
       elicitation.resolve(decision);
       return true;
     }
@@ -1511,6 +1515,7 @@ export class CopilotAgentProvider
     });
     return new Promise<CopilotSdkPermissionResult>((resolve) => {
       this.pendingPermissions.set(action.id, { action, resolve });
+      this.persistEventually();
     });
   }
 
@@ -1530,6 +1535,7 @@ export class CopilotAgentProvider
     });
     return new Promise<CopilotSdkUserInputResponse>((resolve) => {
       this.pendingUserInputs.set(action.id, { action, resolve });
+      this.persistEventually();
     });
   }
 
@@ -1549,6 +1555,7 @@ export class CopilotAgentProvider
     });
     return new Promise<CopilotSdkElicitationResult>((resolve) => {
       this.pendingElicitations.set(action.id, { action, resolve });
+      this.persistEventually();
     });
   }
 
@@ -1556,12 +1563,17 @@ export class CopilotAgentProvider
     sessionId: string,
     result: CopilotSdkPermissionResult,
   ): void {
+    let resolved = false;
     for (const [actionId, pending] of this.pendingPermissions) {
       if (pending.action.sessionId !== sessionId) {
         continue;
       }
       this.pendingPermissions.delete(actionId);
+      resolved = true;
       pending.resolve(result);
+    }
+    if (resolved) {
+      this.persistEventually();
     }
   }
 
@@ -1569,12 +1581,17 @@ export class CopilotAgentProvider
     sessionId: string,
     result: CopilotSdkUserInputResponse,
   ): void {
+    let resolved = false;
     for (const [actionId, pending] of this.pendingUserInputs) {
       if (pending.action.sessionId !== sessionId) {
         continue;
       }
       this.pendingUserInputs.delete(actionId);
+      resolved = true;
       pending.resolve(result);
+    }
+    if (resolved) {
+      this.persistEventually();
     }
   }
 
@@ -1582,12 +1599,17 @@ export class CopilotAgentProvider
     sessionId: string,
     result: CopilotSdkElicitationResult,
   ): void {
+    let resolved = false;
     for (const [actionId, pending] of this.pendingElicitations) {
       if (pending.action.sessionId !== sessionId) {
         continue;
       }
       this.pendingElicitations.delete(actionId);
+      resolved = true;
       pending.resolve(result);
+    }
+    if (resolved) {
+      this.persistEventually();
     }
   }
 
@@ -1599,6 +1621,17 @@ export class CopilotAgentProvider
       role: "user",
       text: inputDisplayText(input),
       attachments: inputAttachments(input),
+    });
+  }
+
+  private appendSystemMessage(
+    session: CopilotSessionState,
+    text: string,
+  ): void {
+    this.appendMessage(session, {
+      role: "system",
+      text,
+      attachments: [],
     });
   }
 
@@ -1742,6 +1775,7 @@ export class CopilotAgentProvider
       const parsed = JSON.parse(raw) as CopilotStateFile;
       const archivedSessionIds = new Set(parsed.archivedSessionIds ?? []);
       const restoredSessions = new Map<string, CopilotSessionState>();
+      let stateChangedOnLoad = false;
       for (const item of parsed.sessions ?? []) {
         const state: CopilotSessionState = {
           thread: item.thread,
@@ -1766,7 +1800,19 @@ export class CopilotAgentProvider
           copilotSessionCreated:
             item.copilotSessionCreated ?? item.copilotSessionId != null,
         };
-        normalizeInactiveCopilotSessionState(state);
+        const restoredPendingActions = (item.pendingActions ?? []).map(
+          clonePendingAction,
+        );
+        if (normalizeInactiveCopilotSessionState(state)) {
+          stateChangedOnLoad = true;
+        }
+        if (restoredPendingActions.length > 0) {
+          this.appendSystemMessage(
+            state,
+            interruptedPendingActionMessage(restoredPendingActions),
+          );
+          stateChangedOnLoad = true;
+        }
         restoredSessions.set(state.thread.id, state);
       }
       this.archivedSessionIds.clear();
@@ -1778,6 +1824,9 @@ export class CopilotAgentProvider
       }
       for (const [threadId, state] of restoredSessions) {
         this.sessions.set(threadId, state);
+      }
+      if (stateChangedOnLoad) {
+        await this.saveState();
       }
     } catch {
       // Missing or corrupt provider state should not block daemon startup.
@@ -1817,6 +1866,12 @@ export class CopilotAgentProvider
         draftAssistantMessages: [...session.draftAssistantMessages.values()].map(
           cloneCopilotDraftAssistantMessage,
         ),
+        pendingActions: pendingActionsForSession(
+          session.thread.id,
+          this.pendingPermissions,
+          this.pendingUserInputs,
+          this.pendingElicitations,
+        ).map(clonePendingAction),
         copilotSessionId: session.copilotSessionId,
         copilotSessionCreated: session.copilotSessionCreated,
       })),
@@ -3850,7 +3905,7 @@ function normalizeStoredRuntime(
 
 function normalizeInactiveCopilotSessionState(
   session: CopilotSessionState,
-): void {
+): boolean {
   const restoredAt = session.thread.updatedAt;
   const hadDraftAssistantMessages = session.draftAssistantMessages.size > 0;
   if (hadDraftAssistantMessages) {
@@ -3886,7 +3941,9 @@ function normalizeInactiveCopilotSessionState(
   ) {
     session.thread.status = { type: "idle" };
     session.runtime = runtimeWithoutTurnId(session.runtime);
+    return true;
   }
+  return false;
 }
 
 function normalizeInactiveCopilotActivity(
@@ -4235,6 +4292,46 @@ function inputAttachments(
   });
 }
 
+function pendingActionsForSession(
+  sessionId: string,
+  pendingPermissions: Map<string, PendingCopilotPermission>,
+  pendingUserInputs: Map<string, PendingCopilotUserInput>,
+  pendingElicitations: Map<string, PendingCopilotElicitation>,
+): AgentPendingAction[] {
+  const actions: AgentPendingAction[] = [];
+  for (const pending of pendingPermissions.values()) {
+    if (pending.action.sessionId === sessionId) {
+      actions.push(pending.action);
+    }
+  }
+  for (const pending of pendingUserInputs.values()) {
+    if (pending.action.sessionId === sessionId) {
+      actions.push(pending.action);
+    }
+  }
+  for (const pending of pendingElicitations.values()) {
+    if (pending.action.sessionId === sessionId) {
+      actions.push(pending.action);
+    }
+  }
+  return actions.sort((left, right) => left.requestedAt - right.requestedAt);
+}
+
+function interruptedPendingActionMessage(
+  actions: AgentPendingAction[],
+): string {
+  const kinds = new Set(actions.map((action) => action.kind));
+  let waitingFor = "approval or input";
+  if (kinds.size === 1 && kinds.has("user_input")) {
+    waitingFor = "your answer";
+  } else if (kinds.size === 1 && kinds.has("elicitation")) {
+    waitingFor = "structured input";
+  } else if (kinds.size === 1) {
+    waitingFor = "approval";
+  }
+  return `Sidemesh restarted while Copilot was waiting for ${waitingFor}. That turn was interrupted. Re-run your last request to continue.`;
+}
+
 function cloneThread(
   session: CopilotSessionState,
   includeTurns: boolean,
@@ -4269,6 +4366,10 @@ function cloneMessage(message: SessionMessage): SessionMessage {
     content: cloneSessionMessageContentBlocks(message.content),
     attachments: message.attachments.map((attachment) => ({ ...attachment })),
   };
+}
+
+function clonePendingAction(action: AgentPendingAction): AgentPendingAction {
+  return structuredClone(action);
 }
 
 function cloneActivity(activity: SessionActivity): SessionActivity {

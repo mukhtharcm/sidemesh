@@ -39,15 +39,12 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
   const persisted = await readResolvedPersistedConfig({
     configPath: options.configPath,
   });
-  const enabledExperimentalKinds: AgentProviderKind[] =
-    process.env.SIDEMESH_ENABLE_COPILOT?.trim() === "1" ? ["copilot"] : [];
   const definitions = listSetupAgentProviderDefinitionSummaries({
     includeDev: options.includeDevProviders,
     includeKinds: [
       ...(persisted.value?.providers.map(
         (provider) => provider.kind as AgentProviderKind,
       ) ?? []),
-      ...enabledExperimentalKinds,
     ],
   });
   const existing = persisted.value;
@@ -98,7 +95,6 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
           env: process.env,
           stateDir,
           includeDev: options.includeDevProviders === true,
-          includeKinds: enabledExperimentalKinds,
         })
       : null;
   if (existing == null && inferredProviders && inferredProviders.providers.length > 0) {
