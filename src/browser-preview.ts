@@ -143,6 +143,7 @@ interface BrowserPreviewRecord {
   cdp: CdpConnection | null;
   sessionIdCdp: string | null;
   targetId: string | null;
+  mainFrameId: string | null;
   ownsBrowser: boolean;
   nextFrameSeq: number;
   lastFramePayload: Record<string, unknown> | null;
@@ -467,6 +468,7 @@ export class BrowserPreviewRegistry {
       cdp: null,
       sessionIdCdp: null,
       targetId: null,
+      mainFrameId: null,
       ownsBrowser: false,
       nextFrameSeq: 1,
       lastFramePayload: null,
@@ -2363,25 +2365,45 @@ export class BrowserPreviewRegistry {
     preview.cleanupHandlers.push(
       cdp.onSessionEvent(sessionId, "Page.frameStartedLoading", (params) => {
         const frameId = stringValue(params.frameId);
-        if (!frameId || frameId !== preview.targetId) return;
-        preview.pageLoading = true;
-        this.broadcast(preview, { type: "loading", state: "started" });
+        if (!frameId || frameId !== preview.mainFrameId) return;
+        this.setPreviewPageLoading(preview, true);
+      }),
+    );
+
+    preview.cleanupHandlers.push(
+      cdp.onSessionEvent(sessionId, "Page.frameStoppedLoading", (params) => {
+        const frameId = stringValue(params.frameId);
+        if (!frameId || frameId !== preview.mainFrameId) return;
+        this.setPreviewPageLoading(preview, false);
       }),
     );
 
     preview.cleanupHandlers.push(
       cdp.onSessionEvent(sessionId, "Page.loadEventFired", () => {
-        preview.pageLoading = false;
-        this.broadcast(preview, { type: "loading", state: "complete" });
-        if (preview.inspectorSnapshot) {
-          void this.refreshInspectorSnapshot(preview)
-            .then((snapshot) => this.broadcastInspectorSnapshot(preview, snapshot))
-            .catch(() => {});
-        }
-        this.scheduleStorageSnapshotRefresh(preview);
+        this.setPreviewPageLoading(preview, false);
       }),
     );
   }
+
+  private setPreviewPageLoading(
+    preview: BrowserPreviewRecord,
+    pageLoading: boolean,
+  ): void {
+    if (preview.pageLoading === pageLoading) return;
+    preview.pageLoading = pageLoading;
+    this.broadcast(preview, {
+      type: "loading",
+      state: pageLoading ? "started" : "complete",
+    });
+    if (pageLoading) return;
+    if (preview.inspectorSnapshot) {
+      void this.refreshInspectorSnapshot(preview)
+        .then((snapshot) => this.broadcastInspectorSnapshot(preview, snapshot))
+        .catch(() => {});
+    }
+    this.scheduleStorageSnapshotRefresh(preview);
+  }
+
   private registerBrowserNavigationHandlers(
     preview: BrowserPreviewRecord,
     primaryTargetId: string,
@@ -2395,6 +2417,10 @@ export class BrowserPreviewRegistry {
       cdp.onSessionEvent(sessionId, "Page.frameNavigated", (params) => {
         const frame = objectValue(params.frame);
         if (!frame || stringValue(frame.parentId)) return;
+        const frameId = stringValue(frame.id);
+        if (frameId) {
+          preview.mainFrameId = frameId;
+        }
         const url = stringValue(frame.url);
         if (!url) return;
         this.updatePreviewUrl(preview, url);
@@ -2547,6 +2573,7 @@ export class BrowserPreviewRegistry {
     preview.cdp = null;
     preview.sessionIdCdp = null;
     preview.targetId = null;
+    preview.mainFrameId = null;
     if (preview.ownsBrowser && preview.process) {
       await terminateBrowserProcess(preview.process);
     }

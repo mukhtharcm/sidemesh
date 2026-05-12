@@ -114,6 +114,35 @@ describe("browser preview", () => {
     assert.equal(isBrowserNavigationUrl("not a url"), false);
   });
 
+  it("tracks page loading for the main frame and ignores subframes", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    const preview = buildFakePreview(cdp, { mainFrameId: "main-frame" });
+    const events: Array<Record<string, unknown>> = [];
+    registry.broadcast = (_preview: unknown, payload: Record<string, unknown>) => {
+      events.push(payload);
+    };
+
+    registry.registerPageLoadHandlers(preview, "session-1");
+
+    cdp.emitSession("Page.frameStartedLoading", { frameId: "subframe-1" });
+    assert.equal(preview.pageLoading, false);
+
+    cdp.emitSession("Page.frameStartedLoading", { frameId: "main-frame" });
+    assert.equal(preview.pageLoading, true);
+
+    cdp.emitSession("Page.frameStoppedLoading", { frameId: "subframe-1" });
+    assert.equal(preview.pageLoading, true);
+
+    cdp.emitSession("Page.frameStoppedLoading", { frameId: "main-frame" });
+    assert.equal(preview.pageLoading, false);
+
+    assert.deepEqual(events, [
+      { type: "loading", state: "started" },
+      { type: "loading", state: "complete" },
+    ]);
+  });
+
   it("tracks network requests and emits summary updates", () => {
     const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
     const cdp = new FakeCdpConnection();
@@ -1629,6 +1658,7 @@ function buildFakePreview(
     cdp,
     sessionIdCdp: "session-1",
     targetId: "target-1",
+    mainFrameId: null,
     ownsBrowser: false,
     nextFrameSeq: 1,
     lastFramePayload: null,

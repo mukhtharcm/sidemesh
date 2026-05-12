@@ -303,6 +303,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         }
         if (type != 'preview') {
           _status = 'Waiting for first frame...';
+          _pageLoading = false;
         }
         _error = null;
       });
