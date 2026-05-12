@@ -1039,6 +1039,82 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("persists pending Copilot user input and restores it as an interrupted turn note", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-pending-restart-test-"),
+    );
+    try {
+      const stateDir = nodePath.join(dir, "state");
+      const provider = new CopilotAgentProvider({
+        stateDir,
+        sdkClientFactory: fakeSdkFactory(new FakeCopilotSdkClient()),
+      });
+      await provider.start();
+
+      const opened = waitForActionOpened(provider, "user_input");
+      void provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "please ask user", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+
+      const action = await opened;
+      await settleProviderWrites();
+
+      const statePath = nodePath.join(stateDir, "sessions.json");
+      const persistedBeforeRestart = JSON.parse(
+        await readFile(statePath, "utf8"),
+      ) as {
+        sessions?: Array<{ pendingActions?: AgentPendingAction[] }>;
+      };
+      assert.equal(
+        persistedBeforeRestart.sessions?.[0]?.pendingActions?.length,
+        1,
+      );
+      assert.equal(
+        persistedBeforeRestart.sessions?.[0]?.pendingActions?.[0]?.id,
+        action.id,
+      );
+
+      const restoredProvider = new CopilotAgentProvider({
+        stateDir,
+        sdkClientFactory: fakeSdkFactory(new FakeCopilotSdkClient()),
+      });
+      await restoredProvider.start();
+
+      const restoredThread = await restoredProvider.readSessionThread(
+        action.sessionId,
+        true,
+      );
+      assert.equal(restoredThread.status.type, "idle");
+      assert.equal(restoredThread.turns?.at(-1)?.status, "interrupted");
+
+      const restoredLog = await restoredProvider.readSessionLog(restoredThread);
+      const restoredNotice = restoredLog.messages.at(-1);
+      assert.equal(restoredNotice?.role, "system");
+      assert.match(restoredNotice?.text ?? "", /waiting for your answer/i);
+      assert.match(restoredNotice?.text ?? "", /re-run your last request/i);
+
+      const persistedAfterRestart = JSON.parse(
+        await readFile(statePath, "utf8"),
+      ) as {
+        sessions?: Array<{ pendingActions?: AgentPendingAction[] }>;
+      };
+      assert.deepEqual(
+        persistedAfterRestart.sessions?.[0]?.pendingActions ?? [],
+        [],
+      );
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("restores partial Copilot assistant output after restart", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-partial-restart-test-"),
