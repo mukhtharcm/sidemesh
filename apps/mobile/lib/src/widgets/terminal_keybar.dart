@@ -44,7 +44,7 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
     return SafeArea(
       top: false,
       child: Container(
-        height: widget.compact ? 46 : 52,
+        height: widget.compact ? 36 : 40,
         padding: EdgeInsets.symmetric(
           horizontal: widget.compact ? 6 : 8,
           vertical: widget.compact ? 5 : 6,
@@ -216,7 +216,7 @@ class _ModifierPill extends StatelessWidget {
         child: Text(
           label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: active ? Colors.white : colors.textSecondary,
+            color: active ? Colors.white : colors.textPrimary,
             fontWeight: active ? AppWeights.emphasis : AppWeights.body,
             fontSize: compact ? 11 : 12,
           ),
