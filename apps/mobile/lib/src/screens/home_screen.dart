@@ -36,7 +36,6 @@ import 'host_detail_screen.dart';
 import 'pair_scanner_sheet.dart';
 import 'settings_screen.dart';
 import 'session_screen.dart';
-import 'usage_pane.dart';
 
 class SidemeshHomeScreen extends StatefulWidget {
   const SidemeshHomeScreen({super.key});
@@ -87,7 +86,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   static const Duration _heartbeatInterval = Duration(minutes: 5);
   List<HostProfile> _hosts = const [];
   bool _loading = true;
-  int _tabIndex = 0;
   int _activeCount = 0;
   int _inboxCount = 0;
   String _query = '';
@@ -395,7 +393,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       return;
     }
     if (!mounted) return;
-    setState(() => _tabIndex = 2);
+    _openSettings();
   }
 
   Future<void> _startSessionFromHome() async {
@@ -435,9 +433,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     _handlingNotificationIntent = true;
     try {
       if (!mounted) return;
-      if (_tabIndex != 1) {
-        setState(() => _tabIndex = 1);
-      }
       final host = _hostForIntent(intent);
       if (host == null) {
         service.markRouteIntentHandled(intent);
@@ -513,7 +508,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final tab = _tabs[_tabIndex];
     final enabledHosts = _enabledHosts;
     final installedAppVersion = _appVersionStore.info.comparableVersion;
     final mobileClientNotice = summarizeMobileClientCompatibility(
@@ -522,6 +516,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       hostNodes: _hostNodeInfo,
       dismissedRecommendedVersion: _dismissedRecommendedMobileClientVersion,
     );
+
     return Scaffold(
       backgroundColor: colors.canvas,
       body: SafeArea(
@@ -529,11 +524,11 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
         child: Column(
           children: [
             _HomeStickyHeader(
-              tab: tab,
+              tab: _tabs[0],
               searchController: _searchController,
-              searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
-              viewMode: _tabIndex == 0 ? _recentViewMode : null,
-              onViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
+              searchVisible: enabledHosts.length >= 1,
+              viewMode: _recentViewMode,
+              onViewModeChanged: _setRecentViewMode,
               onRefresh: _refreshHosts,
               onStartSession: _startSessionFromHome,
               onOpenSettings: _openSettings,
@@ -558,93 +553,83 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
             Expanded(
               child: _loading
                   ? const MeshLoader()
-                  : IndexedStack(
-                      index: _tabIndex,
-                      children: [
-                        RecentPane(
-                          hosts: enabledHosts,
-                          api: _api,
-                          query: _query,
-                          hasSavedHosts: _hosts.isNotEmpty,
-                          screenAwakeSourceKey: 'mobile-recent-sessions',
-                          onOpenSession: _openSession,
-                          onAddHost: () => _showHostEditor(),
-                          onActiveCountChanged: (count) {
-                            if (!mounted) return;
-                            setState(() => _activeCount = count);
-                          },
-                          viewMode: _recentViewMode,
-                          onViewModeChanged: _setRecentViewMode,
-                        ),
-                        InboxPane(
-                          hosts: enabledHosts,
-                          api: _api,
-                          query: _query,
-                          hasSavedHosts: _hosts.isNotEmpty,
-                          onOpenSession: (host, action) =>
-                              _openSession(host, _sessionFromAction(action)),
-                          onOpenPendingSession: (host, session, composerSeed) =>
-                              _openSession(
-                                host,
-                                session,
-                                composerSeed: composerSeed,
-                              ),
-                          onEditHost: (host) =>
-                              _showHostEditor(initialHost: host),
-                          onToggleHostEnabled: _toggleHostEnabled,
-                          allHosts: _hosts,
-                          onInboxCountChanged: (count) {
-                            if (!mounted || count == _inboxCount) return;
-                            setState(() => _inboxCount = count);
-                          },
-                        ),
-                        UsagePane(
-                          hosts: enabledHosts,
-                          api: _api,
-                          active: _tabIndex == 2,
-                        ),
-                        HostsPane(
-                          hosts: _hosts,
-                          hostNodes: _hostNodeInfo,
-                          installedAppVersion: installedAppVersion,
-                          query: _query,
-                          onOpenHost: _openHost,
-                          onEditHost: (host) =>
-                              _showHostEditor(initialHost: host),
-                          onRemoveHost: _removeHost,
-                          onToggleEnabled: _toggleHostEnabled,
-                          onAddHost: () => _showHostEditor(),
-                        ),
-                      ],
-                    ),
+                  : _buildScrollContent(enabledHosts, colors),
             ),
           ],
         ),
       ),
-      floatingActionButton: _tabIndex == 3 && _hosts.isNotEmpty
-          ? FloatingActionButton.extended(
-              onPressed: () => _showHostEditor(),
-              icon: const Icon(Icons.add_link_rounded),
-              label: const Text('Add host'),
-            )
-          : null,
-      bottomNavigationBar: _MeshNavBar(
-        tabs: _tabs,
-        currentIndex: _tabIndex,
-        onTap: (index) {
-          setState(() {
-            _tabIndex = index;
-            final tab = _tabs[index];
-            final showSearch = _searchVisibleForTab(tab, _enabledHosts.length);
-            if (!showSearch &&
-                (_query.isNotEmpty || _searchController.text.isNotEmpty)) {
-              _query = '';
-              _searchController.clear();
-            }
-          });
-        },
-        badges: [_activeCount, _inboxCount, 0, 0],
-      ),
+    );
+  }
+
+  Widget _buildScrollContent(
+    List<HostProfile> enabledHosts,
+    AppColors colors,
+  ) {
+    final installedAppVersion = _appVersionStore.info.comparableVersion;
+    final pendingApprovals = ApprovalInboxStore.instance.entries;
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(child: _SectionHeader(label: 'RECENT')),
+        SliverToBoxAdapter(
+          child: RecentPane(
+            hosts: enabledHosts,
+            api: _api,
+            query: _query,
+            hasSavedHosts: _hosts.isNotEmpty,
+            screenAwakeSourceKey: 'mobile-recent-sessions',
+            onOpenSession: _openSession,
+            onAddHost: () => _showHostEditor(),
+            onActiveCountChanged: (count) {
+              if (!mounted) return;
+              setState(() => _activeCount = count);
+            },
+            viewMode: _recentViewMode,
+            onViewModeChanged: _setRecentViewMode,
+          ),
+        ),
+        if (pendingApprovals.isNotEmpty) ...[
+          SliverToBoxAdapter(child: _SectionHeader(label: 'AWAITING')),
+          SliverToBoxAdapter(
+            child: InboxPane(
+              hosts: enabledHosts,
+              api: _api,
+              query: _query,
+              hasSavedHosts: _hosts.isNotEmpty,
+              onOpenSession: (host, action) =>
+                  _openSession(host, _sessionFromAction(action)),
+              onOpenPendingSession: (host, session, composerSeed) =>
+                  _openSession(host, session, composerSeed: composerSeed),
+              onEditHost: (host) => _showHostEditor(initialHost: host),
+              onToggleHostEnabled: _toggleHostEnabled,
+              allHosts: _hosts,
+              onInboxCountChanged: (count) {
+                if (!mounted || count == _inboxCount) return;
+                setState(() => _inboxCount = count);
+              },
+            ),
+          ),
+        ],
+        SliverToBoxAdapter(child: _SectionHeader(label: 'HOSTS')),
+        SliverToBoxAdapter(
+          child: HostsPane(
+            hosts: _hosts,
+            hostNodes: _hostNodeInfo,
+            installedAppVersion: installedAppVersion,
+            query: _query,
+            onOpenHost: _openHost,
+            onEditHost: (host) => _showHostEditor(initialHost: host),
+            onRemoveHost: _removeHost,
+            onToggleEnabled: _toggleHostEnabled,
+            onAddHost: () => _showHostEditor(),
+          ),
+        ),
+        // TODO(redesign): UsagePane moved to SettingsScreen
+        SliverToBoxAdapter(
+          child: SizedBox(
+            height: 100 + MediaQuery.of(context).padding.bottom,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -4794,6 +4779,28 @@ class _MobileClientUpdateBanner extends StatelessWidget {
               icon: Icon(Icons.close_rounded, color: colors.textSecondary),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: colors.textTertiary,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.5,
+        ),
       ),
     );
   }
