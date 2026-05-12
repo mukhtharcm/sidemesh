@@ -409,17 +409,13 @@ class SidemeshBrowserPreviewWindowManager {
 
   bool get isSupported => _isSupportedOverride ?? supportsSessionPopoutWindows;
 
-  Future<bool> openOrFocusBrowserPreviewWindow({
+  Future<bool> focusBrowserPreviewWindowIfOpen({
     required HostProfile host,
     required HostBrowserPreviewInfo preview,
   }) async {
     if (!isSupported) {
       return false;
     }
-    final requested = SidemeshWindowArguments.browserPreviewWindow(
-      hostId: host.id,
-      preview: preview,
-    );
     final windows = await _platform.getAll();
     for (final window in windows) {
       final parsed = SidemeshWindowArguments.fromJsonString(window.arguments);
@@ -429,6 +425,27 @@ class SidemeshBrowserPreviewWindowManager {
       await window.show();
       return true;
     }
+    return false;
+  }
+
+  Future<bool> openOrFocusBrowserPreviewWindow({
+    required HostProfile host,
+    required HostBrowserPreviewInfo preview,
+  }) async {
+    if (!isSupported) {
+      return false;
+    }
+    final focused = await focusBrowserPreviewWindowIfOpen(
+      host: host,
+      preview: preview,
+    );
+    if (focused) {
+      return true;
+    }
+    final requested = SidemeshWindowArguments.browserPreviewWindow(
+      hostId: host.id,
+      preview: preview,
+    );
     final created = await _platform.create(requested.toJsonString());
     await created.show();
     return true;

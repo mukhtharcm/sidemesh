@@ -286,9 +286,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   void _scheduleAutoResize(Size size) {
-    if (!widget.autoResizeViewport ||
-        !_hasLivePreviewSnapshot ||
-        _preview.clients > 1) {
+    if (!widget.autoResizeViewport || !_hasLivePreviewSnapshot) {
       _autoResizeTimer?.cancel();
       return;
     }

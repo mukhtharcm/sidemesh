@@ -191,6 +191,36 @@ void main() {
     },
   );
 
+  test(
+    'browser preview window manager reports whether a matching window is already open',
+    () async {
+      final existing = _FakeWindowHandle(
+        SidemeshWindowArguments.browserPreviewWindow(
+          hostId: host.id,
+          preview: preview,
+        ).toJsonString(),
+      );
+      final platform = _FakeWindowPlatform(
+        windows: <_FakeWindowHandle>[
+          existing,
+        ],
+      );
+      final manager = SidemeshBrowserPreviewWindowManager(
+        platform: platform,
+        isSupportedOverride: true,
+      );
+
+      final focused = await manager.focusBrowserPreviewWindowIfOpen(
+        host: host,
+        preview: preview,
+      );
+
+      expect(focused, isTrue);
+      expect(existing.showCalls, 1);
+      expect(platform.createdArguments, isEmpty);
+    },
+  );
+
   test('browser preview window manager creates a new window when missing', () async {
     final platform = _FakeWindowPlatform(
       windows: <_FakeWindowHandle>[

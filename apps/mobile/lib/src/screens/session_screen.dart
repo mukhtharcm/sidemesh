@@ -1164,18 +1164,7 @@ class _SessionScreenState extends State<SessionScreen>
             supportsBrowserPreview: _supportsBrowserPreview,
             supportsPortForwarding: _supportsPortForwarding,
             onBrowserPreviewOpened: (preview) {
-              controller.show(
-                buildInspectorBrowserPreviewSurface(
-                  ownerKey: ownerKey,
-                  host: widget.host,
-                  api: widget.api,
-                  preview: preview,
-                  onOpenInWindow:
-                      SidemeshBrowserPreviewWindowManager.instance.isSupported
-                      ? () => unawaited(_openBrowserPreviewWindow(preview))
-                      : null,
-                ),
-              );
+              unawaited(_showDockedBrowserPreview(preview: preview));
             },
           ),
         );
@@ -4958,7 +4947,8 @@ class _SessionScreenState extends State<SessionScreen>
       if (openInWindow) {
         await _openBrowserPreviewWindow(preview);
       } else {
-        _showDockedBrowserPreview(preview: preview);
+        await _showDockedBrowserPreview(preview: preview);
+        if (!mounted) return;
         showAppSnackBar(
           context,
           'Opened preview for ${candidate.endpointLabel}.',
@@ -4993,18 +4983,7 @@ class _SessionScreenState extends State<SessionScreen>
           supportsBrowserPreview: _supportsBrowserPreview,
           supportsPortForwarding: _supportsPortForwarding,
           onBrowserPreviewOpened: (preview) {
-            scope.show(
-              buildInspectorBrowserPreviewSurface(
-                ownerKey: _inspectorOwnerKey(),
-                host: widget.host,
-                api: widget.api,
-                preview: preview,
-                onOpenInWindow:
-                    SidemeshBrowserPreviewWindowManager.instance.isSupported
-                    ? () => unawaited(_openBrowserPreviewWindow(preview))
-                    : null,
-              ),
-            );
+            unawaited(_showDockedBrowserPreview(preview: preview));
           },
         ),
       );
@@ -5021,7 +5000,7 @@ class _SessionScreenState extends State<SessionScreen>
           supportsBrowserPreview: _supportsBrowserPreview,
           supportsPortForwarding: _supportsPortForwarding,
           onBrowserPreviewOpened: (preview) {
-            _showDockedBrowserPreview(preview: preview);
+            unawaited(_showDockedBrowserPreview(preview: preview));
             Navigator.of(context).maybePop();
           },
         ),
@@ -5029,10 +5008,20 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
-  void _showDockedBrowserPreview({
+  Future<void> _showDockedBrowserPreview({
     required HostBrowserPreviewInfo preview,
-  }) {
+  }) async {
     if (!mounted || _disposed) return;
+    final manager = SidemeshBrowserPreviewWindowManager.instance;
+    if (manager.isSupported) {
+      final focused = await manager.focusBrowserPreviewWindowIfOpen(
+        host: widget.host,
+        preview: preview,
+      );
+      if (!mounted || _disposed || focused) {
+        return;
+      }
+    }
     final scope = InspectorScope.maybeOf(context);
     if (widget.desktopMode && scope != null) {
       scope.show(
@@ -5054,9 +5043,23 @@ class _SessionScreenState extends State<SessionScreen>
     });
   }
 
+  void _detachCurrentBrowserPreviewSurface(HostBrowserPreviewInfo preview) {
+    final current = _dockedBrowserPreview;
+    if (current?.preview.id == preview.id) {
+      setState(() => _dockedBrowserPreview = null);
+    }
+    final scope = InspectorScope.maybeOf(context);
+    final active = scope?.current;
+    if (active?.kind == InspectorSurfaceKind.browserPreview &&
+        active?.ownerKey == _inspectorOwnerKey()) {
+      scope?.close();
+    }
+  }
+
   Future<void> _openBrowserPreviewWindow(
     HostBrowserPreviewInfo preview,
   ) async {
+    _detachCurrentBrowserPreviewSurface(preview);
     final opened = await SidemeshBrowserPreviewWindowManager.instance
         .openOrFocusBrowserPreviewWindow(host: widget.host, preview: preview);
     if (!mounted || _disposed) {

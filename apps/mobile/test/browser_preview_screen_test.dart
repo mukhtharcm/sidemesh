@@ -134,40 +134,6 @@ void main() {
     expect(api.sentMessages.last['height'] as int, greaterThan(700));
   });
 
-  testWidgets(
-    'browser preview does not auto-resize while another viewer is attached',
-    (tester) async {
-      final api = _BrowserPreviewFakeApi();
-      addTearDown(api.dispose);
-
-      await _pumpApp(
-        tester,
-        Scaffold(
-          body: BrowserPreviewPane(
-            host: _host(),
-            api: api,
-            preview: _preview(clients: 2),
-            showHeader: false,
-            autoResizeViewport: true,
-          ),
-        ),
-        size: const Size(1180, 900),
-      );
-
-      await _pumpFrames(tester);
-      api.emit({
-        'type': 'hello',
-        'preview': _previewJson()..['clients'] = 2,
-      });
-      await _pumpFrames(tester);
-
-      expect(
-        api.sentMessages.where((message) => message['type'] == 'resize'),
-        isEmpty,
-      );
-    },
-  );
-
   testWidgets('browser preview renders a live network tab and detail sheet', (
     tester,
   ) async {
