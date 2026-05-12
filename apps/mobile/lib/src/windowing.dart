@@ -14,7 +14,7 @@ bool get supportsSessionPopoutWindows =>
     defaultTargetPlatform == TargetPlatform.macOS &&
     Platform.isMacOS;
 
-enum SidemeshWindowKind { main, session }
+enum SidemeshWindowKind { main, session, browserPreview }
 
 @immutable
 class SidemeshWindowArguments {
@@ -22,6 +22,7 @@ class SidemeshWindowArguments {
     required this.kind,
     this.hostId,
     this.session,
+    this.preview,
   });
 
   const SidemeshWindowArguments.mainWindow()
@@ -36,19 +37,32 @@ class SidemeshWindowArguments {
          session: session,
        );
 
+  const SidemeshWindowArguments.browserPreviewWindow({
+    required String hostId,
+    required HostBrowserPreviewInfo preview,
+  }) : this._(
+         kind: SidemeshWindowKind.browserPreview,
+         hostId: hostId,
+         preview: preview,
+       );
+
   final SidemeshWindowKind kind;
   final String? hostId;
   final SessionSummary? session;
+  final HostBrowserPreviewInfo? preview;
 
   String get sessionId => session?.id ?? '';
+  String get previewId => preview?.id ?? '';
 
   Map<String, Object?> toJson() => <String, Object?>{
     'kind': switch (kind) {
       SidemeshWindowKind.main => 'main',
       SidemeshWindowKind.session => 'session',
+      SidemeshWindowKind.browserPreview => 'browserPreview',
     },
     if ((hostId ?? '').isNotEmpty) 'hostId': hostId,
     if (session != null) 'session': session!.toJson(),
+    if (preview != null) 'preview': preview!.toJson(),
   };
 
   String toJsonString() => jsonEncode(toJson());
@@ -57,6 +71,15 @@ class SidemeshWindowArguments {
     return kind == SidemeshWindowKind.session &&
         hostId == host.id &&
         sessionId == nextSession.id;
+  }
+
+  bool matchesBrowserPreview(
+    HostProfile host,
+    HostBrowserPreviewInfo nextPreview,
+  ) {
+    return kind == SidemeshWindowKind.browserPreview &&
+        hostId == host.id &&
+        previewId == nextPreview.id;
   }
 
   static SidemeshWindowArguments fromJsonString(String? raw) {
@@ -70,20 +93,33 @@ class SidemeshWindowArguments {
       }
       final kind = switch (decoded['kind']) {
         'session' => SidemeshWindowKind.session,
+        'browserPreview' => SidemeshWindowKind.browserPreview,
         _ => SidemeshWindowKind.main,
       };
       if (kind == SidemeshWindowKind.main) {
         return const SidemeshWindowArguments.mainWindow();
       }
       final hostId = decoded['hostId'] as String?;
-      final sessionJson = decoded['session'];
-      if ((hostId ?? '').trim().isEmpty ||
-          sessionJson is! Map<String, dynamic>) {
+      if ((hostId ?? '').trim().isEmpty) {
         return const SidemeshWindowArguments.mainWindow();
       }
-      return SidemeshWindowArguments.sessionWindow(
+      if (kind == SidemeshWindowKind.session) {
+        final sessionJson = decoded['session'];
+        if (sessionJson is! Map<String, dynamic>) {
+          return const SidemeshWindowArguments.mainWindow();
+        }
+        return SidemeshWindowArguments.sessionWindow(
+          hostId: hostId!.trim(),
+          session: SessionSummary.fromJson(sessionJson),
+        );
+      }
+      final previewJson = decoded['preview'];
+      if (previewJson is! Map<String, dynamic>) {
+        return const SidemeshWindowArguments.mainWindow();
+      }
+      return SidemeshWindowArguments.browserPreviewWindow(
         hostId: hostId!.trim(),
-        session: SessionSummary.fromJson(sessionJson),
+        preview: HostBrowserPreviewInfo.fromJson(previewJson),
       );
     } catch (_) {
       return const SidemeshWindowArguments.mainWindow();
@@ -352,6 +388,64 @@ class SidemeshSessionWindowManager {
       await window.show();
       return true;
     }
+    final created = await _platform.create(requested.toJsonString());
+    await created.show();
+    return true;
+  }
+}
+
+class SidemeshBrowserPreviewWindowManager {
+  SidemeshBrowserPreviewWindowManager({
+    SidemeshWindowPlatform? platform,
+    bool? isSupportedOverride,
+  }) : _platform = platform ?? const DesktopMultiWindowPlatform(),
+       _isSupportedOverride = isSupportedOverride;
+
+  static final SidemeshBrowserPreviewWindowManager instance =
+      SidemeshBrowserPreviewWindowManager();
+
+  final SidemeshWindowPlatform _platform;
+  final bool? _isSupportedOverride;
+
+  bool get isSupported => _isSupportedOverride ?? supportsSessionPopoutWindows;
+
+  Future<bool> focusBrowserPreviewWindowIfOpen({
+    required HostProfile host,
+    required HostBrowserPreviewInfo preview,
+  }) async {
+    if (!isSupported) {
+      return false;
+    }
+    final windows = await _platform.getAll();
+    for (final window in windows) {
+      final parsed = SidemeshWindowArguments.fromJsonString(window.arguments);
+      if (!parsed.matchesBrowserPreview(host, preview)) {
+        continue;
+      }
+      await window.show();
+      return true;
+    }
+    return false;
+  }
+
+  Future<bool> openOrFocusBrowserPreviewWindow({
+    required HostProfile host,
+    required HostBrowserPreviewInfo preview,
+  }) async {
+    if (!isSupported) {
+      return false;
+    }
+    final focused = await focusBrowserPreviewWindowIfOpen(
+      host: host,
+      preview: preview,
+    );
+    if (focused) {
+      return true;
+    }
+    final requested = SidemeshWindowArguments.browserPreviewWindow(
+      hostId: host.id,
+      preview: preview,
+    );
     final created = await _platform.create(requested.toJsonString());
     await created.show();
     return true;

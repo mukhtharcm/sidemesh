@@ -1,0 +1,121 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../api_client.dart';
+import '../host_store.dart';
+import '../models.dart';
+import '../theme/app_colors.dart';
+import '../widgets/mesh_widgets.dart';
+import '../windowing.dart';
+import 'browser_preview_screen.dart';
+
+class BrowserPreviewWindowScreen extends StatefulWidget {
+  const BrowserPreviewWindowScreen({
+    super.key,
+    required this.arguments,
+  });
+
+  final SidemeshWindowArguments arguments;
+
+  @override
+  State<BrowserPreviewWindowScreen> createState() =>
+      _BrowserPreviewWindowScreenState();
+}
+
+class _BrowserPreviewWindowScreenState extends State<BrowserPreviewWindowScreen> {
+  final HostStore _hostStore = HostStore();
+  final ApiClient _api = ApiClient();
+
+  HostProfile? _host;
+  String? _error;
+  bool _loading = true;
+
+  HostBrowserPreviewInfo get _preview => widget.arguments.preview!;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadHost());
+  }
+
+  Future<void> _loadHost() async {
+    final hostId = widget.arguments.hostId;
+    if ((hostId ?? '').isEmpty) {
+      setState(() {
+        _error = 'This browser preview window is missing its host reference.';
+        _loading = false;
+      });
+      return;
+    }
+    try {
+      final hosts = await _hostStore.loadHosts();
+      HostProfile? match;
+      for (final host in hosts) {
+        if (host.id == hostId) {
+          match = host;
+          break;
+        }
+      }
+      if (!mounted) return;
+      if (match == null) {
+        setState(() {
+          _error =
+              'The host for this browser preview is no longer available in this app install.';
+          _loading = false;
+        });
+        return;
+      }
+      if (!match.enabled) {
+        setState(() {
+          _error =
+              'The host for this browser preview is disabled. Re-enable it in the main window to continue.';
+          _loading = false;
+        });
+        return;
+      }
+      setState(() {
+        _host = match;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Failed to load the host for this browser preview: $error';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    if (_loading) {
+      return Scaffold(backgroundColor: colors.canvas, body: const MeshLoader());
+    }
+    final host = _host;
+    if (host == null) {
+      return Scaffold(
+        backgroundColor: colors.canvas,
+        appBar: AppBar(title: Text(_preview.label)),
+        body: MeshEmptyState(
+          icon: Icons.open_in_browser_rounded,
+          title: 'Browser preview unavailable',
+          body: _error ?? 'This browser preview window could not be restored.',
+        ),
+      );
+    }
+    return Scaffold(
+      backgroundColor: colors.canvas,
+      body: SafeArea(
+        bottom: false,
+        child: BrowserPreviewPane(
+          host: host,
+          api: _api,
+          preview: _preview,
+          autoResizeViewport: true,
+        ),
+      ),
+    );
+  }
+}
