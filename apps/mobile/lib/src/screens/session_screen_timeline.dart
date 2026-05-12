@@ -3805,6 +3805,69 @@ class _SessionWaitingState extends StatelessWidget {
   }
 }
 
+class _UtilityStrip extends StatelessWidget {
+  const _UtilityStrip({
+    required this.host,
+    required this.pendingSends,
+    required this.retryingPendingSend,
+    required this.onRetryNow,
+    required this.onEditCopy,
+    required this.onDiscard,
+    required this.showRuntimeSignal,
+    required this.threadStatus,
+    required this.queueUpdated,
+    required this.autoRetryUpdated,
+  });
+
+  final HostProfile host;
+  final List<PendingSessionSend> pendingSends;
+  final bool retryingPendingSend;
+  final VoidCallback onRetryNow;
+  final ValueChanged<PendingSessionSend> onEditCopy;
+  final ValueChanged<PendingSessionSend> onDiscard;
+  final bool showRuntimeSignal;
+  final LiveEvent? threadStatus;
+  final LiveEvent? queueUpdated;
+  final LiveEvent? autoRetryUpdated;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget? child;
+    Object? key;
+
+    if (pendingSends.isNotEmpty) {
+      key = 'sends';
+      child = _PendingSendStrip(
+        host: host,
+        pending: pendingSends,
+        retrying: retryingPendingSend,
+        onRetryNow: onRetryNow,
+        onEditCopy: onEditCopy,
+        onDiscard: onDiscard,
+      );
+    } else if (showRuntimeSignal) {
+      key = 'runtime';
+      child = Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        child: _RuntimeSignalStrip(
+          threadStatus: threadStatus,
+          queueUpdated: queueUpdated,
+          autoRetryUpdated: autoRetryUpdated,
+        ),
+      );
+    }
+
+    if (child == null) return const SizedBox.shrink();
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 200),
+      transitionBuilder: (child, animation) =>
+          FadeTransition(opacity: animation, child: child),
+      child: KeyedSubtree(key: ValueKey(key), child: child),
+    );
+  }
+}
+
 class _ApprovalFooter extends StatefulWidget {
   const _ApprovalFooter({required this.action, required this.onRespond});
   final PendingAction action;

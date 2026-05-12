@@ -6191,25 +6191,18 @@ class _SessionScreenState extends State<SessionScreen>
             onStop: () => unawaited(_stopDockedBrowserPreview()),
             onStopped: (_) => _closeDockedBrowserPreview(),
           ),
-        if (_pendingSends.isNotEmpty)
-          _PendingSendStrip(
-            host: widget.host,
-            pending: _pendingSends,
-            retrying: _retryingPendingSend,
-            onRetryNow: () => unawaited(_retryPendingSends(manual: true)),
-            onEditCopy: (pending) =>
-                unawaited(_movePendingSendToComposer(pending)),
-            onDiscard: (pending) => unawaited(_discardPendingSend(pending)),
-          ),
-        if (_showRuntimeSignalStrip)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: _RuntimeSignalStrip(
-              threadStatus: _latestThreadStatus,
-              queueUpdated: _latestQueueUpdate,
-              autoRetryUpdated: _latestAutoRetryUpdate,
-            ),
-          ),
+        _UtilityStrip(
+          host: widget.host,
+          pendingSends: _pendingSends,
+          retryingPendingSend: _retryingPendingSend,
+          onRetryNow: () => unawaited(_retryPendingSends(manual: true)),
+          onEditCopy: (pending) => unawaited(_movePendingSendToComposer(pending)),
+          onDiscard: (pending) => unawaited(_discardPendingSend(pending)),
+          showRuntimeSignal: _showRuntimeSignalStrip,
+          threadStatus: _latestThreadStatus,
+          queueUpdated: _latestQueueUpdate,
+          autoRetryUpdated: _latestAutoRetryUpdate,
+        ),
         _ComposerStatusStrip(thinking: _thinkingNotifier),
         _Composer(
           controller: _composerController,
