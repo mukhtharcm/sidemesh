@@ -3795,3 +3795,160 @@ class _SessionWaitingState extends StatelessWidget {
     );
   }
 }
+
+class _QuestionBlock extends StatefulWidget {
+  const _QuestionBlock({
+    required this.action,
+    required this.onAnswer,
+  });
+  final PendingAction action;
+  final ValueChanged<PendingActionResponseDraft> onAnswer;
+
+  @override
+  State<_QuestionBlock> createState() => _QuestionBlockState();
+}
+
+class _QuestionBlockState extends State<_QuestionBlock> {
+  String? _selectedChoice;
+  MeshOptionState _choiceState(String choice) {
+    if (_selectedChoice == null) return MeshOptionState.idle;
+    if (_selectedChoice == choice) return MeshOptionState.submitting;
+    return MeshOptionState.idle;
+  }
+
+  bool _answered = false;
+  String? _answeredText;
+  final TextEditingController _freeformController = TextEditingController();
+
+  @override
+  void dispose() {
+    _freeformController.dispose();
+    super.dispose();
+  }
+
+  void _submitChoice(String choice) {
+    if (_answered) return;
+    setState(() {
+      _selectedChoice = choice;
+    });
+    widget.onAnswer(PendingActionResponseDraft.userInput(answer: choice, wasFreeform: false));
+    setState(() {
+      _answered = true;
+      _answeredText = choice;
+    });
+  }
+
+  void _submitFreeform() {
+    final text = _freeformController.text.trim();
+    if (text.isEmpty || _answered) return;
+    widget.onAnswer(PendingActionResponseDraft.userInput(answer: text, wasFreeform: true));
+    setState(() {
+      _answered = true;
+      _answeredText = text;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final userInput = widget.action.userInput;
+    if (userInput == null) return const SizedBox.shrink();
+
+    if (_answered) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: GestureDetector(
+          onTap: () => setState(() {
+            _answered = false;
+            _selectedChoice = null;
+          }),
+          child: Row(
+            children: [
+              Icon(Icons.arrow_right_rounded, size: 16, color: colors.textTertiary),
+              const SizedBox(width: 4),
+              Text(
+                'you replied ',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
+              ),
+              Flexible(
+                child: Text(
+                  '\u2018${_answeredText ?? ''}\u2019',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            userInput.question,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          for (final choice in userInput.choices)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: MeshOptionRow(
+                label: choice,
+                state: _choiceState(choice),
+                onTap: _answered ? null : () => _submitChoice(choice),
+              ),
+            ),
+          if (userInput.allowFreeform) ...[
+            const SizedBox(height: 4),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _freeformController,
+                    minLines: 1,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText: 'Or type a reply\u2026',
+                      hintStyle: TextStyle(color: colors.textTertiary),
+                      border: OutlineInputBorder(
+                        borderRadius: AppShapes.input,
+                        borderSide: BorderSide(color: colors.border),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: AppShapes.input,
+                        borderSide: BorderSide(color: colors.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: AppShapes.input,
+                        borderSide: BorderSide(color: colors.accent),
+                      ),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: _submitFreeform,
+                  icon: Icon(Icons.arrow_upward_rounded, color: colors.accent),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}

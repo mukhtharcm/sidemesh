@@ -65,6 +65,7 @@ import 'package:sidemesh_mobile/src/host_reconnect_scheduler.dart';
 import '../widgets/provider_badge.dart';
 import '../relative_time_ticker.dart';
 import '../widgets/syntax_code_block.dart';
+import '../widgets/mesh_option_row.dart';
 
 part 'session_screen_header.dart';
 part 'session_screen_composer.dart';
@@ -6094,14 +6095,42 @@ class _SessionScreenState extends State<SessionScreen>
                                     ),
                                 },
                               );
-                              if (!showDay) return child;
+                              Widget itemWidget = child;
+                              if (!showDay) {
+                                if (index == 0 && (_pendingAction?.isUserInput ?? false)) {
+                                  itemWidget = Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      child,
+                                      _QuestionBlock(
+                                        action: _pendingAction!,
+                                        onAnswer: (draft) => unawaited(_respondAction(draft)),
+                                      ),
+                                    ],
+                                  );
+                                }
+                                return itemWidget;
+                              }
+                              Widget daySepChild = child;
+                              if (index == 0 && (_pendingAction?.isUserInput ?? false)) {
+                                daySepChild = Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    child,
+                                    _QuestionBlock(
+                                      action: _pendingAction!,
+                                      onAnswer: (draft) => unawaited(_respondAction(draft)),
+                                    ),
+                                  ],
+                                );
+                              }
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
                                   _DaySeparator(
                                     label: _formatDaySeparator(entry.createdAt),
                                   ),
-                                  child,
+                                  daySepChild,
                                 ],
                               );
                             },
