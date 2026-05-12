@@ -1274,6 +1274,41 @@ void main() {
     );
   });
 
+  testWidgets('browser preview clears stale loading UI when hello resyncs after reconnect', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(
+        host: _host(),
+        api: api,
+        preview: _preview(),
+      ),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+
+    api.emit({'type': 'loading', 'state': 'started'});
+    await _pumpFrames(tester);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    await _pumpFrames(tester);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
   testWidgets('browser preview surfaces network detail fetch errors', (
     tester,
   ) async {
