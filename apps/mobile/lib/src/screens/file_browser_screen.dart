@@ -6,9 +6,10 @@ import '../api_client.dart';
 import '../fs_models.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
+import '../widgets/mesh_breadcrumb.dart';
+import '../widgets/mesh_status_line.dart';
 import '../workspace_live_store.dart';
-import 'file_viewer_pane.dart';
 import 'file_viewer_screen.dart';
 
 /// Embeddable workspace browser tree. Manages its own live subscription,
@@ -149,40 +150,45 @@ class FileBrowserScreen extends StatelessWidget {
     final colors = context.colors;
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
-      appBar: AppBar(
-        backgroundColor: colors.surface,
-        foregroundColor: colors.textPrimary,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        shape: Border(bottom: BorderSide(color: colors.border)),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              baseName(root),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                MeshStatusLine(
+                  segments: [
+                    MeshStatusSegment(host.label, mono: true),
+                    MeshStatusSegment('Files'),
+                  ],
+                ),
+                Container(
+                  height: 36,
+                  color: colors.surface,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.lg,
+                    vertical: 4,
+                  ),
+                  child: MeshBreadcrumb(
+                    segments: _buildBreadcrumbs(root),
+                  ),
+                ),
+                Divider(height: 1, color: colors.border),
+              ],
             ),
-            const SizedBox(height: 2),
-            Text(
-              root,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: monoStyle(color: colors.textTertiary, fontSize: 11),
+          ),
+          Expanded(
+            child: FileBrowserTree(
+              host: host,
+              api: api,
+              root: root,
+              agentProvider: agentProvider,
+              sessionId: sessionId,
             ),
-          ],
-        ),
-      ),
-      body: FileBrowserTree(
-        host: host,
-        api: api,
-        root: root,
-        agentProvider: agentProvider,
-        sessionId: sessionId,
+          ),
+        ],
       ),
     );
     if (topPadding == null) return scaffold;
@@ -190,6 +196,16 @@ class FileBrowserScreen extends StatelessWidget {
       padding: EdgeInsets.only(top: topPadding!),
       child: scaffold,
     );
+  }
+
+  List<MeshBreadcrumbSegment> _buildBreadcrumbs(String path) {
+    final parts = path.split('/').where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return [MeshBreadcrumbSegment(label: '/')];
+    final segments = <MeshBreadcrumbSegment>[];
+    for (var i = 0; i < parts.length; i++) {
+      segments.add(MeshBreadcrumbSegment(label: parts[i]));
+    }
+    return segments;
   }
 }
 
