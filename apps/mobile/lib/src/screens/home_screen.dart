@@ -4618,7 +4618,7 @@ class _MobileClientUpdateBanner extends StatelessWidget {
                         ),
                       ),
                       if (onDismiss != null)
-                        OutlinedButton(
+                        TextButton(
                           onPressed: onDismiss,
                           child: const Text('Later'),
                         ),

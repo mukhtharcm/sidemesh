@@ -3787,15 +3787,12 @@ class _SessionWaitingState extends StatelessWidget {
             ),
           ),
           if (onStop != null) ...[            const SizedBox(height: AppSpacing.lg),
-            OutlinedButton.icon(
+            TextButton.icon(
               onPressed: onStop,
               icon: const Icon(Icons.stop_circle_rounded, size: 17),
               label: const Text('Interrupt agent'),
-              style: OutlinedButton.styleFrom(
+              style: TextButton.styleFrom(
                 foregroundColor: colors.danger,
-                side: BorderSide(
-                  color: colors.danger.withValues(alpha: 0.4),
-                ),
               ),
             ),
           ],
@@ -3954,9 +3951,9 @@ class _ApprovalFooterState extends State<_ApprovalFooter> {
                 ),
               ),
               const SizedBox(width: 8),
-              OutlinedButton(
+              TextButton(
                 onPressed: _decline,
-                style: OutlinedButton.styleFrom(
+                style: TextButton.styleFrom(
                   visualDensity: VisualDensity.compact,
                 ),
                 child: const Text('Decline'),

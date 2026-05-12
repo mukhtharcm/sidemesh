@@ -1610,7 +1610,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
               style: TextStyle(color: colors.danger),
             ),
             const SizedBox(height: 14),
-            OutlinedButton.icon(
+            TextButton.icon(
               onPressed: _retryPreviewStream,
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Reconnect viewer'),
@@ -2469,12 +2469,12 @@ class _InspectorTab extends StatelessWidget {
                 runSpacing: 8,
                 alignment: WrapAlignment.center,
                 children: [
-                  OutlinedButton.icon(
+                  TextButton.icon(
                     onPressed: onRefresh,
                     icon: const Icon(Icons.refresh_rounded),
                     label: const Text('Load inspector'),
                   ),
-                  OutlinedButton.icon(
+                  TextButton.icon(
                     onPressed: onTogglePickMode,
                     icon: const Icon(Icons.ads_click_rounded),
                     label: Text(
@@ -2892,7 +2892,7 @@ class _StorageTab extends StatelessWidget {
                 style: TextStyle(color: colors.textSecondary),
               ),
               const SizedBox(height: 12),
-              OutlinedButton.icon(
+              TextButton.icon(
                 onPressed: onRefresh,
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Load storage'),
@@ -5698,7 +5698,7 @@ class _KeyButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
-      child: OutlinedButton(onPressed: onTap, child: Text(label)),
+      child: TextButton(onPressed: onTap, child: Text(label)),
     );
   }
 }

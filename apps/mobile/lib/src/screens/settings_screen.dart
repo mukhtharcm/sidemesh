@@ -448,7 +448,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                       child: const Text('Reset'),
                     ),
                     const Spacer(),
-                    OutlinedButton(
+                    TextButton(
                       onPressed: _saving
                           ? null
                           : () => Navigator.of(context).maybePop(),
@@ -637,7 +637,7 @@ class _SettingsContent extends StatelessWidget {
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  OutlinedButton(
+                  TextButton(
                     onPressed: notificationsLoading
                         ? null
                         : () => unawaited(onRefreshNotifications()),
@@ -1015,19 +1015,19 @@ class _AboutFooter extends StatelessWidget {
               runSpacing: AppSpacing.sm,
               children: [
                 if (onReplayOnboarding != null)
-                  OutlinedButton.icon(
+                  TextButton.icon(
                     onPressed: onReplayOnboarding,
                     icon: const Icon(Icons.replay_rounded, size: 16),
                     label: const Text('Replay onboarding'),
                   ),
                 if (hasDesktopControls && onResetSidebarWidth != null)
-                  OutlinedButton.icon(
+                  TextButton.icon(
                     onPressed: onResetSidebarWidth,
                     icon: const Icon(Icons.view_sidebar_rounded, size: 16),
                     label: const Text('Reset sidebar'),
                   ),
                 if (hasDesktopControls && onResetInspectorWidth != null)
-                  OutlinedButton.icon(
+                  TextButton.icon(
                     onPressed: onResetInspectorWidth,
                     icon: const Icon(Icons.tune_rounded, size: 16),
                     label: const Text('Reset inspector'),

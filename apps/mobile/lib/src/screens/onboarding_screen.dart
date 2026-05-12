@@ -644,7 +644,7 @@ class _ActionsPage extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    OutlinedButton(
+                    TextButton(
                       onPressed: null,
                       child: const Text('Reject'),
                     ),

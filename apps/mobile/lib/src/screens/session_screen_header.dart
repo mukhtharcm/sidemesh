@@ -813,17 +813,17 @@ class _GitDetailsSheet extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  OutlinedButton.icon(
+                  TextButton.icon(
                     onPressed: () => onShowDiff('working'),
                     icon: const Icon(Icons.difference_rounded, size: 18),
                     label: const Text('Working diff'),
                   ),
-                  OutlinedButton.icon(
+                  TextButton.icon(
                     onPressed: () => onShowDiff('staged'),
                     icon: const Icon(Icons.inventory_2_rounded, size: 18),
                     label: const Text('Staged diff'),
                   ),
-                  OutlinedButton.icon(
+                  TextButton.icon(
                     onPressed: () => onShowDiff('remote'),
                     icon: const Icon(Icons.cloud_rounded, size: 18),
                     label: const Text('Remote diff'),
@@ -1686,7 +1686,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           ),
         ),
         if (action.canDecline)
-          OutlinedButton.icon(
+          TextButton.icon(
             onPressed: () => widget.onRespond(
               PendingActionResponseDraft.elicitation(action: 'decline'),
             ),
@@ -1696,11 +1696,11 @@ class _PendingActionCardState extends State<_PendingActionCard> {
               color: colors.danger,
             ),
             label: Text('Decline', style: TextStyle(color: colors.danger)),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: colors.danger.withValues(alpha: 0.5)),
+            style: TextButton.styleFrom(
+              foregroundColor: colors.danger,
             ),
           ),
-        OutlinedButton.icon(
+        TextButton.icon(
           onPressed: () => widget.onRespond(
             PendingActionResponseDraft.elicitation(action: 'cancel'),
           ),
@@ -1720,7 +1720,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           label: const Text('Approve'),
         ),
       if (action.canApproveForSession)
-        OutlinedButton.icon(
+        TextButton.icon(
           onPressed: () => widget.onRespond(
             PendingActionResponseDraft.approval('acceptForSession'),
           ),
@@ -1728,15 +1728,15 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           label: const Text('Approve for session'),
         ),
       if (action.canDecline)
-        OutlinedButton.icon(
+        TextButton.icon(
           onPressed: _responding ? null : () {
               if (!_responding) setState(() => _responding = true);
               widget.onRespond(PendingActionResponseDraft.approval('decline'));
             },
           icon: Icon(Icons.close_rounded, size: 18, color: colors.danger),
           label: Text('Decline', style: TextStyle(color: colors.danger)),
-          style: OutlinedButton.styleFrom(
-            side: BorderSide(color: colors.danger.withValues(alpha: 0.5)),
+          style: TextButton.styleFrom(
+            foregroundColor: colors.danger,
           ),
         ),
     ];
