@@ -99,6 +99,9 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   final _portController = TextEditingController(text: '3000');
   final _hostController = TextEditingController(text: '127.0.0.1');
   final _labelController = TextEditingController();
+  final _portFocusNode = FocusNode();
+  String? _portError;
+  String? _hostError;
 
   List<HostBrowserPreviewInfo> _browserPreviews = const [];
   _ActiveBrowserPreview? _inlineBrowserPreview;
@@ -112,15 +115,33 @@ class _PortForwardPaneState extends State<PortForwardPane> {
   @override
   void initState() {
     super.initState();
+    _portFocusNode.addListener(_validatePort);
     unawaited(_loadBrowserPreviews());
   }
 
   @override
   void dispose() {
+    _portFocusNode.removeListener(_validatePort);
+    _portFocusNode.dispose();
     _portController.dispose();
     _hostController.dispose();
     _labelController.dispose();
     super.dispose();
+  }
+
+  void _validatePort() {
+    if (_portFocusNode.hasFocus) return;
+    final text = _portController.text.trim();
+    final port = int.tryParse(text);
+    setState(() {
+      if (text.isEmpty) {
+        _portError = null;
+      } else if (port == null || port < 1 || port > 65535) {
+        _portError = 'Enter a port between 1 and 65535';
+      } else {
+        _portError = null;
+      }
+    });
   }
 
   Future<void> _loadBrowserPreviews() async {
@@ -159,7 +180,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
     }
     final targetPort = int.tryParse(_portController.text.trim());
     if (targetPort == null || targetPort < 1 || targetPort > 65535) {
-      showAppSnackBar(context, 'Enter a valid port between 1 and 65535.');
+      setState(() => _portError = 'Enter a port between 1 and 65535');
       return;
     }
     final rawHost = _hostController.text.trim().isEmpty
@@ -167,10 +188,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
         : _hostController.text.trim();
     final targetHost = normalizeBrowserPreviewHost(rawHost);
     if (targetHost == null) {
-      showAppSnackBar(
-        context,
-        'Browser previews only support localhost targets.',
-      );
+      setState(() => _hostError = 'Browser previews only support localhost targets.');
       return;
     }
     setState(() => _creatingPreview = true);
@@ -384,11 +402,18 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                           width: 120,
                           child: TextField(
                             controller: _portController,
+                            focusNode: _portFocusNode,
                             keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               labelText: 'Port',
                               hintText: '3000',
+                              errorText: _portError,
                             ),
+                            onChanged: (_) {
+                              if (_portError != null) {
+                                setState(() => _portError = null);
+                              }
+                            },
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -421,11 +446,18 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                           width: 110,
                           child: TextField(
                             controller: _portController,
+                            focusNode: _portFocusNode,
                             keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               labelText: 'Port',
                               hintText: '3000',
+                              errorText: _portError,
                             ),
+                            onChanged: (_) {
+                              if (_portError != null) {
+                                setState(() => _portError = null);
+                              }
+                            },
                           ),
                         ),
                         FilledButton.icon(
@@ -462,10 +494,16 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                             width: 150,
                             child: TextField(
                               controller: _hostController,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: 'Host',
                                 hintText: '127.0.0.1',
+                                errorText: _hostError,
                               ),
+                              onChanged: (_) {
+                                if (_hostError != null) {
+                                  setState(() => _hostError = null);
+                                }
+                              },
                             ),
                           ),
                           SizedBox(
