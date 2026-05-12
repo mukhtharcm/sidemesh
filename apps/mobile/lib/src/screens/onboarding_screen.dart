@@ -13,7 +13,6 @@ import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/mesh_widgets.dart';
-import '../widgets/theme_picker.dart';
 import 'home_screen.dart';
 import 'pair_scanner_sheet.dart';
 
@@ -40,7 +39,7 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final PageController _pageController = PageController();
   int _pageIndex = 0;
-  static const int _pageCount = 5;
+  static const int _pageCount = 3;
   PairingPayload? _pairingSuccess;
 
   @override
@@ -149,12 +148,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 physics: const ClampingScrollPhysics(),
                 children: [
                   _WelcomePage(colors: colors),
-                  _HowItWorksPage(colors: colors),
-                  _ActionsPage(colors: colors),
-                  _ThemePage(
-                    colors: colors,
-                    themeController: widget.themeController,
-                  ),
+                  _BriefConnectIntroPage(colors: colors),
                   _pairingSuccess != null
                       ? _PairingSuccessPage(
                           colors: colors,
@@ -324,253 +318,40 @@ class _WelcomePage extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Page 2: How it works
+// Page 2: Connect a host (brief intro)
 // ---------------------------------------------------------------------------
 
-class _HowItWorksPage extends StatefulWidget {
-  const _HowItWorksPage({required this.colors});
+class _BriefConnectIntroPage extends StatelessWidget {
+  const _BriefConnectIntroPage({required this.colors});
 
   final AppColors colors;
 
   @override
-  State<_HowItWorksPage> createState() => _HowItWorksPageState();
-}
-
-class _HowItWorksPageState extends State<_HowItWorksPage>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _anim = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _anim.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final colors = widget.colors;
     return _OnboardingPageShell(
       horizontalPadding: 32,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          SizedBox(
-            width: 220,
-            height: 160,
-            child: AnimatedBuilder(
-              animation: _anim,
-              builder: (context, child) {
-                return CustomPaint(
-                  painter: _MeshDiagramPainter(
-                    colors: colors,
-                    progress: _anim.value,
-                  ),
-                );
-              },
+          Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              color: colors.accentMuted,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                color: colors.accent.withValues(alpha: 0.4),
+              ),
             ),
-          ),
-          const SizedBox(height: 40),
-          Text(
-            'How it works',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: colors.textPrimary,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 20),
-          _StepItem(
-            number: '1',
-            title: 'Run the daemon',
-            body: 'Install a small agent on your MacBook or server.',
-            colors: colors,
-          ),
-          const SizedBox(height: 16),
-          _StepItem(
-            number: '2',
-            title: 'Connect this app',
-            body: 'Scan the QR code or enter your host details.',
-            colors: colors,
-          ),
-          const SizedBox(height: 16),
-          _StepItem(
-            number: '3',
-            title: 'Chat and control',
-            body: 'Start sessions, review changes, and approve actions.',
-            colors: colors,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StepItem extends StatelessWidget {
-  const _StepItem({
-    required this.number,
-    required this.title,
-    required this.body,
-    required this.colors,
-  });
-
-  final String number;
-  final String title;
-  final String body;
-  final AppColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: colors.accent.withValues(alpha: 0.4),
-            ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            number,
-            style: monoStyle(
+            child: Icon(
+              Icons.cable_rounded,
+              size: 46,
               color: colors.accent,
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
             ),
           ),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: colors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                body,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.4,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MeshDiagramPainter extends CustomPainter {
-  _MeshDiagramPainter({required this.colors, required this.progress});
-
-  final AppColors colors;
-  final double progress;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-
-    final nodePaint = Paint()
-      ..style = PaintingStyle.fill;
-
-    final nodes = [
-      Offset(size.width * 0.2, size.height * 0.35),
-      Offset(size.width * 0.8, size.height * 0.35),
-      Offset(size.width * 0.5, size.height * 0.75),
-    ];
-
-    // Draw edges with pulsing opacity
-    for (var i = 0; i < nodes.length; i++) {
-      for (var j = i + 1; j < nodes.length; j++) {
-        final t = (progress + i * 0.33) % 1.0;
-        final opacity = 0.15 + 0.25 * (t < 0.5 ? t * 2 : (1 - t) * 2);
-        paint.color = colors.accent.withValues(alpha: opacity);
-        canvas.drawLine(nodes[i], nodes[j], paint);
-      }
-    }
-
-    // Draw nodes
-    for (var i = 0; i < nodes.length; i++) {
-      final t = (progress + i * 0.33) % 1.0;
-      final radius = 8 + 3 * (t < 0.5 ? t * 2 : (1 - t) * 2);
-      nodePaint.color = colors.accent.withValues(alpha: 0.15);
-      canvas.drawCircle(nodes[i], radius + 6, nodePaint);
-      nodePaint.color = colors.accent;
-      canvas.drawCircle(nodes[i], radius, nodePaint);
-    }
-
-    // Labels
-    final labelStyle = TextStyle(
-      color: colors.textTertiary,
-      fontSize: 11,
-      fontWeight: FontWeight.w600,
-      fontFamily: 'SpaceGrotesk',
-    );
-    final labels = ['Your machine', 'Daemon', 'Phone'];
-    for (var i = 0; i < nodes.length; i++) {
-      final tp = TextPainter(
-        text: TextSpan(text: labels[i], style: labelStyle),
-        textDirection: TextDirection.ltr,
-        textAlign: TextAlign.center,
-      );
-      tp.layout();
-      tp.paint(
-        canvas,
-        Offset(
-          nodes[i].dx - tp.width / 2,
-          nodes[i].dy + 20,
-        ),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _MeshDiagramPainter old) {
-    return old.progress != progress || old.colors != colors;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Page 3: What you can do
-// ---------------------------------------------------------------------------
-
-class _ActionsPage extends StatelessWidget {
-  const _ActionsPage({required this.colors});
-
-  final AppColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    return _OnboardingPageShell(
-      horizontalPadding: 24,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
+          const SizedBox(height: 36),
           Text(
-            'Chat, approve, inspect.',
+            'Connect a host',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w800,
@@ -578,194 +359,13 @@ class _ActionsPage extends StatelessWidget {
               letterSpacing: -0.3,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Text(
-            'Everything you need to steer your agents remotely.',
+            'Run the Sidemesh daemon on your Mac or server, then scan the QR code to pair.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 32),
-          // Fake session card
-          MeshCard(
-            tone: MeshCardTone.surface,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    MeshPill(
-                      label: 'codex',
-                      tone: MeshPillTone.accent,
-                      icon: Icons.memory_rounded,
-                    ),
-                    MeshPill(
-                      label: 'approval',
-                      tone: MeshPillTone.warning,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: colors.codeBackground,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: colors.codeBorder),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _FakeDiffLine(
-                        prefix: '+',
-                        text: '  const greeting = "Hello, fleet";',
-                        prefixColor: colors.diffAddGlyph,
-                        lineColor: colors.diffAddLine,
-                      ),
-                      _FakeDiffLine(
-                        prefix: '+',
-                        text: '  console.log(greeting);',
-                        prefixColor: colors.diffAddGlyph,
-                        lineColor: colors.diffAddLine,
-                      ),
-                      _FakeDiffLine(
-                        prefix: '-',
-                        text: '  // old code removed',
-                        prefixColor: colors.diffDelGlyph,
-                        lineColor: colors.diffDelLine,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    TextButton(
-                      onPressed: null,
-                      child: const Text('Reject'),
-                    ),
-                    const SizedBox(height: 8),
-                    FilledButton(
-                      onPressed: null,
-                      child: const Text('Approve'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              _FeatureChip(
-                icon: Icons.chat_bubble_outline_rounded,
-                label: 'Chat',
-                colors: colors,
-              ),
-              _FeatureChip(
-                icon: Icons.code_rounded,
-                label: 'Diffs',
-                colors: colors,
-              ),
-              _FeatureChip(
-                icon: Icons.folder_open_rounded,
-                label: 'Files',
-                colors: colors,
-              ),
-              _FeatureChip(
-                icon: Icons.terminal_rounded,
-                label: 'Terminal',
-                colors: colors,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FakeDiffLine extends StatelessWidget {
-  const _FakeDiffLine({
-    required this.prefix,
-    required this.text,
-    required this.prefixColor,
-    required this.lineColor,
-  });
-
-  final String prefix;
-  final String text;
-  final Color prefixColor;
-  final Color lineColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 6),
-      decoration: BoxDecoration(
-        color: lineColor,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Row(
-        children: [
-          Text(
-            prefix,
-            style: monoStyle(color: prefixColor, fontSize: 11),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              text,
-              style: monoStyle(
-                color: context.colors.codeForeground,
-                fontSize: 11,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FeatureChip extends StatelessWidget {
-  const _FeatureChip({
-    required this.icon,
-    required this.label,
-    required this.colors,
-  });
-
-  final IconData icon;
-  final String label;
-  final AppColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: colors.textSecondary),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: colors.textSecondary,
-              fontWeight: FontWeight.w600,
+              height: 1.5,
             ),
           ),
         ],
@@ -775,52 +375,7 @@ class _FeatureChip extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Page 4: Pick your vibe
-// ---------------------------------------------------------------------------
-
-class _ThemePage extends StatelessWidget {
-  const _ThemePage({
-    required this.colors,
-    required this.themeController,
-  });
-
-  final AppColors colors;
-  final ThemeController themeController;
-
-  @override
-  Widget build(BuildContext context) {
-    return _OnboardingPageShell(
-      horizontalPadding: 24,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            'Pick your vibe',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: colors.textPrimary,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Choose a palette. You can always change it later.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: colors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 32),
-          ThemePicker(controller: themeController),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Page 5: Set up & connect
+// Page 3: Set up & connect
 // ---------------------------------------------------------------------------
 
 class _ConnectPage extends StatelessWidget {
