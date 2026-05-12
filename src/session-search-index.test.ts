@@ -294,6 +294,52 @@ describe("SessionSearchIndex", () => {
     await index.close();
   });
 
+  it("does not match keywords that only appear in command output", async () => {
+    const index = new SessionSearchIndex(dbPath);
+    await index.open();
+
+    await index.indexDocument(makeDoc("command-output-only", {
+      title: "Navigation cleanup",
+      preview: "ui tweaks",
+      messages: [
+        {
+          id: "m1",
+          role: "user" as const,
+          text: "clean up breadcrumb spacing",
+          content: [],
+          attachments: [],
+          createdAt: Date.now(),
+          seq: 1,
+        },
+      ],
+      activities: [
+        {
+          id: "a1",
+          type: "command",
+          turnId: null,
+          createdAt: Date.now(),
+          seq: 2,
+          status: "completed",
+          command: "rg breadcrumb src",
+          cwd: "/tmp",
+          output: "auth token retry logic\n",
+          exitCode: 0,
+          durationMs: 1,
+          source: null,
+          processId: null,
+          commandActions: [],
+          terminalStatus: null,
+          terminalInput: null,
+        },
+      ],
+    }));
+
+    const results = await index.search("token", 10);
+    assert.equal(results.length, 0);
+
+    await index.close();
+  });
+
   it("indexDocument skips unchanged sessions based on manifest", async () => {
     const index = new SessionSearchIndex(dbPath);
     await index.open();

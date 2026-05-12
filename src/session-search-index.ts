@@ -166,6 +166,7 @@ function extractText(parsed: unknown): string | undefined {
 function buildSearchableContent(doc: SessionSearchDocument): string {
   const parts: string[] = [];
   parts.push(doc.title);
+  parts.push(doc.title);
   parts.push(doc.preview);
   parts.push(doc.cwd);
 
@@ -173,7 +174,6 @@ function buildSearchableContent(doc: SessionSearchDocument): string {
     parts.push(message.text);
     for (const attachment of message.attachments) {
       if (attachment.path) parts.push(attachment.path);
-      if (attachment.url) parts.push(attachment.url);
     }
   }
 
@@ -181,12 +181,9 @@ function buildSearchableContent(doc: SessionSearchDocument): string {
     switch (activity.type) {
       case "command":
         parts.push(activity.command);
-        if (activity.output) parts.push(activity.output);
         break;
       case "tool":
         parts.push(activity.toolName);
-        if (activity.args) parts.push(JSON.stringify(activity.args));
-        if (activity.output) parts.push(activity.output);
         if (activity.semantic) {
           for (const target of activity.semantic.targets) {
             if (target.type === "file") parts.push(target.path);
@@ -201,17 +198,13 @@ function buildSearchableContent(doc: SessionSearchDocument): string {
         for (const change of activity.changes) {
           parts.push(change.path);
           if (change.movePath) parts.push(change.movePath);
-          if (change.diff) parts.push(change.diff);
         }
         break;
       case "turn_diff":
-        if (activity.diff) parts.push(activity.diff);
         break;
       case "web_search":
         if (activity.query) parts.push(activity.query);
         for (const q of activity.queries) parts.push(q);
-        if (activity.targetUrl) parts.push(activity.targetUrl);
-        if (activity.pattern) parts.push(activity.pattern);
         break;
       case "image_generation":
         if (activity.revisedPrompt) parts.push(activity.revisedPrompt);
