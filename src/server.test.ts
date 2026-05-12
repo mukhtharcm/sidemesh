@@ -2708,6 +2708,89 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
+  it("clears stale terminal session state from events, resources, and actions after provider confirmation", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const sessionId = await createRestartableSession(server, config);
+
+      provider.emit("liveEvent", {
+        type: "activity_updated",
+        sessionId,
+        turnId: "fake-restart-turn",
+        activity: {
+          id: "search-1",
+          type: "web_search",
+          turnId: "fake-restart-turn",
+          status: "completed",
+          query: "example",
+          queries: ["example"],
+          targetUrl: "https://example.com/docs",
+          pattern: null,
+        },
+      });
+
+      const liveResources = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/resources`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(liveResources.statusCode, 200);
+      assert.equal((liveResources.body as any).resources.length, 1);
+
+      provider.emit("liveEvent", {
+        type: "thread_status_changed",
+        sessionId,
+        status: "errored",
+      });
+
+      const originalReadSessionThread = provider.readSessionThread.bind(provider);
+      provider.readSessionThread = async (threadId, includeTurns) => {
+        const thread = await originalReadSessionThread(threadId, includeTurns);
+        return {
+          ...thread,
+          status: { type: "errored" },
+          ...(includeTurns ? { turns: [] } : {}),
+        };
+      };
+
+      const actionsRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/actions",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(actionsRes.statusCode, 200);
+      assert.deepEqual(actionsRes.body, []);
+
+      const eventsRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=0`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(eventsRes.statusCode, 200);
+      assert.deepEqual((eventsRes.body as any).activities, []);
+      assert.equal((eventsRes.body as any).pendingAction, null);
+      assert.equal((eventsRes.body as any).session.status, "errored");
+
+      const clearedResources = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/resources`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(clearedResources.statusCode, 200);
+      assert.deepEqual((clearedResources.body as any).resources, []);
+    });
+  });
+
   it("reconciles stale terminal live status after a short grace window", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
     const provider = new RestartableFakeProvider();

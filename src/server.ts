@@ -1811,7 +1811,13 @@ export async function startServer(
   app.get(
     "/api/actions",
     asyncRoute(async (_request, response) => {
-      response.json(await listPendingActions(provider, pendingActions));
+      response.json(
+        await listPendingActions(
+          provider,
+          pendingActions,
+          reconcileObservedThreadStatus,
+        ),
+      );
     }),
   );
 
@@ -1939,6 +1945,7 @@ export async function startServer(
       const baseUpdatedAt = asInteger(query.baseUpdatedAt);
 
       const session = await readSession(provider, sessionId, false);
+      reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
 
       let newMessages: SessionMessage[];
       let newActivities: SessionActivity[];
@@ -2141,7 +2148,12 @@ export async function startServer(
         return;
       }
       response.json(
-        await readSessionResources(provider, sessionId, liveActivities),
+        await readSessionResources(
+          provider,
+          sessionId,
+          liveActivities,
+          reconcileObservedThreadStatus,
+        ),
       );
     }),
   );
@@ -3621,13 +3633,18 @@ function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
 async function listPendingActions(
   provider: AgentProvider,
   pendingActions: Map<string, AgentPendingAction>,
+  reconcileStatus?: (
+    sessionId: string,
+    observedStatus: LiveThreadStatus,
+  ) => void,
 ): Promise<PendingAction[]> {
   const actions = [...pendingActions.values()].sort(
     (left, right) => right.requestedAt - left.requestedAt,
   );
   const sessionsById = new Map<string, Promise<ThreadRecord | null>>();
 
-  return Promise.all(
+  return (
+    await Promise.all(
     actions.map(async (action) => {
       if (!action.sessionId || action.sessionId === "unknown") {
         return toPublicPendingAction(action);
@@ -3645,6 +3662,10 @@ async function listPendingActions(
       if (!session) {
         return toPublicPendingAction(action);
       }
+      reconcileStatus?.(action.sessionId, threadStatusPhase(session));
+      if (!pendingActions.has(action.id)) {
+        return null;
+      }
 
       const mapped = mapSession(session);
       return toPublicPendingAction({
@@ -3653,7 +3674,8 @@ async function listPendingActions(
         cwd: mapped.cwd,
       });
     }),
-  );
+    )
+  ).filter((action): action is PendingAction => action != null);
 }
 
 async function indexSessionForSearch(
@@ -4605,8 +4627,13 @@ async function readSessionResources(
   provider: AgentProvider,
   sessionId: string,
   liveActivities: Map<string, Map<string, LiveActivityEntry>>,
+  reconcileStatus?: (
+    sessionId: string,
+    observedStatus: LiveThreadStatus,
+  ) => void,
 ): Promise<SessionResourcesResponse> {
   const session = await readSession(provider, sessionId, false);
+  reconcileStatus?.(session.id, threadStatusPhase(session));
   const readLog = requireProviderMethod(
     provider,
     "readSessionLog",
