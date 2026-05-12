@@ -160,6 +160,7 @@ class _HostPickerSurface extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       child: MeshCard(
         tone: MeshCardTone.surface,
+        showBorder: true,
         padding: const EdgeInsets.all(18),
         child: SafeArea(
           top: false,
@@ -216,6 +217,7 @@ class _HostPickerSurface extends StatelessWidget {
                     final host = hosts[index];
                     return MeshCard(
                       tone: MeshCardTone.muted,
+                      showBorder: true,
                       padding: const EdgeInsets.all(14),
                       onTap: () => Navigator.of(context).pop(host),
                       child: Row(
@@ -1374,6 +1376,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             : const BoxConstraints(),
         child: MeshCard(
           tone: MeshCardTone.elevated,
+          showBorder: true,
           padding: EdgeInsets.all(isDialog ? 18 : 14),
           child: SafeArea(
             top: false,

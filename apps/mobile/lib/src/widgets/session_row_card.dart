@@ -218,6 +218,7 @@ class SessionRowCard extends StatelessWidget {
     final hasBranch = branch != null && branch.isNotEmpty;
     return MeshCard(
       onTap: onTap,
+      showBorder: true,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       borderColor: selected ? colors.accent : null,
       child: Column(

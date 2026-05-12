@@ -352,6 +352,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
             ),
       child: MeshCard(
         tone: MeshCardTone.surface,
+        showBorder: true,
         padding: const EdgeInsets.all(20),
         child: SafeArea(
           top: false,
@@ -1062,6 +1063,7 @@ class _SettingsCard extends StatelessWidget {
     final colors = context.colors;
     return MeshCard(
       tone: MeshCardTone.surface,
+      showBorder: true,
       padding: AppPadding.card,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

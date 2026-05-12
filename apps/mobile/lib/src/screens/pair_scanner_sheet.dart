@@ -74,6 +74,7 @@ class _PairScannerSheetState extends State<PairScannerSheet> {
       padding: EdgeInsets.fromLTRB(16, 16, 16, bottom + 16),
       child: MeshCard(
         tone: MeshCardTone.surface,
+        showBorder: true,
         padding: const EdgeInsets.all(18),
         child: Column(
           mainAxisSize: MainAxisSize.min,

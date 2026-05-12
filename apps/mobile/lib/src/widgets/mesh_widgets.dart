@@ -108,6 +108,7 @@ class MeshCard extends StatelessWidget {
     this.padding = const EdgeInsets.all(18),
     this.onTap,
     this.tone = MeshCardTone.surface,
+    this.showBorder = false,
     this.borderColor,
     @Deprecated(
       'accentStrip produced an unexplained 3 px left-edge stripe. '
@@ -120,6 +121,7 @@ class MeshCard extends StatelessWidget {
   final EdgeInsetsGeometry padding;
   final VoidCallback? onTap;
   final MeshCardTone tone;
+  final bool showBorder;
   final Color? borderColor;
   // ignore: deprecated_member_use_from_same_package
   final Color? accentStrip;
@@ -138,7 +140,7 @@ class MeshCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: border),
+        border: showBorder ? Border.all(color: border) : null,
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(18),

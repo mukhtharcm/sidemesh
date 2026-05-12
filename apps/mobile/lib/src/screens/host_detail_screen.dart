@@ -538,6 +538,7 @@ class _NodeCard extends StatelessWidget {
     final colors = context.colors;
     return MeshCard(
       tone: MeshCardTone.surface,
+      showBorder: true,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -676,6 +677,7 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
 
     return MeshCard(
       tone: MeshCardTone.muted,
+      showBorder: true,
       borderColor: accent.withValues(alpha: 0.5),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Row(
@@ -887,6 +889,7 @@ class _ProviderContractOverviewCard extends StatelessWidget {
     final isViewingActiveProvider = selectedProviderKind == node.provider;
     return MeshCard(
       tone: MeshCardTone.surface,
+      showBorder: true,
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1453,6 +1456,7 @@ class _ProviderContractSummaryCard extends StatelessWidget {
         '$supportedProviders ${supportedProviders == 1 ? "provider" : "providers"}';
     return MeshCard(
       tone: MeshCardTone.muted,
+      showBorder: true,
       padding: EdgeInsets.zero,
       child: Material(
         color: Colors.transparent,
@@ -1567,6 +1571,7 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
 
     return MeshCard(
       tone: MeshCardTone.muted,
+      showBorder: true,
       padding: EdgeInsets.zero,
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -2545,6 +2550,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
         return MeshCard(
           tone: MeshCardTone.muted,
+          showBorder: true,
           padding: EdgeInsets.zero,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
