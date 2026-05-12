@@ -126,6 +126,7 @@ const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
 const RECENT_LIVE_LIMIT = 40;
 const RECENT_SESSIONS_CACHE_TTL_MS = 1_500;
+const TERMINAL_LIVE_STATUS_GRACE_MS = 1_000;
 const RECENT_SESSION_RUNTIME_CONCURRENCY = 4;
 const SESSION_EVENT_DELTA_MAX_ITEMS = 220;
 const SESSION_EVENT_DELTA_MAX_BYTES = 256 * 1024;
@@ -257,6 +258,7 @@ export async function startServer(
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, LiveActivityEntry>>();
   const liveThreadStatuses = new Map<string, LiveThreadStatus>();
+  const liveThreadStatusUpdatedAt = new Map<string, number>();
   const replayIndex = new SessionReplayIndex();
   const searchIndex = new SessionSearchIndex(
     nodePath.join(config.stateDir, "search-index-v1.db"),
@@ -423,26 +425,79 @@ export async function startServer(
   ): void {
     if (status == null) {
       liveThreadStatuses.delete(sessionId);
+      liveThreadStatusUpdatedAt.delete(sessionId);
       return;
     }
     liveThreadStatuses.set(sessionId, status);
+    liveThreadStatusUpdatedAt.set(sessionId, Date.now());
+  }
+
+  function sessionStatusOverrideForDisplay(
+    sessionId: string,
+  ): LiveThreadStatus | null {
+    const status = latestThreadStatusForSession(sessionId);
+    if (status == null) {
+      return null;
+    }
+    if (isRunningThreadStatus(status)) {
+      return status;
+    }
+    if (!isTerminalThreadStatus(status)) {
+      return null;
+    }
+    const updatedAt = liveThreadStatusUpdatedAt.get(sessionId) ?? 0;
+    return Date.now() - updatedAt <= TERMINAL_LIVE_STATUS_GRACE_MS ? status : null;
+  }
+
+  function clearConfirmedTerminalSessionState(sessionId: string): void {
+    activeTurns.delete(sessionId);
+    liveActivities.delete(sessionId);
+    clearSessionLogCache(logCache, sessionId);
+    clearActionsForSession(
+      pendingActions,
+      sessionId,
+      broadcastLive,
+      broadcastApprovalLive,
+    );
   }
 
   function reconcileObservedThreadStatus(
     sessionId: string,
     observedStatus: LiveThreadStatus,
   ): void {
-    const nextStatus = hasPendingActionForSession(pendingActions, sessionId)
-      ? "waiting_for_approval"
-      : activeTurns.has(sessionId)
-        ? "running"
-        : observedStatus;
+    const nextStatus = reconciledThreadStatus(sessionId, observedStatus);
+    if (isTerminalThreadStatus(observedStatus)) {
+      clearConfirmedTerminalSessionState(sessionId);
+    }
     const previousStatus = latestThreadStatusForSession(sessionId);
     if (previousStatus === nextStatus) {
       return;
     }
     setLatestThreadStatusForSession(sessionId, nextStatus);
     scheduleRecentSessionUpsert(sessionId, 0);
+  }
+
+  function reconciledThreadStatus(
+    sessionId: string,
+    observedStatus: LiveThreadStatus,
+  ): LiveThreadStatus {
+    if (isTerminalThreadStatus(observedStatus)) {
+      return observedStatus;
+    }
+    const terminalOverride = sessionStatusOverrideForDisplay(sessionId);
+    if (terminalOverride && isTerminalThreadStatus(terminalOverride)) {
+      return terminalOverride;
+    }
+    if (hasPendingActionForSession(pendingActions, sessionId)) {
+      return "waiting_for_approval";
+    }
+    if (isRunningThreadStatus(observedStatus)) {
+      return observedStatus;
+    }
+    if (observedStatus === "idle" && activeTurns.has(sessionId)) {
+      return "running";
+    }
+    return observedStatus;
   }
 
   function persistSessionRuntimeSignalsEventually(): void {
@@ -745,7 +800,7 @@ export async function startServer(
       runtimeCache,
       limit,
       runtimeMode,
-      latestThreadStatusForSession,
+      sessionStatusOverrideForDisplay,
     );
     recentSessionsCache.set(cacheKey, {
       limit,
@@ -786,7 +841,7 @@ export async function startServer(
       const session = mapSession(
         thread,
         await loadCachedSessionRuntime(provider, thread, runtimeCache, "active"),
-        latestThreadStatusForSession(thread.id),
+        sessionStatusOverrideForDisplay(thread.id),
       );
       broadcastRecentSessionsLive({ type: "upsert", session });
     } catch {
@@ -973,11 +1028,12 @@ export async function startServer(
         return;
       }
       case "thread_status_changed": {
-        setLatestThreadStatusForSession(event.sessionId, event.status);
+        const status = reconciledThreadStatus(event.sessionId, event.status);
+        setLatestThreadStatusForSession(event.sessionId, status);
         broadcastLive(event.sessionId, {
           type: "thread_status_changed",
           sessionId: event.sessionId,
-          status: event.status,
+          status,
           message: event.message,
           pendingActionKind: event.pendingActionKind,
         });
@@ -1517,7 +1573,7 @@ export async function startServer(
           const session = mapSession(
             thread,
             runtime,
-            latestThreadStatusForSession(thread.id),
+            sessionStatusOverrideForDisplay(thread.id),
           );
           const summary: SessionSummary = {
             ...session,
@@ -1557,7 +1613,7 @@ export async function startServer(
             runtimeCache,
             null,
             "none",
-            latestThreadStatusForSession,
+            sessionStatusOverrideForDisplay,
           ),
     getSessionCwd,
   });
@@ -1759,7 +1815,13 @@ export async function startServer(
   app.get(
     "/api/actions",
     asyncRoute(async (_request, response) => {
-      response.json(await listPendingActions(provider, pendingActions));
+      response.json(
+        await listPendingActions(
+          provider,
+          pendingActions,
+          reconcileObservedThreadStatus,
+        ),
+      );
     }),
   );
 
@@ -1841,7 +1903,7 @@ export async function startServer(
         session: mapSession(
           session,
           log.runtime,
-          latestThreadStatusForSession(session.id),
+          sessionStatusOverrideForDisplay(session.id),
         ),
         messages: log.messages,
         activities,
@@ -1887,6 +1949,7 @@ export async function startServer(
       const baseUpdatedAt = asInteger(query.baseUpdatedAt);
 
       const session = await readSession(provider, sessionId, false);
+      reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
 
       let newMessages: SessionMessage[];
       let newActivities: SessionActivity[];
@@ -2055,7 +2118,7 @@ export async function startServer(
         session: mapSession(
           session,
           logRuntime,
-          latestThreadStatusForSession(session.id),
+          sessionStatusOverrideForDisplay(session.id),
         ),
       });
     }),
@@ -2089,7 +2152,12 @@ export async function startServer(
         return;
       }
       response.json(
-        await readSessionResources(provider, sessionId, liveActivities),
+        await readSessionResources(
+          provider,
+          sessionId,
+          liveActivities,
+          reconcileObservedThreadStatus,
+        ),
       );
     }),
   );
@@ -2114,14 +2182,16 @@ export async function startServer(
       ) {
         return;
       }
-      const liveStatus = latestThreadStatusForSession(sessionId);
+      const statusOverride = sessionStatusOverrideForDisplay(sessionId);
       const state = await loadFastRunState(
         provider,
         sessionId,
         activeTurns,
-        isRunningThreadStatus(liveStatus) ? liveStatus : null,
+        statusOverride,
       );
-      reconcileObservedThreadStatus(sessionId, state.status);
+      if (!isTerminalThreadStatus(statusOverride)) {
+        reconcileObservedThreadStatus(sessionId, state.status);
+      }
       response.json({
         sessionId,
         status: state.status,
@@ -2476,7 +2546,7 @@ export async function startServer(
       const session = mapSession(
         started.thread,
         started.runtime,
-        latestThreadStatusForSession(started.thread.id),
+        sessionStatusOverrideForDisplay(started.thread.id),
       );
       response.status(201).json({
         session,
@@ -2820,7 +2890,7 @@ export async function startServer(
       }
       await provider.setSessionName!(sessionId, name);
       const thread = await readSession(provider, sessionId, false);
-      const session = mapSession(thread, null, latestThreadStatusForSession(thread.id));
+      const session = mapSession(thread, null, sessionStatusOverrideForDisplay(thread.id));
       response.json({ session });
       broadcastRecentSessionsLive({ type: "upsert", session });
       void indexSessionForSearch(searchIndex, provider, sessionId).catch(() => {});
@@ -3010,7 +3080,7 @@ export async function startServer(
               runtimeCache,
               null,
               "none",
-              latestThreadStatusForSession,
+              sessionStatusOverrideForDisplay,
             ),
           getSessionCwd,
           sessionId: params.get("sessionId"),
@@ -3623,13 +3693,18 @@ function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
 async function listPendingActions(
   provider: AgentProvider,
   pendingActions: Map<string, AgentPendingAction>,
+  reconcileStatus?: (
+    sessionId: string,
+    observedStatus: LiveThreadStatus,
+  ) => void,
 ): Promise<PendingAction[]> {
   const actions = [...pendingActions.values()].sort(
     (left, right) => right.requestedAt - left.requestedAt,
   );
   const sessionsById = new Map<string, Promise<ThreadRecord | null>>();
 
-  return Promise.all(
+  return (
+    await Promise.all(
     actions.map(async (action) => {
       if (!action.sessionId || action.sessionId === "unknown") {
         return toPublicPendingAction(action);
@@ -3647,6 +3722,10 @@ async function listPendingActions(
       if (!session) {
         return toPublicPendingAction(action);
       }
+      reconcileStatus?.(action.sessionId, threadStatusPhase(session));
+      if (!pendingActions.has(action.id)) {
+        return null;
+      }
 
       const mapped = mapSession(session);
       return toPublicPendingAction({
@@ -3655,7 +3734,8 @@ async function listPendingActions(
         cwd: mapped.cwd,
       });
     }),
-  );
+    )
+  ).filter((action): action is PendingAction => action != null);
 }
 
 async function indexSessionForSearch(
@@ -3891,7 +3971,9 @@ async function loadFastRunState(
     return {
       status: liveStatusOverride,
       isRunning: isRunningThreadStatus(liveStatusOverride),
-      turnId: activeTurns.get(sessionId)?.turnId ?? null,
+      turnId: isRunningThreadStatus(liveStatusOverride)
+        ? activeTurns.get(sessionId)?.turnId ?? null
+        : null,
     };
   }
   const known = activeTurns.get(sessionId);
@@ -4345,6 +4427,10 @@ function isRunningThreadStatus(status: LiveThreadStatus | null | undefined): boo
   );
 }
 
+function isTerminalThreadStatus(status: LiveThreadStatus | null | undefined): boolean {
+  return status === "closed" || status === "errored";
+}
+
 function normalizeThreadStatusPhase(status: string | null | undefined): LiveThreadStatus {
   switch (status) {
     case "idle":
@@ -4613,8 +4699,13 @@ async function readSessionResources(
   provider: AgentProvider,
   sessionId: string,
   liveActivities: Map<string, Map<string, LiveActivityEntry>>,
+  reconcileStatus?: (
+    sessionId: string,
+    observedStatus: LiveThreadStatus,
+  ) => void,
 ): Promise<SessionResourcesResponse> {
   const session = await readSession(provider, sessionId, false);
+  reconcileStatus?.(session.id, threadStatusPhase(session));
   const readLog = requireProviderMethod(
     provider,
     "readSessionLog",
