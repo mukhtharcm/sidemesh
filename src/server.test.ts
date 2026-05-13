@@ -4130,7 +4130,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
-  it("returns create success when the immediate status read is transiently unreadable", async () => {
+  it("returns create success and clears unverified active turns from idle thread status", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
     const provider = new TransientUnreadableCreateStatusProvider();
     const runtime = makeCustomSingleProviderRuntime(provider);
@@ -4166,12 +4166,9 @@ describe("GET /api/sessions/:sessionId/status", () => {
         headers: { Authorization: "Bearer " + config.token },
       });
       assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "running");
-      assert.equal((statusRes.body as any).isRunning, true);
-      assert.equal(
-        (statusRes.body as any).activeTurnId,
-        "fake-transient-create-status-turn",
-      );
+      assert.equal((statusRes.body as any).status, "idle");
+      assert.equal((statusRes.body as any).isRunning, false);
+      assert.equal((statusRes.body as any).activeTurnId, null);
     });
   });
 
