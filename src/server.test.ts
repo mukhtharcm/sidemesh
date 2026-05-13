@@ -4166,17 +4166,40 @@ describe("GET /api/sessions/:sessionId/status", () => {
       );
       assert.equal(createBody.session.status, "running");
 
-      const statusRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "idle");
-      assert.equal((statusRes.body as any).isRunning, false);
-      assert.equal((statusRes.body as any).activeTurnId, null);
+      const sessionLive = await openSessionLiveSocket(
+        server.port,
+        config.token,
+        sessionId,
+      );
+      try {
+        await waitFor(
+          () => sessionLive.events.find((event) => event.type === "hello"),
+          "transient status hello",
+        );
+
+        const statusRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(statusRes.statusCode, 200);
+        assert.equal((statusRes.body as any).status, "idle");
+        assert.equal((statusRes.body as any).isRunning, false);
+        assert.equal((statusRes.body as any).activeTurnId, null);
+        await waitFor(
+          () =>
+            sessionLive.events.find(
+              (event) =>
+                event.type === "thread_status_changed" &&
+                event.status === "idle",
+            ),
+          "transient status idle live event",
+        );
+      } finally {
+        await closeSessionLiveSocket(sessionLive.socket);
+      }
     });
   });
 
