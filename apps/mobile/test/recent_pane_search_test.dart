@@ -98,6 +98,54 @@ void main() {
     },
   );
 
+  testWidgets('renders recents when embedded in the home scroll', (tester) async {
+    final now = DateTime(2026, 1, 1, 12);
+    final api = _FakeSearchApiClient(
+      sessions: <SessionSummary>[
+        _session(id: 'embedded-alpha', title: 'Embedded Alpha', updatedAt: now),
+      ],
+      searchResults: const <String, List<SessionSummary>>{},
+    );
+
+    final themeController = await ThemeController.load();
+    final palette = ThemeVariant.codexAmber;
+    await tester.pumpWidget(
+      ThemeScope(
+        notifier: themeController,
+        child: MaterialApp(
+          theme: buildLightTheme(
+            palette.light,
+            typography: themeController.typography,
+          ),
+          darkTheme: buildDarkTheme(
+            palette.dark,
+            typography: themeController.typography,
+          ),
+          home: Scaffold(
+            body: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: RecentPane(
+                    hosts: const <HostProfile>[host],
+                    api: api,
+                    hasSavedHosts: true,
+                    onOpenSession: (_, _) {},
+                    onActiveCountChanged: (_) {},
+                    shrinkWrap: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Embedded Alpha'), findsOneWidget);
+  });
+
   testWidgets(
     'keeps search relevance ahead of recency when rendering remote matches',
     (tester) async {

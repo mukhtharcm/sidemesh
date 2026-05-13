@@ -6334,10 +6334,13 @@ class _SessionScreenState extends State<SessionScreen>
       backgroundColor: colors.canvas,
       body: widget.desktopMode
           ? layoutBody
-          : GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _dismissKeyboard,
-              child: layoutBody,
+          : SafeArea(
+              bottom: false,
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _dismissKeyboard,
+                child: layoutBody,
+              ),
             ),
     );
     if (widget.topPadding == null) {

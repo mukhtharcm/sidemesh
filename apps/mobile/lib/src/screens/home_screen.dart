@@ -576,6 +576,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
             onActiveCountChanged: (_) {},
             viewMode: _recentViewMode,
             onViewModeChanged: _setRecentViewMode,
+            shrinkWrap: true,
           ),
         ),
         if (pendingApprovals.isNotEmpty) ...[
@@ -612,6 +613,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
             onRemoveHost: _removeHost,
             onToggleEnabled: _toggleHostEnabled,
             onAddHost: () => _showHostEditor(),
+            shrinkWrap: true,
           ),
         ),
         // TODO(redesign): UsagePane moved to SettingsScreen
@@ -918,6 +920,7 @@ class RecentPane extends StatefulWidget {
     this.viewMode = SessionViewMode.flat,
     this.onViewModeChanged,
     this.onAddHost,
+    this.shrinkWrap = false,
   });
 
   final List<HostProfile> hosts;
@@ -934,6 +937,7 @@ class RecentPane extends StatefulWidget {
   final SessionViewMode viewMode;
   final ValueChanged<SessionViewMode>? onViewModeChanged;
   final VoidCallback? onAddHost;
+  final bool shrinkWrap;
 
   @override
   State<RecentPane> createState() => _RecentPaneState();
@@ -1274,6 +1278,9 @@ class _RecentPaneState extends State<RecentPane> {
             _store.failedHostLabels.isEmpty &&
             _store.pendingHostIds.isNotEmpty;
         if (stillLoadingInitial) {
+          if (widget.shrinkWrap) {
+            return const SizedBox(height: 160, child: MeshLoader());
+          }
           return const MeshLoader();
         }
         final sortedEntries = _sortEntries(_store.entries);
@@ -1314,44 +1321,111 @@ class _RecentPaneState extends State<RecentPane> {
         }
 
         if (noResults) {
+          final emptyChildren = <Widget>[
+            if (isRefreshing)
+              _RecentProgressStrip(
+                remaining: _store.pendingHostIds.length,
+                total: widget.hosts.length,
+                showingCached: hasCachedEntries,
+              ),
+            if (hasFailures)
+              _RecentErrorBanner(
+                hostLabels: failureLabels,
+                onRetry: handleRefresh,
+              ),
+            const SizedBox(height: 80),
+            MeshEmptyState(
+              icon: widget.query.trim().isEmpty
+                  ? Icons.cloud_off_rounded
+                  : Icons.search_off_rounded,
+              title: widget.query.trim().isEmpty
+                  ? 'No reachable sessions'
+                  : (_searchLoading ? 'Searching…' : 'No matches'),
+              body: widget.query.trim().isEmpty
+                  ? 'Saved hosts look fine, but none returned recent sessions right now.'
+                  : (_searchLoading
+                        ? 'Looking across all your sessions…'
+                        : 'No sessions match "${widget.query.trim()}". Clear the filter to see everything.'),
+            ),
+          ];
+          if (widget.shrinkWrap) {
+            return Padding(
+              padding: basePadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: emptyChildren,
+              ),
+            );
+          }
           return RefreshIndicator(
             color: context.colors.accent,
             onRefresh: handleRefresh,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                if (isRefreshing)
-                  _RecentProgressStrip(
-                    remaining: _store.pendingHostIds.length,
-                    total: widget.hosts.length,
-                    showingCached: hasCachedEntries,
-                  ),
-                if (hasFailures)
-                  _RecentErrorBanner(
-                    hostLabels: failureLabels,
-                    onRetry: handleRefresh,
-                  ),
-                const SizedBox(height: 80),
-                MeshEmptyState(
-                  icon: widget.query.trim().isEmpty
-                      ? Icons.cloud_off_rounded
-                      : Icons.search_off_rounded,
-                  title: widget.query.trim().isEmpty
-                      ? 'No reachable sessions'
-                      : (_searchLoading ? 'Searching…' : 'No matches'),
-                  body: widget.query.trim().isEmpty
-                      ? 'Saved hosts look fine, but none returned recent sessions right now.'
-                      : (_searchLoading
-                            ? 'Looking across all your sessions…'
-                            : 'No sessions match "${widget.query.trim()}". Clear the filter to see everything.'),
-                ),
-              ],
+              children: emptyChildren,
             ),
           );
         }
         final leadingStrips = (isRefreshing ? 1 : 0) + (hasFailures ? 1 : 0);
+        final sessionList = isGrouped
+            ? _buildGroupedList(
+                context,
+                groups,
+                isRefreshing: isRefreshing,
+                hasFailures: hasFailures,
+                failureLabels: failureLabels,
+                hasCachedEntries: hasCachedEntries,
+                handleRefresh: handleRefresh,
+                shrinkWrap: widget.shrinkWrap,
+              )
+            : ListView.separated(
+                shrinkWrap: widget.shrinkWrap,
+                physics: widget.shrinkWrap
+                    ? const NeverScrollableScrollPhysics()
+                    : null,
+                padding: basePadding,
+                itemCount: sortedEntries.length + leadingStrips,
+                separatorBuilder: (_, _) =>
+                    SizedBox(height: widget.dense ? 2 : AppSpacing.sm),
+                itemBuilder: (context, index) {
+                  var offset = 0;
+                  if (isRefreshing) {
+                    if (index == offset) {
+                      return _RecentProgressStrip(
+                        remaining: _store.pendingHostIds.length,
+                        total: widget.hosts.length,
+                        showingCached: hasCachedEntries,
+                      );
+                    }
+                    offset += 1;
+                  }
+                  if (hasFailures) {
+                    if (index == offset) {
+                      return _RecentErrorBanner(
+                        hostLabels: failureLabels,
+                        onRetry: handleRefresh,
+                      );
+                    }
+                    offset += 1;
+                  }
+                  final entry = sortedEntries[index - offset];
+                  return _buildSessionRow(entry);
+                },
+              );
+        final listContent = widget.shrinkWrap
+            ? sessionList
+            : Expanded(
+                child: RefreshIndicator(
+                  color: context.colors.accent,
+                  onRefresh: handleRefresh,
+                  child: sessionList,
+                ),
+              );
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize:
+              widget.shrinkWrap ? MainAxisSize.min : MainAxisSize.max,
           children: [
             if (_searchLoading)
               const Padding(
@@ -1368,52 +1442,7 @@ class _RecentPaneState extends State<RecentPane> {
                 dense: widget.dense,
               ),
             SizedBox(height: widget.dense ? 4 : 8),
-            Expanded(
-              child: RefreshIndicator(
-                color: context.colors.accent,
-                onRefresh: handleRefresh,
-                child: isGrouped
-                    ? _buildGroupedList(
-                        context,
-                        groups,
-                        isRefreshing: isRefreshing,
-                        hasFailures: hasFailures,
-                        failureLabels: failureLabels,
-                        hasCachedEntries: hasCachedEntries,
-                        handleRefresh: handleRefresh,
-                      )
-                    : ListView.separated(
-                        padding: basePadding,
-                        itemCount: sortedEntries.length + leadingStrips,
-                        separatorBuilder: (_, _) =>
-                            SizedBox(height: widget.dense ? 2 : AppSpacing.sm),
-                        itemBuilder: (context, index) {
-                          var offset = 0;
-                          if (isRefreshing) {
-                            if (index == offset) {
-                              return _RecentProgressStrip(
-                                remaining: _store.pendingHostIds.length,
-                                total: widget.hosts.length,
-                                showingCached: hasCachedEntries,
-                              );
-                            }
-                            offset += 1;
-                          }
-                          if (hasFailures) {
-                            if (index == offset) {
-                              return _RecentErrorBanner(
-                                hostLabels: failureLabels,
-                                onRetry: handleRefresh,
-                              );
-                            }
-                            offset += 1;
-                          }
-                          final entry = sortedEntries[index - offset];
-                          return _buildSessionRow(entry);
-                        },
-                      ),
-              ),
-            ),
+            listContent,
           ],
         );
       },
@@ -1428,6 +1457,7 @@ class _RecentPaneState extends State<RecentPane> {
     required List<String> failureLabels,
     required bool hasCachedEntries,
     required Future<void> Function() handleRefresh,
+    bool shrinkWrap = false,
   }) {
     final padding =
         widget.padding ??
@@ -1435,6 +1465,8 @@ class _RecentPaneState extends State<RecentPane> {
             ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
             : const EdgeInsets.fromLTRB(16, 8, 16, 32));
     return ListView.builder(
+      shrinkWrap: shrinkWrap,
+      physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
       padding: padding,
       itemCount:
           (isRefreshing ? 1 : 0) +
@@ -3246,6 +3278,7 @@ class HostsPane extends StatelessWidget {
     this.query = '',
     this.dense = false,
     this.selectedHostId,
+    this.shrinkWrap = false,
   });
 
   final List<HostProfile> hosts;
@@ -3259,6 +3292,7 @@ class HostsPane extends StatelessWidget {
   final String query;
   final bool dense;
   final String? selectedHostId;
+  final bool shrinkWrap;
 
   @override
   Widget build(BuildContext context) {
@@ -3301,6 +3335,8 @@ class HostsPane extends StatelessWidget {
       );
     }
     return ListView.separated(
+      shrinkWrap: shrinkWrap,
+      physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
       padding: dense
           ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
           : const EdgeInsets.fromLTRB(16, 8, 16, 120),
