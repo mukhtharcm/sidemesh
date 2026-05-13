@@ -140,6 +140,54 @@ void main() {
     expect(find.text('Revised plan.'), findsOneWidget);
   });
 
+  testWidgets('session screen clears the plan card on an empty plan update', (
+    tester,
+  ) async {
+    final session = _session('plan-clear-live');
+    final api = _RichEventFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('plan-clear-live'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit(
+      _planUpdatedEvent(
+        session.id,
+        turnId: 'turn-1',
+        explanation: 'Temporary plan.',
+        plan: const [
+          {'step': 'Remove after provider delete', 'status': 'in_progress'},
+        ],
+      ),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Remove after provider delete'), findsOneWidget);
+
+    api.emit(
+      _planUpdatedEvent(
+        session.id,
+        turnId: 'turn-1',
+        explanation: '',
+        plan: const [],
+      ),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsNothing);
+    expect(find.text('Remove after provider delete'), findsNothing);
+  });
+
   testWidgets('session screen keeps one plan update after reopening', (
     tester,
   ) async {
@@ -253,6 +301,67 @@ void main() {
       expect(find.text('Recovered from /events.'), findsOneWidget);
     },
   );
+
+  testWidgets('session screen clears an existing plan from delta replay', (
+    tester,
+  ) async {
+    final session = _session('plan-clear-delta-replay');
+    final api = _RichEventFakeApi(
+      eventsDelta: SessionEventsDelta(
+        sessionId: session.id,
+        since: 3,
+        nextSeq: 5,
+        messages: const [],
+        activities: const [],
+        latestPlanUpdate: LiveEvent.fromJson(
+          _planUpdatedEvent(
+            session.id,
+            turnId: 'turn-1',
+            explanation: '',
+            plan: const [],
+            seq: 4,
+          ),
+        ),
+        pendingAction: null,
+        session: null,
+      ),
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('plan-clear-delta-replay'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit(
+      _planUpdatedEvent(
+        session.id,
+        turnId: 'turn-1',
+        explanation: 'Live stale plan.',
+        plan: const [
+          {'step': 'Clear stale visible plan', 'status': 'in_progress'},
+        ],
+        seq: 3,
+      ),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Clear stale visible plan'), findsOneWidget);
+
+    api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 5});
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsNothing);
+    expect(find.text('Clear stale visible plan'), findsNothing);
+  });
 
   testWidgets('cached-transcript strip clears after delta sync succeeds', (
     tester,

@@ -36,6 +36,7 @@ import type {
   HostCapabilities,
   LatestPlanUpdate,
   LiveEvent,
+  LivePlanStep,
   LiveThreadStatus,
   SessionActivity,
   NodeConfig,
@@ -4665,12 +4666,17 @@ function normalizeLatestPlanUpdate(
   if (!normalizedSessionId) {
     return null;
   }
-  const plan = latestPlanUpdate.plan.filter(
-    (step) => step.step.trim().length > 0 && step.status.trim().length > 0,
-  );
-  if (plan.length === 0) {
-    return null;
-  }
+  const rawPlan = Array.isArray(latestPlanUpdate.plan)
+    ? latestPlanUpdate.plan
+    : [];
+  const plan = rawPlan.flatMap((step) => {
+    const typed = step && typeof step === "object"
+      ? (step as unknown as Record<string, unknown>)
+      : null;
+    const label = typeof typed?.step === "string" ? typed.step.trim() : "";
+    const status = typeof typed?.status === "string" ? typed.status.trim() : "";
+    return label && status ? [{ step: label, status } as LivePlanStep] : [];
+  });
   return {
     type: "plan_updated",
     sessionId: normalizedSessionId,

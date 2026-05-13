@@ -369,6 +369,119 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("normalizes Copilot plan status markers without checkbox syntax", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-plan-markers-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const liveEvents: AgentProviderLiveEvent[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "plan_updated") {
+          liveEvents.push(liveEvent);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [
+          {
+            type: "text",
+            text: "hello plan marker event",
+            text_elements: [],
+          },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      await waitFor(
+        () => liveEvents.some((liveEvent) => liveEvent.type === "plan_updated"),
+      );
+      const planUpdated = liveEvents.find(
+        (liveEvent) => liveEvent.type === "plan_updated",
+      );
+      if (planUpdated?.type !== "plan_updated") {
+        throw new Error("Expected Copilot plan_updated event");
+      }
+      assert.deepEqual(planUpdated.plan, [
+        { step: "Review the real plan format", status: "completed" },
+        { step: "Wire parser support", status: "in_progress" },
+        { step: "Validate mobile replay", status: "pending" },
+      ]);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
+  it("emits an empty plan update when Copilot deletes the plan file", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-plan-delete-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const liveEvents: AgentProviderLiveEvent[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "plan_updated") {
+          liveEvents.push(liveEvent);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [
+          {
+            type: "text",
+            text: "hello plan delete event",
+            text_elements: [],
+          },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      await waitFor(
+        () => liveEvents.some(
+          (liveEvent) =>
+            liveEvent.type === "plan_updated" && liveEvent.plan.length === 0,
+        ),
+      );
+      const latest = liveEvents.at(-1);
+      if (latest?.type !== "plan_updated") {
+        throw new Error("Expected latest event to be plan_updated");
+      }
+      assert.deepEqual(latest.plan, []);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("runs manual compaction through the Copilot SDK", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-compact-"),
@@ -2102,6 +2215,28 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
           "- [ ] Validate on mobile",
         ].join("\n");
         this.emit(event("session.plan_changed", { operation: "update" }));
+      }
+      if (options.prompt.includes("plan marker event")) {
+        this.planContent = [
+          "# Marker plan",
+          "",
+          "- \u2713 Review the real plan format",
+          "- Wire parser support - in progress",
+          "- Validate mobile replay - pending",
+        ].join("\n");
+        this.emit(event("session.plan_changed", { operation: "create" }));
+      }
+      if (options.prompt.includes("plan delete event")) {
+        this.planContent = [
+          "# Temporary plan",
+          "",
+          "- [ ] Remove the temporary plan",
+        ].join("\n");
+        this.emit(event("session.plan_changed", { operation: "create" }));
+        queueMicrotask(() => {
+          this.planContent = null;
+          this.emit(event("session.plan_changed", { operation: "delete" }));
+        });
       }
       if (options.prompt.includes("reasoning")) {
         this.emit(
