@@ -42,7 +42,7 @@ String buildMacosScopedDirectoryPath({
       'Expected a non-empty macOS home directory path.',
     );
   }
-  return p.join(
+  return p.posix.join(
     normalizedHomePath,
     'Library',
     rootFolderName,
