@@ -460,7 +460,7 @@ class _PlanUpdateCard extends StatelessWidget {
             childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
             iconColor: colors.textSecondary,
             collapsedIconColor: colors.textSecondary,
-            initiallyExpanded: true,
+            initiallyExpanded: false,
             title: Row(
               children: [
                 Icon(Icons.route_rounded, size: 18, color: colors.accent),
