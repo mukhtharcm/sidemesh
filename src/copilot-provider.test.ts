@@ -1176,6 +1176,64 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("retries transiently unreadable Copilot state on startup", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-state-retry-test-"),
+    );
+    try {
+      const stateDir = nodePath.join(dir, "state");
+      const provider = new CopilotAgentProvider({
+        stateDir,
+        sdkClientFactory: fakeSdkFactory(new FakeCopilotSdkClient()),
+      });
+      await provider.start();
+
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "crash partial", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await settleProviderWrites();
+
+      const statePath = nodePath.join(stateDir, "sessions.json");
+      const validState = await readFile(statePath, "utf8");
+      await writeFile(statePath, "{", "utf8");
+      const restoreState = new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          void writeFile(statePath, validState, "utf8").then(resolve, reject);
+        }, 5);
+      });
+
+      const restoredProvider = new CopilotAgentProvider({
+        stateDir,
+        sdkClientFactory: fakeSdkFactory(new FakeCopilotSdkClient()),
+      });
+      await restoredProvider.start();
+      await restoreState;
+
+      const restoredThread = await restoredProvider.readSessionThread(
+        created.thread.id,
+        true,
+      );
+      assert.equal(restoredThread.status.type, "idle");
+      assert.equal(restoredThread.turns?.at(-1)?.status, "interrupted");
+
+      const restoredLog = await restoredProvider.readSessionLog(restoredThread);
+      assert.equal(
+        restoredLog.messages.at(-1)?.text,
+        "copilot says: crash partial",
+      );
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("normalizes stale Copilot history activities and compaction on reload", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-history-restart-state-test-"),
