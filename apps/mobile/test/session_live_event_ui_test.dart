@@ -147,6 +147,7 @@ void main() {
       contains('User answered.'),
     );
     expect(cached.log.session.updatedAt, DateTime(2026, 1, 1, 12, 1));
+    expect(cached.log.nextSeq, 3);
   });
 
   testWidgets('appended user messages update live running state', (

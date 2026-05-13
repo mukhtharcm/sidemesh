@@ -134,6 +134,7 @@ const SESSION_EVENT_DELTA_MAX_ITEMS = 220;
 const SESSION_EVENT_DELTA_MAX_BYTES = 256 * 1024;
 const INSTALL_INFO_REFRESH_TTL_MS = 60_000;
 const LIVE_MESSAGE_REPLAY_LIMIT = 2_000;
+const SEARCH_BACKFILL_CLOSE_GRACE_MS = 1_000;
 type SessionRuntimeListMode = "all" | "active" | "none";
 const HOST_CAPABILITIES: HostCapabilities = {
   workspace: {
@@ -3529,7 +3530,10 @@ export async function startServer(
       await closeWebSocketServer(wsServer);
       await closeHttpServer(server);
       await provider.close?.();
-      await searchBackfillPromise.catch(() => undefined);
+      await waitForBackgroundTaskOnClose(
+        searchBackfillPromise,
+        SEARCH_BACKFILL_CLOSE_GRACE_MS,
+      );
       await sessionRuntimeSignalsSaveChain.catch(() => undefined);
     },
   };
@@ -3584,6 +3588,22 @@ async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
   });
 }
 
+async function waitForBackgroundTaskOnClose(
+  task: Promise<unknown>,
+  timeoutMs: number,
+): Promise<void> {
+  let timer: NodeJS.Timeout | null = null;
+  await Promise.race([
+    task.catch(() => undefined),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+      timer.unref?.();
+    }),
+  ]);
+  if (timer) {
+    clearTimeout(timer);
+  }
+}
 
 function getCodexHomePath(provider: AgentProvider): string | null {
   const runtimeHome = (provider as { runtimeHome?: string }).runtimeHome;

@@ -2727,6 +2727,7 @@ class _SessionScreenState extends State<SessionScreen>
         final previousActivities = _activities;
         setState(() {
           if (message != null) {
+            _advancePersistableLogNextSeq(event.seq);
             final hasThinkingBlocks = message.content.any(
               (b) => b is ThinkingBlock,
             );
@@ -2788,6 +2789,7 @@ class _SessionScreenState extends State<SessionScreen>
         final previousMessages = _messages;
         final previousActivities = _activities;
         setState(() {
+          _advancePersistableLogNextSeq(event.seq);
           _advanceSessionUpdatedAtFromMessage(message);
           _upsertPersistedMessage(message);
           _optimisticMessages = _reconcileOptimisticMessages(_messages);
@@ -5429,6 +5431,17 @@ class _SessionScreenState extends State<SessionScreen>
       return null;
     }
     return nextSeq - 1;
+  }
+
+  void _advancePersistableLogNextSeq(int? seq) {
+    if (seq == null || seq < 0) {
+      return;
+    }
+    final nextSeq = seq + 1;
+    if (_persistableLogNextSeq == null ||
+        nextSeq > _persistableLogNextSeq!) {
+      _persistableLogNextSeq = nextSeq;
+    }
   }
 
   List<SessionMessage> _reconcileOptimisticMessages(

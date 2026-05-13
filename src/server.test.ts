@@ -1078,6 +1078,77 @@ class SearchFixtureProvider extends EventEmitter implements AgentProvider {
   }
 }
 
+class HangingBackfillProvider extends EventEmitter implements AgentProvider {
+  public readonly kind = "fake";
+  public readonly displayName = "Hanging Backfill Provider";
+  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
+  public closeCalls = 0;
+
+  private readonly thread: ThreadRecord = {
+    id: "hanging-backfill-session",
+    name: "Hanging backfill session",
+    preview: "Hanging backfill session",
+    createdAt: 1,
+    updatedAt: 1,
+    cwd: "/repo",
+    source: "fake",
+    path: null,
+    status: { type: "idle" },
+  };
+  private readStartedResolve: (() => void) | null = null;
+  private releaseReadResolve: (() => void) | null = null;
+  public readonly readStarted = new Promise<void>((resolve) => {
+    this.readStartedResolve = resolve;
+  });
+
+  public async start(): Promise<void> {}
+
+  public async close(): Promise<void> {
+    this.closeCalls += 1;
+  }
+
+  public async getVersion(): Promise<string> {
+    return "hanging-backfill";
+  }
+
+  public async listSessionThreads(
+    options: AgentSessionListOptions,
+  ): Promise<ThreadRecord[]> {
+    return options.archived ? [] : [{ ...this.thread }];
+  }
+
+  public async readSessionThread(): Promise<ThreadRecord> {
+    return { ...this.thread };
+  }
+
+  public async listRecentUnindexedSessionThreads(): Promise<ThreadRecord[]> {
+    return [{ ...this.thread }];
+  }
+
+  public async readSessionLog(): Promise<SessionLogSnapshot> {
+    this.readStartedResolve?.();
+    await new Promise<void>((resolve) => {
+      this.releaseReadResolve = resolve;
+    });
+    return {
+      messages: [],
+      activities: [],
+      runtime: null,
+      totalMessages: 0,
+      totalActivities: 0,
+      nextSeq: 1,
+    };
+  }
+
+  public releaseRead(): void {
+    this.releaseReadResolve?.();
+  }
+
+  public async readSessionRuntime(): Promise<null> {
+    return null;
+  }
+}
+
 class ActivityReplayFixtureProvider extends EventEmitter implements AgentProvider {
   public readonly kind = "fake";
   public readonly displayName = "Activity Replay Fixture Provider";
@@ -4801,6 +4872,29 @@ describe("GET /api/sessions/search", () => {
         );
       },
     );
+  });
+
+  it("does not block shutdown indefinitely on a hanging startup backfill", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-close-test-"));
+    const provider = new HangingBackfillProvider();
+    const server = await startServer(
+      makeConfig(stateDir),
+      makeCustomSingleProviderRuntime(provider),
+    );
+    try {
+      await provider.readStarted;
+      const startedAt = Date.now();
+      await server.close();
+      const elapsedMs = Date.now() - startedAt;
+      assert.ok(
+        elapsedMs < 1_500,
+        `expected close to return after the backfill grace period, took ${elapsedMs}ms`,
+      );
+      assert.equal(provider.closeCalls, 1);
+    } finally {
+      provider.releaseRead();
+      await rm(stateDir, { recursive: true, force: true });
+    }
   });
 
   it("applies updatedAfter filters to provider-backed search results using millisecond timestamps", async () => {
