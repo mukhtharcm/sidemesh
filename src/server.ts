@@ -569,14 +569,27 @@ export async function startServer(
       sessionId,
       activeTurn.turnId,
     );
-    if (turnState === "terminal") {
-      clearConfirmedTerminalSessionState(sessionId);
-      setLatestThreadStatusForSession(sessionId, "idle");
-      scheduleRecentSessionUpsert(sessionId, 0);
-      return;
-    }
     if (turnState === "active") {
       unverifiedActiveTurns.delete(sessionId);
+      return;
+    }
+    const threadStatus = await providerThreadStatus(agentProvider, sessionId);
+    if (isRunningThreadStatus(threadStatus)) {
+      unverifiedActiveTurns.delete(sessionId);
+      return;
+    }
+    if (
+      turnState === "terminal" ||
+      threadStatus === "idle" ||
+      isTerminalThreadStatus(threadStatus)
+    ) {
+      clearConfirmedTerminalSessionState(sessionId);
+      setLatestThreadStatusForSession(
+        sessionId,
+        isTerminalThreadStatus(threadStatus) ? threadStatus : "idle",
+      );
+      scheduleRecentSessionUpsert(sessionId, 0);
+      return;
     }
   }
 
@@ -4151,6 +4164,23 @@ async function providerTurnState(
     return "terminal";
   }
   return isActiveTurnStatus(turn.status) ? "active" : "unknown";
+}
+
+async function providerThreadStatus(
+  provider: AgentProvider,
+  sessionId: string,
+): Promise<LiveThreadStatus | null> {
+  if (!hasProviderMethod(provider, "readSessionThread")) {
+    return null;
+  }
+  try {
+    return threadStatusPhase(await readSession(provider, sessionId, false));
+  } catch (error) {
+    if (isTransientTurnSnapshotReadError(error)) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function isThreadLoaded(
