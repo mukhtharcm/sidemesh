@@ -525,51 +525,35 @@ class MeshCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final bg = switch (tone) {
-      MeshCardTone.surface => colors.surface,
-      MeshCardTone.elevated => colors.surfaceElevated,
-      MeshCardTone.muted => colors.surfaceMuted,
-    };
-    final border = borderColor ?? colors.border;
-
-    final content = DecoratedBox(
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(AppRadii.surface),
-        border: Border.all(color: border),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadii.surface),
-        child: Stack(
-          children: [
-            if (accentStrip != null)
-              Positioned(
-                left: 0,
-                top: 0,
-                bottom: 0,
-                child: Container(width: 3, color: accentStrip),
-              ),
-            Padding(padding: padding, child: child),
-          ],
-        ),
-      ),
-    );
-
-    if (onTap == null) {
-      return content;
-    }
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.surface),
-        onTap: onTap,
-        hoverColor: colors.surfaceElevated.withValues(alpha: 0.5),
-        splashColor: colors.accent.withValues(alpha: 0.08),
-        child: content,
-      ),
+    final hasAccentStrip = accentStrip != null;
+    return MeshSurface(
+      padding: hasAccentStrip ? EdgeInsets.zero : padding,
+      onTap: onTap,
+      tone: _meshSurfaceToneForCardTone(tone),
+      borderColor: borderColor,
+      child: hasAccentStrip
+          ? Stack(
+              children: [
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: Container(width: 3, color: accentStrip),
+                ),
+                Padding(padding: padding, child: child),
+              ],
+            )
+          : child,
     );
   }
+}
+
+MeshSurfaceTone _meshSurfaceToneForCardTone(MeshCardTone tone) {
+  return switch (tone) {
+    MeshCardTone.surface => MeshSurfaceTone.surface,
+    MeshCardTone.elevated => MeshSurfaceTone.elevated,
+    MeshCardTone.muted => MeshSurfaceTone.muted,
+  };
 }
 
 enum MeshCardTone { surface, elevated, muted }
@@ -672,20 +656,14 @@ class MeshIconButton extends StatelessWidget {
     final button = Semantics(
       label: label,
       button: true,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.border),
-            ),
-            alignment: Alignment.center,
+      child: MeshSurface(
+        onTap: onTap,
+        padding: EdgeInsets.zero,
+        radius: AppRadii.control,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Center(
             child: Icon(icon, size: 18, color: color ?? colors.textSecondary),
           ),
         ),

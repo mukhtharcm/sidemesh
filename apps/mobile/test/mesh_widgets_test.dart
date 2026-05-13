@@ -22,6 +22,22 @@ void main() {
     expect(taps, 1);
   });
 
+  testWidgets('MeshCard routes through MeshSurface compatibility layer', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        const MeshCard(
+          tone: MeshCardTone.elevated,
+          child: Text('Legacy card'),
+        ),
+      ),
+    );
+
+    expect(find.byType(MeshSurface), findsOneWidget);
+    expect(find.text('Legacy card'), findsOneWidget);
+  });
+
   testWidgets('MeshStatusBadge renders status label and icon', (tester) async {
     await tester.pumpWidget(
       _wrap(
