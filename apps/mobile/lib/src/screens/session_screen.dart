@@ -2762,8 +2762,15 @@ class _SessionScreenState extends State<SessionScreen>
         final previousActivities = _activities;
         setState(() {
           final session = _session;
-          if (session != null && message.createdAt.isAfter(session.updatedAt)) {
-            _session = session.copyWith(updatedAt: message.createdAt);
+          // Keep the cached base timestamp compatible with providers whose
+          // session metadata is still second-precision.
+          final messageUpdatedAt = DateTime.fromMillisecondsSinceEpoch(
+            (message.createdAt.millisecondsSinceEpoch ~/
+                    Duration.millisecondsPerSecond) *
+                Duration.millisecondsPerSecond,
+          );
+          if (session != null && messageUpdatedAt.isAfter(session.updatedAt)) {
+            _session = session.copyWith(updatedAt: messageUpdatedAt);
           }
           _upsertPersistedMessage(message);
           _optimisticMessages = _reconcileOptimisticMessages(_messages);
