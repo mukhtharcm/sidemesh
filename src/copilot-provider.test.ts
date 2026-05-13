@@ -246,6 +246,91 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("coalesces concurrent SDK subagent history without tool call ids", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-sdk-subagent-concurrent-no-id-"),
+    );
+    try {
+      const sessionId = "22222222-3333-4444-8555-777777777777";
+      const sdk = new FakeCopilotSdkClient({
+        sessions: [
+          {
+            metadata: {
+              sessionId,
+              startTime: new Date("2026-04-02T00:00:00.000Z"),
+              modifiedTime: new Date("2026-04-02T00:05:00.000Z"),
+              summary: "Concurrent SDK Subagent Session",
+              isRemote: false,
+              context: { cwd: dir },
+            },
+            events: [
+              event(
+                "subagent.started",
+                { agentName: "code-review" },
+                "subagent-start-1",
+              ),
+              event(
+                "subagent.started",
+                { agentName: "code-review" },
+                "subagent-start-2",
+              ),
+              event(
+                "subagent.completed",
+                {
+                  agentName: "code-review",
+                  agentDisplayName: "code-review",
+                  durationMs: 1000,
+                },
+                "subagent-complete-1",
+              ),
+              event(
+                "subagent.completed",
+                {
+                  agentName: "code-review",
+                  agentDisplayName: "code-review",
+                  durationMs: 2000,
+                },
+                "subagent-complete-2",
+              ),
+            ],
+          },
+        ],
+      });
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const sessions = await provider.listSessionThreads!({
+        limit: 10,
+        archived: false,
+      });
+      const log = await provider.readSessionLog!(sessions[0]!);
+      const subagentActivities = log.activities.filter(
+        (activity) =>
+          activity.type === "tool" && activity.toolName === "code-review",
+      );
+      assert.equal(subagentActivities.length, 2);
+      assert.deepEqual(
+        subagentActivities.map((activity) => activity.id),
+        ["subagent-start-1", "subagent-start-2"],
+      );
+      assert.deepEqual(
+        subagentActivities.map((activity) => activity.status),
+        ["completed", "completed"],
+      );
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("runs a text turn through SDK createSession/send", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-test-"),
@@ -3048,7 +3133,48 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
           }),
         );
       }
-      if (options.prompt.includes("subagent without id")) {
+      if (options.prompt.includes("concurrent subagent without id")) {
+        this.emit(
+          event(
+            "subagent.started",
+            {
+              agentName: "code-review",
+            },
+            "subagent-no-id-start-1",
+          ),
+        );
+        this.emit(
+          event(
+            "subagent.started",
+            {
+              agentName: "code-review",
+            },
+            "subagent-no-id-start-2",
+          ),
+        );
+        this.emit(
+          event(
+            "subagent.completed",
+            {
+              agentName: "code-review",
+              agentDisplayName: "code-review",
+              durationMs: 1000,
+            },
+            "subagent-no-id-complete-1",
+          ),
+        );
+        this.emit(
+          event(
+            "subagent.completed",
+            {
+              agentName: "code-review",
+              agentDisplayName: "code-review",
+              durationMs: 2000,
+            },
+            "subagent-no-id-complete-2",
+          ),
+        );
+      } else if (options.prompt.includes("subagent without id")) {
         this.emit(
           event(
             "subagent.started",
@@ -3511,6 +3637,57 @@ describe("copilot rich event cleanup", () => {
       }
       assert.equal(subagent.status, "completed");
       assert.equal(subagent.title, "Documentation Agent (3s)");
+    } finally {
+      await new Promise((r) => setTimeout(r, 50));
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
+  it("coalesces concurrent live subagent lifecycle events without tool call ids", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-subagent-concurrent-no-id-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [
+          {
+            type: "text",
+            text: "hello concurrent subagent without id",
+            text_elements: [],
+          },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const log = await provider.readSessionLog!(created.thread);
+      const subagentActivities = log.activities.filter(
+        (activity) =>
+          activity.type === "tool" && activity.toolName === "code-review",
+      );
+      assert.equal(subagentActivities.length, 2);
+      assert.deepEqual(
+        subagentActivities.map((activity) => activity.id),
+        ["subagent-no-id-start-1", "subagent-no-id-start-2"],
+      );
+      assert.deepEqual(
+        subagentActivities.map((activity) => activity.status),
+        ["completed", "completed"],
+      );
     } finally {
       await new Promise((r) => setTimeout(r, 50));
       await rm(dir, {

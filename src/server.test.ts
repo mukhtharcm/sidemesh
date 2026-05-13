@@ -3118,6 +3118,76 @@ describe("session live rich events", () => {
     );
   });
 
+  it("replays omitted-seq persisted messages below their provider seq after replay metadata eviction", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new AppendedMessageFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(
+      makeConfig(stateDir),
+      runtime,
+      async (server, config) => {
+        const logRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`,
+          method: "GET",
+          headers: { Authorization: `Bearer ${config.token}` },
+        });
+        assert.equal(logRes.statusCode, 200);
+
+        const live = await openSessionLiveSocket(
+          server.port,
+          config.token,
+          provider.sessionId,
+        );
+        let missed: SessionMessage | undefined;
+        try {
+          await waitFor(
+            () => live.events.find((event) => event.type === "hello"),
+            "hello",
+          );
+          provider.emitTransientDelta();
+          await waitFor(
+            () => live.events.find((event) => event.type === "assistant_delta"),
+            "assistant_delta",
+          );
+          missed = provider.appendAssistantMessage("Replayable omitted seq.", {
+            emitSeq: false,
+          });
+          await waitFor(
+            () =>
+              live.events.find(
+                (event) => event.type === "assistant_message_completed",
+              ),
+            "assistant_message_completed",
+          );
+          provider.appendAuditMessage("Evict omitted seq metadata.");
+        } finally {
+          await closeSessionLiveSocket(live.socket);
+        }
+
+        assert.ok(missed, "Expected omitted-seq assistant message");
+        const deltaRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path:
+            `/api/sessions/${encodeURIComponent(provider.sessionId)}/events` +
+            `?since=${missed.seq - 1}`,
+          method: "GET",
+          headers: { Authorization: `Bearer ${config.token}` },
+        });
+        assert.equal(deltaRes.statusCode, 200);
+        assert.ok(
+          ((deltaRes.body as any).messages ?? []).some(
+            (message: { id: string }) => message.id === missed?.id,
+          ),
+          "persisted message should still replay below its provider seq",
+        );
+      },
+      { liveMessageReplayLimit: 1 },
+    );
+  });
+
   it("returns stale cursor when missed appended-message replay metadata was evicted", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const provider = new AppendedMessageFixtureProvider();

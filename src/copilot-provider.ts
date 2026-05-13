@@ -3777,6 +3777,7 @@ function copilotSubagentActivityId(
     const existingId = findMatchingInProgressCopilotSubagentActivityId(
       existingActivities,
       agentName,
+      displayName,
     );
     if (existingId) {
       return existingId;
@@ -3817,8 +3818,9 @@ function copilotSubagentDisplayName(
 function findMatchingInProgressCopilotSubagentActivityId(
   activities: Iterable<SessionActivity>,
   agentName: string,
+  displayName: string,
 ): string | null {
-  let match: string | null = null;
+  let match: ToolActivity | null = null;
   for (const activity of activities) {
     if (
       activity.type !== "tool" ||
@@ -3830,16 +3832,23 @@ function findMatchingInProgressCopilotSubagentActivityId(
     ) {
       continue;
     }
+    const title = activity.title?.trim() ?? "";
+    if (title && title !== displayName && title !== agentName) {
+      continue;
+    }
     const semanticCategory = activity.semantic?.category;
     if (semanticCategory != null && semanticCategory !== "task") {
       continue;
     }
-    if (match) {
-      return null;
+    if (
+      !match ||
+      activity.seq < match.seq ||
+      (activity.seq === match.seq && activity.createdAt < match.createdAt)
+    ) {
+      match = activity;
     }
-    match = activity.id;
   }
-  return match;
+  return match?.id ?? null;
 }
 
 function buildCopilotHistorySubagentActivity(options: {

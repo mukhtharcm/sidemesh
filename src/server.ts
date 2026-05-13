@@ -206,6 +206,7 @@ interface LiveMessageReplayEntry {
 interface LiveMessageReplayGap {
   startSeq: number;
   endSeqExclusive: number;
+  messageId?: string;
 }
 
 interface InstallInfoRefreshResult {
@@ -2231,6 +2232,7 @@ export async function startServer(
       const evictedLiveMessageReplayGap = liveMessageReplayEvictionGap(
         liveMessageReplayEvictions.get(sessionId),
         since,
+        newMessages,
       );
       if (evictedLiveMessageReplayGap) {
         response.status(410).json({
@@ -4423,6 +4425,7 @@ function rememberLiveMessageReplaySeq(
       rememberLiveMessageReplayGap(
         liveMessageReplayEvictions,
         sessionId,
+        oldest,
         evicted,
       );
     }
@@ -4432,6 +4435,7 @@ function rememberLiveMessageReplaySeq(
 function rememberLiveMessageReplayGap(
   liveMessageReplayEvictions: Map<string, LiveMessageReplayGap[]>,
   sessionId: string,
+  messageId: string,
   entry: LiveMessageReplayEntry,
 ): void {
   if (entry.messageSeq == null) {
@@ -4441,6 +4445,7 @@ function rememberLiveMessageReplayGap(
     const nextGap: LiveMessageReplayGap = {
       startSeq: 0,
       endSeqExclusive: entry.replaySeq,
+      messageId,
     };
     rememberLiveMessageReplayGapRange(
       liveMessageReplayEvictions,
@@ -4482,7 +4487,12 @@ function rememberLiveMessageReplayGapRange(
   const merged: LiveMessageReplayGap[] = [];
   for (const gap of gaps) {
     const last = merged[merged.length - 1];
-    if (!last || gap.startSeq > last.endSeqExclusive) {
+    if (
+      !last ||
+      gap.startSeq > last.endSeqExclusive ||
+      gap.messageId ||
+      last.messageId
+    ) {
       merged.push({ ...gap });
       continue;
     }
@@ -4496,13 +4506,20 @@ function rememberLiveMessageReplayGapRange(
 function liveMessageReplayEvictionGap(
   evictions: LiveMessageReplayGap[] | undefined,
   since: number,
+  replayedMessages: SessionMessage[],
 ): LiveMessageReplayGap | null {
   if (!evictions) {
     return null;
   }
+  const replayedMessageIds = new Set(
+    replayedMessages.map((message) => message.id),
+  );
   let matchingGap: LiveMessageReplayGap | null = null;
   for (const gap of evictions) {
     if (since < gap.startSeq || since >= gap.endSeqExclusive) {
+      continue;
+    }
+    if (gap.messageId && replayedMessageIds.has(gap.messageId)) {
       continue;
     }
     if (!matchingGap || gap.endSeqExclusive < matchingGap.endSeqExclusive) {
