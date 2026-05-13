@@ -593,6 +593,14 @@ export async function startServer(
     }
   }
 
+  async function sessionStatusOverrideForSnapshot(
+    sessionId: string,
+    agentProvider: AgentProvider = provider,
+  ): Promise<LiveThreadStatus | null> {
+    await reconcileUnverifiedActiveTurn(sessionId, agentProvider);
+    return sessionStatusOverrideForDisplay(sessionId);
+  }
+
   function persistSessionRuntimeSignalsEventually(): void {
     sessionRuntimeSignalsSaveChain = sessionRuntimeSignalsSaveChain
       .catch(() => undefined)
@@ -894,7 +902,7 @@ export async function startServer(
       runtimeCache,
       limit,
       runtimeMode,
-      sessionStatusOverrideForDisplay,
+      sessionStatusOverrideForSnapshot,
     );
     recentSessionsCache.set(cacheKey, {
       limit,
@@ -935,7 +943,7 @@ export async function startServer(
       const session = mapSession(
         thread,
         await loadCachedSessionRuntime(provider, thread, runtimeCache, "active"),
-        sessionStatusOverrideForDisplay(thread.id),
+        await sessionStatusOverrideForSnapshot(thread.id),
       );
       broadcastRecentSessionsLive({ type: "upsert", session });
     } catch {
@@ -1674,7 +1682,7 @@ export async function startServer(
           const session = mapSession(
             thread,
             runtime,
-            sessionStatusOverrideForDisplay(thread.id),
+            await sessionStatusOverrideForSnapshot(thread.id),
           );
           const summary: SessionSummary = {
             ...session,
@@ -2011,7 +2019,7 @@ export async function startServer(
         session: mapSession(
           session,
           log.runtime,
-          sessionStatusOverrideForDisplay(session.id),
+          await sessionStatusOverrideForSnapshot(session.id),
         ),
         messages: log.messages,
         activities,
@@ -2226,7 +2234,7 @@ export async function startServer(
         session: mapSession(
           session,
           logRuntime,
-          sessionStatusOverrideForDisplay(session.id),
+          await sessionStatusOverrideForSnapshot(session.id),
         ),
       });
     }),
@@ -3012,7 +3020,11 @@ export async function startServer(
       }
       await provider.setSessionName!(sessionId, name);
       const thread = await readSession(provider, sessionId, false);
-      const session = mapSession(thread, null, sessionStatusOverrideForDisplay(thread.id));
+      const session = mapSession(
+        thread,
+        null,
+        await sessionStatusOverrideForSnapshot(thread.id),
+      );
       response.json({ session });
       broadcastRecentSessionsLive({ type: "upsert", session });
       void indexSessionForSearch(searchIndex, providerRuntime, sessionId).catch(() => {});
@@ -3680,7 +3692,9 @@ async function listSessions(
   runtimeCache: Map<string, SessionRuntimeCacheEntry>,
   limitOverride: number | null = null,
   runtimeMode: SessionRuntimeListMode = "active",
-  statusOverrideForSession?: (sessionId: string) => LiveThreadStatus | null,
+  statusOverrideForSession?: (
+    sessionId: string,
+  ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
 ): Promise<SessionSummary[]> {
   const limit = normalizedSessionListLimit(limitOverride);
   if (
@@ -3702,7 +3716,7 @@ async function listSessions(
             runtimeCache,
             runtimeMode,
           ),
-          statusOverrideForSession?.(thread.id) ?? null,
+          (await statusOverrideForSession?.(thread.id)) ?? null,
       ),
     );
   }
@@ -3732,7 +3746,7 @@ async function listSessions(
           runtimeCache,
           runtimeMode,
         ),
-        statusOverrideForSession?.(thread.id) ?? null,
+        (await statusOverrideForSession?.(thread.id)) ?? null,
       ),
   );
 }
