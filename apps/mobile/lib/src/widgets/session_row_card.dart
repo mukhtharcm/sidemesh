@@ -79,13 +79,13 @@ class SessionRowCard extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadii.control),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             padding: const EdgeInsets.fromLTRB(10, 9, 8, 10),
             decoration: BoxDecoration(
               color: bgColor,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(AppRadii.control),
               border: Border.all(color: borderColor),
             ),
             child: Row(
@@ -216,8 +216,10 @@ class SessionRowCard extends StatelessWidget {
     // ── Mobile / full-width variant ──────────────────────────────────────────
     final branch = session.gitInfo?.branch;
     final hasBranch = branch != null && branch.isNotEmpty;
-    return MeshCard(
+    final statusBadge = _sessionStatusBadge(session);
+    return MeshSurface(
       onTap: onTap,
+      selected: selected,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       borderColor: selected ? colors.accent : null,
       child: Column(
@@ -225,10 +227,6 @@ class SessionRowCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              if (running) ...[
-                LivePulse(color: colors.success),
-                const SizedBox(width: 8),
-              ],
               Expanded(
                 child: Text(
                   session.title,
@@ -239,6 +237,10 @@ class SessionRowCard extends StatelessWidget {
                   ),
                 ),
               ),
+              if (statusBadge != null) ...[
+                const SizedBox(width: AppSpacing.sm),
+                statusBadge,
+              ],
               if (unread) ...[
                 const SizedBox(width: 6),
                 _UnreadDot(color: colors.accent),
@@ -367,6 +369,62 @@ class SessionRowCard extends StatelessWidget {
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────
+
+MeshStatusBadge? _sessionStatusBadge(SessionSummary session) {
+  final status = session.status;
+  return switch (status) {
+    'waiting_for_approval' || 'pendingApproval' => const MeshStatusBadge(
+        label: 'approval',
+        tone: MeshStatusTone.approval,
+        icon: Icons.verified_user_outlined,
+        compact: true,
+      ),
+    'waiting_for_input' => const MeshStatusBadge(
+        label: 'waiting',
+        tone: MeshStatusTone.waiting,
+        icon: Icons.question_answer_outlined,
+        compact: true,
+      ),
+    'queued' => const MeshStatusBadge(
+        label: 'queued',
+        tone: MeshStatusTone.queued,
+        icon: Icons.schedule_rounded,
+        compact: true,
+      ),
+    'blocked' => const MeshStatusBadge(
+        label: 'blocked',
+        tone: MeshStatusTone.waiting,
+        icon: Icons.pause_circle_outline_rounded,
+        compact: true,
+      ),
+    'failed' || 'errored' => const MeshStatusBadge(
+        label: 'failed',
+        tone: MeshStatusTone.danger,
+        icon: Icons.error_outline_rounded,
+        compact: true,
+      ),
+    'stale' => const MeshStatusBadge(
+        label: 'stale',
+        tone: MeshStatusTone.stale,
+        icon: Icons.history_toggle_off_rounded,
+        compact: true,
+      ),
+    'active' || 'running' => const MeshStatusBadge(
+        label: 'running',
+        tone: MeshStatusTone.running,
+        live: true,
+        compact: true,
+      ),
+    _ => session.isActive
+        ? const MeshStatusBadge(
+            label: 'running',
+            tone: MeshStatusTone.running,
+            live: true,
+            compact: true,
+          )
+        : null,
+  };
+}
 
 class _SubAgentBadge extends StatelessWidget {
   const _SubAgentBadge();

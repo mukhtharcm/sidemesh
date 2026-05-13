@@ -456,13 +456,10 @@ class _CreditsRow extends StatelessWidget {
     final label = credits.unlimited == true
         ? 'Unlimited credits'
         : 'Credits ${credits.balanceLabel ?? credits.balance?.toStringAsFixed(2) ?? 'available'}';
-    return Container(
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.border),
-      ),
       child: Row(
         children: [
           Icon(Icons.account_balance_wallet_rounded, size: 17, color: colors.accent),
