@@ -510,12 +510,20 @@ export async function startServer(
       return false;
     }
     const observedStatus = latestThreadStatusForSession(sessionId);
-    const state = await loadFastRunState(
-      agentProvider,
-      sessionId,
-      new Map<string, ActiveTurnState>(),
-      isRunningThreadStatus(observedStatus) ? observedStatus : null,
-    );
+    let state: Awaited<ReturnType<typeof loadFastRunState>>;
+    try {
+      state = await loadFastRunState(
+        agentProvider,
+        sessionId,
+        new Map<string, ActiveTurnState>(),
+        isRunningThreadStatus(observedStatus) ? observedStatus : null,
+      );
+    } catch (error) {
+      if (isTransientTurnSnapshotReadError(error)) {
+        return true;
+      }
+      throw error;
+    }
     if (state.isRunning) {
       return state.turnId == null || state.turnId === turnId;
     }
