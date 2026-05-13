@@ -605,6 +605,13 @@ export class CopilotAgentProvider
       if (!isCopilotUserInputResponse(decision)) {
         return false;
       }
+      const session = this.sessions.get(action.sessionId);
+      if (session) {
+        const text = formatCopilotUserInputResponseMessage(decision);
+        if (text) {
+          this.appendSystemMessage(session, text);
+        }
+      }
       this.pendingUserInputs.delete(action.id);
       this.persistEventually();
       inputRequest.resolve(decision);
@@ -615,6 +622,13 @@ export class CopilotAgentProvider
     if (elicitation) {
       if (!isCopilotElicitationResponse(decision)) {
         return false;
+      }
+      const session = this.sessions.get(action.sessionId);
+      if (session) {
+        const text = formatCopilotElicitationResponseMessage(decision);
+        if (text) {
+          this.appendSystemMessage(session, text);
+        }
       }
       this.pendingElicitations.delete(action.id);
       this.persistEventually();
@@ -1013,7 +1027,9 @@ export class CopilotAgentProvider
         output: null,
         result: null,
         isError: false,
-        semantic: null,
+        semantic: copilotTaskSemantic(
+          event.data.agentDisplayName ?? event.data.agentName ?? "Subagent",
+        ),
       });
       return;
     }
@@ -1033,7 +1049,9 @@ export class CopilotAgentProvider
         output: null,
         result: { type: "success", summary: "Subagent completed" },
         isError: false,
-        semantic: null,
+        semantic: copilotTaskSemantic(
+          event.data.agentDisplayName ?? event.data.agentName ?? "Subagent",
+        ),
       });
       return;
     }
@@ -1053,7 +1071,9 @@ export class CopilotAgentProvider
           summary: event.data.error ?? "Subagent failed",
         },
         isError: true,
-        semantic: null,
+        semantic: copilotTaskSemantic(
+          event.data.agentDisplayName ?? event.data.agentName ?? "Subagent",
+        ),
       });
       return;
     }
@@ -1223,26 +1243,22 @@ export class CopilotAgentProvider
     }
 
     if (event.type === "tool.execution_start") {
-      this.upsertAndEmitActivity(session, active?.turnId ?? null, {
+      const activity = buildCopilotToolActivityDraft({
         id: event.data.toolCallId,
-        type: "tool",
         turnId: active?.turnId ?? null,
         status: "in_progress",
         toolName: copilotToolName(event.data.toolName),
-        title: formatCopilotToolCommand(
-          event.data.toolName,
-          event.data.arguments,
-        ),
         args: event.data.arguments ?? null,
         output: null,
         result: null,
         isError: null,
-        semantic: inferCopilotToolSemantic(
-          event.data.toolName,
-          event.data.arguments,
-          null,
-        ),
+        existing: null,
+        mode: "live",
       });
+      if (!activity) {
+        return;
+      }
+      this.upsertAndEmitActivity(session, active?.turnId ?? null, activity);
       return;
     }
 
@@ -1275,31 +1291,22 @@ export class CopilotAgentProvider
         (existing?.type === "tool" || existing?.type === "command"
           ? existing.output
           : null);
-      this.upsertAndEmitActivity(session, active?.turnId ?? null, {
+      const activity = buildCopilotToolActivityDraft({
         id: event.data.toolCallId,
-        type: "tool",
         turnId: active?.turnId ?? null,
         status: event.data.success ? "completed" : "failed",
         toolName: existingTool?.toolName ?? copilotToolName(completeData.toolName),
-        title:
-          existingTool?.title ??
-          formatCopilotToolCommand(
-            completeData.toolName,
-            completeData.arguments ?? event.data.result ?? event.data.error,
-          ),
         args: existingTool?.args ?? completeData.arguments ?? null,
         output,
         result: event.data.result ?? event.data.error ?? null,
         isError: event.data.success ? false : true,
-        semantic: mergeCopilotToolSemantic(
-          existingTool,
-          inferCopilotToolSemantic(
-            completeData.toolName,
-            existingTool?.args ?? completeData.arguments,
-            event.data.result ?? event.data.error ?? null,
-          ),
-        ),
+        existing: existingTool,
+        mode: "live",
       });
+      if (!activity) {
+        return;
+      }
+      this.upsertAndEmitActivity(session, active?.turnId ?? null, activity);
     }
   }
 
@@ -1529,6 +1536,10 @@ export class CopilotAgentProvider
     }
 
     const action = buildCopilotUserInputAction(session, request);
+    const requestMessage = formatCopilotUserInputRequestMessage(request);
+    if (requestMessage) {
+      this.appendSystemMessage(session, requestMessage);
+    }
     this.emit("liveEvent", {
       type: "action_opened",
       action,
@@ -1549,6 +1560,10 @@ export class CopilotAgentProvider
     }
 
     const action = buildCopilotElicitationAction(session, request);
+    const requestMessage = formatCopilotElicitationRequestMessage(request);
+    if (requestMessage) {
+      this.appendSystemMessage(session, requestMessage);
+    }
     this.emit("liveEvent", {
       type: "action_opened",
       action,
@@ -1777,15 +1792,22 @@ export class CopilotAgentProvider
       const restoredSessions = new Map<string, CopilotSessionState>();
       let stateChangedOnLoad = false;
       for (const item of parsed.sessions ?? []) {
+        const restoredActivities = new Map<string, SessionActivity>();
+        for (const rawActivity of item.activities ?? []) {
+          const normalized = normalizeStoredCopilotActivity(rawActivity);
+          if (!normalized) {
+            stateChangedOnLoad = true;
+            continue;
+          }
+          if (JSON.stringify(rawActivity) !== JSON.stringify(normalized)) {
+            stateChangedOnLoad = true;
+          }
+          restoredActivities.set(normalized.id, normalized);
+        }
         const state: CopilotSessionState = {
           thread: item.thread,
           messages: item.messages ?? [],
-          activities: new Map(
-            (item.activities ?? []).map((activity) => [
-              activity.id,
-              normalizeStoredSessionActivity(activity),
-            ]),
-          ),
+          activities: restoredActivities,
           turns: item.turns ?? [],
           runtime: normalizeStoredRuntime(item.runtime ?? null),
           archived: item.archived === true,
@@ -2506,6 +2528,35 @@ function buildCopilotUserInputAction(
   };
 }
 
+function formatCopilotUserInputRequestMessage(
+  request: CopilotSdkUserInputRequest,
+): string | null {
+  const question = request.question?.trim();
+  if (!question) {
+    return null;
+  }
+  const choices = (request.choices ?? [])
+    .filter(
+      (choice): choice is string =>
+        typeof choice === "string" && choice.trim().length > 0,
+    )
+    .map((choice) => choice.trim());
+  if (choices.length === 0) {
+    return `Agent asked: ${question}`;
+  }
+  return `Agent asked: ${question}\nChoices: ${choices.join(", ")}`;
+}
+
+function formatCopilotUserInputResponseMessage(
+  response: CopilotSdkUserInputResponse,
+): string | null {
+  const answer = response.answer.trim();
+  if (!answer) {
+    return "User answered with an empty response.";
+  }
+  return `User answered: ${answer}`;
+}
+
 function buildCopilotElicitationAction(
   session: CopilotSessionState,
   request: CopilotSdkElicitationContext,
@@ -2536,6 +2587,42 @@ function buildCopilotElicitationAction(
     providerRequestKind: "copilot/elicitation",
     providerPayload: request,
   };
+}
+
+function formatCopilotElicitationRequestMessage(
+  request: CopilotSdkElicitationContext,
+): string | null {
+  const message = request.message?.trim() || "Structured input requested.";
+  if (request.mode === "url") {
+    return request.url
+      ? `Agent requested browser sign-in: ${message}\n${request.url}`
+      : `Agent requested browser sign-in: ${message}`;
+  }
+  const fields = normalizeCopilotElicitationFields(request.requestedSchema)
+    .map((field) => field.title.trim())
+    .filter((title) => title.length > 0);
+  if (fields.length === 0) {
+    return `Agent requested structured input: ${message}`;
+  }
+  return `Agent requested structured input: ${message}\nFields: ${fields.join(", ")}`;
+}
+
+function formatCopilotElicitationResponseMessage(
+  response: CopilotSdkElicitationResult,
+): string | null {
+  switch (response.action) {
+    case "accept":
+      if (response.content && Object.keys(response.content).length > 0) {
+        return `Structured input submitted:\n${JSON.stringify(response.content, null, 2)}`;
+      }
+      return "Structured input submitted.";
+    case "decline":
+      return "Structured input declined.";
+    case "cancel":
+      return "Structured input canceled.";
+    default:
+      return null;
+  }
 }
 
 function copilotPendingActionKind(kind: unknown): AgentPendingAction["kind"] {
@@ -3208,21 +3295,24 @@ function parseSdkSessionEvents(
       event.type === "tool.execution_start" &&
       typeof data.toolCallId === "string"
     ) {
-      activities.set(data.toolCallId, {
+      const activity = buildCopilotHistoryToolActivity({
         id: data.toolCallId,
-        type: "tool",
         turnId: null,
-        createdAt: timestamp,
-        seq: seq++,
         status: "in_progress",
         toolName: copilotToolName(data.toolName),
-        title: formatCopilotToolCommand(data.toolName, data.arguments),
         args: data.arguments ?? null,
         output: null,
         result: null,
         isError: null,
-        semantic: inferCopilotToolSemantic(data.toolName, data.arguments, null),
+        existing: null,
+        createdAt: timestamp,
+        seq,
+        mode: "history",
       });
+      if (activity) {
+        activities.set(data.toolCallId, activity);
+        seq += 1;
+      }
       continue;
     }
 
@@ -3243,29 +3333,107 @@ function parseSdkSessionEvents(
         (existing?.type === "tool" || existing?.type === "command"
           ? existing.output
           : null);
-      activities.set(data.toolCallId, {
+      const activity = buildCopilotHistoryToolActivity({
         id: data.toolCallId,
-        type: "tool",
         turnId: existingTool?.turnId ?? null,
-        createdAt: existingTool?.createdAt ?? timestamp,
-        seq: existingTool?.seq ?? seq++,
         status: data.success === false ? "failed" : "completed",
         toolName: existingTool?.toolName ?? copilotToolName(data.toolName),
-        title:
-          existingTool?.title ?? formatCopilotToolCommand(data.toolName, null),
         args: existingTool?.args ?? data.arguments ?? null,
         output,
         result: data.result ?? data.error ?? null,
         isError: data.success === false,
-        semantic: mergeCopilotToolSemantic(
-          existingTool,
-          inferCopilotToolSemantic(
-            data.toolName,
-            existingTool?.args ?? data.arguments,
-            data.result ?? data.error ?? null,
-          ),
-        ),
+        existing: existingTool,
+        createdAt: existingTool?.createdAt ?? timestamp,
+        seq: existingTool?.seq ?? seq,
+        mode: "history",
       });
+      if (activity) {
+        activities.set(data.toolCallId, activity);
+        if (!existingTool) {
+          seq += 1;
+        }
+      } else {
+        activities.delete(data.toolCallId);
+      }
+      continue;
+    }
+
+    if (event.type === "subagent.started") {
+      const activity = buildCopilotHistorySubagentActivity({
+        id: data.toolCallId,
+        eventId: event.id,
+        createdAt: timestamp,
+        seq,
+        status: "in_progress",
+        agentName: data.agentName,
+        agentDisplayName: data.agentDisplayName,
+      });
+      if (activity) {
+        activities.set(activity.id, activity);
+        seq += 1;
+      }
+      continue;
+    }
+
+    if (event.type === "subagent.completed") {
+      const activity = buildCopilotHistorySubagentActivity({
+        id: data.toolCallId,
+        eventId: event.id,
+        createdAt: timestamp,
+        seq,
+        status: "completed",
+        agentName: data.agentName,
+        agentDisplayName: data.agentDisplayName,
+        durationMs: typeof data.durationMs === "number" ? data.durationMs : null,
+        error: null,
+      });
+      if (activity) {
+        const existingActivity = activities.get(activity.id);
+        activities.set(
+          activity.id,
+          existingActivity?.type === "tool"
+            ? {
+                ...activity,
+                createdAt: existingActivity.createdAt,
+                seq: existingActivity.seq,
+              }
+            : activity,
+        );
+        if (!existingActivity) {
+          seq += 1;
+        }
+      }
+      continue;
+    }
+
+    if (event.type === "subagent.failed") {
+      const activity = buildCopilotHistorySubagentActivity({
+        id: data.toolCallId,
+        eventId: event.id,
+        createdAt: timestamp,
+        seq,
+        status: "failed",
+        agentName: data.agentName,
+        agentDisplayName: data.agentDisplayName,
+        durationMs: typeof data.durationMs === "number" ? data.durationMs : null,
+        error: typeof data.error === "string" ? data.error : null,
+      });
+      if (activity) {
+        const existingActivity = activities.get(activity.id);
+        activities.set(
+          activity.id,
+          existingActivity?.type === "tool"
+            ? {
+                ...activity,
+                createdAt: existingActivity.createdAt,
+                seq: existingActivity.seq,
+              }
+            : activity,
+        );
+        if (!existingActivity) {
+          seq += 1;
+        }
+      }
     }
   }
 
@@ -3283,6 +3451,412 @@ function parseSdkSessionEvents(
     ),
     runtime,
     nextSeq: seq,
+  };
+}
+
+type CopilotToolNormalizationMode = "live" | "history" | "stored";
+
+function buildCopilotToolActivityDraft(options: {
+  id: string;
+  turnId: string | null;
+  status: SessionActivity["status"];
+  toolName: string;
+  args: unknown;
+  output: string | null;
+  result: unknown;
+  isError: boolean | null;
+  existing: ToolActivity | null;
+  mode: CopilotToolNormalizationMode;
+}): Omit<ToolActivity, "createdAt" | "seq"> | null {
+  const normalized = normalizeCopilotToolActivityParts({
+    toolName: options.toolName,
+    title:
+      options.existing?.title ??
+      formatCopilotToolCommand(options.toolName, options.args),
+    args: options.args,
+    output: options.output,
+    result: options.result,
+    isError: options.isError,
+    semantic: mergeCopilotToolSemantic(
+      options.existing,
+      inferCopilotToolSemantic(options.toolName, options.args, options.result),
+    ),
+    mode: options.mode,
+  });
+  if (!normalized) {
+    return null;
+  }
+  return {
+    id: options.id,
+    type: "tool",
+    turnId: options.turnId,
+    status: options.status,
+    toolName: options.toolName,
+    title: normalized.title,
+    args: normalized.args,
+    output: normalized.output,
+    result: normalized.result,
+    isError: normalized.isError,
+    semantic: normalized.semantic,
+  };
+}
+
+function buildCopilotHistoryToolActivity(options: {
+  id: string;
+  turnId: string | null;
+  createdAt: number;
+  seq: number;
+  status: SessionActivity["status"];
+  toolName: string;
+  args: unknown;
+  output: string | null;
+  result: unknown;
+  isError: boolean | null;
+  existing: ToolActivity | null;
+  mode: CopilotToolNormalizationMode;
+}): ToolActivity | null {
+  const draft = buildCopilotToolActivityDraft(options);
+  if (!draft) {
+    return null;
+  }
+  return {
+    ...draft,
+    createdAt: options.createdAt,
+    seq: options.seq,
+  };
+}
+
+function buildCopilotHistorySubagentActivity(options: {
+  id: unknown;
+  eventId: unknown;
+  createdAt: number;
+  seq: number;
+  status: SessionActivity["status"];
+  agentName: unknown;
+  agentDisplayName: unknown;
+  durationMs?: number | null;
+  error?: string | null;
+}): ToolActivity | null {
+  const activityId =
+    typeof options.id === "string" && options.id.length > 0
+      ? options.id
+      : typeof options.eventId === "string" && options.eventId.length > 0
+        ? options.eventId
+        : null;
+  if (!activityId) {
+    return null;
+  }
+  const agentName =
+    typeof options.agentName === "string" && options.agentName.length > 0
+      ? options.agentName
+      : "subagent";
+  const displayName =
+    typeof options.agentDisplayName === "string" &&
+      options.agentDisplayName.length > 0
+      ? options.agentDisplayName
+      : agentName;
+  const duration =
+    typeof options.durationMs === "number"
+      ? ` (${Math.round(options.durationMs / 1000)}s)`
+      : "";
+  return {
+    id: activityId,
+    type: "tool",
+    turnId: null,
+    createdAt: options.createdAt,
+    seq: options.seq,
+    status: options.status,
+    toolName: agentName,
+    title:
+      options.status === "completed" ? `${displayName}${duration}` : displayName,
+    args: null,
+    output: null,
+    result:
+      options.status === "completed"
+        ? { type: "success", summary: "Subagent completed" }
+        : options.status === "failed"
+          ? {
+              type: "error",
+              summary: options.error ?? "Subagent failed",
+            }
+          : null,
+    isError: options.status === "failed" ? true : false,
+    semantic: copilotTaskSemantic(displayName),
+  };
+}
+
+function normalizeStoredCopilotActivity(
+  activity: SessionActivity,
+): SessionActivity | null {
+  const normalized = normalizeStoredSessionActivity(activity);
+  if (normalized.type !== "tool") {
+    return normalized;
+  }
+  const toolName = (normalized.toolName ?? "").trim();
+  const next = normalizeCopilotToolActivityParts({
+    toolName,
+    title: normalized.title ?? toolName,
+    args: normalized.args,
+    output: normalized.output,
+    result: normalized.result,
+    isError: normalized.isError,
+    semantic:
+      normalized.semantic ??
+      inferCopilotToolSemantic(toolName, normalized.args, normalized.result),
+    mode: "stored",
+  });
+  if (!next) {
+    return null;
+  }
+  return {
+    ...normalized,
+    toolName,
+    title: next.title,
+    args: next.args,
+    output: next.output,
+    result: next.result,
+    isError: next.isError,
+    semantic: next.semantic,
+  };
+}
+
+function normalizeCopilotToolActivityParts(options: {
+  toolName: string;
+  title: string | null;
+  args: unknown;
+  output: string | null;
+  result: unknown;
+  isError: boolean | null;
+  semantic: ToolActivitySemantic | null;
+  mode: CopilotToolNormalizationMode;
+}): {
+  title: string;
+  args: unknown;
+  output: string | null;
+  result: unknown;
+  isError: boolean | null;
+  semantic: ToolActivitySemantic | null;
+} | null {
+  const toolName = copilotToolName(options.toolName);
+  if (shouldSuppressCopilotToolActivity(toolName, options.mode)) {
+    return null;
+  }
+  const semantic = normalizeCopilotTaskToolSemantic(
+    toolName,
+    options.args,
+    options.result,
+    options.title,
+    options.semantic,
+  );
+  const output = normalizeCopilotToolOutput(
+    toolName,
+    options.output,
+    options.result,
+  );
+  return {
+    title: normalizeCopilotToolTitle(toolName, options.title, options.args),
+    args: normalizeCopilotToolArgs(toolName, options.args),
+    output,
+    result: normalizeCopilotToolResult(toolName, options.result, output),
+    isError: options.isError,
+    semantic,
+  };
+}
+
+function shouldSuppressCopilotToolActivity(
+  toolName: string,
+  mode: CopilotToolNormalizationMode,
+): boolean {
+  if (toolName === "report_intent") {
+    return true;
+  }
+  return toolName === "ask_user" && mode === "live";
+}
+
+function normalizeCopilotTaskToolSemantic(
+  toolName: string,
+  args: unknown,
+  result: unknown,
+  title: string | null,
+  semantic: ToolActivitySemantic | null,
+): ToolActivitySemantic | null {
+  if (semantic?.category && semantic.category !== "unknown") {
+    return semantic;
+  }
+  if (isCopilotTaskLikeTool(toolName, result, title)) {
+    const label = readableCopilotTaskLabel(toolName, args, title);
+    return copilotTaskSemantic(label);
+  }
+  return semantic;
+}
+
+function isCopilotTaskLikeTool(
+  toolName: string,
+  result: unknown,
+  title: string | null,
+): boolean {
+  if (
+    toolName === "ask_user" ||
+    toolName === "report_intent" ||
+    toolName === "task_complete" ||
+    toolName === "sql" ||
+    toolName === "read_agent" ||
+    toolName === "list_agents" ||
+    toolName === "code-review" ||
+    toolName === "explore" ||
+    toolName === "read_bash" ||
+    toolName === "stop_bash" ||
+    toolName === "general-purpose"
+  ) {
+    return true;
+  }
+  const typedResult = asRecord(result);
+  const summary = typedResult && typeof typedResult.summary === "string"
+    ? typedResult.summary
+    : "";
+  return (
+    summary.toLowerCase().includes("subagent") ||
+    ((title ?? "").toLowerCase().includes("agent") && typedResult != null)
+  );
+}
+
+function normalizeCopilotToolTitle(
+  toolName: string,
+  title: string | null,
+  args: unknown,
+): string {
+  const typedArgs = asRecord(args);
+  switch (toolName) {
+    case "ask_user": {
+      const question = typedArgs && typeof typedArgs.question === "string"
+        ? typedArgs.question.trim()
+        : "";
+      return question ? `Asked user: ${question}` : "Asked user";
+    }
+    case "report_intent":
+      return "Reported intent";
+    case "task_complete":
+      return "Task completed";
+    case "sql": {
+      const description =
+        typedArgs && typeof typedArgs.description === "string"
+          ? typedArgs.description.trim()
+          : "";
+      return description ? `Run SQL query: ${description}` : "Run SQL query";
+    }
+    case "stop_bash": {
+      const shellId =
+        typedArgs && typeof typedArgs.shellId === "string"
+          ? typedArgs.shellId.trim()
+          : "";
+      return shellId ? `Stopped command ${shellId}` : "Stopped command";
+    }
+    case "read_bash": {
+      const shellId =
+        typedArgs && typeof typedArgs.shellId === "string"
+          ? typedArgs.shellId.trim()
+          : "";
+      return shellId ? `Read command ${shellId} output` : "Read command output";
+    }
+    case "list_agents":
+      return "Listed agents";
+    case "read_agent":
+      return "Read agent";
+    case "code-review":
+      return "Code review";
+    case "explore":
+      return "Explorer task";
+    default:
+      return title?.trim() || toolName;
+  }
+}
+
+function normalizeCopilotToolArgs(
+  toolName: string,
+  args: unknown,
+): unknown {
+  if (toolName === "task_complete") {
+    return null;
+  }
+  return args;
+}
+
+function normalizeCopilotToolOutput(
+  toolName: string,
+  output: string | null,
+  result: unknown,
+): string | null {
+  const normalized = (output ?? "").trim();
+  if (toolName === "task_complete") {
+    const summary = readFirstString(asRecord(result), ["content", "summary"]);
+    if (summary) {
+      return summary;
+    }
+  }
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeCopilotToolResult(
+  toolName: string,
+  result: unknown,
+  output: string | null,
+): unknown {
+  if (toolName === "task_complete") {
+    return null;
+  }
+  if (isCopilotWrappedTextResult(result, output)) {
+    return null;
+  }
+  return result;
+}
+
+function isCopilotWrappedTextResult(
+  result: unknown,
+  output: string | null,
+): boolean {
+  if (!result || typeof result !== "object" || Array.isArray(result) || !output) {
+    return false;
+  }
+  const typed = result as Record<string, unknown>;
+  const keys = Object.keys(typed);
+  if (keys.length === 0) {
+    return false;
+  }
+  if (
+    !keys.every((key) =>
+      key === "content" || key === "detailedContent" || key === "message",
+    )
+  ) {
+    return false;
+  }
+  return extractCopilotToolOutput(result)?.trim() === output.trim();
+}
+
+function readableCopilotTaskLabel(
+  toolName: string,
+  args: unknown,
+  title: string | null,
+): string {
+  const normalizedTitle = title?.trim();
+  if (normalizedTitle && !normalizedTitle.includes("{")) {
+    return normalizedTitle;
+  }
+  const typedArgs = asRecord(args);
+  const description =
+    typedArgs && typeof typedArgs.description === "string"
+      ? typedArgs.description.trim()
+      : "";
+  if (description) {
+    return description;
+  }
+  return toolName.replaceAll("_", " ");
+}
+
+function copilotTaskSemantic(label: string): ToolActivitySemantic {
+  return {
+    category: "task",
+    action: "invoke",
+    targets: [{ type: "unknown", label }],
   };
 }
 

@@ -1230,6 +1230,117 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("normalizes Copilot history meta tools and suppresses report_intent", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-history-meta-tools-"),
+    );
+    try {
+      const sessionId = "history-meta-tools";
+      const sdk = new FakeCopilotSdkClient({
+        sessions: [
+          {
+            metadata: {
+              sessionId,
+              startTime: new Date("2026-04-02T00:00:00.000Z"),
+              modifiedTime: new Date("2026-04-02T00:05:00.000Z"),
+              summary: "History meta tools",
+              isRemote: false,
+              context: { cwd: dir },
+            },
+            events: [
+              event("tool.execution_start", {
+                toolCallId: "intent-1",
+                toolName: "report_intent",
+                arguments: { intent: "Asking for environment" },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "intent-1",
+                toolName: "report_intent",
+                success: true,
+                result: {
+                  content: "Intent logged",
+                  detailedContent: "Asking for environment",
+                },
+              }),
+              event("tool.execution_start", {
+                toolCallId: "ask-1",
+                toolName: "ask_user",
+                arguments: {
+                  question: "Which environment should I use?",
+                  choices: ["staging", "production"],
+                  allow_freeform: false,
+                },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "ask-1",
+                toolName: "ask_user",
+                success: true,
+                result: {
+                  content: "User selected: staging",
+                  detailedContent: "User selected: staging",
+                },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "task-1",
+                toolName: "task_complete",
+                success: true,
+                result: {
+                  content: "Finished the work and handed off the PR.",
+                },
+              }),
+            ],
+          },
+        ],
+      });
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const thread = await provider.readSessionThread(sessionId, false);
+      const log = await provider.readSessionLog(thread);
+
+      assert.equal(log.activities.length, 2);
+      assert.equal(
+        log.activities.some(
+          (activity) =>
+            activity.type === "tool" && activity.toolName === "report_intent",
+        ),
+        false,
+      );
+
+      const askUser = log.activities.find(
+        (activity) => activity.type === "tool" && activity.toolName === "ask_user",
+      );
+      assert.ok(askUser, "Expected ask_user history activity");
+      assert.equal(askUser.type, "tool");
+      assert.equal(askUser.title, "Asked user: Which environment should I use?");
+      assert.equal(askUser.output, "User selected: staging");
+      assert.equal(askUser.result, null);
+      assert.equal(askUser.semantic?.category, "task");
+
+      const taskComplete = log.activities.find(
+        (activity) =>
+          activity.type === "tool" && activity.toolName === "task_complete",
+      );
+      assert.ok(taskComplete, "Expected task_complete history activity");
+      assert.equal(taskComplete.type, "tool");
+      assert.equal(taskComplete.title, "Task completed");
+      assert.equal(taskComplete.output, "Finished the work and handed off the PR.");
+      assert.equal(taskComplete.result, null);
+      assert.equal(taskComplete.semantic?.category, "task");
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("bridges SDK permission requests into Sidemesh pending actions", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-approval-test-"),
@@ -1323,6 +1434,36 @@ describe("Copilot provider", () => {
       await completed;
 
       const log = await provider.readSessionLog!(created.thread);
+      assert.equal(
+        log.activities.some(
+          (activity) =>
+            activity.type === "tool" && activity.toolName === "ask_user",
+        ),
+        false,
+      );
+      assert.equal(
+        log.activities.some(
+          (activity) =>
+            activity.type === "tool" && activity.toolName === "report_intent",
+        ),
+        false,
+      );
+      assert.ok(
+        log.messages.some(
+          (message) =>
+            message.role === "system" &&
+            message.text.includes(
+              "Agent asked: Which environment should I use?",
+            ),
+        ),
+      );
+      assert.ok(
+        log.messages.some(
+          (message) =>
+            message.role === "system" &&
+            message.text.includes("User answered: staging"),
+        ),
+      );
       assert.match(log.messages.at(-1)?.text ?? "", /staging/);
     } finally {
       await settleProviderWrites();
@@ -1371,6 +1512,20 @@ describe("Copilot provider", () => {
       await completed;
 
       const log = await provider.readSessionLog!(created.thread);
+      assert.ok(
+        log.messages.some(
+          (message) =>
+            message.role === "system" &&
+            message.text.includes("Agent requested structured input:"),
+        ),
+      );
+      assert.ok(
+        log.messages.some(
+          (message) =>
+            message.role === "system" &&
+            message.text.includes("Structured input submitted:"),
+        ),
+      );
       assert.match(log.messages.at(-1)?.text ?? "", /us-east/);
       assert.match(log.messages.at(-1)?.text ?? "", /dryRun/);
     } finally {
@@ -2088,6 +2243,48 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
             toolCallId: "tool-call-1",
             success: true,
             result: { content: "tool output" },
+          }),
+        );
+      }
+      if (options.prompt.includes("ask user")) {
+        this.emit(
+          event("tool.execution_start", {
+            toolCallId: "intent-call-1",
+            toolName: "report_intent",
+            arguments: { intent: "Asking for environment" },
+          }),
+        );
+        this.emit(
+          event("tool.execution_complete", {
+            toolCallId: "intent-call-1",
+            toolName: "report_intent",
+            success: true,
+            result: {
+              content: "Intent logged",
+              detailedContent: "Asking for environment",
+            },
+          }),
+        );
+        this.emit(
+          event("tool.execution_start", {
+            toolCallId: "ask-user-call-1",
+            toolName: "ask_user",
+            arguments: {
+              question: "Which environment should I use?",
+              choices: ["staging", "production"],
+              allow_freeform: false,
+            },
+          }),
+        );
+        this.emit(
+          event("tool.execution_complete", {
+            toolCallId: "ask-user-call-1",
+            toolName: "ask_user",
+            success: true,
+            result: {
+              content: `User selected: ${userInputResult?.answer ?? ""}`,
+              detailedContent: `User selected: ${userInputResult?.answer ?? ""}`,
+            },
           }),
         );
       }
