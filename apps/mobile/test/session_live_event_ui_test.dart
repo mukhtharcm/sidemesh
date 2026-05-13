@@ -149,9 +149,53 @@ void main() {
     expect(cached.log.session.updatedAt, DateTime(2026, 1, 1, 12, 1));
   });
 
+  testWidgets('appended user messages update live running state', (
+    tester,
+  ) async {
+    final session = _session('appended-user-running');
+    final api = _RichEventFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('appended-user-running'),
+        session: session,
+        api: api,
+        desktopMode: false,
+      ),
+      size: const Size(430, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Interrupt agent'), findsNothing);
+
+    api.emit({
+      'type': 'session_message_appended',
+      'sessionId': session.id,
+      'seq': 2,
+      'messageItem': {
+        'id': 'user-1',
+        'role': 'user',
+        'text': 'Deploy staging.',
+        'content': [
+          {'type': 'text', 'text': 'Deploy staging.'},
+        ],
+        'attachments': [],
+        'createdAt': DateTime(2026, 1, 1, 12, 1).millisecondsSinceEpoch,
+        'seq': 2,
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Deploy staging.'), findsOneWidget);
+    expect(find.text('Interrupt agent'), findsWidgets);
+  });
+
   testWidgets('snapshot replay cursor prevents reconnect delta loops', (
     tester,
   ) async {
+    final host = _host('snapshot-replay-cursor');
     final session = _session('snapshot-replay-cursor');
     final api = _RichEventFakeApi(
       logNextSeq: 9,
@@ -168,7 +212,7 @@ void main() {
     await _pumpApp(
       tester,
       SessionScreen(
-        host: _host('snapshot-replay-cursor'),
+        host: host,
         session: session,
         api: api,
         desktopMode: true,
@@ -182,6 +226,11 @@ void main() {
 
     expect(find.text('Snapshot transcript item.'), findsOneWidget);
     expect(api.fetchEventsCalls, 0);
+    final cached = await SessionLocalStore.instance.loadSessionLog(
+      host,
+      session.id,
+    );
+    expect(cached?.log.nextSeq, 9);
   });
 
   testWidgets('fresh snapshot can lower replay cursor after daemon restart', (
@@ -410,6 +459,7 @@ void main() {
   testWidgets(
     'session screen restores a missed plan update from delta replay',
     (tester) async {
+      final host = _host('plan-delta-replay');
       final session = _session('plan-delta-replay');
       final api = _RichEventFakeApi(
         messages: [
@@ -445,7 +495,7 @@ void main() {
       await _pumpApp(
         tester,
         SessionScreen(
-          host: _host('plan-delta-replay'),
+          host: host,
           session: session,
           api: api,
           desktopMode: true,
@@ -466,6 +516,11 @@ void main() {
       await _expandPlanCard(tester);
 
       expect(find.text('Catch up missed plan state'), findsOneWidget);
+      final cached = await SessionLocalStore.instance.loadSessionLog(
+        host,
+        session.id,
+      );
+      expect(cached?.log.nextSeq, 4);
     },
   );
 

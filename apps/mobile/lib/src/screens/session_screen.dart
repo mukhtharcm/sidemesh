@@ -625,6 +625,7 @@ class _SessionScreenState extends State<SessionScreen>
   bool _restoreComposerFocusOnResume = false;
   bool _keepSessionUnread = false;
   int? _lastEventSeq;
+  int? _persistableLogNextSeq;
   // Incremented whenever a fresh snapshot is requested so in-flight responses
   // from older requests can be discarded.
   int _snapshotRequestId = 0;
@@ -2162,6 +2163,7 @@ class _SessionScreenState extends State<SessionScreen>
           log.latestPlanUpdate,
           fallbackCreatedAt: log.session.updatedAt,
         );
+        _persistableLogNextSeq = log.nextSeq;
         // Seed lastSeq from the snapshot so subsequent resyncs can use the
         // cheap delta endpoint instead of re-downloading everything.
         var highestSeq = 0;
@@ -2261,6 +2263,7 @@ class _SessionScreenState extends State<SessionScreen>
           log.latestPlanUpdate,
           fallbackCreatedAt: log.session.updatedAt,
         );
+        _persistableLogNextSeq = log.nextSeq;
         var highestSeq = 0;
         final snapshotReplaySeq = _snapshotReplaySeq(log.nextSeq);
         if (snapshotReplaySeq != null && snapshotReplaySeq > highestSeq) {
@@ -2448,6 +2451,7 @@ class _SessionScreenState extends State<SessionScreen>
           delta.nextSeq,
           restoredPlanSeq ?? delta.nextSeq,
         );
+        _persistableLogNextSeq = highestSeq + 1;
         if (highestSeq > (_lastEventSeq ?? 0)) {
           _lastEventSeq = highestSeq;
         }
@@ -2483,6 +2487,7 @@ class _SessionScreenState extends State<SessionScreen>
           activities: _activities,
           pendingAction: null,
           history: _history,
+          nextSeq: _persistableLogNextSeq,
           latestPlanUpdate: _latestPlanUpdateForCache(),
         ),
       ),
@@ -2793,6 +2798,16 @@ class _SessionScreenState extends State<SessionScreen>
             previousActivities: previousActivities,
             mergedActivities: _activities,
           );
+          if (message.role == 'user') {
+            _running = true;
+            _awaitingAssistantReply = _pendingAction == null;
+          } else if (message.role == 'assistant') {
+            _clearLiveAssistantMessage();
+            _awaitingAssistantReply =
+                message.phase == 'commentary' &&
+                _running &&
+                _pendingAction == null;
+          }
         });
         _syncSessionLiveActivity();
         _persistCurrentSessionLog();
