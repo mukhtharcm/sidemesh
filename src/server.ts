@@ -256,6 +256,7 @@ export async function startServer(
     value?: SessionSummary[];
   }>();
   const activeTurns = new Map<string, ActiveTurnState>();
+  const unverifiedActiveTurns = new Set<string>();
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, LiveActivityEntry>>();
   const liveThreadStatuses = new Map<string, LiveThreadStatus>();
@@ -452,6 +453,7 @@ export async function startServer(
 
   function clearConfirmedTerminalSessionState(sessionId: string): void {
     activeTurns.delete(sessionId);
+    unverifiedActiveTurns.delete(sessionId);
     liveActivities.delete(sessionId);
     clearSessionLogCache(logCache, sessionId);
     clearActionsForSession(
@@ -520,14 +522,62 @@ export async function startServer(
       );
     } catch (error) {
       if (isTransientTurnSnapshotReadError(error)) {
-        return isRunningThreadStatus(observedStatus);
+        const turnState = await providerTurnState(
+          agentProvider,
+          sessionId,
+          turnId,
+        );
+        if (turnState === "terminal") {
+          unverifiedActiveTurns.delete(sessionId);
+          return false;
+        }
+        if (turnState === "unknown") {
+          unverifiedActiveTurns.add(sessionId);
+        } else {
+          unverifiedActiveTurns.delete(sessionId);
+        }
+        return true;
       }
       throw error;
     }
     if (state.isRunning) {
+      unverifiedActiveTurns.delete(sessionId);
       return state.turnId == null || state.turnId === turnId;
     }
-    return !(await providerReportsTerminalTurn(agentProvider, sessionId, turnId));
+    const shouldTrack =
+      (await providerTurnState(agentProvider, sessionId, turnId)) !== "terminal";
+    if (shouldTrack) {
+      unverifiedActiveTurns.delete(sessionId);
+    }
+    return shouldTrack;
+  }
+
+  async function reconcileUnverifiedActiveTurn(
+    sessionId: string,
+    agentProvider: AgentProvider,
+  ): Promise<void> {
+    if (!unverifiedActiveTurns.has(sessionId)) {
+      return;
+    }
+    const activeTurn = activeTurns.get(sessionId);
+    if (!activeTurn) {
+      unverifiedActiveTurns.delete(sessionId);
+      return;
+    }
+    const turnState = await providerTurnState(
+      agentProvider,
+      sessionId,
+      activeTurn.turnId,
+    );
+    if (turnState === "terminal") {
+      clearConfirmedTerminalSessionState(sessionId);
+      setLatestThreadStatusForSession(sessionId, "idle");
+      scheduleRecentSessionUpsert(sessionId, 0);
+      return;
+    }
+    if (turnState === "active") {
+      unverifiedActiveTurns.delete(sessionId);
+    }
   }
 
   function persistSessionRuntimeSignalsEventually(): void {
@@ -672,6 +722,7 @@ export async function startServer(
         });
       }
       activeTurns.delete(sessionId);
+      unverifiedActiveTurns.delete(sessionId);
       liveActivities.delete(sessionId);
       runtimeCache.delete(sessionId);
       clearSessionLogCache(logCache, sessionId);
@@ -933,6 +984,7 @@ export async function startServer(
         broadcastSkillsChanged(socketsBySession);
         return;
       case "turn_started":
+        unverifiedActiveTurns.delete(event.sessionId);
         activeTurns.set(event.sessionId, {
           turnId: event.turnId,
           startedAt: Date.now(),
@@ -1148,6 +1200,7 @@ export async function startServer(
           broadcastApprovalLive,
         );
         activeTurns.delete(event.sessionId);
+        unverifiedActiveTurns.delete(event.sessionId);
         setLatestThreadStatusForSession(
           event.sessionId,
           event.status === "errored" ? "errored" : "idle",
@@ -2224,6 +2277,7 @@ export async function startServer(
       ) {
         return;
       }
+      await reconcileUnverifiedActiveTurn(sessionId, provider);
       const statusOverride = sessionStatusOverrideForDisplay(sessionId);
       const state = await loadFastRunState(
         provider,
@@ -2852,6 +2906,7 @@ export async function startServer(
       }
       await provider.interruptTurn!(sessionId, state.turnId);
       activeTurns.delete(sessionId);
+      unverifiedActiveTurns.delete(sessionId);
       response.json({ stopped: true, turnId: state.turnId });
     }),
   );
@@ -2973,6 +3028,7 @@ export async function startServer(
       }
       await provider.archiveSession!(sessionId);
       activeTurns.delete(sessionId);
+      unverifiedActiveTurns.delete(sessionId);
       liveThreadStatuses.delete(sessionId);
       liveActivities.delete(sessionId);
       clearSessionLogCache(logCache, sessionId);
@@ -4069,29 +4125,32 @@ async function loadFastRunState(
   return { status, isRunning: false, turnId: null };
 }
 
-async function providerReportsTerminalTurn(
+async function providerTurnState(
   provider: AgentProvider,
   sessionId: string,
   turnId: string,
-): Promise<boolean> {
+): Promise<"active" | "terminal" | "unknown"> {
   if (!hasProviderMethod(provider, "readSessionThread")) {
-    return false;
+    return "unknown";
   }
   let session: ThreadRecord;
   try {
     session = await readSession(provider, sessionId, true);
   } catch (error) {
     if (isTransientTurnSnapshotReadError(error)) {
-      return false;
+      return "unknown";
     }
     throw error;
   }
   const turns = Array.isArray(session.turns) ? session.turns : [];
   const turn = turns.find((candidate) => candidate.id === turnId);
   if (!turn) {
-    return false;
+    return "unknown";
   }
-  return turn.completedAt != null || isTerminalTurnStatus(turn.status);
+  if (turn.completedAt != null || isTerminalTurnStatus(turn.status)) {
+    return "terminal";
+  }
+  return isActiveTurnStatus(turn.status) ? "active" : "unknown";
 }
 
 async function isThreadLoaded(
