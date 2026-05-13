@@ -1946,15 +1946,15 @@ describe("Copilot provider", () => {
         log.messages.some(
           (message) =>
             message.role === "system" &&
-            message.text.includes("User selected an option."),
+            message.text.includes("User selected: staging"),
         ),
       );
       const answerAuditMessage = log.messages.find(
         (message) =>
-          message.role === "system" && message.text.includes("User selected"),
+          message.role === "system" &&
+          message.text.includes("User selected: staging"),
       );
       assert.ok(answerAuditMessage, "Expected ask-user response audit row");
-      assert.doesNotMatch(answerAuditMessage.text, /staging/);
       assert.ok(
         liveMessages.some((message) =>
           message.includes("Agent asked: Which environment should I use?"),
@@ -1962,7 +1962,7 @@ describe("Copilot provider", () => {
       );
       assert.ok(
         liveMessages.some((message) =>
-          message.includes("User selected an option."),
+          message.includes("User selected: staging"),
         ),
       );
       assert.match(log.messages.at(-1)?.text ?? "", /staging/);
@@ -2010,7 +2010,7 @@ describe("Copilot provider", () => {
       assert.deepEqual(action.userInput?.choices, []);
       assert.equal(
         provider.respondToPendingAction(action, {
-          answer: "sensitive freeform answer",
+          answer: "freeform answer",
           wasFreeform: true,
         }),
         true,
@@ -2027,17 +2027,18 @@ describe("Copilot provider", () => {
         ),
       );
       assert.ok(
-        systemMessages.some((message) => message.includes("User answered.")),
-      );
-      assert.equal(
         systemMessages.some((message) =>
-          message.includes("sensitive freeform answer"),
+          message.includes("User answered: freeform answer"),
         ),
-        false,
       );
       assert.ok(
         liveMessages.some((message) =>
           message.includes("Agent asked: Agent question"),
+        ),
+      );
+      assert.ok(
+        liveMessages.some((message) =>
+          message.includes("User answered: freeform answer"),
         ),
       );
     } finally {

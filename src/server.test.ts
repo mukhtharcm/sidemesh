@@ -1350,6 +1350,36 @@ class AppendedMessageFixtureProvider extends EventEmitter implements AgentProvid
     return message;
   }
 
+  public appendAssistantMessage(text: string): SessionMessage {
+    const message: SessionMessage = {
+      id: `assistant-${this.messages.length + 1}`,
+      role: "assistant",
+      text,
+      content: [{ type: "text", text }],
+      attachments: [],
+      createdAt: 1000 + this.messages.length,
+      seq: this.nextSeq++,
+      phase: "final_answer",
+    };
+    this.messages.push(message);
+    this.updatedAt += 1;
+    this.emit("liveEvent", {
+      type: "assistant_message_completed",
+      sessionId: this.sessionId,
+      turnId: "turn-1",
+      message: {
+        id: message.id,
+        role: message.role,
+        text: message.text,
+        content: message.content,
+        createdAt: message.createdAt,
+        seq: message.seq,
+        phase: message.phase,
+      },
+    });
+    return message;
+  }
+
   private buildThread(): ThreadRecord {
     return {
       id: this.sessionId,
@@ -4895,6 +4925,36 @@ describe("GET /api/sessions/search", () => {
       provider.releaseRead();
       await rm(stateDir, { recursive: true, force: true });
     }
+  });
+
+  it("refreshes search for provider-persisted assistant completions", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-assistant-test-"));
+    const provider = new AppendedMessageFixtureProvider();
+    await withServerRuntime(
+      makeConfig(stateDir),
+      makeCustomSingleProviderRuntime(provider),
+      async (server, config) => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        provider.appendAssistantMessage("assistant search refresh needle");
+
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const searchRes = await request({
+            hostname: "127.0.0.1",
+            port: server.port,
+            headers: { Authorization: "Bearer " + config.token },
+            path: `/api/sessions/search?q=${encodeURIComponent("assistant search refresh")}`,
+            method: "GET",
+          });
+          assert.equal(searchRes.statusCode, 200);
+          const results = searchRes.body as any[];
+          if (results.some((session) => session.id === provider.sessionId)) {
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.fail("expected assistant completion to refresh session search index");
+      },
+    );
   });
 
   it("applies updatedAfter filters to provider-backed search results using millisecond timestamps", async () => {

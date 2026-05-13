@@ -2751,7 +2751,9 @@ function formatCopilotUserInputResponseMessage(
   if (!answer) {
     return "User answered with an empty response.";
   }
-  return response.wasFreeform ? "User answered." : "User selected an option.";
+  return response.wasFreeform
+    ? `User answered: ${answer}`
+    : `User selected: ${answer}`;
 }
 
 function buildCopilotElicitationAction(
