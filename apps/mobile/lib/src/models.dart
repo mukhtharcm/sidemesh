@@ -2750,7 +2750,7 @@ class SessionLog {
     final normalizedPlanUpdate =
         latestPlanUpdate != null &&
                 latestPlanUpdate.type == 'plan_updated' &&
-                (latestPlanUpdate.plan?.isNotEmpty ?? false)
+                latestPlanUpdate.plan != null
             ? latestPlanUpdate
             : null;
     return SessionLog(
