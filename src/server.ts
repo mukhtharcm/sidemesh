@@ -531,7 +531,7 @@ export async function startServer(
           unverifiedActiveTurns.delete(sessionId);
           return false;
         }
-        if (turnState === "unknown") {
+        if (turnState === "missing" || turnState === "unknown") {
           unverifiedActiveTurns.add(sessionId);
         } else {
           unverifiedActiveTurns.delete(sessionId);
@@ -578,16 +578,36 @@ export async function startServer(
       unverifiedActiveTurns.delete(sessionId);
       return;
     }
+    if (turnState === "terminal") {
+      clearConfirmedTerminalSessionState(sessionId);
+      const status: LiveThreadStatus =
+        isTerminalThreadStatus(threadStatus) && threadStatus != null
+          ? threadStatus
+          : "idle";
+      setLatestThreadStatusForSession(sessionId, status);
+      broadcastLive(sessionId, {
+        type: "thread_status_changed",
+        sessionId,
+        status,
+      });
+      scheduleRecentSessionUpsert(sessionId, 0);
+      return;
+    }
     if (
-      turnState === "terminal" ||
-      threadStatus === "idle" ||
-      isTerminalThreadStatus(threadStatus)
+      turnState === "missing" &&
+      (threadStatus === "idle" || isTerminalThreadStatus(threadStatus))
     ) {
       clearConfirmedTerminalSessionState(sessionId);
-      setLatestThreadStatusForSession(
+      const status: LiveThreadStatus =
+        isTerminalThreadStatus(threadStatus) && threadStatus != null
+          ? threadStatus
+          : "idle";
+      setLatestThreadStatusForSession(sessionId, status);
+      broadcastLive(sessionId, {
+        type: "thread_status_changed",
         sessionId,
-        isTerminalThreadStatus(threadStatus) ? threadStatus : "idle",
-      );
+        status,
+      });
       scheduleRecentSessionUpsert(sessionId, 0);
       return;
     }
@@ -4156,7 +4176,7 @@ async function providerTurnState(
   provider: AgentProvider,
   sessionId: string,
   turnId: string,
-): Promise<"active" | "terminal" | "unknown"> {
+): Promise<"active" | "terminal" | "missing" | "unknown"> {
   if (!hasProviderMethod(provider, "readSessionThread")) {
     return "unknown";
   }
@@ -4172,7 +4192,7 @@ async function providerTurnState(
   const turns = Array.isArray(session.turns) ? session.turns : [];
   const turn = turns.find((candidate) => candidate.id === turnId);
   if (!turn) {
-    return "unknown";
+    return "missing";
   }
   if (turn.completedAt != null || isTerminalTurnStatus(turn.status)) {
     return "terminal";
