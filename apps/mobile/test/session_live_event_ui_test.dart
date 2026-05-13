@@ -85,11 +85,16 @@ void main() {
       await _pumpFrames(tester);
 
       expect(find.text('Heads up from the fake provider'), findsOneWidget);
-      expect(find.text('Ship the change'), findsOneWidget);
+      expect(find.text('Plan update'), findsOneWidget);
+      expect(find.text('Ship the change'), findsNothing);
       expect(find.text('Queue · 1 steering · 2 follow-up'), findsOneWidget);
       expect(find.text('Retry 2 / 3 in 1.5s'), findsOneWidget);
       expect(find.textContaining('Keep it provider-neutral'), findsOneWidget);
       expect(find.textContaining('Overloaded'), findsOneWidget);
+
+      await _expandPlanCard(tester);
+
+      expect(find.text('Ship the change'), findsOneWidget);
     },
   );
 
@@ -136,8 +141,65 @@ void main() {
 
     expect(find.text('Plan update'), findsOneWidget);
     expect(find.text('Inspect the bug'), findsNothing);
-    expect(find.text('Ship the fix'), findsOneWidget);
+    expect(find.text('Ship the fix'), findsNothing);
     expect(find.text('Revised plan.'), findsOneWidget);
+
+    await _expandPlanCard(tester);
+
+    expect(find.text('Inspect the bug'), findsNothing);
+    expect(find.text('Ship the fix'), findsOneWidget);
+  });
+
+  testWidgets('session screen clears the plan card on an empty plan update', (
+    tester,
+  ) async {
+    final session = _session('plan-clear-live');
+    final api = _RichEventFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('plan-clear-live'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit(
+      _planUpdatedEvent(
+        session.id,
+        turnId: 'turn-1',
+        explanation: 'Temporary plan.',
+        plan: const [
+          {'step': 'Remove after provider delete', 'status': 'in_progress'},
+        ],
+      ),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Remove after provider delete'), findsNothing);
+
+    await _expandPlanCard(tester);
+
+    expect(find.text('Remove after provider delete'), findsOneWidget);
+
+    api.emit(
+      _planUpdatedEvent(
+        session.id,
+        turnId: 'turn-1',
+        explanation: '',
+        plan: const [],
+      ),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsNothing);
+    expect(find.text('Remove after provider delete'), findsNothing);
   });
 
   testWidgets('session screen keeps one plan update after reopening', (
@@ -172,6 +234,10 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Avoid duplicates on reopen'), findsNothing);
+
+    await _expandPlanCard(tester);
+
     expect(find.text('Avoid duplicates on reopen'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -193,6 +259,10 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Avoid duplicates on reopen'), findsNothing);
+
+    await _expandPlanCard(tester);
+
     expect(find.text('Avoid duplicates on reopen'), findsOneWidget);
   });
 
@@ -249,10 +319,79 @@ void main() {
       await _pumpFrames(tester);
 
       expect(find.text('Plan update'), findsOneWidget);
-      expect(find.text('Catch up missed plan state'), findsOneWidget);
+      expect(find.text('Catch up missed plan state'), findsNothing);
       expect(find.text('Recovered from /events.'), findsOneWidget);
+
+      await _expandPlanCard(tester);
+
+      expect(find.text('Catch up missed plan state'), findsOneWidget);
     },
   );
+
+  testWidgets('session screen clears an existing plan from delta replay', (
+    tester,
+  ) async {
+    final session = _session('plan-clear-delta-replay');
+    final api = _RichEventFakeApi(
+      eventsDelta: SessionEventsDelta(
+        sessionId: session.id,
+        since: 3,
+        nextSeq: 5,
+        messages: const [],
+        activities: const [],
+        latestPlanUpdate: LiveEvent.fromJson(
+          _planUpdatedEvent(
+            session.id,
+            turnId: 'turn-1',
+            explanation: '',
+            plan: const [],
+            seq: 4,
+          ),
+        ),
+        pendingAction: null,
+        session: null,
+      ),
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('plan-clear-delta-replay'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit(
+      _planUpdatedEvent(
+        session.id,
+        turnId: 'turn-1',
+        explanation: 'Live stale plan.',
+        plan: const [
+          {'step': 'Clear stale visible plan', 'status': 'in_progress'},
+        ],
+        seq: 3,
+      ),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Clear stale visible plan'), findsNothing);
+
+    await _expandPlanCard(tester);
+
+    expect(find.text('Clear stale visible plan'), findsOneWidget);
+
+    api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 5});
+    await _pumpFrames(tester);
+
+    expect(find.text('Plan update'), findsNothing);
+    expect(find.text('Clear stale visible plan'), findsNothing);
+  });
 
   testWidgets('cached-transcript strip clears after delta sync succeeds', (
     tester,
@@ -1083,6 +1222,11 @@ Future<void> _pumpFrames(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 50));
   await tester.pump(const Duration(milliseconds: 250));
   await tester.pump();
+}
+
+Future<void> _expandPlanCard(WidgetTester tester) async {
+  await tester.tap(find.text('Plan update'));
+  await _pumpFrames(tester);
 }
 
 Future<void> _pumpApp(

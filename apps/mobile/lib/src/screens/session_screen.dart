@@ -2837,15 +2837,20 @@ class _SessionScreenState extends State<SessionScreen>
         _syncSessionLiveActivity();
       case 'plan_updated':
         final plan = event.plan;
-        if (plan == null || plan.isEmpty) {
+        if (plan == null) {
           return;
         }
         setState(() {
-          _appendTimelineRuntimeEvent(
-            _TimelineLiveEventKind.planUpdated,
-            event,
-            replaceSemanticKey: 'plan:${event.sessionId}',
-          );
+          final semanticKey = 'plan:${event.sessionId}';
+          if (plan.isEmpty) {
+            _removeTimelineRuntimeEvent(semanticKey);
+          } else {
+            _appendTimelineRuntimeEvent(
+              _TimelineLiveEventKind.planUpdated,
+              event,
+              replaceSemanticKey: semanticKey,
+            );
+          }
         });
         _schedulePersistCurrentSessionLog();
       case 'reasoning_delta':
@@ -2922,6 +2927,12 @@ class _SessionScreenState extends State<SessionScreen>
     _timelineLiveEvents = updated;
   }
 
+  void _removeTimelineRuntimeEvent(String semanticKey) {
+    _timelineLiveEvents = _timelineLiveEvents
+        .where((candidate) => candidate.semanticKey != semanticKey)
+        .toList(growable: false);
+  }
+
   LiveEvent? _latestPlanUpdateForCache() {
     for (var i = _timelineLiveEvents.length - 1; i >= 0; i -= 1) {
       final record = _timelineLiveEvents[i];
@@ -2942,11 +2953,14 @@ class _SessionScreenState extends State<SessionScreen>
     final plan = latestPlanUpdate?.plan;
     if (latestPlanUpdate == null ||
         latestPlanUpdate.type != 'plan_updated' ||
-        plan == null ||
-        plan.isEmpty) {
+        plan == null) {
       return null;
     }
     final restoredSeq = latestPlanUpdate.seq ?? _nextTimelineSeq();
+    if (plan.isEmpty) {
+      _removeTimelineRuntimeEvent('plan:${latestPlanUpdate.sessionId}');
+      return restoredSeq;
+    }
     _appendTimelineRuntimeEvent(
       _TimelineLiveEventKind.planUpdated,
       latestPlanUpdate,

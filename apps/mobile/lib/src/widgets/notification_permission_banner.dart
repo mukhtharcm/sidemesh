@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../local_notification_service.dart';
 import '../theme/app_colors.dart';
 import 'app_snackbar.dart';
+import 'mesh_widgets.dart';
 
 class NotificationPermissionBanner extends StatefulWidget {
   const NotificationPermissionBanner({
@@ -77,34 +78,28 @@ class _NotificationPermissionBannerState
   Widget build(BuildContext context) {
     if (!_visible) return const SizedBox.shrink();
 
-    final colors = context.colors;
     return Padding(
       padding: widget.margin,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: colors.accentMuted,
-          borderRadius: BorderRadius.circular(widget.compact ? 14 : 18),
-          border: Border.all(color: colors.accent.withValues(alpha: 0.35)),
+      child: MeshSurface(
+        tone: MeshSurfaceTone.accent,
+        radius: widget.compact ? 14 : 18,
+        padding: EdgeInsets.fromLTRB(
+          widget.compact ? 12 : 14,
+          widget.compact ? 10 : 12,
+          widget.compact ? 8 : 10,
+          widget.compact ? 10 : 12,
         ),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            widget.compact ? 12 : 14,
-            widget.compact ? 10 : 12,
-            widget.compact ? 8 : 10,
-            widget.compact ? 10 : 12,
-          ),
-          child: widget.compact
-              ? _CompactBannerBody(
-                  requesting: _requesting,
-                  onEnable: _enable,
-                  onDismiss: _dismiss,
-                )
-              : _BannerBody(
-                  requesting: _requesting,
-                  onEnable: _enable,
-                  onDismiss: _dismiss,
-                ),
-        ),
+        child: widget.compact
+            ? _CompactBannerBody(
+                requesting: _requesting,
+                onEnable: _enable,
+                onDismiss: _dismiss,
+              )
+            : _BannerBody(
+                requesting: _requesting,
+                onEnable: _enable,
+                onDismiss: _dismiss,
+              ),
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import 'mesh_widgets.dart';
 
 /// Shared visual atoms used by launch-option surfaces (create-session,
 /// new-session defaults in settings, per-session overrides).
@@ -22,23 +23,21 @@ class LaunchFieldFrame extends StatelessWidget {
     required this.label,
     required this.child,
     this.alignTop = false,
+    this.trailing,
   });
 
   final IconData icon;
   final String label;
   final Widget child;
   final bool alignTop;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
       child: Row(
         crossAxisAlignment: alignTop
             ? CrossAxisAlignment.start
@@ -59,6 +58,10 @@ class LaunchFieldFrame extends StatelessWidget {
               ],
             ),
           ),
+          if (trailing != null) ...[
+            const SizedBox(width: AppSpacing.sm),
+            trailing!,
+          ],
         ],
       ),
     );
@@ -87,55 +90,46 @@ class LaunchSelectorRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppShapes.input,
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-          decoration: BoxDecoration(
-            color: colors.surfaceMuted,
-            borderRadius: AppShapes.input,
-            border: Border.all(color: colors.border),
-          ),
-          child: Row(
-            children: [
-              _IconChip(icon: icon, tone: _IconChipTone.accent),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _CapsLabel(text: label),
-                    const SizedBox(height: 3),
-                    Text(
-                      value,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: colors.textPrimary,
-                            fontWeight: AppWeights.title,
-                          ),
-                    ),
-                    if (detail.trim().isNotEmpty) ...[
-                      const SizedBox(height: 1),
-                      Text(
-                        detail,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
-                          color: colors.textTertiary,
-                          fontSize: 11,
-                          fontWeight: AppWeights.emphasis,
-                        ),
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      onTap: onTap,
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      child: Row(
+        children: [
+          _IconChip(icon: icon, tone: _IconChipTone.accent),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _CapsLabel(text: label),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: AppWeights.title,
                       ),
-                    ],
-                  ],
                 ),
-              ),
-              Icon(Icons.keyboard_arrow_down_rounded, color: colors.accent),
-            ],
+                if (detail.trim().isNotEmpty) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    detail,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: monoStyle(
+                      color: colors.textTertiary,
+                      fontSize: 11,
+                      fontWeight: AppWeights.emphasis,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
-        ),
+          Icon(Icons.keyboard_arrow_down_rounded, color: colors.accent),
+        ],
       ),
     );
   }
@@ -160,14 +154,10 @@ class LaunchControlGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Container(
+    return MeshSurface(
       width: double.infinity,
+      radius: AppRadii.control,
       padding: AppPadding.cardSm,
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -311,15 +301,11 @@ class LaunchSwitchRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Container(
+    return MeshSurface(
+      tone: value ? MeshSurfaceTone.surface : MeshSurfaceTone.muted,
+      selected: value,
+      radius: AppRadii.control,
       padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
-      decoration: BoxDecoration(
-        color: value
-            ? colors.accentMuted.withValues(alpha: 0.38)
-            : colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: value ? colors.accent : colors.border),
-      ),
       child: Row(
         children: [
           Icon(

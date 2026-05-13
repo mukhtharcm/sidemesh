@@ -160,6 +160,7 @@ const COPILOT_SESSION_MODES = [
   "plan",
   "autopilot",
 ] as const satisfies readonly CopilotSdkSessionMode[];
+const COPILOT_PLAN_READ_RETRY_DELAYS_MS = [25, 75, 150] as const;
 const COPILOT_APPROVAL_POLICIES = ["on-request", "never"] as const;
 const COPILOT_STATE_LOAD_RETRY_DELAYS_MS = [10, 25, 50] as const;
 
@@ -250,6 +251,7 @@ export class CopilotAgentProvider
     string,
     PendingCopilotElicitation
   >();
+  private readonly planUpdateVersions = new Map<string, number>();
   private sdkClient: CopilotSdkClient | null = null;
   private saveChain: Promise<void> = Promise.resolve();
 
@@ -414,6 +416,7 @@ export class CopilotAgentProvider
 
   public async archiveSession(threadId: string): Promise<unknown> {
     this.archivedSessionIds.add(threadId);
+    this.planUpdateVersions.delete(threadId);
     const session = this.sessions.get(threadId);
     if (session) {
       session.archived = true;
@@ -998,7 +1001,15 @@ export class CopilotAgentProvider
     if (event.type === "session.plan_changed") {
       const sdkSession = session.sdkSession ?? active?.sdkSession ?? null;
       if (sdkSession) {
-        void this.emitCopilotPlanUpdated(sessionId, sdkSession, active?.turnId ?? null);
+        const version = (this.planUpdateVersions.get(sessionId) ?? 0) + 1;
+        this.planUpdateVersions.set(sessionId, version);
+        void this.emitCopilotPlanUpdated(
+          sessionId,
+          sdkSession,
+          active?.turnId ?? null,
+          copilotPlanChangedOperation(event),
+          version,
+        );
       }
       return;
     }
@@ -1309,12 +1320,36 @@ export class CopilotAgentProvider
     sessionId: string,
     sdkSession: CopilotSdkSession,
     turnId: string | null,
+    operation: CopilotPlanChangedOperation | null,
+    version: number,
   ): Promise<void> {
+    if (operation === "delete") {
+      if (this.planUpdateVersions.get(sessionId) !== version) {
+        return;
+      }
+      this.emit("liveEvent", {
+        type: "plan_updated",
+        sessionId,
+        turnId: turnId ?? undefined,
+        plan: [],
+      });
+      return;
+    }
     const planRpc = sdkSession.rpc?.plan;
     if (!planRpc) {
       return;
     }
-    const plan = await planRpc.read().catch(() => null);
+    let plan = await planRpc.read().catch(() => null);
+    for (const delayMs of COPILOT_PLAN_READ_RETRY_DELAYS_MS) {
+      if (plan?.exists && plan.content) {
+        break;
+      }
+      await sleep(delayMs);
+      plan = await planRpc.read().catch(() => null);
+    }
+    if (this.planUpdateVersions.get(sessionId) !== version) {
+      return;
+    }
     if (!plan?.exists || !plan.content) {
       return;
     }
@@ -1822,6 +1857,7 @@ export class CopilotAgentProvider
         this.sessions.clear();
         this.loadedSessionIds.clear();
         this.activeTurns.clear();
+        this.planUpdateVersions.clear();
         for (const id of archivedSessionIds) {
           this.archivedSessionIds.add(id);
         }
@@ -2121,6 +2157,24 @@ function reasoningEffortForSdk(
   return undefined;
 }
 
+type CopilotPlanChangedOperation = "create" | "update" | "delete";
+
+function copilotPlanChangedOperation(
+  event: CopilotSdkSessionEvent,
+): CopilotPlanChangedOperation | null {
+  const data = event.data && typeof event.data === "object"
+    ? (event.data as Record<string, unknown>)
+    : null;
+  const operation = typeof data?.operation === "string"
+    ? data.operation
+    : null;
+  return operation === "create" ||
+    operation === "update" ||
+    operation === "delete"
+    ? operation
+    : null;
+}
+
 function parseCopilotPlanContent(content: string): {
   explanation?: string;
   plan: LivePlanStep[];
@@ -2155,9 +2209,10 @@ function parseCopilotPlanContent(content: string): {
 
     const bulletMatch = /^\s*(?:[-*+]|	*\d+\.)\s+(.+?)\s*$/u.exec(rawLine);
     if (bulletMatch) {
-      const step = normalizeCopilotPlanLine(bulletMatch[1] ?? "");
+      const normalized = normalizeCopilotPlanStep(bulletMatch[1] ?? "");
+      const step = normalized.step;
       if (step) {
-        plan.push({ step, status: "pending" });
+        plan.push({ step, status: normalized.status });
       }
       continue;
     }
@@ -2174,6 +2229,55 @@ function parseCopilotPlanContent(content: string): {
     ? explanationParts.join(" ")
     : undefined;
   return { explanation, plan };
+}
+
+function normalizeCopilotPlanStep(value: string): LivePlanStep {
+  let step = normalizeCopilotPlanLine(value);
+  let status: LivePlanStep["status"] = "pending";
+
+  const leadingMarker =
+    /^(?<marker>\u2705|\u2713|\u2714|\u2611|\u2612|\u2717|\u2715|\u23f3|\u231b|\u{1f504}|\u25b6|\u25cb|\u25ef|\u2610)\s+(?<text>.+)$/u.exec(step);
+  const marker = leadingMarker?.groups?.marker;
+  if (marker) {
+    step = normalizeCopilotPlanLine(leadingMarker.groups?.text ?? step);
+    status =
+      marker === "\u2705" ||
+        marker === "\u2713" ||
+        marker === "\u2714" ||
+        marker === "\u2611"
+        ? "completed"
+        : marker === "\u23f3" ||
+            marker === "\u231b" ||
+            marker === "\u{1f504}" ||
+            marker === "\u25b6"
+          ? "in_progress"
+          : "pending";
+  }
+
+  const strikethroughMatch = /^~~(?<text>.+?)~~$/u.exec(step);
+  if (strikethroughMatch?.groups?.text) {
+    step = normalizeCopilotPlanLine(strikethroughMatch.groups.text);
+    status = "completed";
+  }
+
+  const statusMatch =
+    /^(?<text>.+?)\s*(?:[-\u2013\u2014:]|\(|\[)\s*(?<status>done|complete|completed|in progress|started|active|pending|todo|to do|blocked)\s*(?:\)|\])?$/iu.exec(step);
+  if (statusMatch?.groups?.text && statusMatch.groups.status) {
+    step = normalizeCopilotPlanLine(statusMatch.groups.text);
+    const rawStatus = statusMatch.groups.status.toLowerCase();
+    status =
+      rawStatus === "done" ||
+      rawStatus === "complete" ||
+      rawStatus === "completed"
+        ? "completed"
+        : rawStatus === "in progress" ||
+            rawStatus === "started" ||
+            rawStatus === "active"
+          ? "in_progress"
+          : "pending";
+  }
+
+  return { step, status };
 }
 
 function normalizeCopilotPlanLine(value: string): string {

@@ -1125,86 +1125,80 @@ class _ModelSelectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return InkWell(
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      width: double.infinity,
       onTap: loading ? null : onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: colors.surfaceMuted,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: colors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (loading)
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                else
-                  Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    color: colors.textSecondary,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  value,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
-                ),
-                ...badges.map((badge) => _InlineBadge(label: badge)),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-                height: 1.35,
               ),
-            ),
-            if ((currentValue ?? '').trim().isNotEmpty &&
-                currentValue!.trim() != value.trim()) ...[
-              const SizedBox(height: 8),
+              if (loading)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: colors.textSecondary,
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
               Text(
-                'Current thread: ${currentValue!.trim()}',
+                value,
                 style: Theme.of(
                   context,
-                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+                ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
               ),
+              ...badges.map((badge) => _InlineBadge(label: badge)),
             ],
-            if (error != null) ...[
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Retry loading models'),
-              ),
-            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+              height: 1.35,
+            ),
+          ),
+          if ((currentValue ?? '').trim().isNotEmpty &&
+              currentValue!.trim() != value.trim()) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Current thread: ${currentValue!.trim()}',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
           ],
-        ),
+          if (error != null) ...[
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Retry loading models'),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1227,32 +1221,26 @@ class _ReasoningChoiceChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return InkWell(
+    return MeshSurface(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? colors.accentMuted.withValues(alpha: 0.55) : null,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: selected ? colors.accent : colors.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            if (isDefault) ...[
-              const SizedBox(width: 8),
-              _InlineBadge(label: defaultLabel),
-            ],
+      selected: selected,
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          if (isDefault) ...[
+            const SizedBox(width: 8),
+            _InlineBadge(label: defaultLabel),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -1272,13 +1260,11 @@ class _FastModeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Container(
+    return MeshSurface(
+      selected: value,
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: value ? colors.accentMuted.withValues(alpha: 0.45) : null,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: value ? colors.accent : colors.border),
-      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -1422,84 +1408,73 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                         final model = filtered[index];
                         final isCurrent =
                             model.model == _trimmedOrNull(widget.currentModel);
-                        return InkWell(
+                        return MeshSurface(
                           onTap: () => Navigator.of(context).pop(model),
-                          borderRadius: BorderRadius.circular(14),
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: colors.surfaceMuted,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: isCurrent
-                                    ? colors.accent
-                                    : colors.border,
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        model.displayName,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleSmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                      ),
+                          selected: isCurrent,
+                          tone: MeshSurfaceTone.muted,
+                          radius: AppRadii.control,
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      model.displayName,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                     ),
-                                    if (isCurrent)
-                                      const _InlineBadge(label: 'current'),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  model.model,
-                                  style: monoStyle(
-                                    color: colors.textSecondary,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
                                   ),
+                                  if (isCurrent)
+                                    const _InlineBadge(label: 'current'),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                model.model,
+                                style: monoStyle(
+                                  color: colors.textSecondary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
                                 ),
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    if (widget.providerName != null)
-                                      _InlineBadge(label: widget.providerName!),
-                                    if (model.isAutoModel)
-                                      const _InlineBadge(label: 'auto'),
-                                    if (model.isDefault)
-                                      const _InlineBadge(label: 'default'),
-                                    if (model.supportsFastMode)
-                                      const _InlineBadge(label: 'fast'),
-                                    ...model.supportedReasoningEfforts
-                                        .take(3)
-                                        .map(
-                                          (option) => _InlineBadge(
-                                            label: _reasoningEffortLabel(
-                                              option.reasoningEffort,
-                                            ),
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  if (widget.providerName != null)
+                                    _InlineBadge(label: widget.providerName!),
+                                  if (model.isAutoModel)
+                                    const _InlineBadge(label: 'auto'),
+                                  if (model.isDefault)
+                                    const _InlineBadge(label: 'default'),
+                                  if (model.supportsFastMode)
+                                    const _InlineBadge(label: 'fast'),
+                                  ...model.supportedReasoningEfforts.take(3).map(
+                                        (option) => _InlineBadge(
+                                          label: _reasoningEffortLabel(
+                                            option.reasoningEffort,
                                           ),
                                         ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  model.description,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: colors.textSecondary,
-                                        height: 1.35,
                                       ),
-                                ),
-                              ],
-                            ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                model.description,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: colors.textSecondary,
+                                      height: 1.35,
+                                    ),
+                              ),
+                            ],
                           ),
                         );
                       },
@@ -1551,49 +1526,42 @@ class _PolicyAutopilotCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final border = active ? colors.accent : colors.border;
-    final bg = active ? colors.accentMuted : colors.surfaceMuted;
-    return InkWell(
+    return MeshSurface(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: border),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.auto_awesome_rounded, color: colors.accent, size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Autopilot — never ask again',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: colors.textPrimary,
-                    ),
+      selected: active,
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.auto_awesome_rounded, color: colors.accent, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Autopilot — never ask again',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: colors.textPrimary,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Approval = never · Sandbox = full access · Network = on. The agent runs without pausing for approvals and can hit the internet.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.textSecondary,
-                      height: 1.35,
-                    ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Approval = never · Sandbox = full access · Network = on. The agent runs without pausing for approvals and can hit the internet.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.35,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            if (active)
-              Icon(Icons.check_circle_rounded, color: colors.accent, size: 20),
-          ],
-        ),
+          ),
+          if (active)
+            Icon(Icons.check_circle_rounded, color: colors.accent, size: 20),
+        ],
       ),
     );
   }
@@ -1615,13 +1583,11 @@ class _PolicyNetworkTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Container(
+    return MeshSurface(
+      selected: value,
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: value ? colors.accentMuted.withValues(alpha: 0.45) : null,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: value ? colors.accent : colors.border),
-      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -1686,78 +1652,76 @@ class _PolicyRadioTile<T> extends StatelessWidget {
     final accent = danger ? colors.danger : colors.accent;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
+      child: MeshSurface(
         onTap: () => onSelected(value),
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-          decoration: BoxDecoration(
-            color: selected ? colors.accentMuted.withValues(alpha: 0.55) : null,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: selected ? accent : colors.border),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                selected
-                    ? Icons.radio_button_checked_rounded
-                    : Icons.radio_button_unchecked_rounded,
-                size: 20,
-                color: selected ? accent : colors.textSecondary,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
+        selected: selected && !danger,
+        tone: selected && danger
+            ? MeshSurfaceTone.danger
+            : MeshSurfaceTone.muted,
+        borderColor: selected ? accent : colors.border,
+        radius: AppRadii.control,
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              size: 20,
+              color: selected ? accent : colors.textSecondary,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: colors.textPrimary,
+                              ),
+                        ),
+                      ),
+                      if (fromRuntime)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colors.surfaceMuted,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: colors.border),
+                          ),
                           child: Text(
-                            title,
-                            style: Theme.of(context).textTheme.titleSmall
+                            'current',
+                            style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: colors.textPrimary,
+                                  color: colors.textSecondary,
+                                  letterSpacing: 0.4,
                                 ),
                           ),
                         ),
-                        if (fromRuntime)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: colors.surfaceMuted,
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: colors.border),
-                            ),
-                            child: Text(
-                              'current',
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: colors.textSecondary,
-                                    letterSpacing: 0.4,
-                                  ),
-                            ),
-                          ),
-                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                      height: 1.35,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
