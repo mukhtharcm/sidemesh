@@ -2809,6 +2809,66 @@ describe("session live rich events", () => {
     });
   });
 
+  it("does not skip subsequent appended messages after a live appended-message cursor", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new AppendedMessageFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const logRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`,
+        method: "GET",
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      assert.equal(logRes.statusCode, 200);
+
+      const live = await openSessionLiveSocket(
+        server.port,
+        config.token,
+        provider.sessionId,
+      );
+      let firstLiveSeq: number | undefined;
+      try {
+        await waitFor(
+          () => live.events.find((event) => event.type === "hello"),
+          "hello",
+        );
+        const first = provider.appendAuditMessage("First audit.");
+        const firstEvent = await waitFor(
+          () =>
+            live.events.find(
+              (event) => event.type === "session_message_appended",
+            ),
+          "session_message_appended",
+        );
+        assert.equal(firstEvent.messageItem?.seq, first.seq);
+        assert.equal(firstEvent.seq, first.seq);
+        firstLiveSeq = firstEvent.seq;
+      } finally {
+        await closeSessionLiveSocket(live.socket);
+      }
+
+      assert.equal(typeof firstLiveSeq, "number");
+      const second = provider.appendAuditMessage("Second audit.");
+      const deltaRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path:
+          `/api/sessions/${encodeURIComponent(provider.sessionId)}/events` +
+          `?since=${firstLiveSeq}`,
+        method: "GET",
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      assert.equal(deltaRes.statusCode, 200);
+      const delta = deltaRes.body as { messages?: Array<{ id: string }> };
+      assert.deepEqual(
+        delta.messages?.map((message) => message.id),
+        [second.id],
+      );
+    });
+  });
+
   it("includes the latest plan update in log responses and refreshes cache hits", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const { runtime, provider } = makeSingleProviderRuntime({
