@@ -1501,7 +1501,7 @@ describe("Copilot provider", () => {
                 toolName: "view",
                 success: true,
                 result: {
-                  content: "10. export const value = 1;",
+                  content: "  10. export const value = 1;\n",
                   detailedContent: "diff --git a/src/feature.ts b/src/feature.ts",
                 },
               }),
@@ -1585,7 +1585,7 @@ describe("Copilot provider", () => {
       assert.equal(view.type, "tool");
       assert.equal(view.title, "Viewed feature.ts:10-20");
       assert.equal(view.args, null);
-      assert.equal(view.output, "10. export const value = 1;");
+      assert.equal(view.output, "  10. export const value = 1;\n");
       assert.equal(view.result, null);
 
       const edit = log.activities.find((activity) => activity.id === "edit-1");
@@ -1715,6 +1715,11 @@ describe("Copilot provider", () => {
       });
 
       const action = await opened;
+      const pendingThread = await provider.readSessionThread(
+        created.thread.id,
+        false,
+      );
+      assert.equal(pendingThread.preview, "please ask user");
       assert.equal(action.userInput?.question, "Which environment should I use?");
       assert.deepEqual(action.userInput?.choices, ["staging", "production"]);
       assert.equal(

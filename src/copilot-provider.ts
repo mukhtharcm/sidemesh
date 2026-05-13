@@ -1839,9 +1839,13 @@ export class CopilotAgentProvider
 
   private touch(session: CopilotSessionState): void {
     session.thread.updatedAt = nowSeconds();
-    if (session.messages.length > 0) {
-      session.thread.preview =
-        session.messages[session.messages.length - 1]!.text;
+    for (let index = session.messages.length - 1; index >= 0; index -= 1) {
+      const message = session.messages[index]!;
+      if (message.role === "system") {
+        continue;
+      }
+      session.thread.preview = message.text;
+      break;
     }
   }
 
@@ -4200,7 +4204,7 @@ function normalizeCopilotToolOutput(
   output: string | null,
   result: unknown,
 ): string | null {
-  const normalized = (output ?? "").trim();
+  const rawOutput = output ?? "";
   const resultRecord = asRecord(result);
   if (
     toolName === "view" ||
@@ -4211,18 +4215,24 @@ function normalizeCopilotToolOutput(
     toolName === "explore" ||
     toolName.startsWith("github-mcp-server-")
   ) {
-    const content = readFirstString(resultRecord, ["content", "message"]);
+    const content = readFirstNonBlankRawString(resultRecord, [
+      "content",
+      "message",
+    ]);
     if (content) {
       return content;
     }
   }
   if (toolName === "task_complete") {
-    const summary = readFirstString(resultRecord, ["content", "summary"]);
+    const summary = readFirstNonBlankRawString(resultRecord, [
+      "content",
+      "summary",
+    ]);
     if (summary) {
       return summary;
     }
   }
-  return normalized.length > 0 ? normalized : null;
+  return rawOutput.trim().length > 0 ? rawOutput : null;
 }
 
 function normalizeCopilotToolResult(
@@ -4626,6 +4636,22 @@ function readFirstString(
       if (typeof value === "string" && value.trim().length > 0) {
         return value.trim();
       }
+    }
+  }
+  return null;
+}
+
+function readFirstNonBlankRawString(
+  source: Record<string, unknown> | null,
+  keys: string[],
+): string | null {
+  if (!source) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
     }
   }
   return null;

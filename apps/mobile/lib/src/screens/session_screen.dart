@@ -2758,8 +2758,18 @@ class _SessionScreenState extends State<SessionScreen>
         if (message == null) {
           return;
         }
+        final previousMessages = _messages;
+        final previousActivities = _activities;
         setState(() {
-          _upsertOptimisticMessage(message);
+          _upsertPersistedMessage(message);
+          _optimisticMessages = _reconcileOptimisticMessages(_messages);
+          _history = _updatedHistoryAfterDelta(
+            previous: _history,
+            previousMessages: previousMessages,
+            mergedMessages: _messages,
+            previousActivities: previousActivities,
+            mergedActivities: _activities,
+          );
         });
         _syncSessionLiveActivity();
         _persistCurrentSessionLog();
@@ -5348,6 +5358,17 @@ class _SessionScreenState extends State<SessionScreen>
     _optimisticMessages = updated;
   }
 
+  void _upsertPersistedMessage(SessionMessage message) {
+    final existingIndex = _messages.indexWhere((item) => item.id == message.id);
+    if (existingIndex == -1) {
+      _messages = _sortMessages([..._messages, message]);
+      return;
+    }
+    final updated = [..._messages];
+    updated[existingIndex] = message;
+    _messages = _sortMessages(updated);
+  }
+
   List<SessionMessage> _reconcileOptimisticMessages(
     List<SessionMessage> persistedMessages,
   ) {
@@ -5369,6 +5390,16 @@ class _SessionScreenState extends State<SessionScreen>
     final updated = [..._activities];
     updated[existingIndex] = activity;
     _activities = _sortActivities(updated);
+  }
+
+  List<SessionMessage> _sortMessages(List<SessionMessage> messages) {
+    final sorted = [...messages];
+    sorted.sort((left, right) {
+      final bySeq = left.seq.compareTo(right.seq);
+      if (bySeq != 0) return bySeq;
+      return left.createdAt.compareTo(right.createdAt);
+    });
+    return sorted;
   }
 
   List<SessionActivity> _sortActivities(List<SessionActivity> activities) {

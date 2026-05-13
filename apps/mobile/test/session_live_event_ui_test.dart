@@ -98,6 +98,56 @@ void main() {
     },
   );
 
+  testWidgets('appended session messages are persisted in cached logs', (
+    tester,
+  ) async {
+    final host = _host('appended-message-cache');
+    final session = _session('appended-message-cache');
+    final api = _RichEventFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'session_message_appended',
+      'sessionId': session.id,
+      'seq': 2,
+      'messageItem': {
+        'id': 'audit-1',
+        'role': 'system',
+        'text': 'User answered.',
+        'content': [
+          {'type': 'text', 'text': 'User answered.'},
+        ],
+        'attachments': [],
+        'createdAt': DateTime(2026, 1, 1, 12, 1).millisecondsSinceEpoch,
+        'seq': 2,
+      },
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('User answered.'), findsOneWidget);
+    final cached = await SessionLocalStore.instance.loadSessionLog(
+      host,
+      session.id,
+    );
+    expect(cached, isNotNull);
+    expect(
+      cached!.log.messages.map((message) => message.text),
+      contains('User answered.'),
+    );
+  });
+
   testWidgets('session screen keeps only the latest plan update per session', (
     tester,
   ) async {
