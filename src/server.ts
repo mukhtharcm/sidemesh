@@ -527,11 +527,11 @@ export async function startServer(
           sessionId,
           turnId,
         );
-        if (turnState === "terminal") {
+        if (turnState.kind === "terminal") {
           unverifiedActiveTurns.delete(sessionId);
           return false;
         }
-        if (turnState === "missing" || turnState === "unknown") {
+        if (turnState.kind === "missing" || turnState.kind === "unknown") {
           unverifiedActiveTurns.add(sessionId);
         } else {
           unverifiedActiveTurns.delete(sessionId);
@@ -545,7 +545,7 @@ export async function startServer(
       return state.turnId == null || state.turnId === turnId;
     }
     const shouldTrack =
-      (await providerTurnState(agentProvider, sessionId, turnId)) !== "terminal";
+      (await providerTurnState(agentProvider, sessionId, turnId)).kind !== "terminal";
     if (shouldTrack) {
       unverifiedActiveTurns.delete(sessionId);
     }
@@ -555,35 +555,27 @@ export async function startServer(
   async function reconcileUnverifiedActiveTurn(
     sessionId: string,
     agentProvider: AgentProvider,
-  ): Promise<void> {
+  ): Promise<LiveThreadStatus | null> {
     if (!unverifiedActiveTurns.has(sessionId)) {
-      return;
+      return null;
     }
     const activeTurn = activeTurns.get(sessionId);
     if (!activeTurn) {
       unverifiedActiveTurns.delete(sessionId);
-      return;
+      return null;
     }
     const turnState = await providerTurnState(
       agentProvider,
       sessionId,
       activeTurn.turnId,
     );
-    if (turnState === "active") {
+    if (turnState.kind === "active") {
       unverifiedActiveTurns.delete(sessionId);
-      return;
+      return null;
     }
-    const threadStatus = await providerThreadStatus(agentProvider, sessionId);
-    if (isRunningThreadStatus(threadStatus)) {
-      unverifiedActiveTurns.delete(sessionId);
-      return;
-    }
-    if (turnState === "terminal") {
+    if (turnState.kind === "terminal") {
       clearConfirmedTerminalSessionState(sessionId);
-      const status: LiveThreadStatus =
-        isTerminalThreadStatus(threadStatus) && threadStatus != null
-          ? threadStatus
-          : "idle";
+      const status = turnState.status;
       setLatestThreadStatusForSession(sessionId, status);
       broadcastLive(sessionId, {
         type: "thread_status_changed",
@@ -591,16 +583,17 @@ export async function startServer(
         status,
       });
       scheduleRecentSessionUpsert(sessionId, 0);
-      return;
+      return status;
     }
     if (
-      turnState === "missing" &&
-      (threadStatus === "idle" || isTerminalThreadStatus(threadStatus))
+      turnState.kind === "missing" &&
+      (turnState.threadStatus === "idle" ||
+        isTerminalThreadStatus(turnState.threadStatus))
     ) {
       clearConfirmedTerminalSessionState(sessionId);
       const status: LiveThreadStatus =
-        isTerminalThreadStatus(threadStatus) && threadStatus != null
-          ? threadStatus
+        isTerminalThreadStatus(turnState.threadStatus)
+          ? turnState.threadStatus
           : "idle";
       setLatestThreadStatusForSession(sessionId, status);
       broadcastLive(sessionId, {
@@ -609,16 +602,19 @@ export async function startServer(
         status,
       });
       scheduleRecentSessionUpsert(sessionId, 0);
-      return;
+      return status;
     }
+    return null;
   }
 
   async function sessionStatusOverrideForSnapshot(
     sessionId: string,
     agentProvider: AgentProvider = provider,
   ): Promise<LiveThreadStatus | null> {
-    await reconcileUnverifiedActiveTurn(sessionId, agentProvider);
-    return sessionStatusOverrideForDisplay(sessionId);
+    return (
+      (await reconcileUnverifiedActiveTurn(sessionId, agentProvider)) ??
+      sessionStatusOverrideForDisplay(sessionId)
+    );
   }
 
   function persistSessionRuntimeSignalsEventually(): void {
@@ -4172,49 +4168,54 @@ async function loadFastRunState(
   return { status, isRunning: false, turnId: null };
 }
 
+type ProviderTurnState =
+  | { kind: "active" }
+  | { kind: "terminal"; status: LiveThreadStatus }
+  | { kind: "missing"; threadStatus: LiveThreadStatus }
+  | { kind: "unknown" };
+
 async function providerTurnState(
   provider: AgentProvider,
   sessionId: string,
   turnId: string,
-): Promise<"active" | "terminal" | "missing" | "unknown"> {
+): Promise<ProviderTurnState> {
   if (!hasProviderMethod(provider, "readSessionThread")) {
-    return "unknown";
+    return { kind: "unknown" };
   }
   let session: ThreadRecord;
   try {
     session = await readSession(provider, sessionId, true);
   } catch (error) {
     if (isTransientTurnSnapshotReadError(error)) {
-      return "unknown";
+      return { kind: "unknown" };
     }
     throw error;
   }
+  const threadStatus = threadStatusPhase(session);
   const turns = Array.isArray(session.turns) ? session.turns : [];
   const turn = turns.find((candidate) => candidate.id === turnId);
   if (!turn) {
-    return "missing";
+    return { kind: "missing", threadStatus };
   }
   if (turn.completedAt != null || isTerminalTurnStatus(turn.status)) {
-    return "terminal";
+    return {
+      kind: "terminal",
+      status: terminalThreadStatusForTurn(turn.status, threadStatus),
+    };
   }
-  return isActiveTurnStatus(turn.status) ? "active" : "unknown";
+  return isActiveTurnStatus(turn.status)
+    ? { kind: "active" }
+    : { kind: "unknown" };
 }
 
-async function providerThreadStatus(
-  provider: AgentProvider,
-  sessionId: string,
-): Promise<LiveThreadStatus | null> {
-  if (!hasProviderMethod(provider, "readSessionThread")) {
-    return null;
+function terminalThreadStatusForTurn(
+  turnStatus: string | null | undefined,
+  threadStatus: LiveThreadStatus,
+): LiveThreadStatus {
+  if (isTerminalThreadStatus(threadStatus)) {
+    return threadStatus;
   }
-  try {
-    return threadStatusPhase(await readSession(provider, sessionId, false));
-  } catch (error) {
-    if (isTransientTurnSnapshotReadError(error)) {
-      return null;
-    }
-    throw error;
-  }
+  return isErroredTurnStatus(turnStatus) ? "errored" : "idle";
 }
 
 async function isThreadLoaded(
@@ -4666,6 +4667,10 @@ function isTerminalTurnStatus(status: string | null | undefined): boolean {
     status === "cancelled" ||
     status === "canceled"
   );
+}
+
+function isErroredTurnStatus(status: string | null | undefined): boolean {
+  return status === "failed" || status === "error" || status === "errored";
 }
 
 function isActiveThread(thread: ThreadRecord): boolean {
