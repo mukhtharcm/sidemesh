@@ -420,12 +420,14 @@ class MeshStatusBadge extends StatelessWidget {
             Icon(icon, size: compact ? 12 : 13, color: fg),
             const SizedBox(width: AppSpacing.xs),
           ],
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            softWrap: false,
-            style: textStyle,
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+              style: textStyle,
+            ),
           ),
         ],
       ),

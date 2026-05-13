@@ -53,6 +53,28 @@ void main() {
     expect(find.byIcon(Icons.verified_user_outlined), findsOneWidget);
   });
 
+  testWidgets('MeshStatusBadge constrains long labels', (tester) async {
+    await tester.pumpWidget(
+      _wrap(
+        const SizedBox(
+          width: 120,
+          child: MeshStatusBadge(
+            label: 'Waiting for very long pending approval kind',
+            tone: MeshStatusTone.approval,
+            icon: Icons.gpp_maybe_rounded,
+            compact: true,
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    final label = tester.widget<Text>(
+      find.text('Waiting for very long pending approval kind'),
+    );
+    expect(label.overflow, TextOverflow.ellipsis);
+  });
+
   testWidgets('MeshListRow renders title, subtitle, badges, and trailing', (
     tester,
   ) async {
