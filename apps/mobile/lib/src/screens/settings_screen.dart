@@ -1162,66 +1162,48 @@ class _ActionRow extends StatelessWidget {
     final colors = context.colors;
     final iconColor = danger ? colors.danger : colors.accent;
     final titleColor = danger ? colors.danger : colors.textPrimary;
-    final iconBg = danger
-        ? colors.dangerMuted
-        : colors.surfaceMuted;
+    final iconBg = danger ? colors.dangerMuted : colors.surfaceMuted;
     final iconBorder = danger
         ? colors.danger.withValues(alpha: 0.25)
         : colors.border;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppShapes.input,
-        onTap: busy ? null : onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: iconBg,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: iconBorder),
+    return MeshListRow(
+      framed: false,
+      dense: true,
+      radius: AppRadii.control,
+      enabled: !busy,
+      onTap: busy ? null : onTap,
+      leading: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: iconBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: iconBorder),
+        ),
+        alignment: Alignment.center,
+        child: busy
+            ? SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: iconColor,
                 ),
-                alignment: Alignment.center,
-                child: busy
-                    ? SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: iconColor,
-                        ),
-                      )
-                    : Icon(icon, size: 17, color: iconColor),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: AppWeights.emphasis,
-                        color: titleColor,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+              )
+            : Icon(icon, size: 17, color: iconColor),
+      ),
+      title: Text(
+        title,
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+          fontWeight: AppWeights.emphasis,
+          color: titleColor,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: colors.textSecondary,
+          height: 1.3,
         ),
       ),
     );
@@ -1246,19 +1228,21 @@ class _ToggleTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Container(
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      selected: value,
+      radius: AppRadii.control,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 10),
-            child: Icon(icon, size: 18, color: colors.accent),
+            child: Icon(
+              icon,
+              size: 18,
+              color: value ? colors.accent : colors.textSecondary,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1267,9 +1251,9 @@ class _ToggleTile extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.emphasis),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: AppWeights.emphasis,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -1289,4 +1273,3 @@ class _ToggleTile extends StatelessWidget {
     );
   }
 }
-

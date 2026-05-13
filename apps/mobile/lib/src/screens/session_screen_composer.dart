@@ -537,13 +537,12 @@ class _ComposerPlusButton extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 for (final option in options)
-                  ListTile(
+                  MeshListRow(
+                    framed: false,
+                    dense: true,
+                    radius: AppRadii.control,
                     leading: Icon(option.$1, color: colors.accent),
                     title: Text(option.$2),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
                     onTap: () {
                       Navigator.of(ctx).pop();
                       option.$3();
@@ -829,71 +828,49 @@ class _ComposerSkillSuggestionTrayState
 
   Widget _buildSkillRow(BuildContext context, SkillSummary skill) {
     final colors = context.colors;
-    return InkWell(
+    return MeshListRow(
+      framed: false,
+      dense: true,
+      radius: AppRadii.control,
       onTap: () => widget.onSelectSkill(skill),
-      borderRadius: AppShapes.input,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: colors.surfaceMuted,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: colors.border),
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                Icons.auto_awesome_rounded,
-                size: 15,
-                color: colors.accent,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          skill.displayName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelLarge
-                              ?.copyWith(fontWeight: AppWeights.emphasis),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _SkillScopeBadge(skill: skill),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    skill.summaryDescription,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              skill.mentionToken,
-              style: monoStyle(
-                color: colors.textTertiary,
-                fontSize: 11,
-                fontWeight: AppWeights.body,
-              ),
-            ),
-          ],
+      leading: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: colors.surfaceMuted,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: colors.border),
+        ),
+        alignment: Alignment.center,
+        child: Icon(
+          Icons.auto_awesome_rounded,
+          size: 15,
+          color: colors.accent,
+        ),
+      ),
+      title: Text(
+        skill.displayName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(
+          context,
+        ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.emphasis),
+      ),
+      subtitle: Text(
+        skill.summaryDescription,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: colors.textSecondary,
+        ),
+      ),
+      badges: [_SkillScopeBadge(skill: skill)],
+      trailing: Text(
+        skill.mentionToken,
+        style: monoStyle(
+          color: colors.textTertiary,
+          fontSize: 11,
+          fontWeight: AppWeights.body,
         ),
       ),
     );
@@ -1059,31 +1036,23 @@ class _ComposerFileSuggestionTrayState
 
   Widget _buildFileRow(BuildContext context, FsSearchResult file) {
     final colors = context.colors;
-    return InkWell(
+    return MeshListRow(
+      framed: false,
+      dense: true,
+      radius: AppRadii.control,
       onTap: () => widget.onSelectFile(file),
-      borderRadius: AppShapes.input,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Icon(
-              file.isDirectory
-                  ? Icons.folder_rounded
-                  : Icons.insert_drive_file_rounded,
-              size: 16,
-              color: colors.textTertiary,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                file.path,
-                style: TextStyle(color: colors.textPrimary, fontSize: 13),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
+      leading: Icon(
+        file.isDirectory
+            ? Icons.folder_rounded
+            : Icons.insert_drive_file_rounded,
+        size: 16,
+        color: colors.textTertiary,
+      ),
+      title: Text(
+        file.path,
+        style: TextStyle(color: colors.textPrimary, fontSize: 13),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }

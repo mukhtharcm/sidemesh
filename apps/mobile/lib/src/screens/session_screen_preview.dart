@@ -235,65 +235,44 @@ class _PreviewSuggestionTile extends StatelessWidget {
     final colors = context.colors;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
+      child: MeshListRow(
+        framed: true,
+        tone: MeshSurfaceTone.muted,
+        radius: AppRadii.control,
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(14),
+        leading: Container(
+          width: 34,
+          height: 34,
           decoration: BoxDecoration(
-            color: colors.surfaceMuted,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: colors.border),
+            color: colors.accentMuted,
+            borderRadius: BorderRadius.circular(10),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: colors.accentMuted,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  Icons.open_in_browser_rounded,
-                  size: 18,
-                  color: colors.accent,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      suggestion.endpointLabel,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      suggestion.sourceLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              MeshPill(
-                label: suggestion.scheme.toUpperCase(),
-                tone: MeshPillTone.accent,
-                mono: true,
-              ),
-            ],
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.open_in_browser_rounded,
+            size: 18,
+            color: colors.accent,
           ),
+        ),
+        title: Text(
+          suggestion.endpointLabel,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+            color: colors.textPrimary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        subtitle: Text(
+          suggestion.sourceLabel,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: colors.textSecondary,
+          ),
+        ),
+        trailing: MeshPill(
+          label: suggestion.scheme.toUpperCase(),
+          tone: MeshPillTone.accent,
+          mono: true,
         ),
       ),
     );

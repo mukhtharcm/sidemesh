@@ -2288,29 +2288,39 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     final selected = await showModalBottomSheet<String>(
       context: context,
       builder: (context) {
+        final colors = context.colors;
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.verified_rounded),
-                title: const Text('Stable'),
-                subtitle: const Text('Tagged releases'),
-                trailing: _selectedUpdateChannel == 'stable'
-                    ? const Icon(Icons.check_rounded)
-                    : null,
-                onTap: () => Navigator.of(context).pop('stable'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.science_rounded),
-                title: const Text('Bleeding edge'),
-                subtitle: const Text('Latest commits from main'),
-                trailing: _selectedUpdateChannel == 'bleeding-edge'
-                    ? const Icon(Icons.check_rounded)
-                    : null,
-                onTap: () => Navigator.of(context).pop('bleeding-edge'),
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                MeshListRow(
+                  framed: false,
+                  dense: true,
+                  radius: AppRadii.control,
+                  leading: Icon(Icons.verified_rounded, color: colors.accent),
+                  title: const Text('Stable'),
+                  subtitle: const Text('Tagged releases'),
+                  trailing: _selectedUpdateChannel == 'stable'
+                      ? Icon(Icons.check_rounded, color: colors.accent)
+                      : null,
+                  onTap: () => Navigator.of(context).pop('stable'),
+                ),
+                MeshListRow(
+                  framed: false,
+                  dense: true,
+                  radius: AppRadii.control,
+                  leading: Icon(Icons.science_rounded, color: colors.accent),
+                  title: const Text('Bleeding edge'),
+                  subtitle: const Text('Latest commits from main'),
+                  trailing: _selectedUpdateChannel == 'bleeding-edge'
+                      ? Icon(Icons.check_rounded, color: colors.accent)
+                      : null,
+                  onTap: () => Navigator.of(context).pop('bleeding-edge'),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -2813,57 +2823,42 @@ class _ManagementRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: busy ? null : onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          child: Row(
-            children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: colors.surfaceMuted,
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(color: colors.border),
+    return MeshListRow(
+      framed: false,
+      dense: true,
+      radius: AppRadii.control,
+      enabled: !busy,
+      onTap: busy ? null : onTap,
+      leading: Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          color: colors.surfaceMuted,
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(color: colors.border),
+        ),
+        alignment: Alignment.center,
+        child: busy
+            ? SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: colors.textSecondary,
                 ),
-                alignment: Alignment.center,
-                child: busy
-                    ? SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 1.5,
-                          color: colors.textSecondary,
-                        ),
-                      )
-                    : Icon(icon, size: 16, color: colors.textSecondary),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: AppWeights.emphasis,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      detail,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+              )
+            : Icon(icon, size: 16, color: colors.textSecondary),
+      ),
+      title: Text(
+        label,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          fontWeight: AppWeights.emphasis,
+        ),
+      ),
+      subtitle: Text(
+        detail,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: colors.textSecondary,
         ),
       ),
     );
