@@ -2809,6 +2809,68 @@ describe("session live rich events", () => {
     });
   });
 
+  it("replays appended messages missed after a transient live cursor", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new AppendedMessageFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const logRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`,
+        method: "GET",
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      assert.equal(logRes.statusCode, 200);
+
+      const live = await openSessionLiveSocket(
+        server.port,
+        config.token,
+        provider.sessionId,
+      );
+      let transientSeq: number | undefined;
+      try {
+        await waitFor(
+          () => live.events.find((event) => event.type === "hello"),
+          "hello",
+        );
+        provider.emitTransientDelta();
+        const transient = await waitFor(
+          () => live.events.find((event) => event.type === "assistant_delta"),
+          "assistant_delta",
+        );
+        transientSeq = transient.seq;
+      } finally {
+        await closeSessionLiveSocket(live.socket);
+      }
+
+      assert.equal(typeof transientSeq, "number");
+      const missed = provider.appendAuditMessage("Missed audit.");
+      const deltaRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path:
+          `/api/sessions/${encodeURIComponent(provider.sessionId)}/events` +
+          `?since=${transientSeq}`,
+        method: "GET",
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      assert.equal(deltaRes.statusCode, 200);
+      const delta = deltaRes.body as {
+        nextSeq?: number;
+        messages?: Array<{ id: string; seq: number }>;
+      };
+      assert.deepEqual(
+        delta.messages?.map((message) => message.id),
+        [missed.id],
+      );
+      assert.ok(
+        (delta.nextSeq ?? 0) > (transientSeq ?? 0),
+        "delta cursor should advance to the live replay seq",
+      );
+    });
+  });
+
   it("does not skip subsequent appended messages after a live appended-message cursor", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const provider = new AppendedMessageFixtureProvider();

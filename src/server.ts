@@ -133,6 +133,7 @@ const RECENT_SESSION_RUNTIME_CONCURRENCY = 4;
 const SESSION_EVENT_DELTA_MAX_ITEMS = 220;
 const SESSION_EVENT_DELTA_MAX_BYTES = 256 * 1024;
 const INSTALL_INFO_REFRESH_TTL_MS = 60_000;
+const LIVE_MESSAGE_REPLAY_LIMIT = 2_000;
 type SessionRuntimeListMode = "all" | "active" | "none";
 const HOST_CAPABILITIES: HostCapabilities = {
   workspace: {
@@ -259,6 +260,7 @@ export async function startServer(
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, LiveActivityEntry>>();
+  const liveMessageReplaySeqs = new Map<string, Map<string, number>>();
   const liveThreadStatuses = new Map<string, LiveThreadStatus>();
   const liveThreadStatusUpdatedAt = new Map<string, number>();
   const replayIndex = new SessionReplayIndex();
@@ -639,6 +641,11 @@ export async function startServer(
         sessionIds.add(sessionId);
       }
     }
+    for (const sessionId of liveMessageReplaySeqs.keys()) {
+      if (isProviderSession(sessionId)) {
+        sessionIds.add(sessionId);
+      }
+    }
     for (const sessionId of runtimeCache.keys()) {
       if (isProviderSession(sessionId)) {
         sessionIds.add(sessionId);
@@ -666,6 +673,7 @@ export async function startServer(
       }
       activeTurns.delete(sessionId);
       liveActivities.delete(sessionId);
+      liveMessageReplaySeqs.delete(sessionId);
       runtimeCache.delete(sessionId);
       clearSessionLogCache(logCache, sessionId);
       clearActionsForSession(
@@ -953,6 +961,12 @@ export async function startServer(
         }
         const seq = allocSeq(event.sessionId);
         const messageSeq = event.message.seq ?? seq;
+        rememberLiveMessageReplaySeq(
+          liveMessageReplaySeqs,
+          event.sessionId,
+          event.message.id,
+          seq,
+        );
         broadcastLive(event.sessionId, {
           type: "assistant_message_completed",
           sessionId: event.sessionId,
@@ -978,6 +992,12 @@ export async function startServer(
         }
         const seq = allocSeq(event.sessionId);
         const messageSeq = event.message.seq ?? seq;
+        rememberLiveMessageReplaySeq(
+          liveMessageReplaySeqs,
+          event.sessionId,
+          event.message.id,
+          seq,
+        );
         broadcastLive(event.sessionId, {
           type: "session_message_appended",
           sessionId: event.sessionId,
@@ -1387,6 +1407,10 @@ export async function startServer(
     for (const activities of liveActivities.values()) {
       liveActivityItems += activities.size;
     }
+    let liveMessageItems = 0;
+    for (const messages of liveMessageReplaySeqs.values()) {
+      liveMessageItems += messages.size;
+    }
 
     response.json({
       label: config.label,
@@ -1406,6 +1430,8 @@ export async function startServer(
         pendingActions: pendingActions.size,
         liveActivitySessions: liveActivities.size,
         liveActivityItems,
+        liveMessageSessions: liveMessageReplaySeqs.size,
+        liveMessageItems,
         sessionSeqCursors: sessionSeqCursor.size,
         inputDedupe: sessionInputDedupe.size,
       },
@@ -2027,6 +2053,7 @@ export async function startServer(
         try {
           const entry = await replayIndex.load(sessionId, session.path);
           const liveSessionActivities = liveActivities.get(sessionId);
+          const liveSessionMessages = liveMessageReplaySeqs.get(sessionId);
           if (hostCapabilities.sessions.search) {
             void indexSessionForSearch(searchIndex, providerRuntime, sessionId).catch(() => {
               // Ignore indexing errors for live sessions
@@ -2034,7 +2061,12 @@ export async function startServer(
           }
           ensureSeqCursor(sessionId, entry.nextSeq);
           const delta = replayIndex.getDelta(entry, since);
-          newMessages = delta.messages;
+          const replayedMessages = filterMessagesForReplay(
+            entry.messages,
+            liveSessionMessages,
+            since,
+          );
+          newMessages = replayedMessages.messages;
           const replayedActivities = filterActivitiesForReplay(
             mergeSessionActivities(
               delta.activities,
@@ -2049,7 +2081,11 @@ export async function startServer(
             latestPlanUpdateForSession(sessionId),
           );
           nextSeq = nextSeqForLatestPlanUpdate(
-            Math.max(delta.nextSeq, replayedActivities.highestSeq),
+            Math.max(
+              delta.nextSeq,
+              replayedMessages.highestSeq,
+              replayedActivities.highestSeq,
+            ),
             logLatestPlanUpdate,
           );
           logRuntime = delta.runtime;
@@ -2077,6 +2113,7 @@ export async function startServer(
             nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
           );
           const liveSessionActivities = liveActivities.get(sessionId);
+          const liveSessionMessages = liveMessageReplaySeqs.get(sessionId);
           const activities = mergeSessionActivities(
             log.activities,
             liveActivityValues(liveSessionActivities),
@@ -2086,12 +2123,17 @@ export async function startServer(
             liveSessionActivities,
             since,
           );
-          newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
+          const replayedMessages = filterMessagesForReplay(
+            log.messages,
+            liveSessionMessages,
+            since,
+          );
+          newMessages = replayedMessages.messages;
           newActivities = replayedActivities.activities;
-          let highestSeq = replayedActivities.highestSeq;
-          for (const m of newMessages) {
-            if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
-          }
+          const highestSeq = Math.max(
+            replayedMessages.highestSeq,
+            replayedActivities.highestSeq,
+          );
           logLatestPlanUpdate = latestPlanUpdate;
           nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
           logRuntime = log.runtime;
@@ -2108,6 +2150,7 @@ export async function startServer(
           nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
         );
         const liveSessionActivities = liveActivities.get(sessionId);
+        const liveSessionMessages = liveMessageReplaySeqs.get(sessionId);
         const activities = mergeSessionActivities(
           log.activities,
           liveActivityValues(liveSessionActivities),
@@ -2117,12 +2160,17 @@ export async function startServer(
           liveSessionActivities,
           since,
         );
-        newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
+        const replayedMessages = filterMessagesForReplay(
+          log.messages,
+          liveSessionMessages,
+          since,
+        );
+        newMessages = replayedMessages.messages;
         newActivities = replayedActivities.activities;
-        let highestSeq = replayedActivities.highestSeq;
-        for (const m of newMessages) {
-          if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
-        }
+        const highestSeq = Math.max(
+          replayedMessages.highestSeq,
+          replayedActivities.highestSeq,
+        );
         logLatestPlanUpdate = latestPlanUpdate;
         nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
         logRuntime = log.runtime;
@@ -2999,6 +3047,7 @@ export async function startServer(
       activeTurns.delete(sessionId);
       liveThreadStatuses.delete(sessionId);
       liveActivities.delete(sessionId);
+      liveMessageReplaySeqs.delete(sessionId);
       clearSessionLogCache(logCache, sessionId);
       sessionSeqCursor.delete(sessionId);
       response.json({ archived: true });
@@ -4235,6 +4284,56 @@ function liveActivityValues(
     return [];
   }
   return [...sessionActivities.values()].map((entry) => entry.activity);
+}
+
+function rememberLiveMessageReplaySeq(
+  liveMessageReplaySeqs: Map<string, Map<string, number>>,
+  sessionId: string,
+  messageId: string,
+  replaySeq: number,
+): void {
+  if (!messageId) {
+    return;
+  }
+  let sessionMessages = liveMessageReplaySeqs.get(sessionId);
+  if (!sessionMessages) {
+    sessionMessages = new Map<string, number>();
+    liveMessageReplaySeqs.set(sessionId, sessionMessages);
+  }
+  sessionMessages.set(messageId, replaySeq);
+  while (sessionMessages.size > LIVE_MESSAGE_REPLAY_LIMIT) {
+    const oldest = sessionMessages.keys().next().value;
+    if (typeof oldest !== "string") {
+      break;
+    }
+    sessionMessages.delete(oldest);
+  }
+}
+
+function filterMessagesForReplay(
+  messages: SessionMessage[],
+  sessionMessages: Map<string, number> | undefined,
+  since: number,
+): { messages: SessionMessage[]; highestSeq: number } {
+  const returned: SessionMessage[] = [];
+  let highestSeq = since;
+  for (const message of messages) {
+    const replaySeq = Math.max(
+      message.seq ?? 0,
+      sessionMessages?.get(message.id) ?? 0,
+    );
+    if (replaySeq <= since) {
+      continue;
+    }
+    returned.push(message);
+    if (replaySeq > highestSeq) {
+      highestSeq = replaySeq;
+    }
+  }
+  return {
+    messages: returned,
+    highestSeq,
+  };
 }
 
 function filterActivitiesForReplay(

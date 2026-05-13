@@ -3748,7 +3748,6 @@ function copilotSubagentActivityId(
     const existingId = findMatchingInProgressCopilotSubagentActivityId(
       existingActivities,
       agentName,
-      displayName,
     );
     if (existingId) {
       return existingId;
@@ -3789,7 +3788,6 @@ function copilotSubagentDisplayName(
 function findMatchingInProgressCopilotSubagentActivityId(
   activities: Iterable<SessionActivity>,
   agentName: string,
-  displayName: string,
 ): string | null {
   let match: string | null = null;
   for (const activity of activities) {
@@ -3797,12 +3795,14 @@ function findMatchingInProgressCopilotSubagentActivityId(
       activity.type !== "tool" ||
       activity.status !== "in_progress" ||
       activity.toolName !== agentName ||
-      activity.title !== displayName ||
       activity.args != null ||
       activity.output != null ||
-      activity.result != null ||
-      activity.semantic?.category !== "task"
+      activity.result != null
     ) {
+      continue;
+    }
+    const semanticCategory = activity.semantic?.category;
+    if (semanticCategory != null && semanticCategory !== "task") {
       continue;
     }
     if (match) {

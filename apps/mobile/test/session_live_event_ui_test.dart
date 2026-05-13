@@ -146,6 +146,7 @@ void main() {
       cached!.log.messages.map((message) => message.text),
       contains('User answered.'),
     );
+    expect(cached.log.session.updatedAt, DateTime(2026, 1, 1, 12, 1));
   });
 
   testWidgets('session screen keeps only the latest plan update per session', (

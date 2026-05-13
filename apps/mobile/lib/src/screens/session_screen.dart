@@ -2761,6 +2761,10 @@ class _SessionScreenState extends State<SessionScreen>
         final previousMessages = _messages;
         final previousActivities = _activities;
         setState(() {
+          final session = _session;
+          if (session != null && message.createdAt.isAfter(session.updatedAt)) {
+            _session = session.copyWith(updatedAt: message.createdAt);
+          }
           _upsertPersistedMessage(message);
           _optimisticMessages = _reconcileOptimisticMessages(_messages);
           _history = _updatedHistoryAfterDelta(

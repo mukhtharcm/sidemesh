@@ -194,7 +194,6 @@ describe("Copilot provider", () => {
                 "subagent.started",
                 {
                   agentName: "code-review",
-                  agentDisplayName: "Documentation Agent",
                 },
                 "subagent-history-start",
               ),
@@ -2970,7 +2969,6 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
             "subagent.started",
             {
               agentName: "code-review",
-              agentDisplayName: "Documentation Agent",
               agentDescription: "Reads docs",
             },
             "subagent-no-id-start",
