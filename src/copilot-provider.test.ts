@@ -1754,16 +1754,24 @@ describe("Copilot provider", () => {
         log.messages.some(
           (message) =>
             message.role === "system" &&
-            message.text.includes("User answered: staging"),
+            message.text.includes("User selected an option."),
         ),
       );
+      const answerAuditMessage = log.messages.find(
+        (message) =>
+          message.role === "system" && message.text.includes("User selected"),
+      );
+      assert.ok(answerAuditMessage, "Expected ask-user response audit row");
+      assert.doesNotMatch(answerAuditMessage.text, /staging/);
       assert.ok(
         liveMessages.some((message) =>
           message.includes("Agent asked: Which environment should I use?"),
         ),
       );
       assert.ok(
-        liveMessages.some((message) => message.includes("User answered: staging")),
+        liveMessages.some((message) =>
+          message.includes("User selected an option."),
+        ),
       );
       assert.match(log.messages.at(-1)?.text ?? "", /staging/);
     } finally {
@@ -1853,6 +1861,58 @@ describe("Copilot provider", () => {
       );
       assert.match(log.messages.at(-1)?.text ?? "", /us-east/);
       assert.match(log.messages.at(-1)?.text ?? "", /dryRun/);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
+  it("redacts Copilot browser sign-in URLs from transcript audit rows", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-url-elicitation-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const opened = waitForActionOpened(provider, "elicitation");
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [
+          { type: "text", text: "needs browser sign-in", text_elements: [] },
+        ],
+        overrides: emptyOverrides(),
+      });
+
+      const action = await opened;
+      assert.equal(action.elicitation?.mode, "url");
+      assert.match(action.elicitation?.url ?? "", /secret-token/);
+      assert.equal(
+        provider.respondToPendingAction(action, {
+          action: "cancel",
+        }),
+        true,
+      );
+      await completed;
+
+      const log = await provider.readSessionLog!(created.thread);
+      const systemText = log.messages
+        .filter((message) => message.role === "system")
+        .map((message) => message.text)
+        .join("\n");
+      assert.match(systemText, /Agent requested browser sign-in: Sign in to GitHub/);
+      assert.doesNotMatch(systemText, /secret-token/);
+      assert.doesNotMatch(systemText, /https:\/\/auth\.example/);
     } finally {
       await settleProviderWrites();
       await rm(dir, {
@@ -2478,7 +2538,16 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         { sessionId: this.sessionId },
       );
     }
-    if (options.prompt.includes("elicitation")) {
+    if (options.prompt.includes("browser sign-in")) {
+      elicitationResult = await this.config.onElicitationRequest!({
+        sessionId: this.sessionId,
+        mode: "url",
+        message: "Sign in to GitHub",
+        elicitationSource: "github",
+        url: "https://auth.example/login?token=secret-token",
+        requestedSchema: { type: "object", properties: {} },
+      });
+    } else if (options.prompt.includes("elicitation")) {
       elicitationResult = await this.config.onElicitationRequest!({
         sessionId: this.sessionId,
         mode: "form",

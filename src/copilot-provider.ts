@@ -2687,7 +2687,7 @@ function formatCopilotUserInputResponseMessage(
   if (!answer) {
     return "User answered with an empty response.";
   }
-  return `User answered: ${answer}`;
+  return response.wasFreeform ? "User answered." : "User selected an option.";
 }
 
 function buildCopilotElicitationAction(
@@ -2727,9 +2727,7 @@ function formatCopilotElicitationRequestMessage(
 ): string | null {
   const message = request.message?.trim() || "Structured input requested.";
   if (request.mode === "url") {
-    return request.url
-      ? `Agent requested browser sign-in: ${message}\n${request.url}`
-      : `Agent requested browser sign-in: ${message}`;
+    return `Agent requested browser sign-in: ${message}`;
   }
   const fields = normalizeCopilotElicitationFields(request.requestedSchema)
     .map((field) => field.title.trim())
