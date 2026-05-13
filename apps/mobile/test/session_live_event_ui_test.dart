@@ -473,7 +473,7 @@ void main() {
         eventsDelta: SessionEventsDelta(
           sessionId: session.id,
           since: 1,
-          nextSeq: 3,
+          nextSeq: 2,
           messages: const [],
           activities: const [],
           latestPlanUpdate: LiveEvent.fromJson(

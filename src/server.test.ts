@@ -2991,6 +2991,123 @@ describe("session live rich events", () => {
     });
   });
 
+  it("does not replay live-delivered assistant completions when provider seq is omitted", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new AppendedMessageFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const live = await openSessionLiveSocket(
+        server.port,
+        config.token,
+        provider.sessionId,
+      );
+      let deliveredSeq: number | undefined;
+      try {
+        await waitFor(
+          () => live.events.find((event) => event.type === "hello"),
+          "hello",
+        );
+        provider.appendAssistantMessage("Live assistant without provider seq.", {
+          emitSeq: false,
+        });
+        const completed = await waitFor(
+          () =>
+            live.events.find(
+              (event) => event.type === "assistant_message_completed",
+            ),
+          "assistant_message_completed",
+        );
+        deliveredSeq = completed.seq;
+        assert.equal(completed.messageItem?.seq, completed.seq);
+      } finally {
+        await closeSessionLiveSocket(live.socket);
+      }
+
+      assert.equal(typeof deliveredSeq, "number");
+      const deltaRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path:
+          `/api/sessions/${encodeURIComponent(provider.sessionId)}/events` +
+          `?since=${deliveredSeq}`,
+        method: "GET",
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      assert.equal(deltaRes.statusCode, 200);
+      assert.deepEqual((deltaRes.body as any).messages ?? [], []);
+    });
+  });
+
+  it("returns stale cursor when omitted assistant seq replay metadata was evicted", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new AppendedMessageFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(
+      makeConfig(stateDir),
+      runtime,
+      async (server, config) => {
+        const logRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`,
+          method: "GET",
+          headers: { Authorization: `Bearer ${config.token}` },
+        });
+        assert.equal(logRes.statusCode, 200);
+
+        const live = await openSessionLiveSocket(
+          server.port,
+          config.token,
+          provider.sessionId,
+        );
+        let transientSeq: number | undefined;
+        try {
+          await waitFor(
+            () => live.events.find((event) => event.type === "hello"),
+            "hello",
+          );
+          provider.emitTransientDelta();
+          const transient = await waitFor(
+            () => live.events.find((event) => event.type === "assistant_delta"),
+            "assistant_delta",
+          );
+          transientSeq = transient.seq;
+          provider.appendAssistantMessage("Evicted assistant without provider seq.", {
+            emitSeq: false,
+          });
+          await waitFor(
+            () =>
+              live.events.find(
+                (event) => event.type === "assistant_message_completed",
+              ),
+            "assistant_message_completed",
+          );
+          provider.appendAuditMessage("Evict assistant replay metadata.");
+        } finally {
+          await closeSessionLiveSocket(live.socket);
+        }
+
+        assert.equal(typeof transientSeq, "number");
+        const deltaRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path:
+            `/api/sessions/${encodeURIComponent(provider.sessionId)}/events` +
+            `?since=${transientSeq}`,
+          method: "GET",
+          headers: { Authorization: `Bearer ${config.token}` },
+        });
+        assert.equal(deltaRes.statusCode, 410);
+        assert.equal((deltaRes.body as any).error, "stale_cursor");
+        assert.equal(
+          (deltaRes.body as any).reason,
+          "live_message_replay_evicted",
+        );
+      },
+      { liveMessageReplayLimit: 1 },
+    );
+  });
+
   it("returns stale cursor when missed appended-message replay metadata was evicted", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const provider = new AppendedMessageFixtureProvider();

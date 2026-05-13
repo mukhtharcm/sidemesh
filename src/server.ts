@@ -200,7 +200,7 @@ interface LiveActivityEntry {
 
 interface LiveMessageReplayEntry {
   replaySeq: number;
-  messageSeq: number;
+  messageSeq: number | null;
 }
 
 interface LiveMessageReplayGap {
@@ -978,18 +978,20 @@ export async function startServer(
         });
         return;
       case "assistant_message_completed": {
-        if (typeof event.message.seq === "number") {
-          ensureSeqCursor(event.sessionId, event.message.seq);
+        const persistedMessageSeq =
+          typeof event.message.seq === "number" ? event.message.seq : null;
+        if (persistedMessageSeq != null) {
+          ensureSeqCursor(event.sessionId, persistedMessageSeq);
         }
         const seq = allocSeq(event.sessionId);
-        const messageSeq = event.message.seq ?? seq;
+        const messageSeq = persistedMessageSeq ?? seq;
         rememberLiveMessageReplaySeq(
           liveMessageReplaySeqs,
           liveMessageReplayEvictions,
           event.sessionId,
           event.message.id,
           seq,
-          messageSeq,
+          persistedMessageSeq,
           dependencies.liveMessageReplayLimit,
         );
         broadcastLive(event.sessionId, {
@@ -1014,18 +1016,20 @@ export async function startServer(
         return;
       }
       case "session_message_appended": {
-        if (typeof event.message.seq === "number") {
-          ensureSeqCursor(event.sessionId, event.message.seq);
+        const persistedMessageSeq =
+          typeof event.message.seq === "number" ? event.message.seq : null;
+        if (persistedMessageSeq != null) {
+          ensureSeqCursor(event.sessionId, persistedMessageSeq);
         }
         const seq = allocSeq(event.sessionId);
-        const messageSeq = event.message.seq ?? seq;
+        const messageSeq = persistedMessageSeq ?? seq;
         rememberLiveMessageReplaySeq(
           liveMessageReplaySeqs,
           liveMessageReplayEvictions,
           event.sessionId,
           event.message.id,
           seq,
-          messageSeq,
+          persistedMessageSeq,
           dependencies.liveMessageReplayLimit,
         );
         broadcastLive(event.sessionId, {
@@ -2116,7 +2120,7 @@ export async function startServer(
             sessionId,
             latestPlanUpdateForSession(sessionId),
           );
-          nextSeq = nextSeqForLatestPlanUpdate(
+          nextSeq = replayCursorForLatestPlanUpdate(
             Math.max(
               delta.nextSeq,
               replayedMessages.highestSeq,
@@ -2171,7 +2175,7 @@ export async function startServer(
             replayedActivities.highestSeq,
           );
           logLatestPlanUpdate = latestPlanUpdate;
-          nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
+          nextSeq = replayCursorForLatestPlanUpdate(highestSeq, latestPlanUpdate);
           logRuntime = log.runtime;
         }
       } else {
@@ -2208,7 +2212,7 @@ export async function startServer(
           replayedActivities.highestSeq,
         );
         logLatestPlanUpdate = latestPlanUpdate;
-        nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
+        nextSeq = replayCursorForLatestPlanUpdate(highestSeq, latestPlanUpdate);
         logRuntime = log.runtime;
       }
 
@@ -4390,7 +4394,7 @@ function rememberLiveMessageReplaySeq(
   sessionId: string,
   messageId: string,
   replaySeq: number,
-  messageSeq: number,
+  messageSeq: number | null,
   replayLimit: number,
 ): void {
   if (!messageId) {
@@ -4424,6 +4428,21 @@ function rememberLiveMessageReplayGap(
   sessionId: string,
   entry: LiveMessageReplayEntry,
 ): void {
+  if (entry.messageSeq == null) {
+    if (entry.replaySeq <= 0) {
+      return;
+    }
+    const nextGap: LiveMessageReplayGap = {
+      startSeq: 0,
+      endSeqExclusive: entry.replaySeq,
+    };
+    rememberLiveMessageReplayGapRange(
+      liveMessageReplayEvictions,
+      sessionId,
+      nextGap,
+    );
+    return;
+  }
   if (entry.replaySeq <= entry.messageSeq) {
     return;
   }
@@ -4431,6 +4450,18 @@ function rememberLiveMessageReplayGap(
     startSeq: entry.messageSeq,
     endSeqExclusive: entry.replaySeq,
   };
+  rememberLiveMessageReplayGapRange(
+    liveMessageReplayEvictions,
+    sessionId,
+    nextGap,
+  );
+}
+
+function rememberLiveMessageReplayGapRange(
+  liveMessageReplayEvictions: Map<string, LiveMessageReplayGap[]>,
+  sessionId: string,
+  nextGap: LiveMessageReplayGap,
+): void {
   const gaps = liveMessageReplayEvictions.get(sessionId);
   if (!gaps) {
     liveMessageReplayEvictions.set(sessionId, [nextGap]);
@@ -4483,10 +4514,8 @@ function filterMessagesForReplay(
   const returned: SessionMessage[] = [];
   let highestSeq = since;
   for (const message of messages) {
-    const replaySeq = Math.max(
-      message.seq ?? 0,
-      sessionMessages?.get(message.id)?.replaySeq ?? 0,
-    );
+    const replaySeq =
+      sessionMessages?.get(message.id)?.replaySeq ?? message.seq ?? 0;
     if (replaySeq <= since) {
       continue;
     }
@@ -5020,6 +5049,16 @@ function nextSeqForLatestPlanUpdate(
     return nextSeq;
   }
   return Math.max(nextSeq, latestPlanUpdate.seq + 1);
+}
+
+function replayCursorForLatestPlanUpdate(
+  cursor: number,
+  latestPlanUpdate: LatestPlanUpdate | null,
+): number {
+  if (latestPlanUpdate?.seq == null) {
+    return cursor;
+  }
+  return Math.max(cursor, latestPlanUpdate.seq);
 }
 
 async function loadSessionRuntimeSignalsState(
