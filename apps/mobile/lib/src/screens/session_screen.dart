@@ -2165,6 +2165,10 @@ class _SessionScreenState extends State<SessionScreen>
         // Seed lastSeq from the snapshot so subsequent resyncs can use the
         // cheap delta endpoint instead of re-downloading everything.
         var highestSeq = _lastEventSeq ?? 0;
+        final snapshotReplaySeq = _snapshotReplaySeq(log.nextSeq);
+        if (snapshotReplaySeq != null && snapshotReplaySeq > highestSeq) {
+          highestSeq = snapshotReplaySeq;
+        }
         for (final m in log.messages) {
           if (m.seq > highestSeq) highestSeq = m.seq;
         }
@@ -2258,6 +2262,10 @@ class _SessionScreenState extends State<SessionScreen>
           fallbackCreatedAt: log.session.updatedAt,
         );
         var highestSeq = _lastEventSeq ?? 0;
+        final snapshotReplaySeq = _snapshotReplaySeq(log.nextSeq);
+        if (snapshotReplaySeq != null && snapshotReplaySeq > highestSeq) {
+          highestSeq = snapshotReplaySeq;
+        }
         for (final m in log.messages) {
           if (m.seq > highestSeq) highestSeq = m.seq;
         }
@@ -2475,6 +2483,7 @@ class _SessionScreenState extends State<SessionScreen>
           activities: _activities,
           pendingAction: null,
           history: _history,
+          nextSeq: _lastEventSeq == null ? null : _lastEventSeq! + 1,
           latestPlanUpdate: _latestPlanUpdateForCache(),
         ),
       ),
@@ -5399,6 +5408,13 @@ class _SessionScreenState extends State<SessionScreen>
     if (messageUpdatedAt.isAfter(session.updatedAt)) {
       _session = session.copyWith(updatedAt: messageUpdatedAt);
     }
+  }
+
+  int? _snapshotReplaySeq(int? nextSeq) {
+    if (nextSeq == null || nextSeq <= 0) {
+      return null;
+    }
+    return nextSeq - 1;
   }
 
   List<SessionMessage> _reconcileOptimisticMessages(

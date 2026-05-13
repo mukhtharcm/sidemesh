@@ -2784,6 +2784,7 @@ describe("session live rich events", () => {
         config.token,
         provider.sessionId,
       );
+      let appendedSeq: number | undefined;
       try {
         await waitFor(
           () => live.events.find((event) => event.type === "hello"),
@@ -2804,9 +2805,19 @@ describe("session live rich events", () => {
           appended.seq > appended.messageItem.seq,
           "websocket seq should remain independent from persisted message seq",
         );
+        appendedSeq = appended.seq;
       } finally {
         await closeSessionLiveSocket(live.socket);
       }
+      const updatedLogRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`,
+        method: "GET",
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      assert.equal(updatedLogRes.statusCode, 200);
+      assert.equal((updatedLogRes.body as any).nextSeq, (appendedSeq ?? 0) + 1);
     });
   });
 

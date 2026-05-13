@@ -2729,6 +2729,7 @@ class SessionLog {
     required this.activities,
     required this.pendingAction,
     required this.history,
+    this.nextSeq,
     this.latestPlanUpdate,
   });
 
@@ -2737,6 +2738,7 @@ class SessionLog {
   final List<SessionActivity> activities;
   final PendingAction? pendingAction;
   final SessionLogHistorySummary? history;
+  final int? nextSeq;
   final LiveEvent? latestPlanUpdate;
 
   factory SessionLog.fromJson(Map<String, dynamic> json) {
@@ -2771,6 +2773,7 @@ class SessionLog {
           : SessionLogHistorySummary.fromJson(
               json['history'] as Map<String, dynamic>,
             ),
+      nextSeq: _intOrNull(json['nextSeq']),
       latestPlanUpdate: normalizedPlanUpdate,
     );
   }
@@ -2781,6 +2784,7 @@ class SessionLog {
     'activities': activities.map((item) => item.toJson()).toList(),
     'pendingAction': pendingAction?.toJson(),
     'history': history?.toJson(),
+    'nextSeq': nextSeq,
     'latestPlanUpdate': latestPlanUpdate?.toJson(),
   };
 }

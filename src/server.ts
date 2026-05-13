@@ -2005,6 +2005,10 @@ export async function startServer(
         threadUpdatedAt: session.updatedAt,
         runtime: log.runtime,
       });
+      const replayNextSeq = nextSeqForLatestPlanUpdate(
+        sessionSeqCursor.get(sessionId) ?? log.nextSeq,
+        latestPlanUpdate,
+      );
       response.json({
         session: mapSession(
           session,
@@ -2016,6 +2020,7 @@ export async function startServer(
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
         history,
         latestPlanUpdate,
+        nextSeq: replayNextSeq,
       });
     }),
   );

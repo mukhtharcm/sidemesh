@@ -149,6 +149,41 @@ void main() {
     expect(cached.log.session.updatedAt, DateTime(2026, 1, 1, 12, 1));
   });
 
+  testWidgets('snapshot replay cursor prevents reconnect delta loops', (
+    tester,
+  ) async {
+    final session = _session('snapshot-replay-cursor');
+    final api = _RichEventFakeApi(
+      logNextSeq: 9,
+      messages: [
+        _assistantMessage(
+          id: 'snapshot-msg',
+          text: 'Snapshot transcript item.',
+          content: const [TextBlock('Snapshot transcript item.')],
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('snapshot-replay-cursor'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 9});
+    await _pumpFrames(tester);
+
+    expect(find.text('Snapshot transcript item.'), findsOneWidget);
+    expect(api.fetchEventsCalls, 0);
+  });
+
   testWidgets('session screen keeps only the latest plan update per session', (
     tester,
   ) async {
@@ -1512,6 +1547,7 @@ class _RichEventFakeApi extends ApiClient {
     this.activities = const [],
     this.sessionLogHistory,
     this.latestPlanUpdate,
+    this.logNextSeq,
     this.eventsDelta,
     this.eventsError,
     this.fetchLogBlocker,
@@ -1526,6 +1562,7 @@ class _RichEventFakeApi extends ApiClient {
   final List<SessionActivity> activities;
   final SessionLogHistorySummary? sessionLogHistory;
   final LiveEvent? latestPlanUpdate;
+  final int? logNextSeq;
   final SessionEventsDelta? eventsDelta;
   final Object? eventsError;
   Future<void>? fetchLogBlocker;
@@ -1533,6 +1570,7 @@ class _RichEventFakeApi extends ApiClient {
   final SessionSummary? sessionSummary;
   final SessionStatus? sessionStatus;
   int stopSessionCalls = 0;
+  int fetchEventsCalls = 0;
 
   @override
   Future<NodeInfo> fetchNode(HostProfile host) async => nodeInfo ?? _nodeInfo();
@@ -1562,6 +1600,7 @@ class _RichEventFakeApi extends ApiClient {
             totalActivities: activities.length,
             returnedActivities: activities.length,
           ),
+      nextSeq: logNextSeq,
       latestPlanUpdate: latestPlanUpdate,
     );
   }
@@ -1573,6 +1612,7 @@ class _RichEventFakeApi extends ApiClient {
     required int since,
     int? baseUpdatedAt,
   }) async {
+    fetchEventsCalls += 1;
     if (eventsError != null) {
       throw eventsError!;
     }
