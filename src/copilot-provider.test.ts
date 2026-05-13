@@ -172,6 +172,81 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("coalesces SDK subagent lifecycle history without tool call ids", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-sdk-subagent-no-id-"),
+    );
+    try {
+      const sessionId = "22222222-3333-4444-8555-666666666666";
+      const sdk = new FakeCopilotSdkClient({
+        sessions: [
+          {
+            metadata: {
+              sessionId,
+              startTime: new Date("2026-04-02T00:00:00.000Z"),
+              modifiedTime: new Date("2026-04-02T00:05:00.000Z"),
+              summary: "SDK Subagent Session",
+              isRemote: false,
+              context: { cwd: dir },
+            },
+            events: [
+              event(
+                "subagent.started",
+                {
+                  agentName: "code-review",
+                  agentDisplayName: "Documentation Agent",
+                },
+                "subagent-history-start",
+              ),
+              event(
+                "subagent.completed",
+                {
+                  agentName: "code-review",
+                  agentDisplayName: "Documentation Agent",
+                  durationMs: 3400,
+                },
+                "subagent-history-complete",
+              ),
+            ],
+          },
+        ],
+      });
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const sessions = await provider.listSessionThreads!({
+        limit: 10,
+        archived: false,
+      });
+      const log = await provider.readSessionLog!(sessions[0]!);
+      const subagentActivities = log.activities.filter(
+        (activity) =>
+          activity.type === "tool" && activity.toolName === "code-review",
+      );
+      assert.equal(subagentActivities.length, 1);
+      const subagent = subagentActivities[0];
+      assert.ok(subagent, "Expected coalesced subagent activity");
+      if (subagent.type !== "tool") {
+        throw new Error("Expected coalesced subagent activity to be a tool");
+      }
+      assert.equal(subagent.id, "subagent-history-start");
+      assert.equal(subagent.status, "completed");
+      assert.equal(subagent.title, "Documentation Agent (3s)");
+      assert.equal((subagent.result as any)?.type, "success");
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("runs a text turn through SDK createSession/send", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-test-"),
@@ -1830,6 +1905,80 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("records fallback audit rows for blank Copilot ask-user requests", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-blank-ask-user-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const liveMessages: string[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "session_message_appended") {
+          liveMessages.push(liveEvent.message.text);
+        }
+      });
+      const opened = waitForActionOpened(provider, "user_input");
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [
+          { type: "text", text: "please blank ask user", text_elements: [] },
+        ],
+        overrides: emptyOverrides(),
+      });
+
+      const action = await opened;
+      assert.equal(action.userInput?.question, "Agent question");
+      assert.deepEqual(action.userInput?.choices, []);
+      assert.equal(
+        provider.respondToPendingAction(action, {
+          answer: "sensitive freeform answer",
+          wasFreeform: true,
+        }),
+        true,
+      );
+      await completed;
+
+      const log = await provider.readSessionLog!(created.thread);
+      const systemMessages = log.messages
+        .filter((message) => message.role === "system")
+        .map((message) => message.text);
+      assert.ok(
+        systemMessages.some((message) =>
+          message.includes("Agent asked: Agent question"),
+        ),
+      );
+      assert.ok(
+        systemMessages.some((message) => message.includes("User answered.")),
+      );
+      assert.equal(
+        systemMessages.some((message) =>
+          message.includes("sensitive freeform answer"),
+        ),
+        false,
+      );
+      assert.ok(
+        liveMessages.some((message) =>
+          message.includes("Agent asked: Agent question"),
+        ),
+      );
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("bridges Copilot elicitation requests into Sidemesh pending actions", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-elicitation-test-"),
@@ -2573,7 +2722,16 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         return `message-${sendIndex}`;
       }
     }
-    if (options.prompt.includes("ask user")) {
+    if (options.prompt.includes("blank ask user")) {
+      userInputResult = await this.config.onUserInputRequest!(
+        {
+          question: "   ",
+          choices: [],
+          allowFreeform: true,
+        },
+        { sessionId: this.sessionId },
+      );
+    } else if (options.prompt.includes("ask user")) {
       userInputResult = await this.config.onUserInputRequest!(
         {
           question: "Which environment should I use?",
@@ -2685,7 +2843,30 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
           }),
         );
       }
-      if (options.prompt.includes("ask user")) {
+      if (options.prompt.includes("blank ask user")) {
+        this.emit(
+          event("tool.execution_start", {
+            toolCallId: "ask-user-blank-call-1",
+            toolName: "ask_user",
+            arguments: {
+              question: "   ",
+              choices: [],
+              allow_freeform: true,
+            },
+          }),
+        );
+        this.emit(
+          event("tool.execution_complete", {
+            toolCallId: "ask-user-blank-call-1",
+            toolName: "ask_user",
+            success: true,
+            result: {
+              content: "User responded",
+              detailedContent: "User responded",
+            },
+          }),
+        );
+      } else if (options.prompt.includes("ask user")) {
         this.emit(
           event("tool.execution_start", {
             toolCallId: "intent-call-1",
@@ -2783,7 +2964,31 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
           }),
         );
       }
-      if (options.prompt.includes("subagent")) {
+      if (options.prompt.includes("subagent without id")) {
+        this.emit(
+          event(
+            "subagent.started",
+            {
+              agentName: "code-review",
+              agentDisplayName: "Documentation Agent",
+              agentDescription: "Reads docs",
+            },
+            "subagent-no-id-start",
+          ),
+        );
+        this.emit(
+          event(
+            "subagent.completed",
+            {
+              agentName: "code-review",
+              agentDisplayName: "Documentation Agent",
+              durationMs: 3400,
+              totalTokens: 120,
+            },
+            "subagent-no-id-complete",
+          ),
+        );
+      } else if (options.prompt.includes("subagent")) {
         this.emit(
           event("subagent.started", {
             toolCallId: "subagent-1",
@@ -3145,6 +3350,80 @@ describe("copilot rich event cleanup", () => {
       assert.equal(reloadedActivity.toolName, "code-review");
       assert.equal(reloadedActivity.title, "Documentation Agent (3s)");
       assert.equal((reloadedActivity.result as any)?.type, "success");
+    } finally {
+      await new Promise((r) => setTimeout(r, 50));
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
+  it("coalesces live subagent lifecycle events without tool call ids", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-subagent-no-id-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const activities: any[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "activity_updated") {
+          activities.push(liveEvent.activity);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [
+          {
+            type: "text",
+            text: "hello subagent without id",
+            text_elements: [],
+          },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const started = activities.find(
+        (activity) =>
+          activity.type === "tool" &&
+          activity.toolName === "code-review" &&
+          activity.status === "in_progress",
+      );
+      const completedActivity = activities.find(
+        (activity) =>
+          activity.type === "tool" &&
+          activity.toolName === "code-review" &&
+          activity.status === "completed",
+      );
+      assert.ok(started, "Expected subagent started activity");
+      assert.ok(completedActivity, "Expected subagent completed activity");
+      assert.equal(completedActivity?.id, started?.id);
+      assert.equal(completedActivity?.title, "Documentation Agent (3s)");
+
+      const log = await provider.readSessionLog!(created.thread);
+      const subagentActivities = log.activities.filter(
+        (activity) =>
+          activity.type === "tool" && activity.toolName === "code-review",
+      );
+      assert.equal(subagentActivities.length, 1);
+      const subagent = subagentActivities[0];
+      assert.ok(subagent, "Expected coalesced subagent activity");
+      if (subagent.type !== "tool") {
+        throw new Error("Expected coalesced subagent activity to be a tool");
+      }
+      assert.equal(subagent.status, "completed");
+      assert.equal(subagent.title, "Documentation Agent (3s)");
     } finally {
       await new Promise((r) => setTimeout(r, 50));
       await rm(dir, {

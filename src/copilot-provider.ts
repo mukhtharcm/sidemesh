@@ -1029,64 +1029,89 @@ export class CopilotAgentProvider
     }
 
     if (event.type === "subagent.started") {
+      const data = asRecord(event.data);
+      const activityId = copilotSubagentActivityId(data, event.id, null);
+      if (!activityId) {
+        return;
+      }
+      const agentName = copilotSubagentAgentName(data);
+      const displayName = copilotSubagentDisplayName(data, agentName);
       this.upsertAndEmitActivity(session, active?.turnId ?? null, {
-        id: event.data.toolCallId ?? event.id,
+        id: activityId,
         type: "tool",
         turnId: active?.turnId ?? null,
         status: "in_progress",
-        toolName: event.data.agentName ?? "subagent",
-        title: event.data.agentDisplayName ?? event.data.agentName ?? "Subagent",
+        toolName: agentName,
+        title: displayName,
         args: null,
         output: null,
         result: null,
         isError: false,
-        semantic: copilotTaskSemantic(
-          event.data.agentDisplayName ?? event.data.agentName ?? "Subagent",
-        ),
+        semantic: copilotTaskSemantic(displayName),
       });
       return;
     }
 
     if (event.type === "subagent.completed") {
-      const duration = typeof event.data.durationMs === "number"
-        ? ` (${Math.round(event.data.durationMs / 1000)}s)`
+      const data = asRecord(event.data);
+      const activityId = copilotSubagentActivityId(
+        data,
+        event.id,
+        session.activities.values(),
+      );
+      if (!activityId) {
+        return;
+      }
+      const agentName = copilotSubagentAgentName(data);
+      const displayName = copilotSubagentDisplayName(data, agentName);
+      const durationMs = data?.durationMs;
+      const duration = typeof durationMs === "number"
+        ? ` (${Math.round(durationMs / 1000)}s)`
         : "";
       this.upsertAndEmitActivity(session, active?.turnId ?? null, {
-        id: event.data.toolCallId ?? event.id,
+        id: activityId,
         type: "tool",
         turnId: active?.turnId ?? null,
         status: "completed",
-        toolName: event.data.agentName ?? "subagent",
-        title: `${event.data.agentDisplayName ?? event.data.agentName ?? "Subagent"}${duration}`,
+        toolName: agentName,
+        title: `${displayName}${duration}`,
         args: null,
         output: null,
         result: { type: "success", summary: "Subagent completed" },
         isError: false,
-        semantic: copilotTaskSemantic(
-          event.data.agentDisplayName ?? event.data.agentName ?? "Subagent",
-        ),
+        semantic: copilotTaskSemantic(displayName),
       });
       return;
     }
 
     if (event.type === "subagent.failed") {
+      const data = asRecord(event.data);
+      const activityId = copilotSubagentActivityId(
+        data,
+        event.id,
+        session.activities.values(),
+      );
+      if (!activityId) {
+        return;
+      }
+      const agentName = copilotSubagentAgentName(data);
+      const displayName = copilotSubagentDisplayName(data, agentName);
       this.upsertAndEmitActivity(session, active?.turnId ?? null, {
-        id: event.data.toolCallId ?? event.id,
+        id: activityId,
         type: "tool",
         turnId: active?.turnId ?? null,
         status: "failed",
-        toolName: event.data.agentName ?? "subagent",
-        title: event.data.agentDisplayName ?? event.data.agentName ?? "Subagent",
+        toolName: agentName,
+        title: displayName,
         args: null,
         output: null,
         result: {
           type: "error",
-          summary: event.data.error ?? "Subagent failed",
+          summary:
+            readFirstString(data, ["error", "message"]) ?? "Subagent failed",
         },
         isError: true,
-        semantic: copilotTaskSemantic(
-          event.data.agentDisplayName ?? event.data.agentName ?? "Subagent",
-        ),
+        semantic: copilotTaskSemantic(displayName),
       });
       return;
     }
@@ -2678,11 +2703,8 @@ function buildCopilotUserInputAction(
 
 function formatCopilotUserInputRequestMessage(
   request: CopilotSdkUserInputRequest,
-): string | null {
-  const question = request.question?.trim();
-  if (!question) {
-    return null;
-  }
+): string {
+  const question = request.question?.trim() || "Agent question";
   const choices = (request.choices ?? [])
     .filter(
       (choice): choice is string =>
@@ -3510,14 +3532,17 @@ function parseSdkSessionEvents(
     }
 
     if (event.type === "subagent.started") {
+      const agentName = copilotSubagentAgentName(data);
+      const displayName = copilotSubagentDisplayName(data, agentName);
+      const activityId = copilotSubagentActivityId(data, event.id, null);
       const activity = buildCopilotHistorySubagentActivity({
-        id: data.toolCallId,
+        id: activityId,
         eventId: event.id,
         createdAt: timestamp,
         seq,
         status: "in_progress",
-        agentName: data.agentName,
-        agentDisplayName: data.agentDisplayName,
+        agentName,
+        agentDisplayName: displayName,
       });
       if (activity) {
         activities.set(activity.id, activity);
@@ -3527,14 +3552,21 @@ function parseSdkSessionEvents(
     }
 
     if (event.type === "subagent.completed") {
+      const agentName = copilotSubagentAgentName(data);
+      const displayName = copilotSubagentDisplayName(data, agentName);
+      const activityId = copilotSubagentActivityId(
+        data,
+        event.id,
+        activities.values(),
+      );
       const activity = buildCopilotHistorySubagentActivity({
-        id: data.toolCallId,
+        id: activityId,
         eventId: event.id,
         createdAt: timestamp,
         seq,
         status: "completed",
-        agentName: data.agentName,
-        agentDisplayName: data.agentDisplayName,
+        agentName,
+        agentDisplayName: displayName,
         durationMs: typeof data.durationMs === "number" ? data.durationMs : null,
         error: null,
       });
@@ -3558,14 +3590,21 @@ function parseSdkSessionEvents(
     }
 
     if (event.type === "subagent.failed") {
+      const agentName = copilotSubagentAgentName(data);
+      const displayName = copilotSubagentDisplayName(data, agentName);
+      const activityId = copilotSubagentActivityId(
+        data,
+        event.id,
+        activities.values(),
+      );
       const activity = buildCopilotHistorySubagentActivity({
-        id: data.toolCallId,
+        id: activityId,
         eventId: event.id,
         createdAt: timestamp,
         seq,
         status: "failed",
-        agentName: data.agentName,
-        agentDisplayName: data.agentDisplayName,
+        agentName,
+        agentDisplayName: displayName,
         durationMs: typeof data.durationMs === "number" ? data.durationMs : null,
         error: typeof data.error === "string" ? data.error : null,
       });
@@ -3681,6 +3720,97 @@ function buildCopilotHistoryToolActivity(options: {
     createdAt: options.createdAt,
     seq: options.seq,
   };
+}
+
+function copilotSubagentActivityId(
+  data: Record<string, unknown> | null,
+  eventId: unknown,
+  existingActivities: Iterable<SessionActivity> | null,
+): string | null {
+  const explicitId = readFirstString(data, [
+    "toolCallId",
+    "tool_call_id",
+    "toolCallID",
+    "runId",
+    "run_id",
+    "taskId",
+    "task_id",
+    "agentTaskId",
+    "agent_task_id",
+  ]);
+  if (explicitId) {
+    return explicitId;
+  }
+
+  if (existingActivities) {
+    const agentName = copilotSubagentAgentName(data);
+    const displayName = copilotSubagentDisplayName(data, agentName);
+    const existingId = findMatchingInProgressCopilotSubagentActivityId(
+      existingActivities,
+      agentName,
+      displayName,
+    );
+    if (existingId) {
+      return existingId;
+    }
+  }
+
+  if (typeof eventId === "string" && eventId.trim().length > 0) {
+    return eventId.trim();
+  }
+  return null;
+}
+
+function copilotSubagentAgentName(
+  data: Record<string, unknown> | null,
+): string {
+  return readFirstString(data, [
+    "agentName",
+    "agent_name",
+    "agentType",
+    "agent_type",
+    "name",
+  ]) ?? "subagent";
+}
+
+function copilotSubagentDisplayName(
+  data: Record<string, unknown> | null,
+  agentName: string,
+): string {
+  return readFirstString(data, [
+    "agentDisplayName",
+    "agent_display_name",
+    "displayName",
+    "display_name",
+    "title",
+  ]) ?? agentName;
+}
+
+function findMatchingInProgressCopilotSubagentActivityId(
+  activities: Iterable<SessionActivity>,
+  agentName: string,
+  displayName: string,
+): string | null {
+  let match: string | null = null;
+  for (const activity of activities) {
+    if (
+      activity.type !== "tool" ||
+      activity.status !== "in_progress" ||
+      activity.toolName !== agentName ||
+      activity.title !== displayName ||
+      activity.args != null ||
+      activity.output != null ||
+      activity.result != null ||
+      activity.semantic?.category !== "task"
+    ) {
+      continue;
+    }
+    if (match) {
+      return null;
+    }
+    match = activity.id;
+  }
+  return match;
 }
 
 function buildCopilotHistorySubagentActivity(options: {
