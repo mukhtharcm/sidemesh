@@ -44,6 +44,7 @@ export type AgentSessionActivityDraft =
 
 export interface AgentMessageDraft {
   id: string;
+  role?: SessionMessage["role"];
   text: string;
   content?: SessionMessageContentBlock[];
   phase?: SessionMessage["phase"];
@@ -246,6 +247,12 @@ export type AgentProviderLiveEvent =
     }
   | {
       type: "assistant_message_completed";
+      sessionId: string;
+      turnId?: string;
+      message: AgentMessageDraft;
+    }
+  | {
+      type: "session_message_appended";
       sessionId: string;
       turnId?: string;
       message: AgentMessageDraft;

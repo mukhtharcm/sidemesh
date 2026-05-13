@@ -814,6 +814,7 @@ export interface LiveEvent {
     | "turn_started"
     | "assistant_delta"
     | "assistant_message_completed"
+    | "session_message_appended"
     | "turn_completed"
     | "activity_updated"
     | "runtime_updated"

@@ -102,6 +102,7 @@ Providers should emit `liveEvent` events for streaming UI updates:
 - `turn_started`
 - `assistant_delta`
 - `assistant_message_completed`
+- `session_message_appended`
 - `activity_updated`
 - `activity_output_delta`
 - `activity_terminal_input`

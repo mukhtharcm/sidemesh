@@ -2753,6 +2753,17 @@ class _SessionScreenState extends State<SessionScreen>
         _refreshThinkingState();
         _syncSessionLiveActivity();
         _scrollToBottomFast();
+      case 'session_message_appended':
+        final message = event.messageItem;
+        if (message == null) {
+          return;
+        }
+        setState(() {
+          _upsertOptimisticMessage(message);
+        });
+        _syncSessionLiveActivity();
+        _persistCurrentSessionLog();
+        _scrollToBottomFast();
       case 'turn_completed':
         _flushPendingLiveUpdates();
         final committedLive = _liveAssistantMessage;

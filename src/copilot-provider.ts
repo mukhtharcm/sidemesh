@@ -614,7 +614,7 @@ export class CopilotAgentProvider
       if (session) {
         const text = formatCopilotUserInputResponseMessage(decision);
         if (text) {
-          this.appendSystemMessage(session, text);
+          this.appendAndEmitSystemMessage(session, text);
         }
       }
       this.pendingUserInputs.delete(action.id);
@@ -632,7 +632,7 @@ export class CopilotAgentProvider
       if (session) {
         const text = formatCopilotElicitationResponseMessage(decision);
         if (text) {
-          this.appendSystemMessage(session, text);
+          this.appendAndEmitSystemMessage(session, text);
         }
       }
       this.pendingElicitations.delete(action.id);
@@ -1580,7 +1580,7 @@ export class CopilotAgentProvider
     const action = buildCopilotUserInputAction(session, request);
     const requestMessage = formatCopilotUserInputRequestMessage(request);
     if (requestMessage) {
-      this.appendSystemMessage(session, requestMessage);
+      this.appendAndEmitSystemMessage(session, requestMessage);
     }
     this.emit("liveEvent", {
       type: "action_opened",
@@ -1604,7 +1604,7 @@ export class CopilotAgentProvider
     const action = buildCopilotElicitationAction(session, request);
     const requestMessage = formatCopilotElicitationRequestMessage(request);
     if (requestMessage) {
-      this.appendSystemMessage(session, requestMessage);
+      this.appendAndEmitSystemMessage(session, requestMessage);
     }
     this.emit("liveEvent", {
       type: "action_opened",
@@ -1684,11 +1684,30 @@ export class CopilotAgentProvider
   private appendSystemMessage(
     session: CopilotSessionState,
     text: string,
-  ): void {
-    this.appendMessage(session, {
+  ): SessionMessage {
+    return this.appendMessage(session, {
       role: "system",
       text,
       attachments: [],
+    });
+  }
+
+  private appendAndEmitSystemMessage(
+    session: CopilotSessionState,
+    text: string,
+  ): void {
+    const message = this.appendSystemMessage(session, text);
+    this.emit("liveEvent", {
+      type: "session_message_appended",
+      sessionId: session.thread.id,
+      turnId: this.activeTurns.get(session.thread.id)?.turnId,
+      message: {
+        id: message.id,
+        role: message.role,
+        text: message.text,
+        content: message.content,
+        phase: message.phase,
+      },
     });
   }
 
@@ -2727,7 +2746,7 @@ function formatCopilotElicitationResponseMessage(
   switch (response.action) {
     case "accept":
       if (response.content && Object.keys(response.content).length > 0) {
-        return `Structured input submitted:\n${JSON.stringify(response.content, null, 2)}`;
+        return `Structured input submitted (${Object.keys(response.content).length} fields).`;
       }
       return "Structured input submitted.";
     case "decline":
@@ -3754,7 +3773,7 @@ function buildCopilotCommandActivityDraft(options: {
     source: "copilot",
     processId: existingCommand?.processId ?? null,
     commandActions: existingCommand?.commandActions ?? [],
-    terminalStatus: options.status === "in_progress" ? "waiting" : null,
+    terminalStatus: null,
     terminalInput: existingCommand?.terminalInput ?? null,
   };
 }

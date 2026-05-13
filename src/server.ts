@@ -968,6 +968,28 @@ export async function startServer(
         scheduleRecentSessionUpsert(event.sessionId);
         return;
       }
+      case "session_message_appended": {
+        const seq = allocSeq(event.sessionId);
+        broadcastLive(event.sessionId, {
+          type: "session_message_appended",
+          sessionId: event.sessionId,
+          turnId: event.turnId,
+          seq,
+          messageItem: {
+            id: event.message.id,
+            role: event.message.role ?? "system",
+            text: event.message.text,
+            content: event.message.content ?? [],
+            attachments: [],
+            createdAt: Date.now(),
+            seq,
+            phase: event.message.phase,
+          },
+        });
+        clearSessionLogCache(logCache, event.sessionId);
+        scheduleRecentSessionUpsert(event.sessionId);
+        return;
+      }
       case "activity_updated": {
         const next = upsertLiveActivity(
           liveActivities,

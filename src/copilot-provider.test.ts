@@ -1700,6 +1700,12 @@ describe("Copilot provider", () => {
       });
       await provider.start();
 
+      const liveMessages: string[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "session_message_appended") {
+          liveMessages.push(liveEvent.message.text);
+        }
+      });
       const opened = waitForActionOpened(provider, "user_input");
       const completed = waitForTurnCompleted(provider);
       const created = await provider.createSession({
@@ -1751,6 +1757,14 @@ describe("Copilot provider", () => {
             message.text.includes("User answered: staging"),
         ),
       );
+      assert.ok(
+        liveMessages.some((message) =>
+          message.includes("Agent asked: Which environment should I use?"),
+        ),
+      );
+      assert.ok(
+        liveMessages.some((message) => message.includes("User answered: staging")),
+      );
       assert.match(log.messages.at(-1)?.text ?? "", /staging/);
     } finally {
       await settleProviderWrites();
@@ -1775,6 +1789,12 @@ describe("Copilot provider", () => {
       });
       await provider.start();
 
+      const liveMessages: string[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "session_message_appended") {
+          liveMessages.push(liveEvent.message.text);
+        }
+      });
       const opened = waitForActionOpened(provider, "elicitation");
       const completed = waitForTurnCompleted(provider);
       const created = await provider.createSession({
@@ -1810,7 +1830,25 @@ describe("Copilot provider", () => {
         log.messages.some(
           (message) =>
             message.role === "system" &&
-            message.text.includes("Structured input submitted:"),
+            message.text.includes("Structured input submitted"),
+        ),
+      );
+      const structuredAuditMessage = log.messages.find(
+        (message) =>
+          message.role === "system" &&
+          message.text.includes("Structured input submitted"),
+      );
+      assert.ok(structuredAuditMessage, "Expected structured input audit row");
+      assert.doesNotMatch(structuredAuditMessage.text, /us-east/);
+      assert.doesNotMatch(structuredAuditMessage.text, /dryRun/);
+      assert.ok(
+        liveMessages.some((message) =>
+          message.includes("Agent requested structured input:"),
+        ),
+      );
+      assert.ok(
+        liveMessages.some((message) =>
+          message.includes("Structured input submitted"),
         ),
       );
       assert.match(log.messages.at(-1)?.text ?? "", /us-east/);
