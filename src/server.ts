@@ -520,7 +520,7 @@ export async function startServer(
       );
     } catch (error) {
       if (isTransientTurnSnapshotReadError(error)) {
-        return true;
+        return isRunningThreadStatus(observedStatus);
       }
       throw error;
     }
