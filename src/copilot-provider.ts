@@ -56,6 +56,7 @@ import type {
   LivePlanStep,
   ModelSummary,
   PendingActionElicitationField,
+  CommandActivity,
   SessionActivity,
   SkillCatalogEntry,
   SkillSummary,
@@ -1265,6 +1266,7 @@ export class CopilotAgentProvider
         result: null,
         isError: null,
         existing: null,
+        cwd: session.thread.cwd,
         mode: "live",
       });
       if (!activity) {
@@ -1297,7 +1299,6 @@ export class CopilotAgentProvider
     if (event.type === "tool.execution_complete") {
       const completeData = event.data as unknown as Record<string, unknown>;
       const existing = session.activities.get(event.data.toolCallId);
-      const existingTool = existing?.type === "tool" ? existing : null;
       const output =
         extractCopilotToolOutput(event.data.result ?? event.data.error) ??
         (existing?.type === "tool" || existing?.type === "command"
@@ -1307,12 +1308,17 @@ export class CopilotAgentProvider
         id: event.data.toolCallId,
         turnId: active?.turnId ?? null,
         status: event.data.success ? "completed" : "failed",
-        toolName: existingTool?.toolName ?? copilotToolName(completeData.toolName),
-        args: existingTool?.args ?? completeData.arguments ?? null,
+        toolName: existing?.type === "tool"
+          ? existing.toolName
+          : existing?.type === "command"
+            ? "bash"
+          : copilotToolName(completeData.toolName),
+        args: existing?.type === "tool" ? existing.args : completeData.arguments ?? null,
         output,
         result: event.data.result ?? event.data.error ?? null,
         isError: event.data.success ? false : true,
-        existing: existingTool,
+        existing: existing ?? null,
+        cwd: session.thread.cwd,
         mode: "live",
       });
       if (!activity) {
@@ -1830,7 +1836,10 @@ export class CopilotAgentProvider
       for (const item of parsed.sessions ?? []) {
         const restoredActivities = new Map<string, SessionActivity>();
         for (const rawActivity of item.activities ?? []) {
-          const normalized = normalizeStoredCopilotActivity(rawActivity);
+          const normalized = normalizeStoredCopilotActivity(
+            rawActivity,
+            item.thread.cwd,
+          );
           if (!normalized) {
             stateChangedOnLoad = true;
             continue;
@@ -3412,6 +3421,7 @@ function parseSdkSessionEvents(
         existing: null,
         createdAt: timestamp,
         seq,
+        cwd,
         mode: "history",
       });
       if (activity) {
@@ -3432,7 +3442,6 @@ function parseSdkSessionEvents(
         });
       }
       const existing = activities.get(data.toolCallId);
-      const existingTool = existing?.type === "tool" ? existing : null;
       const output =
         extractCopilotToolOutput(data.result ?? data.error) ??
         (existing?.type === "tool" || existing?.type === "command"
@@ -3440,21 +3449,26 @@ function parseSdkSessionEvents(
           : null);
       const activity = buildCopilotHistoryToolActivity({
         id: data.toolCallId,
-        turnId: existingTool?.turnId ?? null,
+        turnId: existing?.turnId ?? null,
         status: data.success === false ? "failed" : "completed",
-        toolName: existingTool?.toolName ?? copilotToolName(data.toolName),
-        args: existingTool?.args ?? data.arguments ?? null,
+        toolName: existing?.type === "tool"
+          ? existing.toolName
+          : existing?.type === "command"
+            ? "bash"
+          : copilotToolName(data.toolName),
+        args: existing?.type === "tool" ? existing.args : data.arguments ?? null,
         output,
         result: data.result ?? data.error ?? null,
         isError: data.success === false,
-        existing: existingTool,
-        createdAt: existingTool?.createdAt ?? timestamp,
-        seq: existingTool?.seq ?? seq,
+        existing: existing ?? null,
+        createdAt: existing?.createdAt ?? timestamp,
+        seq: existing?.seq ?? seq,
+        cwd,
         mode: "history",
       });
       if (activity) {
         activities.set(data.toolCallId, activity);
-        if (!existingTool) {
+        if (!existing) {
           seq += 1;
         }
       } else {
@@ -3570,20 +3584,25 @@ function buildCopilotToolActivityDraft(options: {
   output: string | null;
   result: unknown;
   isError: boolean | null;
-  existing: ToolActivity | null;
+  existing: SessionActivity | null;
+  cwd: string;
   mode: CopilotToolNormalizationMode;
-}): Omit<ToolActivity, "createdAt" | "seq"> | null {
+}): AgentSessionActivityDraft | null {
+  if (isCopilotShellTool(options.toolName)) {
+    return buildCopilotCommandActivityDraft(options);
+  }
+  const existingTool = options.existing?.type === "tool" ? options.existing : null;
   const normalized = normalizeCopilotToolActivityParts({
     toolName: options.toolName,
     title:
-      options.existing?.title ??
+      existingTool?.title ??
       formatCopilotToolCommand(options.toolName, options.args),
     args: options.args,
     output: options.output,
     result: options.result,
     isError: options.isError,
     semantic: mergeCopilotToolSemantic(
-      options.existing,
+      existingTool,
       inferCopilotToolSemantic(options.toolName, options.args, options.result),
     ),
     mode: options.mode,
@@ -3617,9 +3636,10 @@ function buildCopilotHistoryToolActivity(options: {
   output: string | null;
   result: unknown;
   isError: boolean | null;
-  existing: ToolActivity | null;
+  existing: SessionActivity | null;
+  cwd: string;
   mode: CopilotToolNormalizationMode;
-}): ToolActivity | null {
+}): SessionActivity | null {
   const draft = buildCopilotToolActivityDraft(options);
   if (!draft) {
     return null;
@@ -3690,14 +3710,107 @@ function buildCopilotHistorySubagentActivity(options: {
   };
 }
 
+function isCopilotShellTool(toolName: string): boolean {
+  return toolName === "bash";
+}
+
+function buildCopilotCommandActivityDraft(options: {
+  id: string;
+  turnId: string | null;
+  status: SessionActivity["status"];
+  toolName: string;
+  args: unknown;
+  output: string | null;
+  result: unknown;
+  isError: boolean | null;
+  existing: SessionActivity | null;
+  cwd: string;
+}): Omit<CommandActivity, "createdAt" | "seq"> {
+  const existingCommand =
+    options.existing?.type === "command" ? options.existing : null;
+  const output = normalizeCopilotToolOutput(
+    options.toolName,
+    options.output,
+    options.result,
+  );
+  const command =
+    readCopilotShellCommand(options.args) ||
+    existingCommand?.command ||
+    options.toolName;
+  const exitCode =
+    parseCopilotShellExitCode(options.result, output) ??
+    existingCommand?.exitCode ??
+    (options.isError === true ? 1 : null);
+  return {
+    id: options.id,
+    type: "command",
+    turnId: options.turnId,
+    status: options.status,
+    command,
+    cwd: options.cwd || existingCommand?.cwd || "",
+    output,
+    exitCode,
+    durationMs: existingCommand?.durationMs ?? null,
+    source: "copilot",
+    processId: existingCommand?.processId ?? null,
+    commandActions: existingCommand?.commandActions ?? [],
+    terminalStatus: options.status === "in_progress" ? "waiting" : null,
+    terminalInput: existingCommand?.terminalInput ?? null,
+  };
+}
+
+function readCopilotShellCommand(args: unknown): string | null {
+  const typedArgs = asRecord(args);
+  return readFirstString(typedArgs, [
+    "command",
+    "cmd",
+    "fullCommandText",
+    "shellCommand",
+  ]);
+}
+
+function parseCopilotShellExitCode(
+  result: unknown,
+  output: string | null,
+): number | null {
+  const typedResult = asRecord(result);
+  const direct =
+    readNumber(typedResult, ["exitCode", "exit_code", "code"]) ??
+    readNumber(asRecord(typedResult?.metadata), ["exitCode", "exit_code"]);
+  if (direct != null) {
+    return direct;
+  }
+  const match = (output ?? "").match(/<exited with exit code (-?\d+)>/);
+  return match ? Number.parseInt(match[1]!, 10) : null;
+}
+
 function normalizeStoredCopilotActivity(
   activity: SessionActivity,
+  cwd: string,
 ): SessionActivity | null {
   const normalized = normalizeStoredSessionActivity(activity);
   if (normalized.type !== "tool") {
     return normalized;
   }
   const toolName = (normalized.toolName ?? "").trim();
+  if (isCopilotShellTool(toolName)) {
+    return {
+      ...buildCopilotCommandActivityDraft({
+        id: normalized.id,
+        turnId: normalized.turnId,
+        status: normalized.status,
+        toolName,
+        args: normalized.args,
+        output: normalized.output,
+        result: normalized.result,
+        isError: normalized.isError,
+        existing: null,
+        cwd,
+      }),
+      createdAt: normalized.createdAt,
+      seq: normalized.seq,
+    };
+  }
   const next = normalizeCopilotToolActivityParts({
     toolName,
     title: normalized.title ?? toolName,
@@ -3804,6 +3917,7 @@ function isCopilotTaskLikeTool(
     toolName === "ask_user" ||
     toolName === "report_intent" ||
     toolName === "task_complete" ||
+    toolName === "task" ||
     toolName === "sql" ||
     toolName === "read_agent" ||
     toolName === "list_agents" ||
@@ -3811,7 +3925,8 @@ function isCopilotTaskLikeTool(
     toolName === "explore" ||
     toolName === "read_bash" ||
     toolName === "stop_bash" ||
-    toolName === "general-purpose"
+    toolName === "general-purpose" ||
+    toolName.startsWith("github-mcp-server-")
   ) {
     return true;
   }
@@ -3831,12 +3946,18 @@ function normalizeCopilotToolTitle(
   args: unknown,
 ): string {
   const typedArgs = asRecord(args);
+  const normalizedTitle = title?.trim() ?? "";
   switch (toolName) {
     case "ask_user": {
       const question = typedArgs && typeof typedArgs.question === "string"
         ? typedArgs.question.trim()
         : "";
-      return question ? `Asked user: ${question}` : "Asked user";
+      if (question) {
+        return `Asked user: ${question}`;
+      }
+      return normalizedTitle && !normalizedTitle.includes("{")
+        ? normalizedTitle
+        : "Asked user";
     }
     case "report_intent":
       return "Reported intent";
@@ -3847,21 +3968,36 @@ function normalizeCopilotToolTitle(
         typedArgs && typeof typedArgs.description === "string"
           ? typedArgs.description.trim()
           : "";
-      return description ? `Run SQL query: ${description}` : "Run SQL query";
+      if (description) {
+        return `Run SQL query: ${description}`;
+      }
+      return normalizedTitle && !normalizedTitle.includes("{")
+        ? normalizedTitle
+        : "Run SQL query";
     }
     case "stop_bash": {
       const shellId =
         typedArgs && typeof typedArgs.shellId === "string"
           ? typedArgs.shellId.trim()
           : "";
-      return shellId ? `Stopped command ${shellId}` : "Stopped command";
+      if (shellId) {
+        return `Stopped command ${shellId}`;
+      }
+      return normalizedTitle && !normalizedTitle.includes("{")
+        ? normalizedTitle
+        : "Stopped command";
     }
     case "read_bash": {
       const shellId =
         typedArgs && typeof typedArgs.shellId === "string"
           ? typedArgs.shellId.trim()
           : "";
-      return shellId ? `Read command ${shellId} output` : "Read command output";
+      if (shellId) {
+        return `Read command ${shellId} output`;
+      }
+      return normalizedTitle && !normalizedTitle.includes("{")
+        ? normalizedTitle
+        : "Read command output";
     }
     case "list_agents":
       return "Listed agents";
@@ -3871,16 +4007,172 @@ function normalizeCopilotToolTitle(
       return "Code review";
     case "explore":
       return "Explorer task";
+    case "general-purpose": {
+      const description = readFirstString(typedArgs, [
+        "description",
+        "title",
+        "task",
+        "prompt",
+        "summary",
+      ]);
+      if (description) {
+        return description;
+      }
+      return normalizedTitle && !normalizedTitle.includes("{")
+        ? normalizedTitle
+        : "General task";
+    }
+    case "task": {
+      const name = readFirstString(typedArgs, ["name", "agent_type"]);
+      const description = readFirstString(typedArgs, ["description", "title"]);
+      if (description) {
+        return description;
+      }
+      if (name) {
+        return `Started ${name} agent`;
+      }
+      return normalizedTitle && !normalizedTitle.includes("{")
+        ? normalizedTitle
+        : "Started agent task";
+    }
+    case "view":
+      return formatCopilotPathToolTitle("Viewed", typedArgs, normalizedTitle, {
+        includeRange: true,
+      });
+    case "edit":
+      return formatCopilotPathToolTitle("Edited", typedArgs, normalizedTitle);
+    case "create":
+      return formatCopilotPathToolTitle("Created", typedArgs, normalizedTitle);
+    case "apply_patch":
+      return "Applied patch";
+    case "grep":
+    case "rg":
+      return formatCopilotSearchToolTitle("Searched", typedArgs, normalizedTitle);
+    case "glob":
+      return formatCopilotSearchToolTitle("Matched", typedArgs, normalizedTitle);
+    case "web_search": {
+      const query = readFirstString(typedArgs, ["query", "text"]);
+      return query ? `Searched web: ${query}` : "Searched web";
+    }
+    case "web_fetch": {
+      const url = readFirstString(typedArgs, ["url", "uri", "href"]);
+      return url ? `Fetched ${url}` : "Fetched web page";
+    }
     default:
-      return title?.trim() || toolName;
+      if (toolName.startsWith("github-mcp-server-")) {
+        return formatCopilotGithubToolTitle(toolName, typedArgs, normalizedTitle);
+      }
+      return normalizedTitle || toolName;
   }
+}
+
+function formatCopilotPathToolTitle(
+  verb: string,
+  args: Record<string, unknown> | null,
+  fallback: string,
+  options: { includeRange?: boolean } = {},
+): string {
+  const pathValue = readFirstString(args, [
+    "path",
+    "file",
+    "fileName",
+    "filename",
+    "targetPath",
+  ]);
+  if (!pathValue) {
+    return fallback && !fallback.includes("{") ? fallback : verb;
+  }
+  let label = `${verb} ${nodePath.basename(pathValue) || pathValue}`;
+  if (options.includeRange) {
+    const range = Array.isArray(args?.view_range)
+      ? args?.view_range
+      : Array.isArray(args?.range)
+        ? args?.range
+        : null;
+    if (
+      range &&
+      range.length >= 2 &&
+      typeof range[0] === "number" &&
+      typeof range[1] === "number"
+    ) {
+      label = `${label}:${range[0]}-${range[1]}`;
+    }
+  }
+  return label;
+}
+
+function formatCopilotSearchToolTitle(
+  verb: string,
+  args: Record<string, unknown> | null,
+  fallback: string,
+): string {
+  const query = readFirstString(args, ["query", "pattern", "text", "needle"]);
+  if (query) {
+    return `${verb}: ${query}`;
+  }
+  return fallback && !fallback.includes("{") ? fallback : verb;
+}
+
+function formatCopilotGithubToolTitle(
+  toolName: string,
+  args: Record<string, unknown> | null,
+  fallback: string,
+): string {
+  const owner = readFirstString(args, ["owner"]);
+  const repo = readFirstString(args, ["repo"]);
+  const repository = owner && repo ? `${owner}/${repo}` : repo;
+  const pathValue = readFirstString(args, ["path", "file_path"]);
+  const number =
+    readFirstString(args, ["pullNumber", "pull_number", "number"]) ??
+    readNumber(args, ["pullNumber", "pull_number", "number"])?.toString() ??
+    null;
+  if (toolName.endsWith("get_file_contents")) {
+    const suffix = pathValue ? `/${pathValue}` : "";
+    return repository
+      ? `Read GitHub file ${repository}${suffix}`
+      : "Read GitHub file";
+  }
+  if (toolName.endsWith("pull_request_read")) {
+    return repository && number
+      ? `Read GitHub PR ${repository}#${number}`
+      : "Read GitHub pull request";
+  }
+  if (repository) {
+    return `Used GitHub ${repository}`;
+  }
+  return fallback && !fallback.includes("{")
+    ? fallback
+    : toolName.replaceAll("_", " ");
 }
 
 function normalizeCopilotToolArgs(
   toolName: string,
   args: unknown,
 ): unknown {
-  if (toolName === "task_complete") {
+  if (
+    toolName === "ask_user" ||
+    toolName === "report_intent" ||
+    toolName === "task_complete" ||
+    toolName === "task" ||
+    toolName === "sql" ||
+    toolName === "read_bash" ||
+    toolName === "stop_bash" ||
+    toolName === "list_agents" ||
+    toolName === "read_agent" ||
+    toolName === "code-review" ||
+    toolName === "explore" ||
+    toolName === "general-purpose" ||
+    toolName === "view" ||
+    toolName === "edit" ||
+    toolName === "create" ||
+    toolName === "apply_patch" ||
+    toolName === "grep" ||
+    toolName === "rg" ||
+    toolName === "glob" ||
+    toolName === "web_search" ||
+    toolName === "web_fetch" ||
+    toolName.startsWith("github-mcp-server-")
+  ) {
     return null;
   }
   return args;
@@ -3892,8 +4184,23 @@ function normalizeCopilotToolOutput(
   result: unknown,
 ): string | null {
   const normalized = (output ?? "").trim();
+  const resultRecord = asRecord(result);
+  if (
+    toolName === "view" ||
+    toolName === "read_agent" ||
+    toolName === "task" ||
+    toolName === "general-purpose" ||
+    toolName === "code-review" ||
+    toolName === "explore" ||
+    toolName.startsWith("github-mcp-server-")
+  ) {
+    const content = readFirstString(resultRecord, ["content", "message"]);
+    if (content) {
+      return content;
+    }
+  }
   if (toolName === "task_complete") {
-    const summary = readFirstString(asRecord(result), ["content", "summary"]);
+    const summary = readFirstString(resultRecord, ["content", "summary"]);
     if (summary) {
       return summary;
     }
@@ -3906,7 +4213,24 @@ function normalizeCopilotToolResult(
   result: unknown,
   output: string | null,
 ): unknown {
-  if (toolName === "task_complete") {
+  if (
+    toolName === "task_complete" ||
+    toolName === "view" ||
+    toolName === "edit" ||
+    toolName === "create" ||
+    toolName === "apply_patch" ||
+    toolName === "grep" ||
+    toolName === "rg" ||
+    toolName === "glob" ||
+    toolName === "web_search" ||
+    toolName === "web_fetch" ||
+    toolName === "read_agent" ||
+    toolName === "task" ||
+    toolName === "general-purpose" ||
+    toolName === "code-review" ||
+    toolName === "explore" ||
+    toolName.startsWith("github-mcp-server-")
+  ) {
     return null;
   }
   if (isCopilotWrappedTextResult(result, output)) {
@@ -3934,7 +4258,11 @@ function isCopilotWrappedTextResult(
   ) {
     return false;
   }
-  return extractCopilotToolOutput(result)?.trim() === output.trim();
+  const normalizedOutput = output.trim();
+  return ["content", "detailedContent", "message"].some((key) => {
+    const value = typed[key];
+    return typeof value === "string" && value.trim() === normalizedOutput;
+  });
 }
 
 function readableCopilotTaskLabel(
@@ -4136,10 +4464,12 @@ function inferCopilotToolSemantic(
 
   if (
     normalizedName === "fetch" ||
+    normalizedName === "web_fetch" ||
     normalizedName === "open_url" ||
     normalizedName === "openurl" ||
     normalizedName === "request" ||
-    normalizedName === "browse"
+    normalizedName === "browse" ||
+    normalizedName.startsWith("github-mcp-server-")
   ) {
     return {
       category: "network",
@@ -4278,6 +4608,28 @@ function readFirstString(
       const value = source[key];
       if (typeof value === "string" && value.trim().length > 0) {
         return value.trim();
+      }
+    }
+  }
+  return null;
+}
+
+function readNumber(
+  source: Record<string, unknown> | null,
+  keys: string[],
+): number | null {
+  if (!source) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
       }
     }
   }

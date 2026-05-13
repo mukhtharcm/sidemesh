@@ -1429,6 +1429,7 @@ describe("Copilot provider", () => {
       assert.ok(askUser, "Expected ask_user history activity");
       assert.equal(askUser.type, "tool");
       assert.equal(askUser.title, "Asked user: Which environment should I use?");
+      assert.equal(askUser.args, null);
       assert.equal(askUser.output, "User selected: staging");
       assert.equal(askUser.result, null);
       assert.equal(askUser.semantic?.category, "task");
@@ -1443,6 +1444,179 @@ describe("Copilot provider", () => {
       assert.equal(taskComplete.output, "Finished the work and handed off the PR.");
       assert.equal(taskComplete.result, null);
       assert.equal(taskComplete.semantic?.category, "task");
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
+  it("normalizes high-volume Copilot tool families into readable activities", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-history-rich-tools-"),
+    );
+    try {
+      const sessionId = "history-rich-tools";
+      const filePath = nodePath.join(dir, "src", "feature.ts");
+      const sdk = new FakeCopilotSdkClient({
+        sessions: [
+          {
+            metadata: {
+              sessionId,
+              startTime: new Date("2026-04-03T00:00:00.000Z"),
+              modifiedTime: new Date("2026-04-03T00:05:00.000Z"),
+              summary: "History rich tools",
+              isRemote: false,
+              context: { cwd: dir },
+            },
+            events: [
+              event("tool.execution_start", {
+                toolCallId: "bash-1",
+                toolName: "bash",
+                arguments: {
+                  command: "npm run typecheck",
+                  description: "Run TypeScript checks",
+                },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "bash-1",
+                toolName: "bash",
+                success: true,
+                result: {
+                  content: "ok\n<exited with exit code 0>",
+                  detailedContent: "ok\n<exited with exit code 0>",
+                },
+              }),
+              event("tool.execution_start", {
+                toolCallId: "view-1",
+                toolName: "view",
+                arguments: { path: filePath, view_range: [10, 20] },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "view-1",
+                toolName: "view",
+                success: true,
+                result: {
+                  content: "10. export const value = 1;",
+                  detailedContent: "diff --git a/src/feature.ts b/src/feature.ts",
+                },
+              }),
+              event("tool.execution_start", {
+                toolCallId: "edit-1",
+                toolName: "edit",
+                arguments: {
+                  path: filePath,
+                  old_str: "value = 1",
+                  new_str: "value = 2",
+                },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "edit-1",
+                toolName: "edit",
+                success: true,
+                result: {
+                  content: `File ${filePath} updated with changes.`,
+                  detailedContent: "@@ -1 +1 @@\n-value = 1\n+value = 2",
+                },
+              }),
+              event("tool.execution_start", {
+                toolCallId: "agent-1",
+                toolName: "read_agent",
+                arguments: {
+                  agent_id: "code-review",
+                  wait: true,
+                  timeout: 60,
+                },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "agent-1",
+                toolName: "read_agent",
+                success: true,
+                result: {
+                  content: "No blocking review findings.",
+                  detailedContent: "No blocking review findings.\n\n(Full response provided to agent)",
+                },
+              }),
+              event("tool.execution_start", {
+                toolCallId: "task-1",
+                toolName: "task",
+                arguments: {
+                  name: "code-review",
+                  description: "Review branch diff",
+                  prompt: "Long review prompt",
+                },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "task-1",
+                toolName: "task",
+                success: true,
+                result: {
+                  content: "Agent started in background with agent_id: code-review.",
+                  detailedContent: "Prompt to code-review agent: Long review prompt",
+                },
+              }),
+            ],
+          },
+        ],
+      });
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const thread = await provider.readSessionThread(sessionId, false);
+      const log = await provider.readSessionLog(thread);
+
+      const bash = log.activities.find((activity) => activity.id === "bash-1");
+      assert.ok(bash, "Expected bash activity");
+      assert.equal(bash.type, "command");
+      assert.equal(bash.command, "npm run typecheck");
+      assert.equal(bash.cwd, dir);
+      assert.equal(bash.output, "ok\n<exited with exit code 0>");
+      assert.equal(bash.exitCode, 0);
+
+      const view = log.activities.find((activity) => activity.id === "view-1");
+      assert.ok(view, "Expected view activity");
+      assert.equal(view.type, "tool");
+      assert.equal(view.title, "Viewed feature.ts:10-20");
+      assert.equal(view.args, null);
+      assert.equal(view.output, "10. export const value = 1;");
+      assert.equal(view.result, null);
+
+      const edit = log.activities.find((activity) => activity.id === "edit-1");
+      assert.ok(edit, "Expected edit activity");
+      assert.equal(edit.type, "tool");
+      assert.equal(edit.title, "Edited feature.ts");
+      assert.equal(edit.args, null);
+      assert.equal(edit.output, "@@ -1 +1 @@\n-value = 1\n+value = 2");
+      assert.equal(edit.result, null);
+
+      const readAgent = log.activities.find(
+        (activity) => activity.id === "agent-1",
+      );
+      assert.ok(readAgent, "Expected read_agent activity");
+      assert.equal(readAgent.type, "tool");
+      assert.equal(readAgent.args, null);
+      assert.equal(readAgent.output, "No blocking review findings.");
+      assert.equal(readAgent.result, null);
+      assert.equal(readAgent.semantic?.category, "task");
+
+      const task = log.activities.find((activity) => activity.id === "task-1");
+      assert.ok(task, "Expected task activity");
+      assert.equal(task.type, "tool");
+      assert.equal(task.title, "Review branch diff");
+      assert.equal(task.args, null);
+      assert.equal(
+        task.output,
+        "Agent started in background with agent_id: code-review.",
+      );
+      assert.equal(task.result, null);
+      assert.equal(task.semantic?.category, "task");
     } finally {
       await settleProviderWrites();
       await rm(dir, {
