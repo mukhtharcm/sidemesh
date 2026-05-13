@@ -85,11 +85,16 @@ void main() {
       await _pumpFrames(tester);
 
       expect(find.text('Heads up from the fake provider'), findsOneWidget);
-      expect(find.text('Ship the change'), findsOneWidget);
+      expect(find.text('Plan update'), findsOneWidget);
+      expect(find.text('Ship the change'), findsNothing);
       expect(find.text('Queue · 1 steering · 2 follow-up'), findsOneWidget);
       expect(find.text('Retry 2 / 3 in 1.5s'), findsOneWidget);
       expect(find.textContaining('Keep it provider-neutral'), findsOneWidget);
       expect(find.textContaining('Overloaded'), findsOneWidget);
+
+      await _expandPlanCard(tester);
+
+      expect(find.text('Ship the change'), findsOneWidget);
     },
   );
 
@@ -136,8 +141,13 @@ void main() {
 
     expect(find.text('Plan update'), findsOneWidget);
     expect(find.text('Inspect the bug'), findsNothing);
-    expect(find.text('Ship the fix'), findsOneWidget);
+    expect(find.text('Ship the fix'), findsNothing);
     expect(find.text('Revised plan.'), findsOneWidget);
+
+    await _expandPlanCard(tester);
+
+    expect(find.text('Inspect the bug'), findsNothing);
+    expect(find.text('Ship the fix'), findsOneWidget);
   });
 
   testWidgets('session screen clears the plan card on an empty plan update', (
@@ -172,6 +182,10 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Remove after provider delete'), findsNothing);
+
+    await _expandPlanCard(tester);
+
     expect(find.text('Remove after provider delete'), findsOneWidget);
 
     api.emit(
@@ -220,6 +234,10 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Avoid duplicates on reopen'), findsNothing);
+
+    await _expandPlanCard(tester);
+
     expect(find.text('Avoid duplicates on reopen'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -241,6 +259,10 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Avoid duplicates on reopen'), findsNothing);
+
+    await _expandPlanCard(tester);
+
     expect(find.text('Avoid duplicates on reopen'), findsOneWidget);
   });
 
@@ -297,8 +319,12 @@ void main() {
       await _pumpFrames(tester);
 
       expect(find.text('Plan update'), findsOneWidget);
-      expect(find.text('Catch up missed plan state'), findsOneWidget);
+      expect(find.text('Catch up missed plan state'), findsNothing);
       expect(find.text('Recovered from /events.'), findsOneWidget);
+
+      await _expandPlanCard(tester);
+
+      expect(find.text('Catch up missed plan state'), findsOneWidget);
     },
   );
 
@@ -354,6 +380,10 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Plan update'), findsOneWidget);
+    expect(find.text('Clear stale visible plan'), findsNothing);
+
+    await _expandPlanCard(tester);
+
     expect(find.text('Clear stale visible plan'), findsOneWidget);
 
     api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 5});
@@ -1192,6 +1222,11 @@ Future<void> _pumpFrames(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 50));
   await tester.pump(const Duration(milliseconds: 250));
   await tester.pump();
+}
+
+Future<void> _expandPlanCard(WidgetTester tester) async {
+  await tester.tap(find.text('Plan update'));
+  await _pumpFrames(tester);
 }
 
 Future<void> _pumpApp(
