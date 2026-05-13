@@ -197,6 +197,16 @@ interface LiveActivityEntry {
   replaySeq: number;
 }
 
+interface LiveMessageReplayEntry {
+  replaySeq: number;
+  messageSeq: number;
+}
+
+interface LiveMessageReplayGap {
+  startSeq: number;
+  endSeqExclusive: number;
+}
+
 interface InstallInfoRefreshResult {
   ok: boolean;
   refreshed: boolean;
@@ -262,14 +272,16 @@ export async function startServer(
   const activeTurns = new Map<string, ActiveTurnState>();
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, LiveActivityEntry>>();
-  const liveMessageReplaySeqs = new Map<string, Map<string, number>>();
-  const liveMessageReplayEvictions = new Map<string, number>();
+  const liveMessageReplaySeqs = new Map<string, Map<string, LiveMessageReplayEntry>>();
+  const liveMessageReplayEvictions = new Map<string, LiveMessageReplayGap[]>();
   const liveThreadStatuses = new Map<string, LiveThreadStatus>();
   const liveThreadStatusUpdatedAt = new Map<string, number>();
   const replayIndex = new SessionReplayIndex();
   const searchIndex = new SessionSearchIndex(
     nodePath.join(config.stateDir, "search-index-v1.db"),
   );
+  let serverClosing = false;
+  let searchBackfillPromise: Promise<void> = Promise.resolve();
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
   const logCache = new Map<string, SessionLogCacheEntry>();
   const sessionRuntimeSignals = await loadSessionRuntimeSignalsState(
@@ -976,6 +988,7 @@ export async function startServer(
           event.sessionId,
           event.message.id,
           seq,
+          messageSeq,
           dependencies.liveMessageReplayLimit,
         );
         broadcastLive(event.sessionId, {
@@ -1009,6 +1022,7 @@ export async function startServer(
           event.sessionId,
           event.message.id,
           seq,
+          messageSeq,
           dependencies.liveMessageReplayLimit,
         );
         broadcastLive(event.sessionId, {
@@ -2058,17 +2072,6 @@ export async function startServer(
       const query = request.query as Record<string, unknown>;
       const since = asInteger(query.since) ?? 0;
       const baseUpdatedAt = asInteger(query.baseUpdatedAt);
-      const evictedLiveMessageReplaySeq =
-        liveMessageReplayEvictions.get(sessionId) ?? 0;
-      if (evictedLiveMessageReplaySeq > 0 && evictedLiveMessageReplaySeq > since) {
-        response.status(410).json({
-          error: "stale_cursor",
-          reason: "live_message_replay_evicted",
-          since,
-          oldestAvailableSeq: evictedLiveMessageReplaySeq + 1,
-        });
-        return;
-      }
 
       const session = await readSession(provider, sessionId, false);
       reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
@@ -2212,6 +2215,19 @@ export async function startServer(
       )
         ? logLatestPlanUpdate
         : null;
+      const evictedLiveMessageReplayGap = liveMessageReplayEvictionGap(
+        liveMessageReplayEvictions.get(sessionId),
+        since,
+      );
+      if (evictedLiveMessageReplayGap) {
+        response.status(410).json({
+          error: "stale_cursor",
+          reason: "live_message_replay_evicted",
+          since,
+          oldestAvailableSeq: evictedLiveMessageReplayGap.endSeqExclusive + 1,
+        });
+        return;
+      }
 
       if (
         baseUpdatedAt != null &&
@@ -3347,88 +3363,115 @@ export async function startServer(
 
   await listen(server, config.port);
 
-  // Open search index and warm all provider indexes in the background
-  searchIndex.open().then(async () => {
-    searchIndex.setBackfillRunning(true);
-    let totalIndexed = 0;
-    let totalRemoved = 0;
-
-    for (const entry of providerRuntime.providers) {
-      const provider = entry.provider;
-      const providerKind = entry.kind;
-      if (
-        !hasProviderMethod(provider, "listSessionThreads") ||
-        !hasProviderMethod(provider, "readSessionLog")
-      ) {
-        continue;
+  // Open search index and warm all provider indexes in the background.
+  searchBackfillPromise = (async () => {
+    try {
+      await searchIndex.open();
+      if (serverClosing) {
+        return;
       }
-      searchIndex.setProviderError(providerKind, null);
+      searchIndex.setBackfillRunning(true);
+      let totalIndexed = 0;
+      let totalRemoved = 0;
+
       try {
-        const batchSize = 50;
-        for (const archived of [false, true]) {
-          const threads = await provider.listSessionThreads!({
-            limit: 200,
-            archived,
-          });
-          const batches = chunkArray(threads, batchSize);
-          for (const batch of batches) {
-            for (const thread of batch) {
-              try {
-                const log = await provider.readSessionLog!(thread, {
-                  messageLimit: 200,
-                  activityLimit: 200,
-                });
-                const createdAt = threadTimestampMillis(thread.createdAt);
-                const updatedAt = threadTimestampMillis(thread.updatedAt);
-                const sessionKey = indexedSessionIdForProvider(
-                  providerRuntime,
-                  providerKind,
-                  thread.id,
-                );
-                await searchIndex.indexDocument({
-                  sessionKey,
-                  providerKind,
-                  title: thread.name || thread.preview,
-                  preview: thread.preview,
-                  cwd: thread.cwd,
-                  createdAt,
-                  updatedAt,
-                  archived,
-                  fingerprint: `${providerKind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${createdAt}|${updatedAt}|${archived}|${log.nextSeq}`,
-                  messages: log.messages,
-                  activities: log.activities,
-                });
-                if (sessionKey !== thread.id) {
-                  await searchIndex.remove(thread.id);
+        for (const entry of providerRuntime.providers) {
+          if (serverClosing) {
+            return;
+          }
+          const provider = entry.provider;
+          const providerKind = entry.kind;
+          if (
+            !hasProviderMethod(provider, "listSessionThreads") ||
+            !hasProviderMethod(provider, "readSessionLog")
+          ) {
+            continue;
+          }
+          searchIndex.setProviderError(providerKind, null);
+          try {
+            const batchSize = 50;
+            for (const archived of [false, true]) {
+              if (serverClosing) {
+                return;
+              }
+              const threads = await provider.listSessionThreads!({
+                limit: 200,
+                archived,
+              });
+              if (serverClosing) {
+                return;
+              }
+              const batches = chunkArray(threads, batchSize);
+              for (const batch of batches) {
+                if (serverClosing) {
+                  return;
                 }
-                totalIndexed++;
-              } catch {
-                // Ignore per-session indexing errors during catch-up
+                for (const thread of batch) {
+                  if (serverClosing) {
+                    return;
+                  }
+                  try {
+                    const log = await provider.readSessionLog!(thread, {
+                      messageLimit: 200,
+                      activityLimit: 200,
+                    });
+                    if (serverClosing) {
+                      return;
+                    }
+                    const createdAt = threadTimestampMillis(thread.createdAt);
+                    const updatedAt = threadTimestampMillis(thread.updatedAt);
+                    const sessionKey = indexedSessionIdForProvider(
+                      providerRuntime,
+                      providerKind,
+                      thread.id,
+                    );
+                    await searchIndex.indexDocument({
+                      sessionKey,
+                      providerKind,
+                      title: thread.name || thread.preview,
+                      preview: thread.preview,
+                      cwd: thread.cwd,
+                      createdAt,
+                      updatedAt,
+                      archived,
+                      fingerprint: `${providerKind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${createdAt}|${updatedAt}|${archived}|${log.nextSeq}`,
+                      messages: log.messages,
+                      activities: log.activities,
+                    });
+                    if (sessionKey !== thread.id) {
+                      await searchIndex.remove(thread.id);
+                    }
+                    totalIndexed++;
+                  } catch {
+                    // Ignore per-session indexing errors during catch-up
+                  }
+                }
+                // yield so startup remains responsive
+                await new Promise((resolve) => setImmediate(resolve));
               }
             }
-            // yield so startup remains responsive
-            await new Promise((resolve) => setImmediate(resolve));
+          } catch (error: unknown) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            searchIndex.setProviderError(providerKind, message);
           }
         }
-      } catch (error: unknown) {
-        const message =
-          error instanceof Error ? error.message : String(error);
-        searchIndex.setProviderError(providerKind, message);
+      } finally {
+        searchIndex.setBackfillRunning(false);
       }
+      if (
+        !serverClosing &&
+        (totalIndexed > 0 || totalRemoved > 0)
+      ) {
+        console.log(`Search index caught up: ${totalIndexed} indexed, ${totalRemoved} removed`);
+      }
+    } catch (error: unknown) {
+      console.error(
+        "Failed to open search index:",
+        error instanceof Error ? error.message : error,
+      );
     }
-
-    searchIndex.setBackfillRunning(false);
-    return { indexed: totalIndexed, removed: totalRemoved };
-  }).then((result) => {
-    if (result.indexed > 0 || result.removed > 0) {
-      console.log(`Search index caught up: ${result.indexed} indexed, ${result.removed} removed`);
-    }
-  }).catch((error: unknown) => {
-    console.error(
-      "Failed to open search index:",
-      error instanceof Error ? error.message : error,
-    );
-  });
+  })();
 
   for (const line of startupSummaryLines({
     config,
@@ -3473,6 +3516,7 @@ export async function startServer(
   runningServerRef = {
     port: boundPort,
     close: async () => {
+      serverClosing = true;
       clearInterval(healthMonitor);
       terminalRegistry.dispose();
       portForwardRegistry.dispose();
@@ -3484,8 +3528,9 @@ export async function startServer(
       }
       await closeWebSocketServer(wsServer);
       await closeHttpServer(server);
-      await sessionRuntimeSignalsSaveChain.catch(() => undefined);
       await provider.close?.();
+      await searchBackfillPromise.catch(() => undefined);
+      await sessionRuntimeSignalsSaveChain.catch(() => undefined);
     },
   };
   return runningServerRef;
@@ -4318,11 +4363,12 @@ function liveActivityValues(
 }
 
 function rememberLiveMessageReplaySeq(
-  liveMessageReplaySeqs: Map<string, Map<string, number>>,
-  liveMessageReplayEvictions: Map<string, number>,
+  liveMessageReplaySeqs: Map<string, Map<string, LiveMessageReplayEntry>>,
+  liveMessageReplayEvictions: Map<string, LiveMessageReplayGap[]>,
   sessionId: string,
   messageId: string,
   replaySeq: number,
+  messageSeq: number,
   replayLimit: number,
 ): void {
   if (!messageId) {
@@ -4330,26 +4376,86 @@ function rememberLiveMessageReplaySeq(
   }
   let sessionMessages = liveMessageReplaySeqs.get(sessionId);
   if (!sessionMessages) {
-    sessionMessages = new Map<string, number>();
+    sessionMessages = new Map<string, LiveMessageReplayEntry>();
     liveMessageReplaySeqs.set(sessionId, sessionMessages);
   }
-  sessionMessages.set(messageId, replaySeq);
+  sessionMessages.set(messageId, { replaySeq, messageSeq });
   while (sessionMessages.size > replayLimit) {
     const oldest = sessionMessages.keys().next().value;
     if (typeof oldest !== "string") {
       break;
     }
-    const evictedReplaySeq = sessionMessages.get(oldest) ?? 0;
+    const evicted = sessionMessages.get(oldest);
     sessionMessages.delete(oldest);
-    if (evictedReplaySeq > (liveMessageReplayEvictions.get(sessionId) ?? 0)) {
-      liveMessageReplayEvictions.set(sessionId, evictedReplaySeq);
+    if (evicted) {
+      rememberLiveMessageReplayGap(
+        liveMessageReplayEvictions,
+        sessionId,
+        evicted,
+      );
     }
   }
 }
 
+function rememberLiveMessageReplayGap(
+  liveMessageReplayEvictions: Map<string, LiveMessageReplayGap[]>,
+  sessionId: string,
+  entry: LiveMessageReplayEntry,
+): void {
+  if (entry.replaySeq <= entry.messageSeq) {
+    return;
+  }
+  const nextGap: LiveMessageReplayGap = {
+    startSeq: entry.messageSeq,
+    endSeqExclusive: entry.replaySeq,
+  };
+  const gaps = liveMessageReplayEvictions.get(sessionId);
+  if (!gaps) {
+    liveMessageReplayEvictions.set(sessionId, [nextGap]);
+    return;
+  }
+  gaps.push(nextGap);
+  gaps.sort((a, b) => (
+    a.startSeq === b.startSeq
+      ? a.endSeqExclusive - b.endSeqExclusive
+      : a.startSeq - b.startSeq
+  ));
+  const merged: LiveMessageReplayGap[] = [];
+  for (const gap of gaps) {
+    const last = merged[merged.length - 1];
+    if (!last || gap.startSeq > last.endSeqExclusive) {
+      merged.push({ ...gap });
+      continue;
+    }
+    if (gap.endSeqExclusive > last.endSeqExclusive) {
+      last.endSeqExclusive = gap.endSeqExclusive;
+    }
+  }
+  liveMessageReplayEvictions.set(sessionId, merged);
+}
+
+function liveMessageReplayEvictionGap(
+  evictions: LiveMessageReplayGap[] | undefined,
+  since: number,
+): LiveMessageReplayGap | null {
+  if (!evictions) {
+    return null;
+  }
+  let matchingGap: LiveMessageReplayGap | null = null;
+  for (const gap of evictions) {
+    if (since < gap.startSeq || since >= gap.endSeqExclusive) {
+      continue;
+    }
+    if (!matchingGap || gap.endSeqExclusive < matchingGap.endSeqExclusive) {
+      matchingGap = gap;
+    }
+  }
+  return matchingGap;
+}
+
 function filterMessagesForReplay(
   messages: SessionMessage[],
-  sessionMessages: Map<string, number> | undefined,
+  sessionMessages: Map<string, LiveMessageReplayEntry> | undefined,
   since: number,
 ): { messages: SessionMessage[]; highestSeq: number } {
   const returned: SessionMessage[] = [];
@@ -4357,7 +4463,7 @@ function filterMessagesForReplay(
   for (const message of messages) {
     const replaySeq = Math.max(
       message.seq ?? 0,
-      sessionMessages?.get(message.id) ?? 0,
+      sessionMessages?.get(message.id)?.replaySeq ?? 0,
     );
     if (replaySeq <= since) {
       continue;

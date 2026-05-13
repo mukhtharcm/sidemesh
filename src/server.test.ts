@@ -2924,12 +2924,13 @@ describe("session live rich events", () => {
         assert.equal(typeof transientSeq, "number");
         provider.appendAuditMessage("Missed audit.");
         provider.appendAuditMessage("Evicting audit.");
+        provider.appendAuditMessage("Evicting audit again.");
         const deltaRes = await request({
           hostname: "127.0.0.1",
           port: server.port,
           path:
             `/api/sessions/${encodeURIComponent(provider.sessionId)}/events` +
-            `?since=${transientSeq}`,
+            `?since=${transientSeq}&baseUpdatedAt=4000`,
           method: "GET",
           headers: { Authorization: `Bearer ${config.token}` },
         });
@@ -2938,6 +2939,68 @@ describe("session live rich events", () => {
         assert.equal(
           (deltaRes.body as any).reason,
           "live_message_replay_evicted",
+        );
+      },
+      { liveMessageReplayLimit: 1 },
+    );
+  });
+
+  it("replays persisted messages when evicted live replay metadata is not needed", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new AppendedMessageFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(
+      makeConfig(stateDir),
+      runtime,
+      async (server, config) => {
+        const logRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`,
+          method: "GET",
+          headers: { Authorization: `Bearer ${config.token}` },
+        });
+        assert.equal(logRes.statusCode, 200);
+
+        const live = await openSessionLiveSocket(
+          server.port,
+          config.token,
+          provider.sessionId,
+        );
+        let transientSeq: number | undefined;
+        try {
+          await waitFor(
+            () => live.events.find((event) => event.type === "hello"),
+            "hello",
+          );
+          provider.emitTransientDelta();
+          const transient = await waitFor(
+            () => live.events.find((event) => event.type === "assistant_delta"),
+            "assistant_delta",
+          );
+          transientSeq = transient.seq;
+        } finally {
+          await closeSessionLiveSocket(live.socket);
+        }
+
+        assert.equal(typeof transientSeq, "number");
+        const first = provider.appendAuditMessage("Replayable audit.");
+        const second = provider.appendAuditMessage("Still replayable audit.");
+        const deltaRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path:
+            `/api/sessions/${encodeURIComponent(provider.sessionId)}/events` +
+            `?since=${(transientSeq ?? 0) - 1}`,
+          method: "GET",
+          headers: { Authorization: `Bearer ${config.token}` },
+        });
+        assert.equal(deltaRes.statusCode, 200);
+        assert.deepEqual(
+          ((deltaRes.body as any).messages ?? []).map(
+            (message: { id: string }) => message.id,
+          ),
+          [first.id, second.id],
         );
       },
       { liveMessageReplayLimit: 1 },

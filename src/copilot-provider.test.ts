@@ -301,6 +301,79 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("stops the SDK client and disconnects sessions on close", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-close-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "hello close", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      await provider.close();
+
+      assert.equal(sdk.stopCalls, 1);
+      assert.equal(sdk.forceStopCalls, 0);
+      assert.equal(sdk.created[0]?.session.disconnectCalls, 1);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
+  it("marks active Copilot turns interrupted on close", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-active-close-test-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient({ holdResponses: true });
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const created = await provider.createSession({
+        cwd: dir,
+        input: [{ type: "text", text: "hold close", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await waitFor(() => sdk.created[0]?.session.sent.length === 1);
+
+      await provider.close();
+
+      const thread = await provider.readSessionThread!(created.thread.id, true);
+      assert.equal(thread.turns?.[0]?.status, "interrupted");
+      assert.equal(thread.status.type, "interrupted");
+      assert.equal(sdk.created[0]?.session.disconnectCalls, 1);
+      assert.equal(sdk.stopCalls, 1);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("emits runtime updates for usage telemetry during live turns", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-runtime-telemetry-"),
@@ -2401,6 +2474,8 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
     CopilotSdkSessionMetadata
   >();
   private readonly sessionEvents = new Map<string, CopilotSdkSessionEvent[]>();
+  public stopCalls = 0;
+  public forceStopCalls = 0;
 
   public constructor(
     options: {
@@ -2491,6 +2566,14 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
     /* fake */
   }
 
+  public async stop(): Promise<void> {
+    this.stopCalls += 1;
+  }
+
+  public async forceStop(): Promise<void> {
+    this.forceStopCalls += 1;
+  }
+
   public async getStatus(): Promise<{
     version: string;
     protocolVersion: number;
@@ -2564,6 +2647,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
 
 class FakeCopilotSdkSession implements CopilotSdkSession {
   public readonly sent: CopilotSdkMessageOptions[] = [];
+  public disconnectCalls = 0;
   public readonly rpc = {
     mode: {
       get: async (): Promise<CopilotSdkSessionMode> => this.currentMode,
@@ -3144,6 +3228,10 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
 
   public async abort(): Promise<void> {
     this.aborted = true;
+  }
+
+  public async disconnect(): Promise<void> {
+    this.disconnectCalls += 1;
   }
 
   public async setModel(

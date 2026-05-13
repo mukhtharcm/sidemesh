@@ -2164,7 +2164,7 @@ class _SessionScreenState extends State<SessionScreen>
         );
         // Seed lastSeq from the snapshot so subsequent resyncs can use the
         // cheap delta endpoint instead of re-downloading everything.
-        var highestSeq = _lastEventSeq ?? 0;
+        var highestSeq = 0;
         final snapshotReplaySeq = _snapshotReplaySeq(log.nextSeq);
         if (snapshotReplaySeq != null && snapshotReplaySeq > highestSeq) {
           highestSeq = snapshotReplaySeq;
@@ -2261,7 +2261,7 @@ class _SessionScreenState extends State<SessionScreen>
           log.latestPlanUpdate,
           fallbackCreatedAt: log.session.updatedAt,
         );
-        var highestSeq = _lastEventSeq ?? 0;
+        var highestSeq = 0;
         final snapshotReplaySeq = _snapshotReplaySeq(log.nextSeq);
         if (snapshotReplaySeq != null && snapshotReplaySeq > highestSeq) {
           highestSeq = snapshotReplaySeq;
@@ -2483,7 +2483,6 @@ class _SessionScreenState extends State<SessionScreen>
           activities: _activities,
           pendingAction: null,
           history: _history,
-          nextSeq: _lastEventSeq == null ? null : _lastEventSeq! + 1,
           latestPlanUpdate: _latestPlanUpdateForCache(),
         ),
       ),

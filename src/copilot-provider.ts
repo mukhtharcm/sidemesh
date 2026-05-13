@@ -272,6 +272,33 @@ export class CopilotAgentProvider
     await this.loadState();
   }
 
+  public async close(): Promise<void> {
+    for (const sessionId of [...this.activeTurns.keys()]) {
+      this.completeActiveTurn(sessionId, "interrupted");
+    }
+    this.activeTurns.clear();
+    for (const session of this.sessions.values()) {
+      const sdkSession = session.sdkSession;
+      session.sdkSession = null;
+      await sdkSession?.disconnect?.().catch(() => undefined);
+    }
+    await this.saveChain.catch(() => undefined);
+    const client = this.sdkClient;
+    this.sdkClient = null;
+    if (!client) {
+      return;
+    }
+    if (!client.stop) {
+      await client.forceStop?.().catch(() => undefined);
+      return;
+    }
+    try {
+      await client.stop();
+    } catch {
+      await client.forceStop?.().catch(() => undefined);
+    }
+  }
+
   public async getVersion(): Promise<string> {
     try {
       const status = await (await this.ensureSdkClient()).getStatus?.();
