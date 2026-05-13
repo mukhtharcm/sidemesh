@@ -521,7 +521,7 @@ void main() {
         host,
         session.id,
       );
-      expect(cached?.log.nextSeq, 4);
+      expect(cached?.log.nextSeq, 3);
     },
   );
 

@@ -27,6 +27,7 @@ import type { AgentProviderRuntime, AgentProviderRuntimeEntry } from "./provider
 import type {
   AgentCreateSessionRequest,
   AgentCreateSessionResult,
+  AgentMessageDraft,
   AgentPendingAction,
   AgentProvider,
   AgentProviderCore,
@@ -1350,7 +1351,10 @@ class AppendedMessageFixtureProvider extends EventEmitter implements AgentProvid
     return message;
   }
 
-  public appendAssistantMessage(text: string): SessionMessage {
+  public appendAssistantMessage(
+    text: string,
+    options: { emitSeq?: boolean } = {},
+  ): SessionMessage {
     const message: SessionMessage = {
       id: `assistant-${this.messages.length + 1}`,
       role: "assistant",
@@ -1363,19 +1367,22 @@ class AppendedMessageFixtureProvider extends EventEmitter implements AgentProvid
     };
     this.messages.push(message);
     this.updatedAt += 1;
+    const draft: AgentMessageDraft = {
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      content: message.content,
+      createdAt: message.createdAt,
+      phase: message.phase,
+    };
+    if (options.emitSeq !== false) {
+      draft.seq = message.seq;
+    }
     this.emit("liveEvent", {
       type: "assistant_message_completed",
       sessionId: this.sessionId,
       turnId: "turn-1",
-      message: {
-        id: message.id,
-        role: message.role,
-        text: message.text,
-        content: message.content,
-        createdAt: message.createdAt,
-        seq: message.seq,
-        phase: message.phase,
-      },
+      message: draft,
     });
     return message;
   }
@@ -4935,7 +4942,9 @@ describe("GET /api/sessions/search", () => {
       makeCustomSingleProviderRuntime(provider),
       async (server, config) => {
         await new Promise((resolve) => setTimeout(resolve, 100));
-        provider.appendAssistantMessage("assistant search refresh needle");
+        provider.appendAssistantMessage("assistant search refresh needle", {
+          emitSeq: false,
+        });
 
         for (let attempt = 0; attempt < 100; attempt += 1) {
           const searchRes = await request({

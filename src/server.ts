@@ -1008,10 +1008,8 @@ export async function startServer(
             phase: event.message.phase,
           },
         });
-        if (typeof event.message.seq === "number") {
-          clearSessionLogCache(logCache, event.sessionId);
-          void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
-        }
+        clearSessionLogCache(logCache, event.sessionId);
+        void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
         scheduleRecentSessionUpsert(event.sessionId);
         return;
       }

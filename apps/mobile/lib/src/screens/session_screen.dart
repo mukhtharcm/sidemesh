@@ -2451,7 +2451,7 @@ class _SessionScreenState extends State<SessionScreen>
           delta.nextSeq,
           restoredPlanSeq ?? delta.nextSeq,
         );
-        _persistableLogNextSeq = highestSeq + 1;
+        _persistableLogNextSeq = highestSeq;
         if (highestSeq > (_lastEventSeq ?? 0)) {
           _lastEventSeq = highestSeq;
         }
