@@ -1,8 +1,9 @@
 import 'dart:io';
 
 import 'package:path/path.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
+
+import 'app_directories.dart';
 
 class SidemeshDb {
   SidemeshDb._();
@@ -73,7 +74,7 @@ class SidemeshDb {
 
   static Future<String> _resolveDbPath() async {
     final dir = Platform.isMacOS
-        ? (await getApplicationSupportDirectory()).path
+        ? (await getSidemeshApplicationSupportDirectory()).path
         : await getDatabasesPath();
     await Directory(dir).create(recursive: true);
     final dbPath = join(dir, 'sidemesh_v1.db');

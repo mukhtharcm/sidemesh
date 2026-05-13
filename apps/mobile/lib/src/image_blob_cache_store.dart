@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
+import 'app_directories.dart';
 import 'models.dart';
 
 class ImageBlobCacheStore {
@@ -171,7 +171,7 @@ class ImageBlobCacheStore {
   }
 
   Future<Directory> _cacheDir() async {
-    final root = await getApplicationCacheDirectory();
+    final root = await getSidemeshApplicationCacheDirectory();
     final dir = Directory('${root.path}/$_cacheFolderName');
     if (!await dir.exists()) {
       await dir.create(recursive: true);
