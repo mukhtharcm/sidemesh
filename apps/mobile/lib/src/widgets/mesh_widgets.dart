@@ -217,6 +217,8 @@ class MeshListRow extends StatelessWidget {
     this.enabled = true,
     this.dense = false,
     this.tone = MeshSurfaceTone.surface,
+    this.framed = true,
+    this.radius = AppRadii.surface,
   });
 
   final Widget title;
@@ -230,63 +232,96 @@ class MeshListRow extends StatelessWidget {
   final bool enabled;
   final bool dense;
   final MeshSurfaceTone tone;
+  final bool framed;
+  final double radius;
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final rowPadding = dense
         ? const EdgeInsets.fromLTRB(12, 10, 10, 10)
         : const EdgeInsets.fromLTRB(14, 14, 12, 14);
     final gap = dense ? AppSpacing.sm : AppSpacing.md;
-    return MeshSurface(
-      tone: tone,
-      selected: selected,
-      enabled: enabled,
-      onTap: onTap,
-      padding: rowPadding,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (leading != null) ...[
-            leading!,
-            SizedBox(width: gap),
-          ],
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(child: title),
-                    if (badges.isNotEmpty) ...[
-                      const SizedBox(width: AppSpacing.sm),
-                      Flexible(
-                        child: Wrap(
-                          spacing: AppSpacing.xs,
-                          runSpacing: AppSpacing.xs,
-                          alignment: WrapAlignment.end,
-                          children: badges,
-                        ),
+    final borderRadius = BorderRadius.circular(radius);
+    final row = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (leading != null) ...[leading!, SizedBox(width: gap)],
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: title),
+                  if (badges.isNotEmpty) ...[
+                    const SizedBox(width: AppSpacing.sm),
+                    Flexible(
+                      child: Wrap(
+                        spacing: AppSpacing.xs,
+                        runSpacing: AppSpacing.xs,
+                        alignment: WrapAlignment.end,
+                        children: badges,
                       ),
-                    ],
+                    ),
                   ],
-                ),
-                if (subtitle != null) ...[
-                  SizedBox(height: dense ? 3 : AppSpacing.xs),
-                  subtitle!,
                 ],
-                if (meta != null) ...[
-                  SizedBox(height: dense ? 3 : AppSpacing.xs),
-                  meta!,
-                ],
+              ),
+              if (subtitle != null) ...[
+                SizedBox(height: dense ? 3 : AppSpacing.xs),
+                subtitle!,
               ],
-            ),
+              if (meta != null) ...[
+                SizedBox(height: dense ? 3 : AppSpacing.xs),
+                meta!,
+              ],
+            ],
           ),
-          if (trailing != null) ...[
-            SizedBox(width: gap),
-            trailing!,
-          ],
-        ],
+        ),
+        if (trailing != null) ...[SizedBox(width: gap), trailing!],
+      ],
+    );
+
+    if (framed) {
+      return MeshSurface(
+        tone: tone,
+        selected: selected,
+        enabled: enabled,
+        onTap: onTap,
+        padding: rowPadding,
+        radius: radius,
+        child: row,
+      );
+    }
+
+    final content = AnimatedContainer(
+      duration: const Duration(milliseconds: 140),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        color: selected
+            ? colors.accentMuted.withValues(alpha: 0.56)
+            : Colors.transparent,
+        borderRadius: borderRadius,
+        border: selected
+            ? Border.all(color: colors.accent.withValues(alpha: 0.28))
+            : null,
+      ),
+      child: Padding(padding: rowPadding, child: row),
+    );
+
+    if (!enabled || onTap == null) {
+      return content;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: borderRadius,
+        onTap: onTap,
+        hoverColor: colors.surfaceMuted.withValues(alpha: 0.62),
+        splashColor: colors.accent.withValues(alpha: 0.08),
+        child: content,
       ),
     );
   }

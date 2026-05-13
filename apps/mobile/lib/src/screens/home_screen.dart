@@ -3719,22 +3719,9 @@ class _HostRowCard extends StatelessWidget {
             ),
           );
         }
-        final hostMetaChildren = <Widget>[
-          if (!host.enabled ||
-              status.reachability != HostReachability.unknown)
-            ListenableBuilder(
-              listenable: RelativeTimeTicker.minutes,
-              builder: (context, _) {
-                return Text(
-                  _statusLine(status),
-                  style: monoStyle(
-                    color: _statusColor(colors, status),
-                    fontSize: 10.5,
-                    fontWeight: AppWeights.body,
-                  ),
-                );
-              },
-            ),
+        final showStatusLine =
+            !host.enabled || status.reachability != HostReachability.unknown;
+        final supplementalBadges = <Widget>[
           if (node?.updateAvailable == true && !dense)
             MeshPill(
               label: node?.usesBleedingEdgeTrack == true
@@ -3760,101 +3747,136 @@ class _HostRowCard extends StatelessWidget {
               tone: MeshPillTone.info,
             ),
         ];
-        return MeshListRow(
+        return MeshSurface(
           onTap: host.enabled ? onTap : null,
           selected: selected,
-          leading: Stack(
-            clipBehavior: Clip.none,
+          enabled: host.enabled,
+          padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: colors.accentMuted,
-                  borderRadius: BorderRadius.circular(AppRadii.control),
-                  border: Border.all(
-                    color: colors.accent.withValues(alpha: 0.3),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: colors.accentMuted,
+                          borderRadius: BorderRadius.circular(
+                            AppRadii.control,
+                          ),
+                          border: Border.all(
+                            color: colors.accent.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.dns_rounded,
+                          color: colors.accent,
+                          size: 20,
+                        ),
+                      ),
+                      Positioned(
+                        right: -2,
+                        bottom: -2,
+                        child: _HostStatusDot(
+                          status: status,
+                          enabled: host.enabled,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                host.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(
+                                      fontWeight: AppWeights.emphasis,
+                                      color: host.enabled
+                                          ? null
+                                          : colors.textTertiary,
+                                    ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            hostStatusBadge,
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          host.baseUrl,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: monoStyle(
+                            color: host.enabled
+                                ? colors.textSecondary
+                                : colors.textTertiary,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  _HostRowActionsMenu(
+                    hostEnabled: host.enabled,
+                    onToggleEnabled: onToggleEnabled,
+                    onEdit: onEdit,
+                    onRemove: onRemove,
+                  ),
+                ],
+              ),
+              if (showStatusLine || supplementalBadges.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.only(left: 56),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (showStatusLine)
+                        ListenableBuilder(
+                          listenable: RelativeTimeTicker.minutes,
+                          builder: (context, _) {
+                            return Text(
+                              _statusLine(status),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: monoStyle(
+                                color: _statusColor(colors, status),
+                                fontSize: 10.5,
+                                fontWeight: AppWeights.body,
+                              ),
+                            );
+                          },
+                        ),
+                      if (showStatusLine && supplementalBadges.isNotEmpty)
+                        const SizedBox(height: 8),
+                      if (supplementalBadges.isNotEmpty)
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: supplementalBadges,
+                        ),
+                    ],
                   ),
                 ),
-                alignment: Alignment.center,
-                child: Icon(
-                  Icons.dns_rounded,
-                  color: colors.accent,
-                  size: 20,
-                ),
-              ),
-              Positioned(
-                right: -2,
-                bottom: -2,
-                child: _HostStatusDot(
-                  status: status,
-                  enabled: host.enabled,
-                ),
-              ),
-            ],
-          ),
-          title: Text(
-            host.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: AppWeights.emphasis,
-              color: host.enabled ? null : colors.textTertiary,
-            ),
-          ),
-          badges: [hostStatusBadge],
-          subtitle: Text(
-            host.enabled ? host.baseUrl : 'Disabled · ${host.baseUrl}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: monoStyle(
-              color: colors.textSecondary,
-              fontSize: 11.5,
-            ),
-          ),
-          meta: hostMetaChildren.isEmpty
-              ? null
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (var i = 0; i < hostMetaChildren.length; i++) ...[
-                      if (i > 0) const SizedBox(height: 6),
-                      hostMetaChildren[i],
-                    ],
-                  ],
-                ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                tooltip: host.enabled ? 'Disable host' : 'Enable host',
-                onPressed: onToggleEnabled,
-                icon: Icon(
-                  host.enabled
-                      ? Icons.pause_circle_outline_rounded
-                      : Icons.play_circle_outline_rounded,
-                  size: 20,
-                  color: host.enabled ? colors.textSecondary : colors.accent,
-                ),
-              ),
-              IconButton(
-                tooltip: 'Edit host',
-                onPressed: onEdit,
-                icon: Icon(
-                  Icons.edit_rounded,
-                  size: 20,
-                  color: colors.textSecondary,
-                ),
-              ),
-              IconButton(
-                tooltip: 'Remove host',
-                onPressed: onRemove,
-                icon: Icon(
-                  Icons.delete_outline,
-                  size: 20,
-                  color: colors.textSecondary,
-                ),
-              ),
+              ],
             ],
           ),
         );
@@ -3919,6 +3941,111 @@ class _HostRowCard extends StatelessWidget {
       case HostReachability.unknown:
         return colors.textTertiary;
     }
+  }
+}
+
+enum _HostRowAction { toggleEnabled, edit, remove }
+
+class _HostRowActionsMenu extends StatelessWidget {
+  const _HostRowActionsMenu({
+    required this.hostEnabled,
+    required this.onToggleEnabled,
+    required this.onEdit,
+    required this.onRemove,
+  });
+
+  final bool hostEnabled;
+  final VoidCallback onToggleEnabled;
+  final VoidCallback onEdit;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return PopupMenuButton<_HostRowAction>(
+      tooltip: 'Host actions',
+      position: PopupMenuPosition.under,
+      color: colors.surfaceElevated,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        side: BorderSide(color: colors.border),
+      ),
+      onSelected: (action) {
+        switch (action) {
+          case _HostRowAction.toggleEnabled:
+            onToggleEnabled();
+          case _HostRowAction.edit:
+            onEdit();
+          case _HostRowAction.remove:
+            onRemove();
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: _HostRowAction.toggleEnabled,
+          child: _HostActionMenuItem(
+            icon: hostEnabled
+                ? Icons.pause_circle_outline_rounded
+                : Icons.play_circle_outline_rounded,
+            label: hostEnabled ? 'Disable host' : 'Enable host',
+            color: hostEnabled ? colors.textSecondary : colors.accent,
+          ),
+        ),
+        PopupMenuItem(
+          value: _HostRowAction.edit,
+          child: _HostActionMenuItem(
+            icon: Icons.edit_rounded,
+            label: 'Edit host',
+            color: colors.textSecondary,
+          ),
+        ),
+        PopupMenuItem(
+          value: _HostRowAction.remove,
+          child: _HostActionMenuItem(
+            icon: Icons.delete_outline,
+            label: 'Remove host',
+            color: colors.danger,
+          ),
+        ),
+      ],
+      child: MeshSurface(
+        padding: EdgeInsets.zero,
+        radius: AppRadii.control,
+        tone: MeshSurfaceTone.muted,
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: Icon(
+            Icons.more_horiz_rounded,
+            size: 22,
+            color: colors.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HostActionMenuItem extends StatelessWidget {
+  const _HostActionMenuItem({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 10),
+        Text(label),
+      ],
+    );
   }
 }
 

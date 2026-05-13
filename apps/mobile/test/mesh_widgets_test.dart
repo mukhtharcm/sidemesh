@@ -78,6 +78,30 @@ void main() {
     expect(find.text('online'), findsOneWidget);
     expect(find.byIcon(Icons.chevron_right_rounded), findsOneWidget);
   });
+
+  testWidgets('MeshListRow can render unframed grouped rows', (tester) async {
+    var taps = 0;
+    await tester.pumpWidget(
+      _wrap(
+        MeshListRow(
+          title: const Text('Terminal'),
+          subtitle: const Text('Open a shell in this workspace.'),
+          leading: const Icon(Icons.terminal_rounded),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: () => taps++,
+          framed: false,
+          dense: true,
+        ),
+      ),
+    );
+
+    expect(find.byType(MeshSurface), findsNothing);
+    expect(find.text('Terminal'), findsOneWidget);
+
+    await tester.tap(find.text('Terminal'));
+
+    expect(taps, 1);
+  });
 }
 
 Widget _wrap(Widget child) {

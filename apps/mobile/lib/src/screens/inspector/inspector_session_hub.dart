@@ -193,6 +193,8 @@ class _HubToolRow extends StatelessWidget {
     return MeshListRow(
       onTap: tool.onTap,
       dense: true,
+      framed: false,
+      radius: AppRadii.control,
       leading: Container(
         width: 32,
         height: 32,
