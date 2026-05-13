@@ -3455,6 +3455,28 @@ describe("GET /api/sessions/:sessionId/status", () => {
     return (sessionsRes.body as any[]).find((item) => item.id === sessionId)?.status;
   }
 
+  async function createTransientStatusSession(
+    server: RunningServer,
+    config: NodeConfig,
+  ): Promise<any> {
+    const createRes = await request({
+      hostname: "127.0.0.1",
+      port: server.port,
+      path: "/api/sessions/create",
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + config.token,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        cwd: "/tmp/transient-unreadable-create-status-test",
+        prompt: "start while thread read is temporarily unavailable",
+      }),
+    });
+    assert.equal(createRes.statusCode, 201);
+    return createRes.body as any;
+  }
+
   it("reports running for inProgress turns", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
     await withServer(makeConfig(stateDir), async (server, config) => {
@@ -4135,28 +4157,14 @@ describe("GET /api/sessions/:sessionId/status", () => {
     const provider = new TransientUnreadableCreateStatusProvider();
     const runtime = makeCustomSingleProviderRuntime(provider);
     await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          cwd: "/tmp/transient-unreadable-create-status-test",
-          prompt: "start while thread read is temporarily unavailable",
-        }),
-      });
-      assert.equal(createRes.statusCode, 201);
-      const sessionId = (createRes.body as any).session.id as string;
+      const createBody = await createTransientStatusSession(server, config);
+      const sessionId = createBody.session.id as string;
       assert.equal(sessionId, "fake-transient-create-status-session");
       assert.equal(
-        (createRes.body as any).activeTurnId,
+        createBody.activeTurnId,
         "fake-transient-create-status-turn",
       );
-      assert.equal((createRes.body as any).session.status, "running");
+      assert.equal(createBody.session.status, "running");
 
       const statusRes = await request({
         hostname: "127.0.0.1",
@@ -4169,6 +4177,58 @@ describe("GET /api/sessions/:sessionId/status", () => {
       assert.equal((statusRes.body as any).status, "idle");
       assert.equal((statusRes.body as any).isRunning, false);
       assert.equal((statusRes.body as any).activeTurnId, null);
+    });
+  });
+
+  it("clears unverified active turns from log snapshots", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new TransientUnreadableCreateStatusProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const createBody = await createTransientStatusSession(server, config);
+      const sessionId = createBody.session.id as string;
+
+      const logRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(logRes.statusCode, 200);
+      assert.equal((logRes.body as any).session.status, "idle");
+    });
+  });
+
+  it("clears unverified active turns from event replay snapshots", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new TransientUnreadableCreateStatusProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const createBody = await createTransientStatusSession(server, config);
+      const sessionId = createBody.session.id as string;
+
+      const eventsRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=0`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(eventsRes.statusCode, 200);
+      assert.equal((eventsRes.body as any).session.status, "idle");
+    });
+  });
+
+  it("clears unverified active turns from recent session snapshots", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new TransientUnreadableCreateStatusProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const createBody = await createTransientStatusSession(server, config);
+      const sessionId = createBody.session.id as string;
+
+      assert.equal(await readRecentStatus(server, config, sessionId), "idle");
     });
   });
 
