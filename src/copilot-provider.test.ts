@@ -1559,6 +1559,24 @@ describe("Copilot provider", () => {
                   detailedContent: "Prompt to code-review agent: Long review prompt",
                 },
               }),
+              event("tool.execution_start", {
+                toolCallId: "github-1",
+                toolName: "github-mcp-server-get_file_contents",
+                arguments: {
+                  owner: "textcortex",
+                  repo: "sidemesh",
+                  path: "src/copilot-provider.ts",
+                  ref: "main",
+                },
+              }),
+              event("tool.execution_complete", {
+                toolCallId: "github-1",
+                toolName: "github-mcp-server-get_file_contents",
+                success: true,
+                result: {
+                  content: "export class CopilotAgentProvider {}",
+                },
+              }),
             ],
           },
         ],
@@ -1617,6 +1635,28 @@ describe("Copilot provider", () => {
       );
       assert.equal(task.result, null);
       assert.equal(task.semantic?.category, "task");
+
+      const github = log.activities.find(
+        (activity) => activity.id === "github-1",
+      );
+      assert.ok(github, "Expected GitHub MCP activity");
+      assert.equal(github.type, "tool");
+      assert.equal(
+        github.title,
+        "Read GitHub file textcortex/sidemesh/src/copilot-provider.ts",
+      );
+      assert.deepEqual(github.args, {
+        owner: "textcortex",
+        repo: "sidemesh",
+        path: "src/copilot-provider.ts",
+        ref: "main",
+      });
+      assert.equal(github.output, "export class CopilotAgentProvider {}");
+      assert.equal(github.result, null);
+      assert.equal(github.semantic?.category, "network");
+      assert.deepEqual(github.semantic?.targets, [
+        { type: "unknown", label: "textcortex/sidemesh/src/copilot-provider.ts" },
+      ]);
     } finally {
       await settleProviderWrites();
       await rm(dir, {

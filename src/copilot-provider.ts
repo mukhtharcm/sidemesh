@@ -4191,10 +4191,12 @@ function normalizeCopilotToolArgs(
     toolName === "rg" ||
     toolName === "glob" ||
     toolName === "web_search" ||
-    toolName === "web_fetch" ||
-    toolName.startsWith("github-mcp-server-")
+    toolName === "web_fetch"
   ) {
     return null;
+  }
+  if (toolName.startsWith("github-mcp-server-")) {
+    return normalizeCopilotGithubToolArgs(args);
   }
   return args;
 }
@@ -4406,6 +4408,12 @@ function inferCopilotToolSemantic(
     ["command", "cmd", "fullCommandText", "shellCommand"],
     typedResult,
   );
+  const githubSemantic = normalizedName.startsWith("github-mcp-server-")
+    ? inferCopilotGithubToolSemantic(normalizedName, typedArgs, typedResult, url)
+    : null;
+  if (githubSemantic) {
+    return githubSemantic;
+  }
 
   if (
     normalizedName === "view" ||
@@ -4495,8 +4503,7 @@ function inferCopilotToolSemantic(
     normalizedName === "open_url" ||
     normalizedName === "openurl" ||
     normalizedName === "request" ||
-    normalizedName === "browse" ||
-    normalizedName.startsWith("github-mcp-server-")
+    normalizedName === "browse"
   ) {
     return {
       category: "network",
@@ -4544,6 +4551,66 @@ function inferCopilotToolSemantic(
       })),
     ],
   };
+}
+
+function inferCopilotGithubToolSemantic(
+  toolName: string,
+  args: Record<string, unknown> | null,
+  result: Record<string, unknown> | null,
+  url: string | null,
+): ToolActivitySemantic {
+  const owner = readFirstString(args, ["owner"], result);
+  const repo = readFirstString(args, ["repo"], result);
+  const repository = owner && repo ? `${owner}/${repo}` : repo ?? owner;
+  const pathValue = readFirstString(args, ["path", "file_path"], result);
+  const number =
+    readFirstString(args, ["pullNumber", "pull_number", "number"], result) ??
+    readNumber(args, ["pullNumber", "pull_number", "number"])?.toString() ??
+    readNumber(result, ["pullNumber", "pull_number", "number"])?.toString() ??
+    null;
+  const labels = new Set<string>();
+  if (toolName.endsWith("get_file_contents") && repository && pathValue) {
+    labels.add(`${repository}/${pathValue}`);
+  } else if (toolName.endsWith("pull_request_read") && repository && number) {
+    labels.add(`${repository}#${number}`);
+  } else if (repository) {
+    labels.add(repository);
+  }
+  if (pathValue && (!repository || !toolName.endsWith("get_file_contents"))) {
+    labels.add(pathValue);
+  }
+  if (number && !toolName.endsWith("pull_request_read")) {
+    labels.add(`#${number}`);
+  }
+  return {
+    category: "network",
+    action: "fetch",
+    targets: [
+      ...(url ? [{ type: "url" as const, url, role: "target" as const }] : []),
+      ...[...labels].map((label) => ({ type: "unknown" as const, label })),
+    ],
+  };
+}
+
+function normalizeCopilotGithubToolArgs(args: unknown): unknown {
+  const typedArgs = asRecord(args);
+  if (!typedArgs) {
+    return null;
+  }
+  const normalized: Record<string, string | number> = {};
+  for (const key of ["owner", "repo", "path", "file_path", "ref", "branch"]) {
+    const value = readFirstString(typedArgs, [key]);
+    if (value) {
+      normalized[key] = value;
+    }
+  }
+  const number =
+    readNumber(typedArgs, ["pullNumber", "pull_number", "number"]) ??
+    null;
+  if (number != null) {
+    normalized.number = number;
+  }
+  return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
 function mergeCopilotToolSemantic(

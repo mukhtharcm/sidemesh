@@ -987,6 +987,7 @@ export async function startServer(
           },
         });
         clearSessionLogCache(logCache, event.sessionId);
+        void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
         scheduleRecentSessionUpsert(event.sessionId);
         return;
       }
