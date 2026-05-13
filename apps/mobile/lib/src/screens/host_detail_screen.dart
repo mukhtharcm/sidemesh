@@ -179,9 +179,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
     List<SessionSummary> recents,
     List<SessionSummary> favorites,
   ) {
-    final byId = <String, SessionSummary>{
-      for (final s in recents) s.id: s,
-    };
+    final byId = <String, SessionSummary>{for (final s in recents) s.id: s};
     for (final fav in favorites) {
       byId.putIfAbsent(fav.id, () => fav);
     }
@@ -665,13 +663,14 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
         'This host requires Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
       MobileClientCompatibilityLevel.recommended =>
         'This host recommends Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
-      MobileClientCompatibilityLevel.none => node.minimumMobileClientVersion != null &&
-              node.minimumMobileClientVersion!.isNotEmpty
-          ? 'This host currently supports Sidemesh mobile ${mobileClientVersionLabel(node.minimumMobileClientVersion!)} or newer.'
-          : node.recommendedMobileClientVersion != null &&
-                node.recommendedMobileClientVersion!.isNotEmpty
-          ? 'This host currently recommends Sidemesh mobile ${mobileClientVersionLabel(node.recommendedMobileClientVersion!)} or newer.'
-          : 'This host did not publish a mobile client policy.',
+      MobileClientCompatibilityLevel.none =>
+        node.minimumMobileClientVersion != null &&
+                node.minimumMobileClientVersion!.isNotEmpty
+            ? 'This host currently supports Sidemesh mobile ${mobileClientVersionLabel(node.minimumMobileClientVersion!)} or newer.'
+            : node.recommendedMobileClientVersion != null &&
+                  node.recommendedMobileClientVersion!.isNotEmpty
+            ? 'This host currently recommends Sidemesh mobile ${mobileClientVersionLabel(node.recommendedMobileClientVersion!)} or newer.'
+            : 'This host did not publish a mobile client policy.',
     };
 
     return MeshCard(
@@ -747,9 +746,9 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   currentVersion,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textTertiary,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
                 ),
               ],
             ),
@@ -1002,12 +1001,8 @@ class _ProviderDefinitionSection extends StatelessWidget {
           detail: '${providers.length} available',
         ),
         const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: AppShapes.card,
-            border: Border.all(color: colors.border),
-          ),
+        MeshSurface(
+          padding: EdgeInsets.zero,
           child: Column(
             children: [
               for (var index = 0; index < providers.length; index++) ...[
@@ -1047,87 +1042,64 @@ class _ProviderDefinitionRow extends StatelessWidget {
     final command = provider.config.command ?? provider.defaultCommand;
     final iconTone = selected ? colors.accent : colors.textTertiary;
     final iconBackground = selected ? colors.accentMuted : colors.surfaceMuted;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: AppShapes.card,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-          child: Row(
-            children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: iconBackground,
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(
-                    color: selected
-                        ? colors.accent.withValues(alpha: 0.36)
-                        : colors.border,
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  selected
-                      ? Icons.radio_button_checked_rounded
-                      : Icons.radio_button_unchecked_rounded,
-                  size: 17,
-                  color: iconTone,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            provider.displayName.isEmpty
-                                ? provider.kind
-                                : provider.displayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelLarge
-                                ?.copyWith(fontWeight: AppWeights.title),
-                          ),
-                        ),
-                        if (active) ...[
-                          const SizedBox(width: 7),
-                          _TinyStatusPill(
-                            label: 'active',
-                            tone: MeshPillTone.success,
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      [
-                        provider.kind,
-                        if (provider.version.trim().isNotEmpty)
-                          provider.version.trim(),
-                        if (command.trim().isNotEmpty) 'cmd $command',
-                      ].join(' - '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: monoStyle(
-                        color: colors.textTertiary,
-                        fontSize: 10.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (selected)
-                Icon(Icons.check_rounded, color: colors.accent, size: 18),
-            ],
+    return MeshListRow(
+      framed: false,
+      dense: true,
+      onTap: onTap,
+      leading: Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          color: iconBackground,
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(
+            color: selected
+                ? colors.accent.withValues(alpha: 0.36)
+                : colors.border,
           ),
         ),
+        alignment: Alignment.center,
+        child: Icon(
+          selected
+              ? Icons.radio_button_checked_rounded
+              : Icons.radio_button_unchecked_rounded,
+          size: 17,
+          color: iconTone,
+        ),
       ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              provider.displayName.isEmpty
+                  ? provider.kind
+                  : provider.displayName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
+            ),
+          ),
+          if (active) ...[
+            const SizedBox(width: 7),
+            _TinyStatusPill(label: 'active', tone: MeshPillTone.success),
+          ],
+        ],
+      ),
+      subtitle: Text(
+        [
+          provider.kind,
+          if (provider.version.trim().isNotEmpty) provider.version.trim(),
+          if (command.trim().isNotEmpty) 'cmd $command',
+        ].join(' - '),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+      ),
+      trailing: selected
+          ? Icon(Icons.check_rounded, color: colors.accent, size: 18)
+          : null,
     );
   }
 }
@@ -1197,13 +1169,8 @@ class _CapabilitySummaryGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final allEnabled = group.enabledCount == group.totalCount;
-    return Container(
+    return MeshSurface(
       padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: AppShapes.card,
-        border: Border.all(color: colors.border),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1257,40 +1224,11 @@ class _CapabilityStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final bg = feature.enabled ? colors.successMuted : colors.surfaceMuted;
-    final fg = feature.enabled ? colors.success : colors.textTertiary;
-    final border = feature.enabled
-        ? colors.success.withValues(alpha: 0.28)
-        : colors.border;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(8, 5, 9, 5),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            feature.enabled ? Icons.check_rounded : Icons.remove_rounded,
-            size: 13,
-            color: fg,
-          ),
-          const SizedBox(width: 5),
-          Text(
-            feature.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: monoStyle(
-              color: fg,
-              fontSize: 11,
-              fontWeight: feature.enabled ? AppWeights.title : AppWeights.body,
-            ),
-          ),
-        ],
-      ),
+    return MeshPill(
+      label: feature.label,
+      icon: feature.enabled ? Icons.check_rounded : Icons.remove_rounded,
+      tone: feature.enabled ? MeshPillTone.success : MeshPillTone.neutral,
+      mono: true,
     );
   }
 }
@@ -1489,8 +1427,9 @@ class _ProviderContractSummaryCard extends StatelessWidget {
                     children: [
                       Text(
                         'Providers & capabilities',
-                        style: Theme.of(context).textTheme.titleSmall
-                            ?.copyWith(fontWeight: AppWeights.title),
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: AppWeights.title,
+                        ),
                       ),
                       const SizedBox(height: 3),
                       Text(
@@ -1897,9 +1836,9 @@ class _CapabilityGroupRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   group.title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: AppWeights.title,
+                  ),
                 ),
               ),
               MeshPill(
@@ -1962,11 +1901,9 @@ class _SectionHeader extends StatelessWidget {
                   child: Text(
                     title,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.titleSmall?.copyWith(
-                          fontWeight: AppWeights.title,
-                        ),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: AppWeights.title,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -2117,10 +2054,7 @@ String _humanizeCamelCase(String value) {
 }
 
 class _WorkspaceLaunchRow extends StatelessWidget {
-  const _WorkspaceLaunchRow({
-    required this.workspaces,
-    required this.onTap,
-  });
+  const _WorkspaceLaunchRow({required this.workspaces, required this.onTap});
 
   final List<WorkspaceSummary> workspaces;
   final ValueChanged<WorkspaceSummary> onTap;
@@ -2345,15 +2279,12 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         refreshFailed
             ? 'Update channel set, but refresh failed.'
             : selected == 'bleeding-edge'
-                ? 'Update channel set to bleeding edge.'
-                : 'Update channel set to stable.',
+            ? 'Update channel set to bleeding edge.'
+            : 'Update channel set to stable.',
       );
     } catch (e) {
       if (!mounted) return;
-      showAppSnackBar(
-        context,
-        'Update channel failed: ${friendlyError(e)}',
-      );
+      showAppSnackBar(context, 'Update channel failed: ${friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _savingUpdateChannel = false);
     }
@@ -2500,7 +2431,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   String _updateDetail() {
     final isOffline =
         HostStatusStore.instance.statusFor(widget.host.id).reachability ==
-            HostReachability.offline;
+        HostReachability.offline;
     if (isOffline) {
       return 'Host offline — cannot update';
     }
@@ -2558,7 +2489,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         final colors = context.colors;
         final isOffline =
             HostStatusStore.instance.statusFor(widget.host.id).reachability ==
-                HostReachability.offline;
+            HostReachability.offline;
 
         return MeshCard(
           tone: MeshCardTone.muted,
@@ -2573,7 +2504,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                   targetLabel: _updateTargetLabel,
                   previousVersion: _updatePreviousVersion,
                   previousCommitSha: _updatePreviousCommitSha,
-                  updateChannel: _updateChannelAtStart ?? widget.node.updateChannel,
+                  updateChannel:
+                      _updateChannelAtStart ?? widget.node.updateChannel,
                   currentNode: widget.node,
                   onDismiss: () => setState(() => _updateStartedAt = null),
                   onRetry: () {
@@ -2676,10 +2608,10 @@ class _UpdateProgressBanner extends StatelessWidget {
     if (status.reachability == HostReachability.online) {
       final changed = updateChannel == 'bleeding-edge'
           ? currentNode.currentCommitSha != null &&
-              currentNode.currentCommitSha != previousCommitSha
+                currentNode.currentCommitSha != previousCommitSha
           : currentNode.packageVersion != null &&
-              currentNode.packageVersion!.isNotEmpty &&
-              currentNode.packageVersion != previousVersion;
+                currentNode.packageVersion!.isNotEmpty &&
+                currentNode.packageVersion != previousVersion;
       if (changed) {
         return _buildSuccess(context, colors, _successLabel());
       }
@@ -2858,15 +2790,15 @@ class _ManagementRow extends StatelessWidget {
       ),
       title: Text(
         label,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          fontWeight: AppWeights.emphasis,
-        ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(fontWeight: AppWeights.emphasis),
       ),
       subtitle: Text(
         detail,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: colors.textSecondary,
-        ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
       ),
     );
   }

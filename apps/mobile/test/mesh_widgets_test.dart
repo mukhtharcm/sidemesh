@@ -27,15 +27,25 @@ void main() {
   ) async {
     await tester.pumpWidget(
       _wrap(
-        const MeshCard(
-          tone: MeshCardTone.elevated,
-          child: Text('Legacy card'),
-        ),
+        const MeshCard(tone: MeshCardTone.elevated, child: Text('Legacy card')),
       ),
     );
 
     expect(find.byType(MeshSurface), findsOneWidget);
     expect(find.text('Legacy card'), findsOneWidget);
+  });
+
+  testWidgets('MeshSurface supports accent callout tone', (tester) async {
+    await tester.pumpWidget(
+      _wrap(
+        const MeshSurface(
+          tone: MeshSurfaceTone.accent,
+          child: Text('Approval alerts'),
+        ),
+      ),
+    );
+
+    expect(find.text('Approval alerts'), findsOneWidget);
   });
 
   testWidgets('MeshStatusBadge renders status label and icon', (tester) async {

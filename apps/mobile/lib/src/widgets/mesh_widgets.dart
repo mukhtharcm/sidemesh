@@ -26,45 +26,48 @@ class MeshPill extends StatelessWidget {
     final colors = context.colors;
     final (bg, fg, border) = switch (tone) {
       MeshPillTone.neutral => (
-          colors.surfaceMuted,
-          colors.textSecondary,
-          colors.border,
-        ),
+        colors.surfaceMuted,
+        colors.textSecondary,
+        colors.border,
+      ),
       MeshPillTone.accent => (
-          colors.accentMuted,
-          colors.accent,
-          colors.accent.withValues(alpha: 0.4),
-        ),
+        colors.accentMuted,
+        colors.accent,
+        colors.accent.withValues(alpha: 0.4),
+      ),
       MeshPillTone.success => (
-          colors.successMuted,
-          colors.success,
-          colors.success.withValues(alpha: 0.4),
-        ),
+        colors.successMuted,
+        colors.success,
+        colors.success.withValues(alpha: 0.4),
+      ),
       MeshPillTone.danger => (
-          colors.dangerMuted,
-          colors.danger,
-          colors.danger.withValues(alpha: 0.4),
-        ),
+        colors.dangerMuted,
+        colors.danger,
+        colors.danger.withValues(alpha: 0.4),
+      ),
       MeshPillTone.warning => (
-          colors.warningMuted,
-          colors.warning,
-          colors.warning.withValues(alpha: 0.4),
-        ),
+        colors.warningMuted,
+        colors.warning,
+        colors.warning.withValues(alpha: 0.4),
+      ),
       MeshPillTone.info => (
-          colors.infoMuted,
-          colors.info,
-          colors.info.withValues(alpha: 0.4),
-        ),
+        colors.infoMuted,
+        colors.info,
+        colors.info.withValues(alpha: 0.4),
+      ),
     };
 
     final textStyle = mono
-        ? monoStyle(color: fg, fontSize: 11.5, fontWeight: AppWeights.title)
-            .copyWith(letterSpacing: 0.2)
+        ? monoStyle(
+            color: fg,
+            fontSize: 11.5,
+            fontWeight: AppWeights.title,
+          ).copyWith(letterSpacing: 0.2)
         : Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: fg,
-              fontWeight: bold ? AppWeights.emphasis : AppWeights.body,
-              letterSpacing: 0.2,
-            );
+            color: fg,
+            fontWeight: bold ? AppWeights.emphasis : AppWeights.body,
+            letterSpacing: 0.2,
+          );
 
     return Container(
       padding: EdgeInsets.symmetric(
@@ -139,23 +142,26 @@ class MeshSurface extends StatelessWidget {
             MeshSurfaceTone.surface => colors.surface,
             MeshSurfaceTone.elevated => colors.surfaceElevated,
             MeshSurfaceTone.muted => colors.surfaceMuted,
+            MeshSurfaceTone.accent => colors.accentMuted.withValues(
+              alpha: 0.72,
+            ),
             MeshSurfaceTone.warning => colors.warningMuted.withValues(
-                alpha: 0.62,
-              ),
+              alpha: 0.62,
+            ),
             MeshSurfaceTone.danger => colors.dangerMuted.withValues(
-                alpha: 0.58,
-              ),
+              alpha: 0.58,
+            ),
           };
-    final border = borderColor ??
+    final border =
+        borderColor ??
         (selected
             ? colors.accent.withValues(alpha: 0.52)
             : switch (tone) {
                 MeshSurfaceTone.warning => colors.warning.withValues(
-                    alpha: 0.36,
-                  ),
-                MeshSurfaceTone.danger => colors.danger.withValues(
-                    alpha: 0.36,
-                  ),
+                  alpha: 0.36,
+                ),
+                MeshSurfaceTone.danger => colors.danger.withValues(alpha: 0.36),
+                MeshSurfaceTone.accent => colors.accent.withValues(alpha: 0.36),
                 _ => colors.border,
               });
     final borderRadius = BorderRadius.circular(radius);
@@ -200,7 +206,7 @@ class MeshSurface extends StatelessWidget {
   }
 }
 
-enum MeshSurfaceTone { surface, elevated, muted, warning, danger }
+enum MeshSurfaceTone { surface, elevated, muted, accent, warning, danger }
 
 /// Standard list row shell for session, host, file, and settings rows.
 class MeshListRow extends StatelessWidget {
@@ -350,50 +356,50 @@ class MeshStatusBadge extends StatelessWidget {
     final colors = context.colors;
     final (bg, fg, border) = switch (tone) {
       MeshStatusTone.neutral => (
-          colors.surfaceMuted,
-          colors.textSecondary,
-          colors.border,
-        ),
+        colors.surfaceMuted,
+        colors.textSecondary,
+        colors.border,
+      ),
       MeshStatusTone.running => (
-          colors.successMuted,
-          colors.success,
-          colors.success.withValues(alpha: 0.4),
-        ),
+        colors.successMuted,
+        colors.success,
+        colors.success.withValues(alpha: 0.4),
+      ),
       MeshStatusTone.waiting => (
-          colors.warningMuted,
-          colors.warning,
-          colors.warning.withValues(alpha: 0.42),
-        ),
+        colors.warningMuted,
+        colors.warning,
+        colors.warning.withValues(alpha: 0.42),
+      ),
       MeshStatusTone.approval => (
-          colors.warningMuted,
-          colors.warning,
-          colors.warning.withValues(alpha: 0.52),
-        ),
+        colors.warningMuted,
+        colors.warning,
+        colors.warning.withValues(alpha: 0.52),
+      ),
       MeshStatusTone.queued => (
-          colors.infoMuted,
-          colors.info,
-          colors.info.withValues(alpha: 0.42),
-        ),
+        colors.infoMuted,
+        colors.info,
+        colors.info.withValues(alpha: 0.42),
+      ),
       MeshStatusTone.success => (
-          colors.successMuted,
-          colors.success,
-          colors.success.withValues(alpha: 0.4),
-        ),
+        colors.successMuted,
+        colors.success,
+        colors.success.withValues(alpha: 0.4),
+      ),
       MeshStatusTone.danger => (
-          colors.dangerMuted,
-          colors.danger,
-          colors.danger.withValues(alpha: 0.42),
-        ),
+        colors.dangerMuted,
+        colors.danger,
+        colors.danger.withValues(alpha: 0.42),
+      ),
       MeshStatusTone.offline => (
-          colors.surfaceMuted,
-          colors.textTertiary,
-          colors.border,
-        ),
+        colors.surfaceMuted,
+        colors.textTertiary,
+        colors.border,
+      ),
       MeshStatusTone.stale => (
-          colors.surfaceMuted,
-          colors.textSecondary,
-          colors.borderStrong.withValues(alpha: 0.72),
-        ),
+        colors.surfaceMuted,
+        colors.textSecondary,
+        colors.borderStrong.withValues(alpha: 0.72),
+      ),
     };
     final horizontal = compact ? 7.0 : 9.0;
     final vertical = compact ? 3.0 : 4.0;
@@ -529,9 +535,7 @@ class _MeshSkeletonState extends State<MeshSkeleton>
           decoration: BoxDecoration(
             color: colors.surfaceMuted.withValues(alpha: pulse),
             borderRadius: BorderRadius.circular(widget.radius),
-            border: Border.all(
-              color: colors.border.withValues(alpha: 0.42),
-            ),
+            border: Border.all(color: colors.border.withValues(alpha: 0.42)),
           ),
         );
       },
@@ -630,9 +634,9 @@ class MeshEmptyState extends StatelessWidget {
             Text(
               title,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: AppWeights.title,
-                    color: colors.textPrimary,
-                  ),
+                fontWeight: AppWeights.title,
+                color: colors.textPrimary,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
@@ -640,9 +644,9 @@ class MeshEmptyState extends StatelessWidget {
               body,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.45,
-                  ),
+                color: colors.textSecondary,
+                height: 1.45,
+              ),
             ),
           ],
         ),
@@ -666,6 +670,7 @@ class MeshIconButton extends StatelessWidget {
   final VoidCallback onTap;
   final String? tooltip;
   final Color? color;
+
   /// Accessibility label surfaced to screen readers. Defaults to [tooltip].
   final String? semanticLabel;
 
@@ -726,9 +731,10 @@ class _LivePulseState extends State<LivePulse>
       duration: const Duration(milliseconds: 1500),
       vsync: this,
     )..repeat(reverse: true);
-    _opacity = Tween<double>(begin: 1.0, end: 0.3).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _opacity = Tween<double>(
+      begin: 1.0,
+      end: 0.3,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override

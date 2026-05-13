@@ -2902,35 +2902,26 @@ class _PendingSendActionChip extends StatelessWidget {
     if (destructive) {
       return MeshDangerAction(label: label, icon: icon, onPressed: onTap);
     }
-    final fg = disabled
-        ? colors.textTertiary
-        : colors.textPrimary;
-    final bg = disabled
-        ? colors.surfaceMuted
-        : colors.surfaceMuted;
-    return Material(
-      color: bg,
-      borderRadius: AppShapes.pill,
-      child: InkWell(
-        borderRadius: AppShapes.pill,
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 16, color: fg),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: fg,
-                  fontWeight: AppWeights.emphasis,
-                ),
-              ),
-            ],
+    final fg = disabled ? colors.textTertiary : colors.textPrimary;
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: 999,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      enabled: !disabled,
+      onTap: onTap,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: fg),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: fg,
+              fontWeight: AppWeights.emphasis,
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
