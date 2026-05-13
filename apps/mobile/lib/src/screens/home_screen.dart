@@ -3162,10 +3162,11 @@ class _InboxCard extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 6),
-                          MeshPill(
+                          MeshStatusBadge(
                             label: _actionKindLabel(action.kind),
-                            tone: MeshPillTone.warning,
-                            mono: true,
+                            tone: _actionKindTone(action.kind),
+                            icon: _actionKindIcon(action.kind),
+                            compact: true,
                           ),
                         ],
                       ),
@@ -3213,10 +3214,11 @@ class _InboxCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              MeshPill(
+              MeshStatusBadge(
                 label: _actionKindLabel(action.kind),
-                tone: MeshPillTone.warning,
-                mono: true,
+                tone: _actionKindTone(action.kind),
+                icon: _actionKindIcon(action.kind),
+                compact: true,
               ),
             ],
           ),
@@ -3292,6 +3294,24 @@ String _actionKindLabel(String kind) {
     'user_input' => 'question',
     'elicitation' => 'form',
     _ => kind,
+  };
+}
+
+MeshStatusTone _actionKindTone(String kind) {
+  return switch (kind) {
+    'user_input' => MeshStatusTone.waiting,
+    'elicitation' => MeshStatusTone.queued,
+    _ => MeshStatusTone.approval,
+  };
+}
+
+IconData _actionKindIcon(String kind) {
+  return switch (kind) {
+    'user_input' => Icons.chat_bubble_outline_rounded,
+    'elicitation' => Icons.fact_check_rounded,
+    'file_change' => Icons.description_outlined,
+    'command' => Icons.terminal_rounded,
+    _ => Icons.shield_rounded,
   };
 }
 

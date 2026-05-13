@@ -116,6 +116,7 @@ class MeshSurface extends StatelessWidget {
     this.selected = false,
     this.enabled = true,
     this.radius = AppRadii.surface,
+    this.width,
   });
 
   final Widget child;
@@ -126,6 +127,7 @@ class MeshSurface extends StatelessWidget {
   final bool selected;
   final bool enabled;
   final double radius;
+  final double? width;
 
   @override
   Widget build(BuildContext context) {
@@ -161,6 +163,7 @@ class MeshSurface extends StatelessWidget {
     final content = AnimatedContainer(
       duration: const Duration(milliseconds: 140),
       curve: Curves.easeOutCubic,
+      width: width,
       decoration: BoxDecoration(
         color: bg,
         borderRadius: borderRadius,

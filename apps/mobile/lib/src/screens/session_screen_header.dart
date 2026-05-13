@@ -35,13 +35,10 @@ class _CachedTranscriptStrip extends StatelessWidget {
             ? 'Offline · showing last known session state'
             : 'Offline · $_lastConnectedText',
     };
-    return Container(
+    return MeshSurface(
+      tone: MeshSurfaceTone.warning,
+      radius: AppRadii.control,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.warning.withValues(alpha: 0.11),
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.warning.withValues(alpha: 0.26)),
-      ),
       child: Row(
         children: [
           if (refreshing)
@@ -1518,15 +1515,11 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           children: [
             Row(
               children: [
-                Icon(kindMeta.icon, color: kindMeta.accent, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  kindMeta.kicker,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: kindMeta.accent,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.6,
-                  ),
+                MeshStatusBadge(
+                  label: kindMeta.kicker,
+                  tone: kindMeta.tone,
+                  icon: kindMeta.icon,
+                  compact: true,
                 ),
               ],
             ),
@@ -1567,7 +1560,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: _buildFooterActions(context, colors),
+              children: _buildFooterActions(context),
             ),
           ],
         ),
@@ -1842,7 +1835,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     };
   }
 
-  List<Widget> _buildFooterActions(BuildContext context, AppColors colors) {
+  List<Widget> _buildFooterActions(BuildContext context) {
     if (action.isUserInput) {
       return [
         FilledButton.icon(
@@ -1862,19 +1855,12 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           ),
         ),
         if (action.canDecline)
-          OutlinedButton.icon(
+          MeshDangerAction(
             onPressed: () => widget.onRespond(
               PendingActionResponseDraft.elicitation(action: 'decline'),
             ),
-            icon: Icon(
-              Icons.thumb_down_alt_rounded,
-              size: 18,
-              color: colors.danger,
-            ),
-            label: Text('Decline', style: TextStyle(color: colors.danger)),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: colors.danger.withValues(alpha: 0.5)),
-            ),
+            icon: Icons.thumb_down_alt_rounded,
+            label: 'Decline',
           ),
         OutlinedButton.icon(
           onPressed: () => widget.onRespond(
@@ -1904,16 +1890,13 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           label: const Text('Approve for session'),
         ),
       if (action.canDecline)
-        OutlinedButton.icon(
+        MeshDangerAction(
           onPressed: _responding ? null : () {
               if (!_responding) setState(() => _responding = true);
               widget.onRespond(PendingActionResponseDraft.approval('decline'));
             },
-          icon: Icon(Icons.close_rounded, size: 18, color: colors.danger),
-          label: Text('Decline', style: TextStyle(color: colors.danger)),
-          style: OutlinedButton.styleFrom(
-            side: BorderSide(color: colors.danger.withValues(alpha: 0.5)),
-          ),
+          icon: Icons.close_rounded,
+          label: 'Decline',
         ),
     ];
   }
@@ -2026,11 +2009,13 @@ class _PendingActionKindMeta {
     required this.kicker,
     required this.icon,
     required this.accent,
+    required this.tone,
   });
 
   final String kicker;
   final IconData icon;
   final Color accent;
+  final MeshStatusTone tone;
 }
 
 _PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {
@@ -2039,6 +2024,7 @@ _PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {
       kicker: 'INPUT NEEDED',
       icon: Icons.chat_bubble_outline_rounded,
       accent: colors.accent,
+      tone: MeshStatusTone.waiting,
     );
   }
   if (action.isElicitation) {
@@ -2046,12 +2032,14 @@ _PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {
       kicker: 'FORM REQUIRED',
       icon: Icons.fact_check_rounded,
       accent: colors.info,
+      tone: MeshStatusTone.queued,
     );
   }
   return _PendingActionKindMeta(
     kicker: 'APPROVAL REQUIRED',
     icon: Icons.shield_rounded,
     accent: colors.warning,
+    tone: MeshStatusTone.approval,
   );
 }
 
