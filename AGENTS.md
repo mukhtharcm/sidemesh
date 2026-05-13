@@ -217,6 +217,11 @@ specific agent provider.
 - **macOS unsandboxed**: The macOS build runs unsandboxed by design so keychain
   access works without extra signing. `file_picker` 11+ assumes sandboxed apps
   and performs an entitlement check — we explicitly skip it in `main.dart`.
+- **macOS path_provider FFI**: `path_provider_foundation` now uses the
+  `objective_c` native asset on macOS. If that framework is missing from a
+  debug app bundle, early calls like `getApplicationSupportDirectory()` can
+  crash at runtime. Prefer direct `~/Library/.../<bundle-id>` resolution for
+  startup-critical local storage paths in this app.
 - **Flutter flavors**: Build/run commands must include `--flavor dev` or
   `--flavor prod`.
 - **No formatter**: No Prettier, Biome, or ESLint. Follow file-local style.
