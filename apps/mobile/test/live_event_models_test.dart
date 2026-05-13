@@ -194,6 +194,19 @@ void main() {
     expect(parsed.latestPlanUpdate?.seq, 7);
     expect(parsed.latestPlanUpdate?.plan, hasLength(2));
     expect(parsed.latestPlanUpdate?.plan?.last.step, 'Restore the plan');
+
+    final clearLog = SessionLog.fromJson({
+      ...log.toJson(),
+      'latestPlanUpdate': {
+        'type': 'plan_updated',
+        'sessionId': 'session-1',
+        'seq': 8,
+        'plan': [],
+      },
+    });
+    expect(clearLog.latestPlanUpdate?.type, 'plan_updated');
+    expect(clearLog.latestPlanUpdate?.seq, 8);
+    expect(clearLog.latestPlanUpdate?.plan, isEmpty);
   });
 
   test('Session status models treat waiting states as active', () {
