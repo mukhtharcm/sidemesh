@@ -9,6 +9,7 @@ import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/home_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
+import 'package:sidemesh_mobile/src/session_read_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
@@ -38,9 +39,11 @@ void main() {
 
   setUp(() async {
     SessionLocalStore.instance.resetMigrationState();
+    SessionReadStore.instance.resetForTest();
     final db = await SidemeshDb.instance;
     await db.delete('sessions');
     SharedPreferences.setMockInitialValues(<String, Object>{});
+    await SessionReadStore.instance.ensureLoaded();
   });
 
   testWidgets(
@@ -189,52 +192,124 @@ void main() {
     expect(find.text('Best Match'), findsOneWidget);
   });
 
-  testWidgets('deduplicates mirrored search results returned by multiple hosts', (
-    tester,
-  ) async {
+  testWidgets(
+    'deduplicates mirrored search results returned by multiple hosts',
+    (tester) async {
+      final now = DateTime(2026, 1, 1, 12);
+      final api = _FakeSearchApiClient(
+        sessions: const <SessionSummary>[],
+        searchResults: <String, List<SessionSummary>>{
+          'host-1::ng': <SessionSummary>[
+            _session(
+              id: 'shared',
+              title: 'Shared Match',
+              updatedAt: now,
+              matchRank: 1,
+            ),
+          ],
+          'host-2::ng': <SessionSummary>[
+            _session(
+              id: 'shared',
+              title: 'Shared Match',
+              updatedAt: now.add(const Duration(seconds: 1)),
+              matchRank: 2,
+            ),
+          ],
+        },
+      );
+
+      await _pumpRecentPane(
+        tester,
+        api: api,
+        hosts: const <HostProfile>[host, brokenHost],
+        query: '',
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await _pumpRecentPane(
+        tester,
+        api: api,
+        hosts: const <HostProfile>[host, brokenHost],
+        query: 'ng',
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump();
+
+      expect(find.text('Shared Match'), findsOneWidget);
+    },
+  );
+
+  testWidgets('filters recents down to active sessions only', (tester) async {
     final now = DateTime(2026, 1, 1, 12);
     final api = _FakeSearchApiClient(
-      sessions: const <SessionSummary>[],
-      searchResults: <String, List<SessionSummary>>{
-        'host-1::ng': <SessionSummary>[
-          _session(
-            id: 'shared',
-            title: 'Shared Match',
-            updatedAt: now,
-            matchRank: 1,
-          ),
-        ],
-        'host-2::ng': <SessionSummary>[
-          _session(
-            id: 'shared',
-            title: 'Shared Match',
-            updatedAt: now.add(const Duration(seconds: 1)),
-            matchRank: 2,
-          ),
-        ],
-      },
+      sessions: <SessionSummary>[
+        _session(
+          id: 'running',
+          title: 'Running Agent',
+          updatedAt: now,
+          status: 'running',
+        ),
+        _session(
+          id: 'idle',
+          title: 'Idle Agent',
+          updatedAt: now.subtract(const Duration(minutes: 1)),
+        ),
+      ],
+      searchResults: const <String, List<SessionSummary>>{},
     );
 
     await _pumpRecentPane(
       tester,
       api: api,
-      hosts: const <HostProfile>[host, brokenHost],
+      hosts: const <HostProfile>[host],
       query: '',
+      filters: const RecentSessionFilters(runningOnly: true),
     );
     await tester.pump();
     await tester.pump();
+
+    expect(find.text('Running Agent'), findsOneWidget);
+    expect(find.text('Idle Agent'), findsNothing);
+  });
+
+  testWidgets('filters recents down to unread sessions only', (tester) async {
+    final now = DateTime(2026, 1, 1, 12);
+    final readSession = _session(
+      id: 'read',
+      title: 'Read Session',
+      updatedAt: now.subtract(const Duration(minutes: 2)),
+    );
+    final unreadSession = _session(
+      id: 'unread',
+      title: 'Unread Session',
+      updatedAt: now,
+    );
+    SessionReadStore.instance.markSeen(
+      host,
+      readSession.id,
+      readSession.updatedAt,
+    );
+    SessionReadStore.instance.markUnread(host, unreadSession.id);
+    await SessionReadStore.instance.flush();
+    final api = _FakeSearchApiClient(
+      sessions: <SessionSummary>[readSession, unreadSession],
+      searchResults: const <String, List<SessionSummary>>{},
+    );
 
     await _pumpRecentPane(
       tester,
       api: api,
-      hosts: const <HostProfile>[host, brokenHost],
-      query: 'ng',
+      hosts: const <HostProfile>[host],
+      query: '',
+      filters: const RecentSessionFilters(unreadOnly: true),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 350));
     await tester.pump();
 
-    expect(find.text('Shared Match'), findsOneWidget);
+    expect(find.text('Unread Session'), findsOneWidget);
+    expect(find.text('Read Session'), findsNothing);
   });
 }
 
@@ -243,6 +318,7 @@ Future<void> _pumpRecentPane(
   required ApiClient api,
   required List<HostProfile> hosts,
   required String query,
+  RecentSessionFilters filters = const RecentSessionFilters(),
 }) async {
   final themeController = await ThemeController.load();
   final palette = ThemeVariant.codexAmber;
@@ -263,6 +339,7 @@ Future<void> _pumpRecentPane(
             hosts: hosts,
             api: api,
             query: query,
+            filters: filters,
             hasSavedHosts: hosts.isNotEmpty,
             onOpenSession: (_, _) {},
             onActiveCountChanged: (_) {},
@@ -277,6 +354,7 @@ SessionSummary _session({
   required String id,
   required String title,
   required DateTime updatedAt,
+  String status = 'loaded',
   num? matchRank,
 }) {
   return SessionSummary(
@@ -288,7 +366,7 @@ SessionSummary _session({
     updatedAt: updatedAt,
     source: 'codex',
     provider: 'codex',
-    status: 'loaded',
+    status: status,
     runtime: null,
     gitInfo: null,
     matchRank: matchRank,

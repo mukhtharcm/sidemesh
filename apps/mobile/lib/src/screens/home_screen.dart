@@ -92,6 +92,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   int _inboxCount = 0;
   String _query = '';
   SessionViewMode _recentViewMode = SessionViewMode.flat;
+  RecentSessionFilters _recentFilters = const RecentSessionFilters();
   bool _handlingNotificationIntent = false;
   String? _dismissedRecommendedMobileClientVersion;
   final Map<String, NodeInfo> _hostNodeInfo = {};
@@ -256,6 +257,20 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       SessionViewMode.byCwd => 'byCwd',
       SessionViewMode.byHost => 'byHost',
       SessionViewMode.flat => 'flat',
+    });
+  }
+
+  void _toggleRecentRunningOnly(bool enabled) {
+    if (_recentFilters.runningOnly == enabled) return;
+    setState(() {
+      _recentFilters = _recentFilters.copyWith(runningOnly: enabled);
+    });
+  }
+
+  void _toggleRecentUnreadOnly(bool enabled) {
+    if (_recentFilters.unreadOnly == enabled) return;
+    setState(() {
+      _recentFilters = _recentFilters.copyWith(unreadOnly: enabled);
     });
   }
 
@@ -534,6 +549,13 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
               viewMode: _tabIndex == 0 ? _recentViewMode : null,
               onViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
+              recentFilters: _tabIndex == 0 ? _recentFilters : null,
+              onRunningOnlyChanged: _tabIndex == 0
+                  ? _toggleRecentRunningOnly
+                  : null,
+              onUnreadOnlyChanged: _tabIndex == 0
+                  ? _toggleRecentUnreadOnly
+                  : null,
               onRefresh: _refreshHosts,
               onStartSession: _startSessionFromHome,
               onOpenSettings: _openSettings,
@@ -575,6 +597,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                           },
                           viewMode: _recentViewMode,
                           onViewModeChanged: _setRecentViewMode,
+                          filters: _recentFilters,
                         ),
                         InboxPane(
                           hosts: enabledHosts,
@@ -651,6 +674,25 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
 
 enum SessionViewMode { flat, byCwd, byHost }
 
+class RecentSessionFilters {
+  const RecentSessionFilters({
+    this.runningOnly = false,
+    this.unreadOnly = false,
+  });
+
+  final bool runningOnly;
+  final bool unreadOnly;
+
+  bool get isAnyActive => runningOnly || unreadOnly;
+
+  RecentSessionFilters copyWith({bool? runningOnly, bool? unreadOnly}) {
+    return RecentSessionFilters(
+      runningOnly: runningOnly ?? this.runningOnly,
+      unreadOnly: unreadOnly ?? this.unreadOnly,
+    );
+  }
+}
+
 class _TabDef {
   const _TabDef({
     required this.title,
@@ -672,6 +714,9 @@ class _HomeStickyHeader extends StatelessWidget {
     required this.searchVisible,
     required this.viewMode,
     required this.onViewModeChanged,
+    required this.recentFilters,
+    required this.onRunningOnlyChanged,
+    required this.onUnreadOnlyChanged,
     required this.onRefresh,
     required this.onStartSession,
     required this.onOpenSettings,
@@ -682,6 +727,9 @@ class _HomeStickyHeader extends StatelessWidget {
   final bool searchVisible;
   final SessionViewMode? viewMode;
   final ValueChanged<SessionViewMode>? onViewModeChanged;
+  final RecentSessionFilters? recentFilters;
+  final ValueChanged<bool>? onRunningOnlyChanged;
+  final ValueChanged<bool>? onUnreadOnlyChanged;
   final VoidCallback onRefresh;
   final VoidCallback onStartSession;
   final VoidCallback onOpenSettings;
@@ -778,6 +826,9 @@ class _HomeStickyHeader extends StatelessWidget {
                     hintText: 'Search ${tab.title.toLowerCase()}',
                     viewMode: viewMode,
                     onViewModeChanged: onViewModeChanged,
+                    recentFilters: recentFilters,
+                    onRunningOnlyChanged: onRunningOnlyChanged,
+                    onUnreadOnlyChanged: onUnreadOnlyChanged,
                   )
                 : const SizedBox(key: ValueKey('no-search'), height: 0),
           ),
@@ -793,12 +844,18 @@ class _HomeSearchField extends StatelessWidget {
     required this.hintText,
     this.viewMode,
     this.onViewModeChanged,
+    this.recentFilters,
+    this.onRunningOnlyChanged,
+    this.onUnreadOnlyChanged,
   });
 
   final TextEditingController controller;
   final String hintText;
   final SessionViewMode? viewMode;
   final ValueChanged<SessionViewMode>? onViewModeChanged;
+  final RecentSessionFilters? recentFilters;
+  final ValueChanged<bool>? onRunningOnlyChanged;
+  final ValueChanged<bool>? onUnreadOnlyChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -807,118 +864,145 @@ class _HomeSearchField extends StatelessWidget {
       animation: controller,
       builder: (context, _) {
         final hasQuery = controller.text.isNotEmpty;
-        return TextField(
-          controller: controller,
-          textInputAction: TextInputAction.search,
-          style: TextStyle(color: colors.textPrimary, fontSize: 14),
-          decoration: InputDecoration(
-            isDense: true,
-            filled: true,
-            fillColor: colors.surface,
-            hintText: hintText,
-            hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
-            prefixIcon: viewMode != null && onViewModeChanged != null
-                ? ConstrainedBox(
-                    constraints: const BoxConstraints.tightFor(
-                      width: 32,
-                      height: 32,
-                    ),
-                    child: PopupMenuButton<SessionViewMode>(
-                      padding: EdgeInsets.zero,
-                      icon: Icon(
-                        switch (viewMode!) {
-                          SessionViewMode.flat => Icons.view_list_rounded,
-                          SessionViewMode.byCwd => Icons.folder_rounded,
-                          SessionViewMode.byHost => Icons.hub_rounded,
-                        },
+        final filters = recentFilters;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: controller,
+              textInputAction: TextInputAction.search,
+              style: TextStyle(color: colors.textPrimary, fontSize: 14),
+              decoration: InputDecoration(
+                isDense: true,
+                filled: true,
+                fillColor: colors.surface,
+                hintText: hintText,
+                hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
+                prefixIcon: viewMode != null && onViewModeChanged != null
+                    ? ConstrainedBox(
+                        constraints: const BoxConstraints.tightFor(
+                          width: 32,
+                          height: 32,
+                        ),
+                        child: PopupMenuButton<SessionViewMode>(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(
+                            switch (viewMode!) {
+                              SessionViewMode.flat => Icons.view_list_rounded,
+                              SessionViewMode.byCwd => Icons.folder_rounded,
+                              SessionViewMode.byHost => Icons.hub_rounded,
+                            },
+                            size: 18,
+                            color: colors.textSecondary,
+                          ),
+                          tooltip: 'View mode',
+                          onSelected: onViewModeChanged,
+                          itemBuilder: (context) => [
+                            PopupMenuItem(
+                              value: SessionViewMode.flat,
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.view_list_rounded, size: 18),
+                                  const SizedBox(width: 10),
+                                  const Text('Flat list'),
+                                  if (viewMode == SessionViewMode.flat) ...[
+                                    const SizedBox(width: 8),
+                                    const Icon(Icons.check_rounded, size: 16),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: SessionViewMode.byCwd,
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.folder_rounded, size: 18),
+                                  const SizedBox(width: 10),
+                                  const Text('By working dir'),
+                                  if (viewMode == SessionViewMode.byCwd) ...[
+                                    const SizedBox(width: 8),
+                                    const Icon(Icons.check_rounded, size: 16),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: SessionViewMode.byHost,
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.hub_rounded, size: 18),
+                                  const SizedBox(width: 10),
+                                  const Text('By host'),
+                                  if (viewMode == SessionViewMode.byHost) ...[
+                                    const SizedBox(width: 8),
+                                    const Icon(Icons.check_rounded, size: 16),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : Icon(
+                        Icons.search_rounded,
                         size: 18,
                         color: colors.textSecondary,
                       ),
-                      tooltip: 'View mode',
-                      onSelected: onViewModeChanged,
-                      itemBuilder: (context) => [
-                        PopupMenuItem(
-                          value: SessionViewMode.flat,
-                          child: Row(
-                            children: [
-                              const Icon(Icons.view_list_rounded, size: 18),
-                              const SizedBox(width: 10),
-                              const Text('Flat list'),
-                              if (viewMode == SessionViewMode.flat) ...[
-                                const SizedBox(width: 8),
-                                const Icon(Icons.check_rounded, size: 16),
-                              ],
-                            ],
-                          ),
+                prefixIconConstraints: const BoxConstraints(
+                  minWidth: 36,
+                  minHeight: 36,
+                ),
+                suffixIcon: hasQuery
+                    ? IconButton(
+                        tooltip: 'Clear',
+                        iconSize: 16,
+                        onPressed: controller.clear,
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: colors.textSecondary,
                         ),
-                        PopupMenuItem(
-                          value: SessionViewMode.byCwd,
-                          child: Row(
-                            children: [
-                              const Icon(Icons.folder_rounded, size: 18),
-                              const SizedBox(width: 10),
-                              const Text('By working dir'),
-                              if (viewMode == SessionViewMode.byCwd) ...[
-                                const SizedBox(width: 8),
-                                const Icon(Icons.check_rounded, size: 16),
-                              ],
-                            ],
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: SessionViewMode.byHost,
-                          child: Row(
-                            children: [
-                              const Icon(Icons.hub_rounded, size: 18),
-                              const SizedBox(width: 10),
-                              const Text('By host'),
-                              if (viewMode == SessionViewMode.byHost) ...[
-                                const SizedBox(width: 8),
-                                const Icon(Icons.check_rounded, size: 16),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : Icon(
-                    Icons.search_rounded,
-                    size: 18,
-                    color: colors.textSecondary,
+                      )
+                    : null,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 10,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: AppShapes.pill,
+                  borderSide: BorderSide(color: colors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: AppShapes.pill,
+                  borderSide: BorderSide(color: colors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: AppShapes.pill,
+                  borderSide: BorderSide(color: colors.accent, width: 1.2),
+                ),
+              ),
+            ),
+            if (filters != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.xs,
+                children: [
+                  FilterChip(
+                    label: const Text('Running'),
+                    selected: filters.runningOnly,
+                    onSelected: onRunningOnlyChanged,
+                    visualDensity: VisualDensity.compact,
                   ),
-            prefixIconConstraints: const BoxConstraints(
-              minWidth: 36,
-              minHeight: 36,
-            ),
-            suffixIcon: hasQuery
-                ? IconButton(
-                    tooltip: 'Clear',
-                    iconSize: 16,
-                    onPressed: controller.clear,
-                    icon: Icon(
-                      Icons.close_rounded,
-                      color: colors.textSecondary,
-                    ),
-                  )
-                : null,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 8,
-              vertical: 10,
-            ),
-            border: OutlineInputBorder(
-              borderRadius: AppShapes.pill,
-              borderSide: BorderSide(color: colors.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: AppShapes.pill,
-              borderSide: BorderSide(color: colors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: AppShapes.pill,
-              borderSide: BorderSide(color: colors.accent, width: 1.2),
-            ),
-          ),
+                  FilterChip(
+                    label: const Text('Unread'),
+                    selected: filters.unreadOnly,
+                    onSelected: onUnreadOnlyChanged,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+            ],
+          ],
         );
       },
     );
@@ -1074,6 +1158,7 @@ class RecentPane extends StatefulWidget {
     this.screenAwakeSourceKey,
     this.screenAwakeController,
     this.viewMode = SessionViewMode.flat,
+    this.filters = const RecentSessionFilters(),
     this.onViewModeChanged,
     this.onAddHost,
   });
@@ -1090,6 +1175,7 @@ class RecentPane extends StatefulWidget {
   final String? screenAwakeSourceKey;
   final ScreenAwakeController? screenAwakeController;
   final SessionViewMode viewMode;
+  final RecentSessionFilters filters;
   final ValueChanged<SessionViewMode>? onViewModeChanged;
   final VoidCallback? onAddHost;
 
@@ -1359,22 +1445,61 @@ class _RecentPaneState extends State<RecentPane> {
     return left.session.id.compareTo(right.session.id);
   }
 
-  List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
-    // When in search mode, use server results directly
-    if (_searchEntries != null) {
-      final overrides = SessionOverridesStore.instance;
-      return _searchEntries!
-          .map(
-            (entry) => RemoteSessionEntry(
-              host: entry.host,
-              session: overrides.overlay(entry.host.id, entry.session),
-            ),
-          )
-          .toList();
+  bool _matchesRecentFilters(RemoteSessionEntry entry) {
+    final filters = widget.filters;
+    if (filters.runningOnly && !entry.session.isActive) {
+      return false;
     }
+    if (filters.unreadOnly &&
+        !SessionReadStore.instance.isUnread(entry.host, entry.session)) {
+      return false;
+    }
+    return true;
+  }
 
+  String _emptyStateTitle() {
+    if (_searchLoading) {
+      return 'Searching…';
+    }
+    if (widget.query.trim().isNotEmpty) {
+      return 'No matches';
+    }
+    if (widget.filters.runningOnly && widget.filters.unreadOnly) {
+      return 'No running unread sessions';
+    }
+    if (widget.filters.runningOnly) {
+      return 'No running sessions';
+    }
+    if (widget.filters.unreadOnly) {
+      return 'No unread sessions';
+    }
+    return 'No reachable sessions';
+  }
+
+  String _emptyStateBody() {
+    if (widget.query.trim().isNotEmpty) {
+      if (_searchLoading) {
+        return 'Looking across all your sessions…';
+      }
+      return 'No sessions match "${widget.query.trim()}". Clear the filter to see everything.';
+    }
+    if (widget.filters.runningOnly && widget.filters.unreadOnly) {
+      return 'No sessions are both active and unread right now.';
+    }
+    if (widget.filters.runningOnly) {
+      return 'No agents are active right now.';
+    }
+    if (widget.filters.unreadOnly) {
+      return 'Everything in recents has already been read on this device.';
+    }
+    return 'Saved hosts look fine, but none returned recent sessions right now.';
+  }
+
+  List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
+    final isSearchResults = _searchEntries != null;
     final overrides = SessionOverridesStore.instance;
-    final overlaid = entries
+    final sourceEntries = _searchEntries ?? entries;
+    final overlaid = sourceEntries
         .map(
           (entry) => RemoteSessionEntry(
             host: entry.host,
@@ -1384,14 +1509,15 @@ class _RecentPaneState extends State<RecentPane> {
         .toList();
     final query = widget.query.trim().toLowerCase();
     Iterable<RemoteSessionEntry> visible = overlaid;
-    if (query.isNotEmpty) {
+    if (_searchEntries == null && query.isNotEmpty) {
       visible = overlaid.where((entry) {
         return recentSessionMatchesQuery(entry.host, entry.session, query);
       });
     }
+    visible = visible.where(_matchesRecentFilters);
     final sorted = visible.toList();
-    // Sort by recency only — the pinned shelf handles favourite ordering.
-    if (widget.viewMode == SessionViewMode.flat) {
+    // Preserve server relevance order for remote search results.
+    if (!isSearchResults && widget.viewMode == SessionViewMode.flat) {
       sorted.sort(
         (left, right) =>
             right.session.updatedAt.compareTo(left.session.updatedAt),
@@ -1441,6 +1567,7 @@ class _RecentPaneState extends State<RecentPane> {
         SessionLocalStore.instance,
         HostStatusStore.instance,
         SessionOverridesStore.instance,
+        SessionReadStore.instance,
       ]),
       builder: (context, _) {
         final stillLoadingInitial =
@@ -1458,6 +1585,7 @@ class _RecentPaneState extends State<RecentPane> {
         final showPinnedShelf = !isGrouped &&
             widget.viewMode == SessionViewMode.flat &&
             widget.query.trim().isEmpty &&
+            !widget.filters.isAnyActive &&
             _searchEntries == null;
         final pinnedEntries = showPinnedShelf
             ? sortedEntries
@@ -1509,16 +1637,12 @@ class _RecentPaneState extends State<RecentPane> {
                 const SizedBox(height: 80),
                 MeshEmptyState(
                   icon: widget.query.trim().isEmpty
-                      ? Icons.cloud_off_rounded
+                      ? (widget.filters.isAnyActive
+                            ? Icons.filter_alt_off_rounded
+                            : Icons.cloud_off_rounded)
                       : Icons.search_off_rounded,
-                  title: widget.query.trim().isEmpty
-                      ? 'No reachable sessions'
-                      : (_searchLoading ? 'Searching…' : 'No matches'),
-                  body: widget.query.trim().isEmpty
-                      ? 'Saved hosts look fine, but none returned recent sessions right now.'
-                      : (_searchLoading
-                            ? 'Looking across all your sessions…'
-                            : 'No sessions match "${widget.query.trim()}". Clear the filter to see everything.'),
+                  title: _emptyStateTitle(),
+                  body: _emptyStateBody(),
                 ),
               ],
             ),
