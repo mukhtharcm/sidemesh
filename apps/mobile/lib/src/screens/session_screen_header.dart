@@ -35,13 +35,10 @@ class _CachedTranscriptStrip extends StatelessWidget {
             ? 'Offline · showing last known session state'
             : 'Offline · $_lastConnectedText',
     };
-    return Container(
+    return MeshSurface(
+      tone: MeshSurfaceTone.warning,
+      radius: AppRadii.control,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.warning.withValues(alpha: 0.11),
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.warning.withValues(alpha: 0.26)),
-      ),
       child: Row(
         children: [
           if (refreshing)
@@ -314,58 +311,42 @@ class _SessionActionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final tone = _toneColor(colors);
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () => Navigator.of(context).pop(action.value),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: tone.withValues(alpha: action.active ? 0.14 : 0.08),
-                  borderRadius: AppShapes.input,
-                  border: Border.all(color: tone.withValues(alpha: 0.18)),
-                ),
-                child: Icon(action.icon, size: 18, color: tone),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      action.label,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: action.tone == _SessionActionTone.danger
-                            ? colors.danger
-                            : colors.textPrimary,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.1,
-                      ),
-                    ),
-                    if ((action.detail ?? '').isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        action.detail!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
+    return MeshListRow(
+      framed: false,
+      dense: true,
+      radius: AppRadii.control,
+      onTap: () => Navigator.of(context).pop(action.value),
+      leading: Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          color: tone.withValues(alpha: action.active ? 0.14 : 0.08),
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          border: Border.all(color: tone.withValues(alpha: 0.18)),
+        ),
+        child: Icon(action.icon, size: 18, color: tone),
+      ),
+      title: Text(
+        action.label,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: action.tone == _SessionActionTone.danger
+              ? colors.danger
+              : colors.textPrimary,
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.1,
         ),
       ),
+      subtitle: (action.detail ?? '').isEmpty
+          ? null
+          : Text(
+              action.detail!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
     );
   }
 }
@@ -1518,15 +1499,11 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           children: [
             Row(
               children: [
-                Icon(kindMeta.icon, color: kindMeta.accent, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  kindMeta.kicker,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: kindMeta.accent,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.6,
-                  ),
+                MeshStatusBadge(
+                  label: kindMeta.kicker,
+                  tone: kindMeta.tone,
+                  icon: kindMeta.icon,
+                  compact: true,
                 ),
               ],
             ),
@@ -1567,7 +1544,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: _buildFooterActions(context, colors),
+              children: _buildFooterActions(context),
             ),
           ],
         ),
@@ -1691,12 +1668,42 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     Widget child;
     switch (field.type) {
       case 'boolean':
-        child = SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          value: _boolValues[field.key] ?? false,
-          title: Text(label),
-          subtitle: field.description == null ? null : Text(field.description!),
-          onChanged: (value) => setState(() => _boolValues[field.key] = value),
+        final value = _boolValues[field.key] ?? false;
+        child = MeshSurface(
+          tone: MeshSurfaceTone.muted,
+          selected: value,
+          radius: AppRadii.control,
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+          onTap: () => setState(() => _boolValues[field.key] = !value),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label),
+                    if (field.description != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        field.description!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Switch(
+                value: value,
+                onChanged: (next) {
+                  setState(() => _boolValues[field.key] = next);
+                },
+              ),
+            ],
+          ),
         );
       case 'number':
         child = TextField(
@@ -1842,7 +1849,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     };
   }
 
-  List<Widget> _buildFooterActions(BuildContext context, AppColors colors) {
+  List<Widget> _buildFooterActions(BuildContext context) {
     if (action.isUserInput) {
       return [
         FilledButton.icon(
@@ -1862,19 +1869,12 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           ),
         ),
         if (action.canDecline)
-          OutlinedButton.icon(
+          MeshDangerAction(
             onPressed: () => widget.onRespond(
               PendingActionResponseDraft.elicitation(action: 'decline'),
             ),
-            icon: Icon(
-              Icons.thumb_down_alt_rounded,
-              size: 18,
-              color: colors.danger,
-            ),
-            label: Text('Decline', style: TextStyle(color: colors.danger)),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: colors.danger.withValues(alpha: 0.5)),
-            ),
+            icon: Icons.thumb_down_alt_rounded,
+            label: 'Decline',
           ),
         OutlinedButton.icon(
           onPressed: () => widget.onRespond(
@@ -1904,16 +1904,13 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           label: const Text('Approve for session'),
         ),
       if (action.canDecline)
-        OutlinedButton.icon(
+        MeshDangerAction(
           onPressed: _responding ? null : () {
               if (!_responding) setState(() => _responding = true);
               widget.onRespond(PendingActionResponseDraft.approval('decline'));
             },
-          icon: Icon(Icons.close_rounded, size: 18, color: colors.danger),
-          label: Text('Decline', style: TextStyle(color: colors.danger)),
-          style: OutlinedButton.styleFrom(
-            side: BorderSide(color: colors.danger.withValues(alpha: 0.5)),
-          ),
+          icon: Icons.close_rounded,
+          label: 'Decline',
         ),
     ];
   }
@@ -2026,11 +2023,13 @@ class _PendingActionKindMeta {
     required this.kicker,
     required this.icon,
     required this.accent,
+    required this.tone,
   });
 
   final String kicker;
   final IconData icon;
   final Color accent;
+  final MeshStatusTone tone;
 }
 
 _PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {
@@ -2039,6 +2038,7 @@ _PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {
       kicker: 'INPUT NEEDED',
       icon: Icons.chat_bubble_outline_rounded,
       accent: colors.accent,
+      tone: MeshStatusTone.waiting,
     );
   }
   if (action.isElicitation) {
@@ -2046,12 +2046,14 @@ _PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {
       kicker: 'FORM REQUIRED',
       icon: Icons.fact_check_rounded,
       accent: colors.info,
+      tone: MeshStatusTone.queued,
     );
   }
   return _PendingActionKindMeta(
     kicker: 'APPROVAL REQUIRED',
     icon: Icons.shield_rounded,
     accent: colors.warning,
+    tone: MeshStatusTone.approval,
   );
 }
 

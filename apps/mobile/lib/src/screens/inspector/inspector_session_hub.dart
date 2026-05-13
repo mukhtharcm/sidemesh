@@ -190,57 +190,39 @@ class _HubToolRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppShapes.card,
-        onTap: tool.onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: colors.accentMuted,
-                  borderRadius: AppShapes.input,
-                ),
-                alignment: Alignment.center,
-                child: Icon(tool.icon, size: 16, color: colors.accent),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      tool.label,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      tool.description,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 18,
-                color: colors.textTertiary,
-              ),
-            ],
-          ),
+    return MeshListRow(
+      onTap: tool.onTap,
+      dense: true,
+      framed: false,
+      radius: AppRadii.control,
+      leading: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: colors.accentMuted,
+          borderRadius: BorderRadius.circular(AppRadii.control),
         ),
+        alignment: Alignment.center,
+        child: Icon(tool.icon, size: 16, color: colors.accent),
+      ),
+      title: Text(
+        tool.label,
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+          color: colors.textPrimary,
+          fontWeight: AppWeights.title,
+        ),
+      ),
+      subtitle: Text(
+        tool.description,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: colors.textSecondary,
+          height: 1.35,
+        ),
+      ),
+      trailing: Icon(
+        Icons.chevron_right_rounded,
+        size: 18,
+        color: colors.textTertiary,
       ),
     );
   }

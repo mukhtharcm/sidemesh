@@ -53,38 +53,11 @@ class PinnedListPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     if (pins.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.push_pin_rounded,
-                size: 32,
-                color: colors.textTertiary,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'No pinned messages',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: colors.textPrimary,
-                  fontWeight: AppWeights.emphasis,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Pin a message from its bubble to keep it within reach.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
+      return const MeshEmptyState.compact(
+        icon: Icons.push_pin_rounded,
+        title: 'No pinned messages',
+        body: 'Pin a message from its bubble to keep it within reach.',
       );
     }
     return ListView.separated(
@@ -120,89 +93,79 @@ class _PinnedListTile extends StatelessWidget {
     final roleIcon = pin.role == 'assistant'
         ? Icons.smart_toy_rounded
         : Icons.person_outline_rounded;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppShapes.input,
-        onTap: onOpen,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: AppShapes.input,
-            border: Border.all(color: colors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return MeshSurface(
+      onTap: onOpen,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Icon(roleIcon, size: 14, color: colors.textSecondary),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      pin.roleLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colors.textSecondary,
-                        fontWeight: AppWeights.emphasis,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
+              Icon(roleIcon, size: 14, color: colors.textSecondary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  pin.roleLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colors.textSecondary,
+                    fontWeight: AppWeights.emphasis,
+                    letterSpacing: 0.4,
                   ),
-                  Tooltip(
-                    message: 'Unpin',
-                    child: InkResponse(
-                      radius: 22,
-                      onTap: onUnpin,
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Icon(
-                          Icons.close_rounded,
-                          size: 16,
-                          color: colors.textTertiary,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                pin.preview,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textPrimary,
-                  height: 1.35,
                 ),
               ),
-              if (pin.attachmentCount > 0 || pin.textTruncated) ...[
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    if (pin.attachmentCount > 0)
-                      MeshPill(
-                        label:
-                            '${pin.attachmentCount} attachment'
-                            '${pin.attachmentCount == 1 ? '' : 's'}',
-                        icon: Icons.attachment_rounded,
-                      ),
-                    if (pin.textTruncated)
-                      const MeshPill(
-                        label: 'truncated',
-                        icon: Icons.content_cut_rounded,
-                        tone: MeshPillTone.warning,
-                      ),
-                  ],
+              Tooltip(
+                message: 'Unpin',
+                child: InkResponse(
+                  radius: 22,
+                  onTap: onUnpin,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      Icons.close_rounded,
+                      size: 16,
+                      color: colors.textTertiary,
+                    ),
+                  ),
                 ),
-              ],
+              ),
             ],
           ),
-        ),
+          const SizedBox(height: 4),
+          Text(
+            pin.preview,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textPrimary,
+              height: 1.35,
+            ),
+          ),
+          if (pin.attachmentCount > 0 || pin.textTruncated) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                if (pin.attachmentCount > 0)
+                  MeshPill(
+                    label:
+                        '${pin.attachmentCount} attachment'
+                        '${pin.attachmentCount == 1 ? '' : 's'}',
+                    icon: Icons.attachment_rounded,
+                  ),
+                if (pin.textTruncated)
+                  const MeshPill(
+                    label: 'truncated',
+                    icon: Icons.content_cut_rounded,
+                    tone: MeshPillTone.warning,
+                  ),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }

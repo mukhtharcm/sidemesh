@@ -23,14 +23,21 @@ abstract final class AppSpacing {
 }
 
 abstract final class AppRadii {
-  /// Pills and small chips.
-  static const double pill = 10;
-  /// Inputs, small buttons.
-  static const double input = 14;
-  /// Cards and primary surfaces.
-  static const double card = 18;
+  /// Badges, compact chips, and tiny action targets.
+  static const double badge = 8;
+  /// Inputs, small buttons, and nested controls.
+  static const double control = 12;
+  /// App surfaces, list rows, and primary grouped content.
+  static const double surface = 16;
   /// Bottom sheets and modal dialogs.
   static const double sheet = 24;
+
+  /// Compact legacy chip radius. Prefer [badge] for new UI.
+  static const double pill = badge;
+  /// Legacy control radius. Prefer [control] for new UI.
+  static const double input = control;
+  /// Legacy card radius. Prefer [surface] for new UI.
+  static const double card = surface;
 }
 
 abstract final class AppWeights {
