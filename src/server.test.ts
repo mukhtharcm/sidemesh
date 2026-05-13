@@ -979,6 +979,119 @@ class TransientUnreadableCreateTurnProvider
   }
 }
 
+class RecoveringCreateTurnProvider extends EventEmitter implements AgentProvider {
+  public readonly kind = "fake";
+  public readonly displayName = "Recovering Create Turn Provider";
+  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
+
+  private cwd = "/tmp";
+  private created = false;
+
+  public constructor(
+    private readonly sessionId: string,
+    private readonly createTurnId: string,
+    private includeTurnFailuresRemaining: number,
+    private readonly recoveredTurnStatus: string | null,
+  ) {
+    super();
+  }
+
+  public async start(): Promise<void> {}
+
+  public async close(): Promise<void> {}
+
+  public async getVersion(): Promise<string> {
+    return "recovering-create-turn-test";
+  }
+
+  public async createSession(
+    request: AgentCreateSessionRequest,
+  ): Promise<AgentCreateSessionResult> {
+    this.created = true;
+    this.cwd = request.cwd;
+    return {
+      thread: this.buildThread(false),
+      activeTurnId: request.input.length > 0 ? this.createTurnId : null,
+      runtime: null,
+    };
+  }
+
+  public async listSessionThreads(
+    options: AgentSessionListOptions,
+  ): Promise<ThreadRecord[]> {
+    if (!this.created || options.archived) {
+      return [];
+    }
+    return [this.buildThread(false)].slice(0, options.limit);
+  }
+
+  public async readSessionThread(
+    threadId: string,
+    includeTurns: boolean,
+  ): Promise<ThreadRecord> {
+    assert.equal(threadId, this.sessionId);
+    if (includeTurns && this.includeTurnFailuresRemaining > 0) {
+      this.includeTurnFailuresRemaining -= 1;
+      throw new Error(
+        `failed to read thread ${threadId}: rollout /tmp/${threadId}.jsonl is empty`,
+      );
+    }
+    return this.buildThread(includeTurns);
+  }
+
+  public async listRecentUnindexedSessionThreads(
+    limit: number,
+  ): Promise<ThreadRecord[]> {
+    if (!this.created) {
+      return [];
+    }
+    return [this.buildThread(false)].slice(0, limit);
+  }
+
+  public async readSessionLog(): Promise<SessionLogSnapshot> {
+    return {
+      messages: [],
+      activities: [],
+      runtime: null,
+      totalMessages: 0,
+      totalActivities: 0,
+      nextSeq: 1,
+    };
+  }
+
+  public async readSessionRuntime(): Promise<null> {
+    return null;
+  }
+
+  private buildThread(includeTurns: boolean): ThreadRecord {
+    return {
+      id: this.sessionId,
+      name: "Recovering create turn session",
+      preview: "Recovering create turn session",
+      createdAt: 1,
+      updatedAt: 1,
+      cwd: this.cwd,
+      source: "fake",
+      path: null,
+      status: { type: "idle" },
+      ...(includeTurns
+        ? {
+            turns: this.recoveredTurnStatus
+              ? [
+                  {
+                    id: this.createTurnId,
+                    status: this.recoveredTurnStatus,
+                    startedAt: 1,
+                    completedAt: 2,
+                  },
+                ]
+              : [],
+          }
+        : {}),
+    };
+  }
+}
+
 class TransientUnreadableCreateStatusProvider
   extends EventEmitter
   implements AgentProvider
@@ -4149,6 +4262,99 @@ describe("GET /api/sessions/:sessionId/status", () => {
         (statusRes.body as any).activeTurnId,
         "fake-transient-create-turn",
       );
+    });
+  });
+
+  it("keeps unverified returned turns until a transient turn snapshot recovers", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new RecoveringCreateTurnProvider(
+      "fake-recovering-missing-session",
+      "fake-recovering-missing-turn",
+      2,
+      null,
+    );
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const createRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd: "/tmp/recovering-missing-create-turn-test",
+          prompt: "start while turn snapshot is temporarily unavailable",
+        }),
+      });
+      assert.equal(createRes.statusCode, 201);
+      const sessionId = (createRes.body as any).session.id as string;
+      assert.equal(sessionId, "fake-recovering-missing-session");
+      assert.equal((createRes.body as any).session.status, "running");
+
+      const statusRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(statusRes.statusCode, 200);
+      assert.equal((statusRes.body as any).status, "idle");
+      assert.equal((statusRes.body as any).isRunning, false);
+      assert.equal((statusRes.body as any).activeTurnId, null);
+    });
+  });
+
+  it("keeps recovered failed turn status after live terminal grace expires", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new RecoveringCreateTurnProvider(
+      "fake-recovering-failed-session",
+      "fake-recovering-failed-turn",
+      2,
+      "failed",
+    );
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const createRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd: "/tmp/recovering-failed-create-turn-test",
+          prompt: "start while failed turn snapshot is temporarily unavailable",
+        }),
+      });
+      assert.equal(createRes.statusCode, 201);
+      const sessionId = (createRes.body as any).session.id as string;
+      assert.equal(sessionId, "fake-recovering-failed-session");
+      assert.equal((createRes.body as any).session.status, "running");
+
+      const statusRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(statusRes.statusCode, 200);
+      assert.equal((statusRes.body as any).status, "errored");
+      assert.equal((statusRes.body as any).isRunning, false);
+      assert.equal((statusRes.body as any).activeTurnId, null);
+
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+      assert.equal(await readRecentStatus(server, config, sessionId), "errored");
+      const delayedStatus = await readStatus(server, config, sessionId);
+      assert.equal(delayedStatus.status, "errored");
+      assert.equal(delayedStatus.isRunning, false);
     });
   });
 
