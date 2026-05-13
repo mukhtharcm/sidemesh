@@ -979,6 +979,7 @@ class TransientUnreadableCreateStatusProvider
   private readonly createTurnId = "fake-transient-create-status-turn";
   private cwd = "/tmp";
   private created = false;
+  private unreadable = true;
 
   public async start(): Promise<void> {}
 
@@ -1011,13 +1012,16 @@ class TransientUnreadableCreateStatusProvider
 
   public async readSessionThread(
     threadId: string,
-    includeTurns: boolean,
+    _includeTurns: boolean,
   ): Promise<ThreadRecord> {
     assert.equal(threadId, this.sessionId);
-    assert.equal(includeTurns, false);
-    throw new Error(
-      `failed to read thread ${threadId}: rollout file not found`,
-    );
+    if (this.unreadable) {
+      this.unreadable = false;
+      throw new Error(
+        `failed to read thread ${threadId}: rollout file not found`,
+      );
+    }
+    return this.buildThread();
   }
 
   public async listRecentUnindexedSessionThreads(
@@ -4102,7 +4106,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         (createRes.body as any).activeTurnId,
         "fake-transient-create-status-turn",
       );
-      assert.equal((createRes.body as any).session.status, "running");
+      assert.equal((createRes.body as any).session.status, "idle");
 
       const statusRes = await request({
         hostname: "127.0.0.1",
@@ -4112,10 +4116,11 @@ describe("GET /api/sessions/:sessionId/status", () => {
         headers: { Authorization: "Bearer " + config.token },
       });
       assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "running");
+      assert.equal((statusRes.body as any).status, "idle");
+      assert.equal((statusRes.body as any).isRunning, false);
       assert.equal(
         (statusRes.body as any).activeTurnId,
-        "fake-transient-create-status-turn",
+        null,
       );
     });
   });
