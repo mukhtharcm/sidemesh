@@ -2399,13 +2399,20 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               const SizedBox(height: 12),
               StatefulBuilder(
                 builder: (context, setLocalState) {
-                  return CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text("Don't ask again"),
-                    value: skipNextTime,
-                    onChanged: (v) {
-                      setLocalState(() => skipNextTime = v ?? false);
+                  return MeshListRow(
+                    framed: false,
+                    dense: true,
+                    radius: AppRadii.control,
+                    onTap: () {
+                      setLocalState(() => skipNextTime = !skipNextTime);
                     },
+                    title: const Text("Don't ask again"),
+                    trailing: Checkbox(
+                      value: skipNextTime,
+                      onChanged: (v) {
+                        setLocalState(() => skipNextTime = v ?? false);
+                      },
+                    ),
                   );
                 },
               ),

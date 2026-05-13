@@ -311,58 +311,42 @@ class _SessionActionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final tone = _toneColor(colors);
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () => Navigator.of(context).pop(action.value),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: tone.withValues(alpha: action.active ? 0.14 : 0.08),
-                  borderRadius: AppShapes.input,
-                  border: Border.all(color: tone.withValues(alpha: 0.18)),
-                ),
-                child: Icon(action.icon, size: 18, color: tone),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      action.label,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: action.tone == _SessionActionTone.danger
-                            ? colors.danger
-                            : colors.textPrimary,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.1,
-                      ),
-                    ),
-                    if ((action.detail ?? '').isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        action.detail!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
+    return MeshListRow(
+      framed: false,
+      dense: true,
+      radius: AppRadii.control,
+      onTap: () => Navigator.of(context).pop(action.value),
+      leading: Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          color: tone.withValues(alpha: action.active ? 0.14 : 0.08),
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          border: Border.all(color: tone.withValues(alpha: 0.18)),
+        ),
+        child: Icon(action.icon, size: 18, color: tone),
+      ),
+      title: Text(
+        action.label,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: action.tone == _SessionActionTone.danger
+              ? colors.danger
+              : colors.textPrimary,
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.1,
         ),
       ),
+      subtitle: (action.detail ?? '').isEmpty
+          ? null
+          : Text(
+              action.detail!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
     );
   }
 }
@@ -1684,12 +1668,42 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     Widget child;
     switch (field.type) {
       case 'boolean':
-        child = SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          value: _boolValues[field.key] ?? false,
-          title: Text(label),
-          subtitle: field.description == null ? null : Text(field.description!),
-          onChanged: (value) => setState(() => _boolValues[field.key] = value),
+        final value = _boolValues[field.key] ?? false;
+        child = MeshSurface(
+          tone: MeshSurfaceTone.muted,
+          selected: value,
+          radius: AppRadii.control,
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+          onTap: () => setState(() => _boolValues[field.key] = !value),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label),
+                    if (field.description != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        field.description!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Switch(
+                value: value,
+                onChanged: (next) {
+                  setState(() => _boolValues[field.key] = next);
+                },
+              ),
+            ],
+          ),
         );
       case 'number':
         child = TextField(

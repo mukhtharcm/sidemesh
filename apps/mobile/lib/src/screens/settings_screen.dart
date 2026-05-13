@@ -897,61 +897,43 @@ class _SettingsSectionState extends State<_SettingsSection>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        InkWell(
+        MeshListRow(
+          framed: false,
+          radius: AppRadii.control,
           onTap: () => setState(() => _expanded = !_expanded),
-          borderRadius: AppShapes.input,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.xs,
-              vertical: AppSpacing.sm,
+          leading: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: colors.accentMuted,
+              borderRadius: BorderRadius.circular(AppRadii.control),
+              border: Border.all(
+                color: colors.accent.withValues(alpha: 0.28),
+              ),
             ),
-            child: Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: colors.accentMuted,
-                    borderRadius: AppShapes.input,
-                    border: Border.all(
-                      color: colors.accent.withValues(alpha: 0.28),
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(widget.icon, size: 17, color: colors.accent),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.title,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: AppWeights.title,
-                          letterSpacing: AppLetterSpacing.headline,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.subtitle,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                AnimatedRotation(
-                  duration: const Duration(milliseconds: 180),
-                  turns: _expanded ? 0.5 : 0,
-                  child: Icon(
-                    Icons.expand_more_rounded,
-                    color: colors.textSecondary,
-                    size: 22,
-                  ),
-                ),
-              ],
+            alignment: Alignment.center,
+            child: Icon(widget.icon, size: 17, color: colors.accent),
+          ),
+          title: Text(
+            widget.title,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: AppWeights.title,
+              letterSpacing: AppLetterSpacing.headline,
+            ),
+          ),
+          subtitle: Text(
+            widget.subtitle,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+            ),
+          ),
+          trailing: AnimatedRotation(
+            duration: const Duration(milliseconds: 180),
+            turns: _expanded ? 0.5 : 0,
+            child: Icon(
+              Icons.expand_more_rounded,
+              color: colors.textSecondary,
+              size: 22,
             ),
           ),
         ),

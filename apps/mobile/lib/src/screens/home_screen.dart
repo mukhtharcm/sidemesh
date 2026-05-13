@@ -4489,67 +4489,44 @@ class _HostEditorActionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppShapes.card,
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-          decoration: BoxDecoration(
-            color: colors.surfaceMuted,
-            borderRadius: AppShapes.input,
-            border: Border.all(color: colors.border),
+    return MeshListRow(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      dense: true,
+      onTap: onTap,
+      leading: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: colors.infoMuted,
+          borderRadius: BorderRadius.circular(11),
+          border: Border.all(
+            color: colors.info.withValues(alpha: 0.24),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: colors.infoMuted,
-                  borderRadius: BorderRadius.circular(11),
-                  border: Border.all(
-                    color: colors.info.withValues(alpha: 0.24),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(icon, color: colors.info, size: 17),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                actionLabel,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colors.info,
-                  fontWeight: AppWeights.title,
-                ),
-              ),
-            ],
-          ),
+        ),
+        alignment: Alignment.center,
+        child: Icon(icon, color: colors.info, size: 17),
+      ),
+      title: Text(
+        title,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: colors.textPrimary,
+          fontWeight: AppWeights.title,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: colors.textSecondary,
+        ),
+      ),
+      trailing: Text(
+        actionLabel,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: colors.info,
+          fontWeight: AppWeights.title,
         ),
       ),
     );
@@ -4570,13 +4547,10 @@ class _HostEditorFieldFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Container(
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
       child: Row(
         children: [
           Container(
@@ -4623,57 +4597,35 @@ class _HostEnabledCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppShapes.input,
-        onTap: () => onChanged(!enabled),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-          decoration: BoxDecoration(
-            color: colors.surfaceMuted,
-            borderRadius: AppShapes.input,
-            border: Border.all(color: colors.border),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                enabled ? Icons.sensors_rounded : Icons.pause_rounded,
-                color: enabled ? colors.accent : colors.textSecondary,
-                size: 18,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      enabled ? 'Host traffic enabled' : 'Host traffic paused',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      enabled
-                          ? 'Include this host in sessions, inbox, and sync.'
-                          : 'Keep it saved, but skip automatic app traffic.',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              _HostEditorToggle(value: enabled),
-            ],
-          ),
+    return MeshListRow(
+      tone: MeshSurfaceTone.muted,
+      selected: enabled,
+      radius: AppRadii.control,
+      dense: true,
+      onTap: () => onChanged(!enabled),
+      leading: Icon(
+        enabled ? Icons.sensors_rounded : Icons.pause_rounded,
+        color: enabled ? colors.accent : colors.textSecondary,
+        size: 18,
+      ),
+      title: Text(
+        enabled ? 'Host traffic enabled' : 'Host traffic paused',
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: colors.textPrimary,
+          fontWeight: AppWeights.title,
         ),
       ),
+      subtitle: Text(
+        enabled
+            ? 'Include this host in sessions, inbox, and sync.'
+            : 'Keep it saved, but skip automatic app traffic.',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: colors.textSecondary,
+        ),
+      ),
+      trailing: _HostEditorToggle(value: enabled),
     );
   }
 }
