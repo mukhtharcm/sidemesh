@@ -986,6 +986,7 @@ class RecoveringCreateTurnProvider extends EventEmitter implements AgentProvider
 
   private cwd = "/tmp";
   private created = false;
+  private recoveredIncludeTurnRead: (() => void | Promise<void>) | null = null;
 
   public constructor(
     private readonly sessionId: string,
@@ -1036,7 +1037,18 @@ class RecoveringCreateTurnProvider extends EventEmitter implements AgentProvider
         `failed to read thread ${threadId}: rollout /tmp/${threadId}.jsonl is empty`,
       );
     }
+    if (includeTurns && this.recoveredIncludeTurnRead) {
+      const recoveredIncludeTurnRead = this.recoveredIncludeTurnRead;
+      this.recoveredIncludeTurnRead = null;
+      await recoveredIncludeTurnRead();
+    }
     return this.buildThread(includeTurns);
+  }
+
+  public onRecoveredIncludeTurnRead(
+    recoveredIncludeTurnRead: () => void | Promise<void>,
+  ): void {
+    this.recoveredIncludeTurnRead = recoveredIncludeTurnRead;
   }
 
   public async listRecentUnindexedSessionThreads(
@@ -4305,6 +4317,124 @@ describe("GET /api/sessions/:sessionId/status", () => {
       assert.equal((statusRes.body as any).status, "idle");
       assert.equal((statusRes.body as any).isRunning, false);
       assert.equal((statusRes.body as any).activeTurnId, null);
+    });
+  });
+
+  it("does not reconcile an old unverified turn after a newer turn starts", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new RecoveringCreateTurnProvider(
+      "fake-recovering-race-session",
+      "fake-recovering-race-turn",
+      2,
+      null,
+    );
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const createRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd: "/tmp/recovering-race-create-turn-test",
+          prompt: "start while turn snapshot is temporarily unavailable",
+        }),
+      });
+      assert.equal(createRes.statusCode, 201);
+      const sessionId = (createRes.body as any).session.id as string;
+      provider.onRecoveredIncludeTurnRead(() => {
+        provider.emit("liveEvent", {
+          type: "turn_started",
+          sessionId,
+          turnId: "fake-recovering-new-turn",
+        });
+      });
+
+      const statusRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(statusRes.statusCode, 200);
+      assert.equal((statusRes.body as any).status, "running");
+      assert.equal((statusRes.body as any).isRunning, true);
+      assert.equal((statusRes.body as any).activeTurnId, "fake-recovering-new-turn");
+    });
+  });
+
+  it("keeps live activities when recovery clears a transient active turn", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new RecoveringCreateTurnProvider(
+      "fake-recovering-live-activity-session",
+      "fake-recovering-live-activity-turn",
+      2,
+      null,
+    );
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const createRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd: "/tmp/recovering-live-activity-create-turn-test",
+          prompt: "start while turn snapshot is temporarily unavailable",
+        }),
+      });
+      assert.equal(createRes.statusCode, 201);
+      const sessionId = (createRes.body as any).session.id as string;
+      provider.emit("liveEvent", {
+        type: "activity_updated",
+        sessionId,
+        turnId: "fake-recovering-live-activity-turn",
+        activity: {
+          id: "cmd-live-tail",
+          type: "command",
+          turnId: "fake-recovering-live-activity-turn",
+          status: "in_progress",
+          command: "npm test",
+          cwd: "/tmp/recovering-live-activity-create-turn-test",
+          output: "streamed output not flushed yet",
+          exitCode: null,
+          durationMs: null,
+          source: "agent",
+          processId: "proc-live-tail",
+          commandActions: [],
+          terminalStatus: null,
+          terminalInput: null,
+        },
+      });
+
+      const statusRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(statusRes.statusCode, 200);
+      assert.equal((statusRes.body as any).status, "idle");
+
+      const logRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(logRes.statusCode, 200);
+      assert.equal((logRes.body as any).activities[0]?.id, "cmd-live-tail");
     });
   });
 
