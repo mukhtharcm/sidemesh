@@ -469,12 +469,24 @@ export async function startServer(
     );
   }
 
+  function clearRecoveredTerminalSessionState(sessionId: string): void {
+    activeTurns.delete(sessionId);
+    unverifiedActiveTurns.delete(sessionId);
+    clearActionsForSession(
+      pendingActions,
+      sessionId,
+      broadcastLive,
+      broadcastApprovalLive,
+    );
+  }
+
   function reconcileObservedThreadStatus(
     sessionId: string,
     observedStatus: LiveThreadStatus,
   ): void {
     const nextStatus = reconciledThreadStatus(sessionId, observedStatus);
     if (isTerminalThreadStatus(observedStatus)) {
+      recoveredTerminalThreadStatuses.delete(sessionId);
       clearConfirmedTerminalSessionState(sessionId);
     }
     const previousStatus = latestThreadStatusForSession(sessionId);
@@ -583,12 +595,21 @@ export async function startServer(
       sessionId,
       activeTurn.turnId,
     );
+    const currentActiveTurn = activeTurns.get(sessionId);
+    if (
+      !unverifiedActiveTurns.has(sessionId) ||
+      !currentActiveTurn ||
+      currentActiveTurn.turnId !== activeTurn.turnId ||
+      currentActiveTurn.startedAt !== activeTurn.startedAt
+    ) {
+      return null;
+    }
     if (turnState.kind === "active") {
       unverifiedActiveTurns.delete(sessionId);
       return null;
     }
     if (turnState.kind === "terminal") {
-      clearConfirmedTerminalSessionState(sessionId);
+      clearRecoveredTerminalSessionState(sessionId);
       const status = turnState.status;
       if (isTerminalThreadStatus(status)) {
         recoveredTerminalThreadStatuses.set(sessionId, status);
@@ -607,7 +628,7 @@ export async function startServer(
       (turnState.threadStatus === "idle" ||
         isTerminalThreadStatus(turnState.threadStatus))
     ) {
-      clearConfirmedTerminalSessionState(sessionId);
+      clearRecoveredTerminalSessionState(sessionId);
       const status: LiveThreadStatus =
         isTerminalThreadStatus(turnState.threadStatus)
           ? turnState.threadStatus
@@ -1260,6 +1281,7 @@ export async function startServer(
         );
         activeTurns.delete(event.sessionId);
         unverifiedActiveTurns.delete(event.sessionId);
+        recoveredTerminalThreadStatuses.delete(event.sessionId);
         setLatestThreadStatusForSession(
           event.sessionId,
           event.status === "errored" ? "errored" : "idle",
