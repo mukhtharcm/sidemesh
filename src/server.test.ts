@@ -558,6 +558,12 @@ class ImmediateCompletionProvider extends EventEmitter implements AgentProvider 
   private created = false;
   private lastTurnId: string | null = null;
   private submitCount = 0;
+  private unreadableThreadReads: number;
+
+  public constructor(unreadableThreadReads = 0) {
+    super();
+    this.unreadableThreadReads = unreadableThreadReads;
+  }
 
   public async start(): Promise<void> {}
 
@@ -607,6 +613,12 @@ class ImmediateCompletionProvider extends EventEmitter implements AgentProvider 
     includeTurns: boolean,
   ): Promise<ThreadRecord> {
     assert.equal(threadId, this.sessionId);
+    if (!includeTurns && this.unreadableThreadReads > 0) {
+      this.unreadableThreadReads -= 1;
+      throw new Error(
+        `failed to read thread ${threadId}: rollout file not found`,
+      );
+    }
     return this.buildThread(includeTurns);
   }
 
@@ -3931,6 +3943,44 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
+  it("does not resurrect completed turns when the immediate status read is transiently unreadable", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new ImmediateCompletionProvider(1);
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const createRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd: "/tmp/immediate-completion-transient-status-test",
+          prompt: "finish immediately while status read is unavailable",
+        }),
+      });
+      assert.equal(createRes.statusCode, 201);
+      const sessionId = (createRes.body as any).session.id as string;
+      assert.equal((createRes.body as any).session.status, "idle");
+      assert.equal((createRes.body as any).activeTurnId, "fake-immediate-create-turn");
+
+      const statusRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(statusRes.statusCode, 200);
+      assert.equal((statusRes.body as any).status, "idle");
+      assert.equal((statusRes.body as any).isRunning, false);
+      assert.equal((statusRes.body as any).activeTurnId, null);
+    });
+  });
+
   it("tracks returned turn ids when cached live status is terminal", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
     const provider = new StaleIdleSubmitProvider();
@@ -4106,7 +4156,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         (createRes.body as any).activeTurnId,
         "fake-transient-create-status-turn",
       );
-      assert.equal((createRes.body as any).session.status, "idle");
+      assert.equal((createRes.body as any).session.status, "running");
 
       const statusRes = await request({
         hostname: "127.0.0.1",
@@ -4116,11 +4166,11 @@ describe("GET /api/sessions/:sessionId/status", () => {
         headers: { Authorization: "Bearer " + config.token },
       });
       assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "idle");
-      assert.equal((statusRes.body as any).isRunning, false);
+      assert.equal((statusRes.body as any).status, "running");
+      assert.equal((statusRes.body as any).isRunning, true);
       assert.equal(
         (statusRes.body as any).activeTurnId,
-        null,
+        "fake-transient-create-status-turn",
       );
     });
   });
