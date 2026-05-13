@@ -42,16 +42,19 @@ In `SessionRowCard` (mobile variant), the unread dot currently sits
 between the title and the star button — it's 8×8 px and easy to miss.
 
 When `unread == true`, also apply a slightly bolder font weight to the
-title and a subtle left border tint on the card:
+title and a subtle Mesh status treatment on the row. Do not use a left-edge
+accent strip; the redesign direction moved away from that visual pattern.
 
 ```dart
-accentStrip: running
-    ? colors.success
-    : (unread ? colors.accent.withValues(alpha: 0.5) : null),
+MeshStatusBadge(
+  label: 'follow-up',
+  icon: Icons.flag_rounded,
+  tone: MeshStatusTone.queued,
+)
 ```
 
-A faint accent strip (thinner than the running strip) makes unread
-sessions visually distinct without being noisy.
+A compact badge or selected-row treatment makes unread sessions visible
+without adding another unexplained edge marker.
 
 ### Step 3 — Auto-clear unread on open
 
@@ -68,5 +71,5 @@ blue dot: "Flagged for follow-up — tap to open".
 
 - The action is labelled "Flag for follow-up" with a flag icon.
 - The detail text explains what happens ("blue dot in recents").
-- Unread sessions have a faint accent strip on their card.
+- Unread sessions have a compact follow-up status treatment on their row.
 - Opening a session clears the flag automatically.
