@@ -3009,6 +3009,72 @@ describe("session live rich events", () => {
     });
   });
 
+  it("replays an empty plan update as a clear signal", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const sessionId = created.thread.id;
+
+      provider.emit("liveEvent", {
+        type: "plan_updated",
+        sessionId,
+        turnId: "turn-1",
+        explanation: "Create the plan card.",
+        plan: [{ step: "Show the plan", status: "in_progress" }],
+      });
+
+      const firstDelta = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=-1`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(firstDelta.statusCode, 200);
+      assert.equal(
+        (firstDelta.body as any).latestPlanUpdate.plan[0].step,
+        "Show the plan",
+      );
+      const firstSeq = (firstDelta.body as any).latestPlanUpdate.seq as number;
+
+      provider.emit("liveEvent", {
+        type: "plan_updated",
+        sessionId,
+        turnId: "turn-1",
+        plan: [],
+      });
+
+      const clearDelta = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=${firstSeq}`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(clearDelta.statusCode, 200);
+      assert.deepEqual((clearDelta.body as any).latestPlanUpdate.plan, []);
+
+      const log = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(log.statusCode, 200);
+      assert.deepEqual((log.body as any).latestPlanUpdate.plan, []);
+    });
+  });
+
   it("replays updated activities through the events delta route even when the transcript seq is unchanged", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const provider = new ActivityReplayFixtureProvider();

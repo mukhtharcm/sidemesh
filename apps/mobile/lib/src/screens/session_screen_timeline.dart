@@ -460,7 +460,7 @@ class _PlanUpdateCard extends StatelessWidget {
             childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
             iconColor: colors.textSecondary,
             collapsedIconColor: colors.textSecondary,
-            initiallyExpanded: true,
+            initiallyExpanded: false,
             title: Row(
               children: [
                 Icon(Icons.route_rounded, size: 18, color: colors.accent),
@@ -518,10 +518,11 @@ class _PlanUpdateCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    MeshPill(
+                    MeshStatusBadge(
                       label: _planStepLabel(steps[index].status),
                       tone: _planStepTone(steps[index].status),
-                      mono: true,
+                      icon: _planStepIcon(steps[index].status),
+                      compact: true,
                     ),
                   ],
                 ),
@@ -545,10 +546,10 @@ class _PlanUpdateCard extends StatelessWidget {
     _ => colors.textTertiary,
   };
 
-  MeshPillTone _planStepTone(String status) => switch (status) {
-    'completed' => MeshPillTone.success,
-    'in_progress' => MeshPillTone.accent,
-    _ => MeshPillTone.neutral,
+  MeshStatusTone _planStepTone(String status) => switch (status) {
+    'completed' => MeshStatusTone.success,
+    'in_progress' => MeshStatusTone.running,
+    _ => MeshStatusTone.neutral,
   };
 
   String _planStepLabel(String status) => switch (status) {
@@ -578,10 +579,11 @@ class _RuntimeSignalStrip extends StatelessWidget {
     final thread = threadStatus;
     if (_shouldShowThreadStatus(thread)) {
       pills.add(
-        MeshPill(
+        MeshStatusBadge(
           label: _threadStatusLabel(thread!),
           tone: _threadStatusTone(thread.status),
           icon: _threadStatusIcon(thread.status),
+          compact: true,
         ),
       );
       final message = (thread.message ?? '').trim();
@@ -631,30 +633,24 @@ class _RuntimeSignalStrip extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(spacing: 8, runSpacing: 8, children: pills),
-            if (details.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                details.join(' • '),
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  fontWeight: FontWeight.w600,
-                ),
+    return MeshSurface(
+      radius: AppRadii.control,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(spacing: 8, runSpacing: 8, children: pills),
+          if (details.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              details.join(' • '),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                fontWeight: FontWeight.w600,
               ),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -699,11 +695,12 @@ class _RuntimeSignalStrip extends StatelessWidget {
     };
   }
 
-  MeshPillTone _threadStatusTone(String? status) => switch (status) {
-    'waiting_for_input' || 'waiting_for_approval' => MeshPillTone.warning,
-    'errored' => MeshPillTone.danger,
-    'running' => MeshPillTone.accent,
-    _ => MeshPillTone.neutral,
+  MeshStatusTone _threadStatusTone(String? status) => switch (status) {
+    'waiting_for_input' => MeshStatusTone.waiting,
+    'waiting_for_approval' => MeshStatusTone.approval,
+    'errored' => MeshStatusTone.danger,
+    'running' => MeshStatusTone.running,
+    _ => MeshStatusTone.neutral,
   };
 
   IconData _threadStatusIcon(String? status) => switch (status) {
@@ -2039,10 +2036,10 @@ class _ActivityCardState extends State<_ActivityCard> {
     };
 
     final statusTone = switch (activity.status) {
-      'completed' => MeshPillTone.success,
-      'failed' => MeshPillTone.danger,
-      'declined' => MeshPillTone.neutral,
-      _ => MeshPillTone.accent,
+      'completed' => MeshStatusTone.success,
+      'failed' => MeshStatusTone.danger,
+      'declined' => MeshStatusTone.neutral,
+      _ => MeshStatusTone.running,
     };
     final statusLabel = switch (activity.status) {
       'completed' => 'done',
@@ -2142,11 +2139,11 @@ class _ActivityCardState extends State<_ActivityCard> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        MeshPill(
+                        MeshStatusBadge(
                           label: statusLabel,
                           tone: statusTone,
                           icon: statusIcon,
-                          mono: true,
+                          compact: true,
                         ),
                         const SizedBox(width: 4),
                         Icon(

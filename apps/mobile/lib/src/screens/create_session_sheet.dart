@@ -1439,7 +1439,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (_availableProviders.length > 1) ...[
-          _LaunchSelectorRow(
+          LaunchSelectorRow(
             key: const ValueKey('create-session-provider-selector'),
             icon: Icons.smart_toy_rounded,
             label: 'Provider',
@@ -1449,7 +1449,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           ),
           const SizedBox(height: 10),
         ],
-        _LaunchFieldFrame(
+        LaunchFieldFrame(
           icon: Icons.folder_open_rounded,
           label: 'Working directory',
           trailing: _nodeInfo != null
@@ -1485,7 +1485,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           ),
         ),
         const SizedBox(height: 10),
-        _LaunchFieldFrame(
+        LaunchFieldFrame(
           icon: Icons.keyboard_command_key_rounded,
           label: 'Prompt',
           alignTop: true,
@@ -1511,50 +1511,41 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   Widget _buildLaunchSummaryCard(BuildContext context) {
     final colors = context.colors;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppShapes.input,
-        onTap: _submitting ? null : _toggleAdvanced,
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-          decoration: BoxDecoration(
-            color: colors.surfaceMuted,
-            borderRadius: AppShapes.input,
-            border: Border.all(color: colors.border),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.tune_rounded, size: 18, color: colors.accent),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Tune launch',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _launchSummaryText(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                  ],
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      width: double.infinity,
+      onTap: _submitting ? null : _toggleAdvanced,
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      child: Row(
+        children: [
+          Icon(Icons.tune_rounded, size: 18, color: colors.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Tune launch',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.title,
+                  ),
                 ),
-              ),
-              Icon(Icons.keyboard_arrow_down_rounded, color: colors.accent),
-            ],
+                const SizedBox(height: 2),
+                Text(
+                  _launchSummaryText(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+          Icon(Icons.keyboard_arrow_down_rounded, color: colors.accent),
+        ],
       ),
     );
   }
@@ -1572,7 +1563,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   Widget _buildAdvancedPanel(BuildContext context) {
-    final colors = context.colors;
     final effectiveReasoning = _effectiveReasoningEffort;
     String? reasoningDescription;
     for (final option in _supportedReasoningOptions) {
@@ -1582,13 +1572,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       }
     }
 
-    return Container(
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2032,14 +2019,11 @@ class _ErrorPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Container(
+    return MeshSurface(
+      tone: MeshSurfaceTone.danger,
+      radius: AppRadii.control,
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: colors.dangerMuted,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.danger.withValues(alpha: 0.35)),
-      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2060,169 +2044,6 @@ class _ErrorPanel extends StatelessWidget {
   }
 }
 
-class _LaunchFieldFrame extends StatelessWidget {
-  const _LaunchFieldFrame({
-    required this.icon,
-    required this.label,
-    required this.child,
-    this.alignTop = false,
-    this.trailing,
-  });
-
-  final IconData icon;
-  final String label;
-  final Widget child;
-  final bool alignTop;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: alignTop
-            ? CrossAxisAlignment.start
-            : CrossAxisAlignment.center,
-        children: [
-          Padding(
-            padding: EdgeInsets.only(top: alignTop ? 2 : 0),
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: BorderRadius.circular(11),
-                border: Border.all(color: colors.border),
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, color: colors.accent, size: 17),
-            ),
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: colors.textSecondary,
-                    fontWeight: AppWeights.title,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                child,
-              ],
-            ),
-          ),
-          if (trailing != null) ...[
-            const SizedBox(width: 8),
-            trailing!,
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _LaunchSelectorRow extends StatelessWidget {
-  const _LaunchSelectorRow({
-    super.key,
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.detail,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String detail;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppShapes.input,
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-          decoration: BoxDecoration(
-            color: colors.surfaceMuted,
-            borderRadius: AppShapes.input,
-            border: Border.all(color: colors.border),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: colors.accentMuted,
-                  borderRadius: BorderRadius.circular(11),
-                  border: Border.all(
-                    color: colors.accent.withValues(alpha: 0.24),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(icon, color: colors.accent, size: 17),
-              ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colors.textSecondary,
-                        fontWeight: AppWeights.title,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      value,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    if (detail.trim().isNotEmpty) ...[
-                      const SizedBox(height: 1),
-                      Text(
-                        detail,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
-                          color: colors.textTertiary,
-                          fontSize: 11,
-                          fontWeight: AppWeights.emphasis,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              Icon(Icons.keyboard_arrow_down_rounded, color: colors.accent),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _CompactInfoLine extends StatelessWidget {
   const _CompactInfoLine({required this.icon, required this.text});
@@ -2282,80 +2103,74 @@ class _ModelSelectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return InkWell(
+    return MeshSurface(
       onTap: loading ? null : onTap,
-      borderRadius: AppShapes.input,
-      child: Container(
-        width: double.infinity,
-        padding: EdgeInsets.all(compact ? 10 : 12),
-        decoration: BoxDecoration(
-          color: colors.surfaceMuted,
-          borderRadius: AppShapes.input,
-          border: Border.all(color: colors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: 16, color: colors.textSecondary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: AppWeights.emphasis,
-                    ),
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      width: double.infinity,
+      padding: EdgeInsets.all(compact ? 10 : 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: colors.textSecondary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: AppWeights.emphasis,
                   ),
                 ),
-                if (loading)
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                else
-                  Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    color: colors.textSecondary,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  value,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyLarge?.copyWith(fontWeight: AppWeights.body),
+              ),
+              if (loading)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: colors.textSecondary,
                 ),
-                ...badges.map((badge) => _InlineBadge(label: badge)),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              maxLines: compact ? 2 : null,
-              overflow: compact ? TextOverflow.ellipsis : null,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-                height: compact ? 1.25 : 1.35,
-              ),
-            ),
-            if (error != null) ...[
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: Text(retryLabel),
-              ),
             ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                value,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(fontWeight: AppWeights.body),
+              ),
+              ...badges.map((badge) => _InlineBadge(label: badge)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            maxLines: compact ? 2 : null,
+            overflow: compact ? TextOverflow.ellipsis : null,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+              height: compact ? 1.25 : 1.35,
+            ),
+          ),
+          if (error != null) ...[
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: Text(retryLabel),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -2556,92 +2371,90 @@ class _ProviderPickerTile extends StatelessWidget {
       provider.kind,
       if (provider.version.trim().isNotEmpty) provider.version.trim(),
     ].join(' · ');
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () => Navigator.of(context).pop(provider.kind),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: selected
-                      ? colors.accentMuted
-                      : colors.surfaceMuted.withValues(alpha: 0.8),
-                  borderRadius: AppShapes.input,
-                  border: Border.all(
-                    color: selected
-                        ? colors.accent.withValues(alpha: 0.38)
-                        : colors.border,
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  selected
-                      ? Icons.radio_button_checked_rounded
-                      : Icons.smart_toy_rounded,
-                  size: 19,
-                  color: selected ? colors.accent : colors.textSecondary,
-                ),
+    return MeshSurface(
+      onTap: () => Navigator.of(context).pop(provider.kind),
+      selected: selected,
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: selected
+                  ? colors.accentMuted
+                  : colors.surfaceMuted.withValues(alpha: 0.8),
+              borderRadius: AppShapes.input,
+              border: Border.all(
+                color: selected
+                    ? colors.accent.withValues(alpha: 0.38)
+                    : colors.border,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.smart_toy_rounded,
+              size: 19,
+              color: selected ? colors.accent : colors.textSecondary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _displayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: colors.textPrimary,
-                                  fontWeight: AppWeights.title,
-                                ),
-                          ),
-                        ),
-                        if (selected)
-                          MeshPill(
-                            label: 'selected',
-                            icon: Icons.check_rounded,
-                            tone: MeshPillTone.accent,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      meta,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: monoStyle(
-                        color: colors.textSecondary,
-                        fontSize: 11.5,
-                        fontWeight: AppWeights.emphasis,
+                    Expanded(
+                      child: Text(
+                        _displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium
+                            ?.copyWith(
+                              color: colors.textPrimary,
+                              fontWeight: AppWeights.title,
+                            ),
                       ),
                     ),
-                    const SizedBox(height: 7),
-                    Wrap(
-                      spacing: 7,
-                      runSpacing: 7,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        _InlineBadge(label: _command),
-                        for (final badge in _badges) _InlineBadge(label: badge),
-                      ],
-                    ),
+                    if (selected)
+                      MeshPill(
+                        label: 'selected',
+                        icon: Icons.check_rounded,
+                        tone: MeshPillTone.accent,
+                      ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 3),
+                Text(
+                  meta,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    color: colors.textSecondary,
+                    fontSize: 11.5,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+                const SizedBox(height: 7),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _InlineBadge(label: _command),
+                    for (final badge in _badges) _InlineBadge(label: badge),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -2987,61 +2800,56 @@ class _ModelPickerTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return InkWell(
+    return MeshSurface(
       onTap: onTap,
-      borderRadius: AppShapes.input,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: colors.surfaceMuted,
-          borderRadius: AppShapes.input,
-          border: Border.all(color: selected ? colors.accent : colors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: AppWeights.emphasis,
-                    ),
+      selected: selected,
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: AppWeights.emphasis,
                   ),
                 ),
-                if (selected) const _InlineBadge(label: 'selected'),
-              ],
-            ),
-            if (model != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                model!.model,
-                style: monoStyle(
-                  color: colors.textSecondary,
-                  fontSize: 12,
-                  fontWeight: AppWeights.body,
-                ),
               ),
+              if (selected) const _InlineBadge(label: 'selected'),
             ],
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: badges
-                  .map((badge) => _InlineBadge(label: badge))
-                  .toList(),
-            ),
-            const SizedBox(height: 8),
+          ),
+          if (model != null) ...[
+            const SizedBox(height: 4),
             Text(
-              description,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              model!.model,
+              style: monoStyle(
                 color: colors.textSecondary,
-                height: 1.35,
+                fontSize: 12,
+                fontWeight: AppWeights.body,
               ),
             ),
           ],
-        ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: badges
+                .map((badge) => _InlineBadge(label: badge))
+                .toList(),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            description,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+              height: 1.35,
+            ),
+          ),
+        ],
       ),
     );
   }
