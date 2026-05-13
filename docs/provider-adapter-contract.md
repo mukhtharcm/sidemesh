@@ -110,6 +110,12 @@ Providers should emit `liveEvent` events for streaming UI updates:
 - `action_opened`
 - `skills_changed`
 
+`assistant_message_completed` and `session_message_appended` message drafts may
+include provider-owned `seq` and `createdAt` values. The daemon keeps the
+WebSocket event `seq` separate from the persisted transcript message `seq`, so
+providers should pass through the persisted values when they have already
+written the message to session history.
+
 > **Note:** `fs_changed` is no longer emitted by provider adapters. Host-owned
 > filesystem watches in `src/fs-routes.ts` send `fs_changed` directly over the
 > WebSocket. Provider adapters should not implement filesystem operations.

@@ -1460,12 +1460,20 @@ export class CopilotAgentProvider
     phase: "commentary" | "final_answer",
     id: string,
   ): void {
-    this.appendAssistantMessage(session, turnId, text, phase, id);
+    const message = this.appendAssistantMessage(session, turnId, text, phase, id);
     this.emit("liveEvent", {
       type: "assistant_message_completed",
       sessionId: session.thread.id,
       turnId,
-      message: { id, text, phase },
+      message: {
+        id: message.id,
+        role: message.role,
+        text: message.text,
+        content: message.content,
+        createdAt: message.createdAt,
+        seq: message.seq,
+        phase: message.phase,
+      },
     });
   }
 
@@ -1706,6 +1714,8 @@ export class CopilotAgentProvider
         role: message.role,
         text: message.text,
         content: message.content,
+        createdAt: message.createdAt,
+        seq: message.seq,
         phase: message.phase,
       },
     });
@@ -1717,12 +1727,12 @@ export class CopilotAgentProvider
     text: string,
     phase: "commentary" | "final_answer",
     id = `copilot-assistant-${randomUUID()}`,
-  ): void {
+  ): SessionMessage {
     const active = this.activeTurns.get(session.thread.id);
     const content = cloneSessionMessageContentBlocks(
       active?.reasoningBlocks ?? [],
     );
-    this.appendMessage(session, {
+    const message = this.appendMessage(session, {
       id,
       role: "assistant",
       text,
@@ -1735,6 +1745,7 @@ export class CopilotAgentProvider
       ...(turn.items ?? []),
       { id, type: "agentMessage", text, phase },
     ];
+    return message;
   }
 
   private syncDraftAssistantMessages(
@@ -3735,6 +3746,28 @@ function isCopilotShellTool(toolName: string): boolean {
   return toolName === "bash";
 }
 
+function isStoredCopilotSubagentActivity(activity: ToolActivity): boolean {
+  const title = (activity.title ?? "").trim();
+  if (
+    title.length === 0 ||
+    title.includes("{") ||
+    activity.args != null ||
+    activity.output != null ||
+    activity.semantic?.category !== "task"
+  ) {
+    return false;
+  }
+  const result = asRecord(activity.result);
+  if (activity.status === "in_progress" && result == null) {
+    return true;
+  }
+  const resultType = typeof result?.type === "string" ? result.type : null;
+  if (activity.status === "completed" && resultType === "success") {
+    return true;
+  }
+  return activity.status === "failed" && resultType === "error";
+}
+
 function buildCopilotCommandActivityDraft(options: {
   id: string;
   turnId: string | null;
@@ -3831,6 +3864,9 @@ function normalizeStoredCopilotActivity(
       createdAt: normalized.createdAt,
       seq: normalized.seq,
     };
+  }
+  if (isStoredCopilotSubagentActivity(normalized)) {
+    return normalized;
   }
   const next = normalizeCopilotToolActivityParts({
     toolName,

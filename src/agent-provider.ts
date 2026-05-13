@@ -47,6 +47,8 @@ export interface AgentMessageDraft {
   role?: SessionMessage["role"];
   text: string;
   content?: SessionMessageContentBlock[];
+  createdAt?: number;
+  seq?: number;
   phase?: SessionMessage["phase"];
 }
 

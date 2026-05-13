@@ -40,6 +40,7 @@ import type {
 import type {
   ProviderModeCatalog,
   SessionLogSnapshot,
+  SessionMessage,
   ThreadRecord,
 } from "./types.js";
 
@@ -1173,6 +1174,121 @@ class ActivityReplayFixtureProvider extends EventEmitter implements AgentProvide
       source: "fake",
       path: null,
       status: { type: "idle" },
+    };
+  }
+}
+
+class AppendedMessageFixtureProvider extends EventEmitter implements AgentProvider {
+  public readonly kind = "fake";
+  public readonly displayName = "Appended Message Fixture Provider";
+  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
+  public readonly sessionId = "fake-appended-message-session";
+  private updatedAt = 1;
+  private nextSeq = 5;
+  private readonly messages: SessionMessage[] = [];
+
+  public async start(): Promise<void> {}
+
+  public async close(): Promise<void> {}
+
+  public async getVersion(): Promise<string> {
+    return "appended-message-fixture";
+  }
+
+  public async listSessionThreads(
+    options: AgentSessionListOptions,
+  ): Promise<ThreadRecord[]> {
+    if (options.archived) {
+      return [];
+    }
+    return [this.buildThread()].slice(0, options.limit);
+  }
+
+  public async readSessionThread(
+    threadId: string,
+    _includeTurns: boolean,
+  ): Promise<ThreadRecord> {
+    assert.equal(threadId, this.sessionId);
+    return this.buildThread();
+  }
+
+  public async listRecentUnindexedSessionThreads(
+    limit: number,
+  ): Promise<ThreadRecord[]> {
+    return [this.buildThread()].slice(0, limit);
+  }
+
+  public async readSessionLog(
+    thread: ThreadRecord,
+    _options?: AgentSessionLogOptions,
+  ): Promise<SessionLogSnapshot> {
+    assert.equal(thread.id, this.sessionId);
+    return {
+      messages: this.messages.map((message) => ({
+        ...message,
+        content: [...message.content],
+        attachments: [...message.attachments],
+      })),
+      activities: [],
+      runtime: null,
+      totalMessages: this.messages.length,
+      totalActivities: 0,
+      nextSeq: this.nextSeq,
+    };
+  }
+
+  public async readSessionRuntime(): Promise<null> {
+    return null;
+  }
+
+  public emitTransientDelta(): void {
+    this.emit("liveEvent", {
+      type: "assistant_delta",
+      sessionId: this.sessionId,
+      delta: "transient",
+      turnId: "turn-1",
+    });
+  }
+
+  public appendAuditMessage(text: string): SessionMessage {
+    const message: SessionMessage = {
+      id: `audit-${this.messages.length + 1}`,
+      role: "system",
+      text,
+      content: [{ type: "text", text }],
+      attachments: [],
+      createdAt: 1000 + this.messages.length,
+      seq: this.nextSeq++,
+    };
+    this.messages.push(message);
+    this.updatedAt += 1;
+    this.emit("liveEvent", {
+      type: "session_message_appended",
+      sessionId: this.sessionId,
+      turnId: "turn-1",
+      message: {
+        id: message.id,
+        role: message.role,
+        text: message.text,
+        content: message.content,
+        createdAt: message.createdAt,
+        seq: message.seq,
+      },
+    });
+    return message;
+  }
+
+  private buildThread(): ThreadRecord {
+    return {
+      id: this.sessionId,
+      name: "Appended message fixture",
+      preview: "Appended message fixture",
+      createdAt: 1,
+      updatedAt: this.updatedAt,
+      cwd: "/repo",
+      source: "fake",
+      path: null,
+      status: { type: "running", activeFlags: ["inProgress"] },
     };
   }
 }
@@ -2644,6 +2760,51 @@ describe("session live rich events", () => {
       } finally {
         await closeSessionLiveSocket(primaryLive.socket);
         await closeSessionLiveSocket(secondaryLive.socket);
+      }
+    });
+  });
+
+  it("keeps appended message payload seq aligned to provider history seq", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new AppendedMessageFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const logRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`,
+        method: "GET",
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      assert.equal(logRes.statusCode, 200);
+
+      const live = await openSessionLiveSocket(
+        server.port,
+        config.token,
+        provider.sessionId,
+      );
+      try {
+        await waitFor(
+          () => live.events.find((event) => event.type === "hello"),
+          "hello",
+        );
+        provider.emitTransientDelta();
+        const persisted = provider.appendAuditMessage("User answered.");
+        const appended = await waitFor(
+          () =>
+            live.events.find(
+              (event) => event.type === "session_message_appended",
+            ),
+          "session_message_appended",
+        );
+        assert.equal(appended.messageItem?.seq, persisted.seq);
+        assert.equal(appended.messageItem?.createdAt, persisted.createdAt);
+        assert.ok(
+          appended.seq > appended.messageItem.seq,
+          "websocket seq should remain independent from persisted message seq",
+        );
+      } finally {
+        await closeSessionLiveSocket(live.socket);
       }
     });
   });

@@ -2787,7 +2787,7 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         this.emit(
           event("subagent.started", {
             toolCallId: "subagent-1",
-            agentName: "docs-agent",
+            agentName: "code-review",
             agentDisplayName: "Documentation Agent",
             agentDescription: "Reads docs",
           }),
@@ -2795,7 +2795,7 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         this.emit(
           event("subagent.completed", {
             toolCallId: "subagent-1",
-            agentName: "docs-agent",
+            agentName: "code-review",
             agentDisplayName: "Documentation Agent",
             durationMs: 3400,
             totalTokens: 120,
@@ -3085,8 +3085,9 @@ describe("copilot rich event cleanup", () => {
     );
     try {
       const sdk = new FakeCopilotSdkClient();
+      const stateDir = nodePath.join(dir, "state");
       const provider = new CopilotAgentProvider({
-        stateDir: nodePath.join(dir, "state"),
+        stateDir,
         sdkClientFactory: fakeSdkFactory(sdk),
       });
       await provider.start();
@@ -3099,7 +3100,7 @@ describe("copilot rich event cleanup", () => {
       });
 
       const completed = waitForTurnCompleted(provider);
-      await provider.createSession({
+      const created = await provider.createSession({
         cwd: dir,
         input: [
           {
@@ -3115,14 +3116,35 @@ describe("copilot rich event cleanup", () => {
       const started = activities.find((a) => a.id === "subagent-1" && a.status === "in_progress");
       assert.ok(started, "Expected subagent started activity");
       assert.equal(started?.type, "tool");
-      assert.equal(started?.toolName, "docs-agent");
+      assert.equal(started?.toolName, "code-review");
       assert.equal(started?.title, "Documentation Agent");
 
       const completedActivity = activities.find(
         (a) => a.id === "subagent-1" && a.status === "completed",
       );
       assert.ok(completedActivity, "Expected subagent completed activity");
+      assert.equal(completedActivity?.title, "Documentation Agent (3s)");
       assert.equal(completedActivity?.result?.type, "success");
+      await settleProviderWrites();
+
+      const reloadedProvider = new CopilotAgentProvider({
+        stateDir,
+        sdkClientFactory: fakeSdkFactory(new FakeCopilotSdkClient()),
+      });
+      await reloadedProvider.start();
+      const reloadedThread = await reloadedProvider.readSessionThread(
+        created.thread.id,
+        false,
+      );
+      const reloadedLog = await reloadedProvider.readSessionLog(reloadedThread);
+      const reloadedActivity = reloadedLog.activities.find(
+        (activity) => activity.id === "subagent-1",
+      );
+      assert.ok(reloadedActivity, "Expected reloaded subagent activity");
+      assert.equal(reloadedActivity.type, "tool");
+      assert.equal(reloadedActivity.toolName, "code-review");
+      assert.equal(reloadedActivity.title, "Documentation Agent (3s)");
+      assert.equal((reloadedActivity.result as any)?.type, "success");
     } finally {
       await new Promise((r) => setTimeout(r, 50));
       await rm(dir, {

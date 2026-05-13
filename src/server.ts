@@ -948,7 +948,11 @@ export async function startServer(
         });
         return;
       case "assistant_message_completed": {
+        if (typeof event.message.seq === "number") {
+          ensureSeqCursor(event.sessionId, event.message.seq);
+        }
         const seq = allocSeq(event.sessionId);
+        const messageSeq = event.message.seq ?? seq;
         broadcastLive(event.sessionId, {
           type: "assistant_message_completed",
           sessionId: event.sessionId,
@@ -960,8 +964,8 @@ export async function startServer(
             text: event.message.text,
             content: event.message.content ?? [],
             attachments: [],
-            createdAt: Date.now(),
-            seq,
+            createdAt: event.message.createdAt ?? Date.now(),
+            seq: messageSeq,
             phase: event.message.phase,
           },
         });
@@ -969,7 +973,11 @@ export async function startServer(
         return;
       }
       case "session_message_appended": {
+        if (typeof event.message.seq === "number") {
+          ensureSeqCursor(event.sessionId, event.message.seq);
+        }
         const seq = allocSeq(event.sessionId);
+        const messageSeq = event.message.seq ?? seq;
         broadcastLive(event.sessionId, {
           type: "session_message_appended",
           sessionId: event.sessionId,
@@ -981,8 +989,8 @@ export async function startServer(
             text: event.message.text,
             content: event.message.content ?? [],
             attachments: [],
-            createdAt: Date.now(),
-            seq,
+            createdAt: event.message.createdAt ?? Date.now(),
+            seq: messageSeq,
             phase: event.message.phase,
           },
         });
