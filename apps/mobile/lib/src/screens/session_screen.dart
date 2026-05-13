@@ -2811,6 +2811,7 @@ class _SessionScreenState extends State<SessionScreen>
                 _pendingAction == null;
           }
         });
+        _refreshThinkingState();
         _syncSessionLiveActivity();
         _persistCurrentSessionLog();
         _scrollToBottomFast();

@@ -2126,6 +2126,16 @@ describe("POST /api/admin/provider/:kind/restart", () => {
       });
       assert.equal(afterActions.statusCode, 200);
       assert.deepEqual(afterActions.body, []);
+
+      const afterLog = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(afterLog.statusCode, 200);
+      assert.equal((afterLog.body as any).nextSeq, 1);
     });
   });
 

@@ -667,6 +667,11 @@ export async function startServer(
         sessionIds.add(sessionId);
       }
     }
+    for (const sessionId of sessionSeqCursor.keys()) {
+      if (isProviderSession(sessionId)) {
+        sessionIds.add(sessionId);
+      }
+    }
     for (const sessionId of runtimeCache.keys()) {
       if (isProviderSession(sessionId)) {
         sessionIds.add(sessionId);
@@ -712,6 +717,7 @@ export async function startServer(
           status: "idle",
         });
       }
+      sessionSeqCursor.delete(sessionId);
       scheduleRecentSessionUpsert(sessionId, 0);
     }
   }

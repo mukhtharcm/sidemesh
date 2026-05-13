@@ -191,6 +191,7 @@ void main() {
 
     expect(find.text('Deploy staging.'), findsOneWidget);
     expect(find.text('Interrupt agent'), findsWidgets);
+    expect(find.text('Working'), findsOneWidget);
   });
 
   testWidgets('snapshot replay cursor prevents reconnect delta loops', (
