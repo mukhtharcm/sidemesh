@@ -1062,6 +1062,7 @@ void main() {
   testWidgets('completed assistant message keeps collapsed reasoning visible', (
     tester,
   ) async {
+    final host = _host('reasoning-collapse');
     final session = _session('reasoning-collapse');
     final api = _RichEventFakeApi();
     addTearDown(api.dispose);
@@ -1069,7 +1070,7 @@ void main() {
     await _pumpApp(
       tester,
       SessionScreen(
-        host: _host('reasoning-collapse'),
+        host: host,
         session: session,
         api: api,
         desktopMode: true,
@@ -1106,6 +1107,15 @@ void main() {
     expect(find.text('Step one.'), findsNothing);
     expect(find.text('Final answer.'), findsOneWidget);
     expect(find.text('Reasoning'), findsOneWidget);
+    final cached = await SessionLocalStore.instance.loadSessionLog(
+      host,
+      session.id,
+    );
+    final cachedMessage = cached!.log.messages.singleWhere(
+      (message) => message.id == 'msg-1',
+    );
+    expect(cachedMessage.text, 'Final answer.');
+    expect(cachedMessage.content.any((block) => block is ThinkingBlock), isTrue);
 
     final reasoningLabel = tester
         .widgetList<RichText>(find.byType(RichText))

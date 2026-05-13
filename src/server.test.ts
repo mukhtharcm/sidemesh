@@ -199,8 +199,9 @@ async function withServerRuntime(
   config: NodeConfig,
   runtime: AgentProviderRuntime,
   fn: (server: RunningServer, config: NodeConfig) => Promise<void>,
+  dependencyOverrides: Parameters<typeof startServer>[2] = {},
 ): Promise<void> {
-  const server = await startServer(config, runtime);
+  const server = await startServer(config, runtime, dependencyOverrides);
   try {
     await fn(server, config);
   } finally {
@@ -2869,6 +2870,67 @@ describe("session live rich events", () => {
         "delta cursor should advance to the live replay seq",
       );
     });
+  });
+
+  it("returns stale cursor when missed appended-message replay metadata was evicted", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new AppendedMessageFixtureProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(
+      makeConfig(stateDir),
+      runtime,
+      async (server, config) => {
+        const logRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`,
+          method: "GET",
+          headers: { Authorization: `Bearer ${config.token}` },
+        });
+        assert.equal(logRes.statusCode, 200);
+
+        const live = await openSessionLiveSocket(
+          server.port,
+          config.token,
+          provider.sessionId,
+        );
+        let transientSeq: number | undefined;
+        try {
+          await waitFor(
+            () => live.events.find((event) => event.type === "hello"),
+            "hello",
+          );
+          provider.emitTransientDelta();
+          const transient = await waitFor(
+            () => live.events.find((event) => event.type === "assistant_delta"),
+            "assistant_delta",
+          );
+          transientSeq = transient.seq;
+        } finally {
+          await closeSessionLiveSocket(live.socket);
+        }
+
+        assert.equal(typeof transientSeq, "number");
+        provider.appendAuditMessage("Missed audit.");
+        provider.appendAuditMessage("Evicting audit.");
+        const deltaRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path:
+            `/api/sessions/${encodeURIComponent(provider.sessionId)}/events` +
+            `?since=${transientSeq}`,
+          method: "GET",
+          headers: { Authorization: `Bearer ${config.token}` },
+        });
+        assert.equal(deltaRes.statusCode, 410);
+        assert.equal((deltaRes.body as any).error, "stale_cursor");
+        assert.equal(
+          (deltaRes.body as any).reason,
+          "live_message_replay_evicted",
+        );
+      },
+      { liveMessageReplayLimit: 1 },
+    );
   });
 
   it("does not skip subsequent appended messages after a live appended-message cursor", async () => {

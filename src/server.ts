@@ -211,12 +211,14 @@ export interface RunningServer {
 interface StartServerDependencies {
   detectInstallInfo: typeof detectInstallInfo;
   spawnSelfUpdater: typeof spawnSelfUpdater;
+  liveMessageReplayLimit: number;
   exitProcess(code?: number): never;
 }
 
 const DEFAULT_START_SERVER_DEPENDENCIES: StartServerDependencies = {
   detectInstallInfo,
   spawnSelfUpdater,
+  liveMessageReplayLimit: LIVE_MESSAGE_REPLAY_LIMIT,
   exitProcess: (code = 0) => process.exit(code),
 };
 
@@ -261,6 +263,7 @@ export async function startServer(
   const pendingActions = new Map<string, AgentPendingAction>();
   const liveActivities = new Map<string, Map<string, LiveActivityEntry>>();
   const liveMessageReplaySeqs = new Map<string, Map<string, number>>();
+  const liveMessageReplayEvictions = new Map<string, number>();
   const liveThreadStatuses = new Map<string, LiveThreadStatus>();
   const liveThreadStatusUpdatedAt = new Map<string, number>();
   const replayIndex = new SessionReplayIndex();
@@ -646,6 +649,11 @@ export async function startServer(
         sessionIds.add(sessionId);
       }
     }
+    for (const sessionId of liveMessageReplayEvictions.keys()) {
+      if (isProviderSession(sessionId)) {
+        sessionIds.add(sessionId);
+      }
+    }
     for (const sessionId of runtimeCache.keys()) {
       if (isProviderSession(sessionId)) {
         sessionIds.add(sessionId);
@@ -674,6 +682,7 @@ export async function startServer(
       activeTurns.delete(sessionId);
       liveActivities.delete(sessionId);
       liveMessageReplaySeqs.delete(sessionId);
+      liveMessageReplayEvictions.delete(sessionId);
       runtimeCache.delete(sessionId);
       clearSessionLogCache(logCache, sessionId);
       clearActionsForSession(
@@ -963,9 +972,11 @@ export async function startServer(
         const messageSeq = event.message.seq ?? seq;
         rememberLiveMessageReplaySeq(
           liveMessageReplaySeqs,
+          liveMessageReplayEvictions,
           event.sessionId,
           event.message.id,
           seq,
+          dependencies.liveMessageReplayLimit,
         );
         broadcastLive(event.sessionId, {
           type: "assistant_message_completed",
@@ -994,9 +1005,11 @@ export async function startServer(
         const messageSeq = event.message.seq ?? seq;
         rememberLiveMessageReplaySeq(
           liveMessageReplaySeqs,
+          liveMessageReplayEvictions,
           event.sessionId,
           event.message.id,
           seq,
+          dependencies.liveMessageReplayLimit,
         );
         broadcastLive(event.sessionId, {
           type: "session_message_appended",
@@ -1432,6 +1445,7 @@ export async function startServer(
         liveActivityItems,
         liveMessageSessions: liveMessageReplaySeqs.size,
         liveMessageItems,
+        liveMessageReplayEvictions: liveMessageReplayEvictions.size,
         sessionSeqCursors: sessionSeqCursor.size,
         inputDedupe: sessionInputDedupe.size,
       },
@@ -2039,6 +2053,17 @@ export async function startServer(
       const query = request.query as Record<string, unknown>;
       const since = asInteger(query.since) ?? 0;
       const baseUpdatedAt = asInteger(query.baseUpdatedAt);
+      const evictedLiveMessageReplaySeq =
+        liveMessageReplayEvictions.get(sessionId) ?? 0;
+      if (evictedLiveMessageReplaySeq > 0 && evictedLiveMessageReplaySeq > since) {
+        response.status(410).json({
+          error: "stale_cursor",
+          reason: "live_message_replay_evicted",
+          since,
+          oldestAvailableSeq: evictedLiveMessageReplaySeq + 1,
+        });
+        return;
+      }
 
       const session = await readSession(provider, sessionId, false);
       reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
@@ -3048,6 +3073,7 @@ export async function startServer(
       liveThreadStatuses.delete(sessionId);
       liveActivities.delete(sessionId);
       liveMessageReplaySeqs.delete(sessionId);
+      liveMessageReplayEvictions.delete(sessionId);
       clearSessionLogCache(logCache, sessionId);
       sessionSeqCursor.delete(sessionId);
       response.json({ archived: true });
@@ -4288,9 +4314,11 @@ function liveActivityValues(
 
 function rememberLiveMessageReplaySeq(
   liveMessageReplaySeqs: Map<string, Map<string, number>>,
+  liveMessageReplayEvictions: Map<string, number>,
   sessionId: string,
   messageId: string,
   replaySeq: number,
+  replayLimit: number,
 ): void {
   if (!messageId) {
     return;
@@ -4301,12 +4329,16 @@ function rememberLiveMessageReplaySeq(
     liveMessageReplaySeqs.set(sessionId, sessionMessages);
   }
   sessionMessages.set(messageId, replaySeq);
-  while (sessionMessages.size > LIVE_MESSAGE_REPLAY_LIMIT) {
+  while (sessionMessages.size > replayLimit) {
     const oldest = sessionMessages.keys().next().value;
     if (typeof oldest !== "string") {
       break;
     }
+    const evictedReplaySeq = sessionMessages.get(oldest) ?? 0;
     sessionMessages.delete(oldest);
+    if (evictedReplaySeq > (liveMessageReplayEvictions.get(sessionId) ?? 0)) {
+      liveMessageReplayEvictions.set(sessionId, evictedReplaySeq);
+    }
   }
 }
 

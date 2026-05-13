@@ -2710,6 +2710,8 @@ class _SessionScreenState extends State<SessionScreen>
         _flushPendingLiveUpdates();
         final message = event.messageItem;
         final committedLive = _liveAssistantMessage;
+        final previousMessages = _messages;
+        final previousActivities = _activities;
         setState(() {
           if (message != null) {
             final hasThinkingBlocks = message.content.any(
@@ -2717,29 +2719,38 @@ class _SessionScreenState extends State<SessionScreen>
             );
             final liveThinking = committedLive != null &&
                 committedLive.reasoning.trim().isNotEmpty;
+            late final SessionMessage persistedMessage;
             if (!hasThinkingBlocks && liveThinking) {
               final reasoning = committedLive.reasoning.trimRight();
-              _upsertOptimisticMessage(
-                SessionMessage(
-                  id: message.id,
-                  role: message.role,
-                  text: message.text,
-                  content: [
-                    ThinkingBlock(reasoning),
-                    ...message.content.whereType<TextBlock>(),
-                    if (!message.content.any((b) => b is TextBlock) &&
-                        message.text.trim().isNotEmpty)
-                      TextBlock(message.text),
-                  ],
-                  attachments: message.attachments,
-                  createdAt: message.createdAt,
-                  seq: message.seq,
-                  phase: message.phase,
-                ),
+              persistedMessage = SessionMessage(
+                id: message.id,
+                role: message.role,
+                text: message.text,
+                content: [
+                  ThinkingBlock(reasoning),
+                  ...message.content.whereType<TextBlock>(),
+                  if (!message.content.any((b) => b is TextBlock) &&
+                      message.text.trim().isNotEmpty)
+                    TextBlock(message.text),
+                ],
+                attachments: message.attachments,
+                createdAt: message.createdAt,
+                seq: message.seq,
+                phase: message.phase,
               );
             } else {
-              _upsertOptimisticMessage(message);
+              persistedMessage = message;
             }
+            _advanceSessionUpdatedAtFromMessage(persistedMessage);
+            _upsertPersistedMessage(persistedMessage);
+            _optimisticMessages = _reconcileOptimisticMessages(_messages);
+            _history = _updatedHistoryAfterDelta(
+              previous: _history,
+              previousMessages: previousMessages,
+              mergedMessages: _messages,
+              previousActivities: previousActivities,
+              mergedActivities: _activities,
+            );
           } else if (committedLive != null &&
               (committedLive.text.trim().isNotEmpty ||
                   committedLive.reasoning.trim().isNotEmpty)) {
@@ -2752,6 +2763,9 @@ class _SessionScreenState extends State<SessionScreen>
         });
         _refreshThinkingState();
         _syncSessionLiveActivity();
+        if (message != null) {
+          _persistCurrentSessionLog();
+        }
         _scrollToBottomFast();
       case 'session_message_appended':
         final message = event.messageItem;
@@ -2761,17 +2775,7 @@ class _SessionScreenState extends State<SessionScreen>
         final previousMessages = _messages;
         final previousActivities = _activities;
         setState(() {
-          final session = _session;
-          // Keep the cached base timestamp compatible with providers whose
-          // session metadata is still second-precision.
-          final messageUpdatedAt = DateTime.fromMillisecondsSinceEpoch(
-            (message.createdAt.millisecondsSinceEpoch ~/
-                    Duration.millisecondsPerSecond) *
-                Duration.millisecondsPerSecond,
-          );
-          if (session != null && messageUpdatedAt.isAfter(session.updatedAt)) {
-            _session = session.copyWith(updatedAt: messageUpdatedAt);
-          }
+          _advanceSessionUpdatedAtFromMessage(message);
           _upsertPersistedMessage(message);
           _optimisticMessages = _reconcileOptimisticMessages(_messages);
           _history = _updatedHistoryAfterDelta(
@@ -5378,6 +5382,23 @@ class _SessionScreenState extends State<SessionScreen>
     final updated = [..._messages];
     updated[existingIndex] = message;
     _messages = _sortMessages(updated);
+  }
+
+  void _advanceSessionUpdatedAtFromMessage(SessionMessage message) {
+    final session = _session;
+    if (session == null) {
+      return;
+    }
+    // Keep the cached base timestamp compatible with providers whose session
+    // metadata is still second-precision.
+    final messageUpdatedAt = DateTime.fromMillisecondsSinceEpoch(
+      (message.createdAt.millisecondsSinceEpoch ~/
+              Duration.millisecondsPerSecond) *
+          Duration.millisecondsPerSecond,
+    );
+    if (messageUpdatedAt.isAfter(session.updatedAt)) {
+      _session = session.copyWith(updatedAt: messageUpdatedAt);
+    }
   }
 
   List<SessionMessage> _reconcileOptimisticMessages(
