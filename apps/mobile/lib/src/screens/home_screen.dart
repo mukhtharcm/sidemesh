@@ -3538,18 +3538,19 @@ class _HostRowCard extends StatelessWidget {
                 recommendedVersion: node!.recommendedMobileClientVersion,
                 minimumVersion: node!.minimumMobileClientVersion,
               );
+        final hostStatusBadge = _hostStatusBadge(status, host.enabled);
         if (dense) {
           return Material(
             color: Colors.transparent,
             child: InkWell(
               onTap: host.enabled ? onTap : null,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(AppRadii.control),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 120),
                 padding: const EdgeInsets.fromLTRB(10, 9, 6, 10),
                 decoration: BoxDecoration(
                   color: selected ? colors.accentMuted : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(AppRadii.control),
                   border: Border.all(
                     color: selected
                         ? colors.accent.withValues(alpha: 0.35)
@@ -3663,8 +3664,9 @@ class _HostRowCard extends StatelessWidget {
             ),
           );
         }
-        return MeshCard(
+        return MeshSurface(
           onTap: host.enabled ? onTap : null,
+          selected: selected,
           padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
           child: Row(
             children: [
@@ -3703,12 +3705,25 @@ class _HostRowCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      host.label,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: AppWeights.emphasis,
-                        color: host.enabled ? null : colors.textTertiary,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            host.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  fontWeight: AppWeights.emphasis,
+                                  color: host.enabled
+                                      ? null
+                                      : colors.textTertiary,
+                                ),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        hostStatusBadge,
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -3865,6 +3880,43 @@ class _HostRowCard extends StatelessWidget {
         return colors.textTertiary;
     }
   }
+}
+
+MeshStatusBadge _hostStatusBadge(HostStatus status, bool enabled) {
+  if (!enabled) {
+    return const MeshStatusBadge(
+      label: 'disabled',
+      tone: MeshStatusTone.offline,
+      icon: Icons.pause_circle_outline_rounded,
+      compact: true,
+    );
+  }
+  return switch (status.reachability) {
+    HostReachability.online => const MeshStatusBadge(
+        label: 'online',
+        tone: MeshStatusTone.success,
+        icon: Icons.check_circle_outline_rounded,
+        compact: true,
+      ),
+    HostReachability.probing => const MeshStatusBadge(
+        label: 'checking',
+        tone: MeshStatusTone.queued,
+        icon: Icons.sync_rounded,
+        compact: true,
+      ),
+    HostReachability.offline => const MeshStatusBadge(
+        label: 'offline',
+        tone: MeshStatusTone.danger,
+        icon: Icons.wifi_off_rounded,
+        compact: true,
+      ),
+    HostReachability.unknown => const MeshStatusBadge(
+        label: 'unknown',
+        tone: MeshStatusTone.stale,
+        icon: Icons.help_outline_rounded,
+        compact: true,
+      ),
+  };
 }
 
 class _HostStatusDot extends StatelessWidget {
