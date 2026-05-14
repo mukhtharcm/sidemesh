@@ -726,7 +726,16 @@ void main() {
       cwd: '/repo',
       output: 'ok',
     );
-    final api = _RichEventFakeApi(sessionSummary: session);
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        _plainToolActivity(
+          id: 'live-command',
+          seq: 1,
+          toolName: 'run_command',
+        ),
+      ],
+    );
     addTearDown(api.dispose);
 
     await _pumpApp(
@@ -1823,6 +1832,46 @@ SessionActivity _legacyCommandToolActivity({
         SessionToolSemanticTarget(type: 'command', command: command),
       ],
     ),
+    changes: const [],
+    diff: null,
+    query: null,
+    queries: const [],
+    targetUrl: null,
+    pattern: null,
+    revisedPrompt: null,
+    savedPath: null,
+  );
+}
+
+SessionActivity _plainToolActivity({
+  required String id,
+  required int seq,
+  required String toolName,
+}) {
+  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  return SessionActivity(
+    id: id,
+    type: 'tool',
+    createdAt: now,
+    seq: seq,
+    status: 'completed',
+    turnId: 'turn-$seq',
+    command: null,
+    cwd: null,
+    output: null,
+    exitCode: null,
+    durationMs: null,
+    source: null,
+    processId: null,
+    commandActions: const [],
+    terminalStatus: null,
+    terminalInput: null,
+    toolName: toolName,
+    toolTitle: null,
+    toolArgs: null,
+    toolResult: null,
+    toolError: null,
+    toolSemantic: null,
     changes: const [],
     diff: null,
     query: null,
