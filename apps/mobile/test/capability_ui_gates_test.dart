@@ -226,18 +226,18 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('No adjustable controls'), findsOneWidget);
+    expect(find.text('Nothing to change here'), findsOneWidget);
     expect(
       find.text(
-        'Fake Test Provider does not advertise runtime controls for existing sessions.',
+        'Fake Test Provider does not expose session settings you can change after a run starts.',
       ),
       findsOneWidget,
     );
-    expect(find.text('Model & thinking'), findsNothing);
-    expect(find.text('Session mode'), findsNothing);
-    expect(find.text('Approval policy'), findsNothing);
-    expect(find.text('Sandbox'), findsNothing);
-    expect(find.text('Network'), findsNothing);
+    expect(find.text('Model and thinking'), findsNothing);
+    expect(find.text('Mode'), findsNothing);
+    expect(find.text('Approvals'), findsNothing);
+    expect(find.text('File access'), findsNothing);
+    expect(find.text('Internet access'), findsNothing);
   });
 
   testWidgets('session controls show advertised runtime controls', (
@@ -269,11 +269,11 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Model & thinking'), findsOneWidget);
-    expect(find.text('Session mode'), findsOneWidget);
-    expect(find.text('Approval policy'), findsOneWidget);
-    expect(find.text('Sandbox'), findsOneWidget);
-    expect(find.text('Network'), findsOneWidget);
+    expect(find.text('Model and thinking'), findsOneWidget);
+    expect(find.text('Mode'), findsOneWidget);
+    expect(find.text('Approvals'), findsOneWidget);
+    expect(find.text('File access'), findsOneWidget);
+    expect(find.text('Internet access'), findsOneWidget);
   });
 
   testWidgets('session controls use provider-defined mode catalogs', (

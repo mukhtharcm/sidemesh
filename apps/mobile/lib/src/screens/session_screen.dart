@@ -192,17 +192,17 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      MeshPill(
-                        label: 'parked',
-                        tone: MeshPillTone.warning,
-                        icon: Icons.pause_rounded,
-                        mono: true,
+                          MeshPill(
+                            label: 'paused',
+                            tone: MeshPillTone.warning,
+                            icon: Icons.pause_rounded,
+                            mono: true,
                       ),
                     ],
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    'Tap to resume · $target',
+                    'Tap to reopen · $target',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: monoStyle(color: colors.textSecondary, fontSize: 11),
@@ -240,7 +240,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                       Row(
                         children: [
                           Text(
-                            'Browser lens',
+                            'Browser preview',
                             style: Theme.of(context).textTheme.labelMedium
                                 ?.copyWith(
                                   color: colors.textSecondary,
@@ -250,7 +250,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           MeshPill(
-                            label: 'live',
+                            label: 'open',
                             tone: MeshPillTone.success,
                             icon: Icons.bolt_rounded,
                             mono: true,

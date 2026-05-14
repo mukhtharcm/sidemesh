@@ -567,8 +567,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     showAppSnackBar(
       context,
       savedPolicy.isEmpty && savedTurnConfig.isEmpty
-          ? 'Session will use default controls on your next fresh turn.'
-          : 'Applied on your next fresh turn.',
+          ? 'This session will use the default settings on the next reply.'
+          : 'Changes will apply on the next reply.',
     );
   }
 
@@ -725,7 +725,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Session controls',
+                      'Turn settings',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: AppWeights.title,
                       ),
@@ -735,7 +735,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Change how the agent handles the model, thinking effort, Fast mode, approvals, file access and network for this session. Applied on your next fresh turn. If the agent is already responding, these changes wait until the current turn finishes.',
+                'Choose the model, mode, approvals, file access, and internet behavior for the next reply in this session. If the agent is already working, the changes wait for the current reply to finish.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colors.textSecondary,
                   height: 1.4,
@@ -765,14 +765,14 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'No adjustable controls',
+                              'Nothing to change here',
                               style: theme.textTheme.titleSmall?.copyWith(
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              '$_providerName does not advertise runtime controls for existing sessions.',
+                              '$_providerName does not expose session settings you can change after a run starts.',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: colors.textSecondary,
                                 height: 1.35,
@@ -788,7 +788,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                 if (showModeControls) ...[
                   const SizedBox(height: 20),
                   Text(
-                    'Session mode',
+                    'Mode',
                     style: theme.textTheme.labelLarge?.copyWith(
                       color: colors.textSecondary,
                       letterSpacing: 0.4,
@@ -841,7 +841,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                 if (showModelControls) ...[
                   const SizedBox(height: 20),
                   Text(
-                    showReasoningControls ? 'Model & thinking' : 'Model',
+                    showReasoningControls ? 'Model and thinking' : 'Model',
                     style: theme.textTheme.labelLarge?.copyWith(
                       color: colors.textSecondary,
                       letterSpacing: 0.4,
@@ -989,7 +989,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                   ],
                   if (_supportsApprovalPolicy) ...[
                     Text(
-                      'Approval policy',
+                      'Approvals',
                       style: theme.textTheme.labelLarge?.copyWith(
                         color: colors.textSecondary,
                         letterSpacing: 0.4,
@@ -1016,7 +1016,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                     const SizedBox(height: 18),
                   if (_supportsSandboxMode) ...[
                     Text(
-                      'Sandbox',
+                      'File access',
                       style: theme.textTheme.labelLarge?.copyWith(
                         color: colors.textSecondary,
                         letterSpacing: 0.4,
@@ -1045,7 +1045,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                     const SizedBox(height: 18),
                   if (_supportsNetworkAccess) ...[
                     Text(
-                      'Network',
+                      'Internet access',
                       style: theme.textTheme.labelLarge?.copyWith(
                         color: colors.textSecondary,
                         letterSpacing: 0.4,
@@ -1056,11 +1056,11 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                       value: _effectiveNetworkOn,
                       disabled: _networkToggleDisabled,
                       subtitle: _networkToggleDisabled
-                          ? 'Full access already grants network. Toggle locked.'
+                          ? 'Full access already includes internet access.'
                           : (_effectiveSandbox == SandboxMode.workspaceWrite ||
                                 _effectiveSandbox == SandboxMode.readOnly)
-                          ? 'Allow outbound network for tools like gh, curl, pip. Off by default for read-only / workspace-write.'
-                          : 'Allow outbound network.',
+                          ? 'Let tools like gh, curl, or pip use the internet. Off by default for read-only and workspace-write modes.'
+                          : 'Let tools use the internet.',
                       onChanged: (value) {
                         setState(() {
                           _policy = _policy.copyWith(networkAccess: value);
@@ -1076,7 +1076,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                   TextButton.icon(
                     onPressed: _reset,
                     icon: const Icon(Icons.restart_alt_rounded, size: 18),
-                    label: const Text('Reset to defaults'),
+                    label: const Text('Reset'),
                   ),
                   const Spacer(),
                   TextButton(
@@ -1087,7 +1087,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                   FilledButton.icon(
                     onPressed: _save,
                     icon: const Icon(Icons.check_rounded, size: 18),
-                    label: const Text('Save'),
+                    label: const Text('Apply'),
                   ),
                 ],
               ),
@@ -1184,7 +1184,7 @@ class _ModelSelectionCard extends StatelessWidget {
               currentValue!.trim() != value.trim()) ...[
             const SizedBox(height: 8),
             Text(
-              'Current thread: ${currentValue!.trim()}',
+              'Current setting: ${currentValue!.trim()}',
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
@@ -1288,8 +1288,8 @@ class _FastModeTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   enabled
-                      ? 'Ask for the fast service tier on your next fresh turn.'
-                      : 'This model does not advertise Fast mode.',
+                      ? 'Prefer the faster service tier on the next reply.'
+                      : 'This model does not support Fast mode.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.35,
@@ -1367,7 +1367,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Choose model',
+              'Choose a model',
               style: Theme.of(
                 context,
               ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
@@ -1375,8 +1375,8 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
             const SizedBox(height: 6),
             Text(
               widget.providerName == null
-                  ? 'Pick the model for your next fresh turn. Auto models stay simple; specific models let you adjust thinking effort.'
-                  : 'Pick the model for your next fresh turn on this session\'s ${widget.providerName} provider.',
+                  ? 'Pick the model for the next reply. Auto models keep things simple; named models let you choose thinking effort.'
+                  : 'Pick the model for the next reply on this session\'s ${widget.providerName} provider.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: colors.textSecondary,
                 height: 1.4,
@@ -1542,7 +1542,7 @@ class _PolicyAutopilotCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Autopilot — never ask again',
+                  'Hands-off mode',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                     color: colors.textPrimary,
@@ -1550,7 +1550,7 @@ class _PolicyAutopilotCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Approval = never · Sandbox = full access · Network = on. The agent runs without pausing for approvals and can hit the internet.',
+                  'Approvals off, full file access, internet on. The agent keeps going without stopping to ask you first.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.35,
@@ -1602,7 +1602,7 @@ class _PolicyNetworkTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Allow outbound network',
+                  'Use the internet',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                     color: colors.textPrimary,
@@ -1781,15 +1781,15 @@ String _sessionModeDescription(
   }
   return switch (value) {
     null =>
-      'Leave mode alone and keep the current $providerName session behavior.',
+      'Keep the current $providerName mode for the next reply.',
     'interactive' =>
       'Interactive keeps the agent conversational and approval-oriented.',
     'plan' =>
       'Plan focuses on outlining or analyzing before it starts making changes.',
     'autopilot' =>
-      'Autopilot lets the provider run with its most self-directed execution mode.',
+      'Autopilot lets the provider keep going with fewer interruptions.',
     _ =>
-      '$providerName will switch to ${providerModeLabel(value, modes)} mode on the next fresh turn.',
+      '$providerName will switch to ${providerModeLabel(value, modes)} mode on the next reply.',
   };
 }
 
