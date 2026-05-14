@@ -41,8 +41,6 @@ class DesktopShell extends StatefulWidget {
 
 enum _SidebarSection { recent, inbox, hosts }
 
-enum _SidebarOverflowAction { newSession, addHost, usage, shortcuts, settings }
-
 String _desktopSessionViewModeLabel(SessionViewMode mode) {
   return switch (mode) {
     SessionViewMode.flat => 'List',
@@ -1247,48 +1245,7 @@ class _Sidebar extends StatelessWidget {
     final enabledHosts = hosts
         .where((host) => host.enabled)
         .toList(growable: false);
-    final title = switch (section) {
-      _SidebarSection.recent => 'Recent sessions',
-      _SidebarSection.inbox => 'Inbox',
-      _SidebarSection.hosts => 'Hosts',
-    };
-    final subtitle = switch (section) {
-      _SidebarSection.recent =>
-        'Resume work, scan activity, or start something new.',
-      _SidebarSection.inbox =>
-        'Review approvals and pending replies without digging around.',
-      _SidebarSection.hosts => 'Manage the machines this app can reach.',
-    };
-    final primaryLabel = switch ((
-      hosts.isEmpty,
-      enabledHosts.isEmpty,
-      section,
-    )) {
-      (true, _, _) => 'Add host',
-      (false, true, _) => 'Review hosts',
-      (false, false, _SidebarSection.hosts) => 'Add host',
-      _ => 'New session',
-    };
-    final primaryIcon = switch ((
-      hosts.isEmpty,
-      enabledHosts.isEmpty,
-      section,
-    )) {
-      (true, _, _) => Icons.add_link_rounded,
-      (false, true, _) => Icons.hub_rounded,
-      (false, false, _SidebarSection.hosts) => Icons.add_link_rounded,
-      _ => Icons.add_rounded,
-    };
-    final primaryOnTap = switch ((
-      hosts.isEmpty,
-      enabledHosts.isEmpty,
-      section,
-    )) {
-      (true, _, _) => onAddHost,
-      (false, true, _) => () => onSelectSection(_SidebarSection.hosts),
-      (false, false, _SidebarSection.hosts) => onAddHost,
-      _ => onStartSession,
-    };
+    final canStartSession = enabledHosts.isNotEmpty;
     return SizedBox(
       width: width,
       child: Container(
@@ -1296,152 +1253,168 @@ class _Sidebar extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Draggable titlebar area with traffic-light inset.
             SizedBox(height: titlebarInset + 10),
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 10, 12),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      Text(
-                        'Sidemesh',
-                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: colors.textSecondary,
-                          fontWeight: AppWeights.emphasis,
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: colors.accentMuted,
+                          borderRadius: BorderRadius.circular(11),
+                          border: Border.all(
+                            color: colors.accent.withValues(alpha: 0.26),
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.hub_rounded,
+                          size: 18,
+                          color: colors.accent,
                         ),
                       ),
-                      const Spacer(),
-                      PopupMenuButton<_SidebarOverflowAction>(
-                        tooltip: 'More',
-                        onSelected: (action) {
-                          switch (action) {
-                            case _SidebarOverflowAction.newSession:
-                              onStartSession();
-                            case _SidebarOverflowAction.addHost:
-                              onAddHost();
-                            case _SidebarOverflowAction.usage:
-                              onOpenUsage();
-                            case _SidebarOverflowAction.shortcuts:
-                              onShowShortcuts();
-                            case _SidebarOverflowAction.settings:
-                              onOpenSettings();
-                          }
-                        },
-                        itemBuilder: (context) => [
-                          if (enabledHosts.isNotEmpty)
-                            const PopupMenuItem(
-                              value: _SidebarOverflowAction.newSession,
-                              child: ListTile(
-                                dense: true,
-                                leading: Icon(Icons.add_rounded),
-                                title: Text('New session'),
-                              ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Sidemesh',
+                              style: Theme.of(context).textTheme.labelLarge
+                                  ?.copyWith(
+                                    color: colors.textPrimary,
+                                    fontWeight: AppWeights.title,
+                                  ),
                             ),
-                          const PopupMenuItem(
-                            value: _SidebarOverflowAction.addHost,
-                            child: ListTile(
-                              dense: true,
-                              leading: Icon(Icons.add_link_rounded),
-                              title: Text('Add host'),
+                            const SizedBox(height: 1),
+                            Text(
+                              'Desktop control for your agents',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: colors.textSecondary,
+                                    height: 1.2,
+                                  ),
                             ),
-                          ),
-                          const PopupMenuItem(
-                            value: _SidebarOverflowAction.usage,
-                            child: ListTile(
-                              dense: true,
-                              leading: Icon(Icons.speed_rounded),
-                              title: Text('Usage'),
-                            ),
-                          ),
-                          const PopupMenuItem(
-                            value: _SidebarOverflowAction.shortcuts,
-                            child: ListTile(
-                              dense: true,
-                              leading: Icon(Icons.keyboard_rounded),
-                              title: Text('Keyboard shortcuts'),
-                            ),
-                          ),
-                          const PopupMenuItem(
-                            value: _SidebarOverflowAction.settings,
-                            child: ListTile(
-                              dense: true,
-                              leading: Icon(Icons.tune_rounded),
-                              title: Text('Settings'),
-                            ),
-                          ),
-                        ],
-                        child: Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: colors.canvas,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: colors.border),
-                          ),
-                          alignment: Alignment.center,
-                          child: Icon(
-                            Icons.more_horiz_rounded,
-                            size: 18,
-                            color: colors.textSecondary,
-                          ),
+                          ],
                         ),
+                      ),
+                      _SidebarCountPill(
+                        label: '${enabledHosts.length}/${hosts.length} ready',
+                        icon: Icons.hub_rounded,
+                      ),
+                      const SizedBox(width: 8),
+                      MeshIconButton(
+                        icon: Icons.keyboard_rounded,
+                        tooltip: 'Keyboard shortcuts',
+                        onTap: onShowShortcuts,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      color: colors.textPrimary,
-                      fontWeight: AppWeights.title,
+                  const SizedBox(height: 12),
+                  MeshCard(
+                    tone: MeshCardTone.muted,
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Overview',
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(
+                                color: colors.textPrimary,
+                                fontWeight: AppWeights.title,
+                              ),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _SidebarCountPill(
+                              label: '$activeCount active',
+                              icon: Icons.schedule_rounded,
+                            ),
+                            _SidebarCountPill(
+                              label: '$inboxCount waiting',
+                              icon: Icons.all_inbox_rounded,
+                            ),
+                            _SidebarCountPill(
+                              label: '${hosts.length} machines',
+                              icon: Icons.devices_rounded,
+                            ),
+                          ],
+                        ),
+                        if (!canStartSession) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            hosts.isEmpty
+                                ? 'Add a machine to start your first session.'
+                                : 'Enable a machine in Hosts before you start new work.',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: colors.textSecondary,
+                                  height: 1.35,
+                                ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: colors.textSecondary,
-                      height: 1.4,
-                    ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: canStartSession ? onStartSession : null,
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('New session'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton.tonalIcon(
+                        onPressed: onAddHost,
+                        icon: const Icon(Icons.add_link_rounded, size: 18),
+                        label: const Text('Add host'),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: primaryOnTap,
-                    icon: Icon(primaryIcon, size: 18),
-                    label: Text(primaryLabel),
+                  _SidebarNavigation(
+                    section: section,
+                    inboxCount: inboxCount,
+                    activeCount: activeCount,
+                    hostCount: hosts.length,
+                    onSelect: onSelectSection,
                   ),
                 ],
               ),
             ),
+            const NotificationPermissionBanner(
+              margin: EdgeInsets.fromLTRB(12, 0, 12, 10),
+              compact: true,
+            ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: _SidebarSegments(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: _SidebarPaneHeader(
                 section: section,
+                hostCount: hosts.length,
                 inboxCount: inboxCount,
-                activeCount: activeCount,
-                onSelect: onSelectSection,
+                recentViewMode: recentViewMode,
+                onRecentViewModeChanged: onRecentViewModeChanged,
               ),
             ),
-            const SizedBox(height: 6),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
               child: _SidebarSearchField(
                 controller: searchController,
                 focusNode: searchFocus,
                 onClear: onClearSearch,
-                viewMode: section == _SidebarSection.recent
-                    ? recentViewMode
-                    : null,
-                onViewModeChanged: section == _SidebarSection.recent
-                    ? onRecentViewModeChanged
-                    : null,
               ),
-            ),
-            const NotificationPermissionBanner(
-              margin: EdgeInsets.fromLTRB(10, 0, 10, 8),
-              compact: true,
             ),
             Expanded(
               child: loading
@@ -1468,6 +1441,29 @@ class _Sidebar extends StatelessWidget {
                       onRecentViewModeChanged: onRecentViewModeChanged,
                     ),
             ),
+            Divider(height: 1, color: colors.border),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _SidebarFooterButton(
+                      icon: Icons.speed_rounded,
+                      label: 'Usage',
+                      onTap: onOpenUsage,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _SidebarFooterButton(
+                      icon: Icons.tune_rounded,
+                      label: 'Settings',
+                      onTap: onOpenSettings,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -1475,103 +1471,299 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
-class _SidebarSegments extends StatelessWidget {
-  const _SidebarSegments({
+class _SidebarNavigation extends StatelessWidget {
+  const _SidebarNavigation({
     required this.section,
     required this.inboxCount,
     required this.activeCount,
+    required this.hostCount,
     required this.onSelect,
   });
 
   final _SidebarSection section;
   final int inboxCount;
   final int activeCount;
+  final int hostCount;
   final ValueChanged<_SidebarSection> onSelect;
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _SidebarNavItem(
+          selected: section == _SidebarSection.recent,
+          icon: Icons.schedule_rounded,
+          title: 'Recent',
+          subtitle: 'Resume work and scan activity',
+          badge: '$activeCount',
+          onTap: () => onSelect(_SidebarSection.recent),
+        ),
+        const SizedBox(height: 8),
+        _SidebarNavItem(
+          selected: section == _SidebarSection.inbox,
+          icon: Icons.all_inbox_rounded,
+          title: 'Inbox',
+          subtitle: 'Approvals and pending replies',
+          badge: '$inboxCount',
+          onTap: () => onSelect(_SidebarSection.inbox),
+        ),
+        const SizedBox(height: 8),
+        _SidebarNavItem(
+          selected: section == _SidebarSection.hosts,
+          icon: Icons.hub_rounded,
+          title: 'Hosts',
+          subtitle: 'Machines and connection setup',
+          badge: '$hostCount',
+          onTap: () => onSelect(_SidebarSection.hosts),
+        ),
+      ],
+    );
+  }
+}
+
+class _SidebarNavItem extends StatelessWidget {
+  const _SidebarNavItem({
+    required this.selected,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.badge,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String badge;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
     final colors = context.colors;
-    Widget pill(
-      _SidebarSection s,
-      String label,
-      IconData icon, {
-      int badge = 0,
-    }) {
-      final selected = section == s;
-      return Expanded(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 2),
-          child: Material(
-            color: selected ? colors.accentMuted : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: () => onSelect(s),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      icon,
-                      size: 14,
-                      color: selected ? colors.accent : colors.textSecondary,
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: selected ? colors.accent : colors.textSecondary,
-                      ),
-                    ),
-                    if (badge > 0) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 1,
-                        ),
-                        decoration: BoxDecoration(
-                          color: colors.accent,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          '$badge',
-                          style: TextStyle(
-                            color: colors.accentOn,
-                            fontSize: 10.5,
-                            fontWeight: AppWeights.emphasis,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+    return MeshSurface(
+      onTap: onTap,
+      selected: selected,
+      tone: MeshSurfaceTone.muted,
+      borderColor: selected
+          ? colors.accent.withValues(alpha: 0.34)
+          : colors.border,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: selected ? colors.accentMuted : colors.surfaceMuted,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: selected
+                    ? colors.accent.withValues(alpha: 0.24)
+                    : colors.border,
               ),
             ),
+            alignment: Alignment.center,
+            child: Icon(
+              icon,
+              size: 16,
+              color: selected ? colors.accent : colors.textSecondary,
+            ),
           ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _SidebarCountPill(label: badge),
+        ],
+      ),
+    );
+  }
+}
+
+class _SidebarPaneHeader extends StatelessWidget {
+  const _SidebarPaneHeader({
+    required this.section,
+    required this.hostCount,
+    required this.inboxCount,
+    required this.recentViewMode,
+    required this.onRecentViewModeChanged,
+  });
+
+  final _SidebarSection section;
+  final int hostCount;
+  final int inboxCount;
+  final SessionViewMode? recentViewMode;
+  final ValueChanged<SessionViewMode>? onRecentViewModeChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final title = switch (section) {
+      _SidebarSection.recent => 'Recent sessions',
+      _SidebarSection.inbox => 'Inbox',
+      _SidebarSection.hosts => 'Hosts',
+    };
+    final subtitle = switch (section) {
+      _SidebarSection.recent => 'Resume work or start something new.',
+      _SidebarSection.inbox => 'Review approvals and pending replies.',
+      _SidebarSection.hosts => 'Manage the machines this app can reach.',
+    };
+    Widget trailing;
+    if (section == _SidebarSection.recent &&
+        recentViewMode != null &&
+        onRecentViewModeChanged != null) {
+      trailing = PopupMenuButton<SessionViewMode>(
+        tooltip: 'View mode',
+        onSelected: onRecentViewModeChanged,
+        itemBuilder: (context) => [
+          for (final mode in SessionViewMode.values)
+            PopupMenuItem(
+              value: mode,
+              child: Row(
+                children: [
+                  Icon(_desktopSessionViewModeIcon(mode), size: 16),
+                  const SizedBox(width: 8),
+                  Text(_desktopSessionViewModeLabel(mode)),
+                  if (recentViewMode == mode) ...[
+                    const SizedBox(width: 6),
+                    const Icon(Icons.check_rounded, size: 14),
+                  ],
+                ],
+              ),
+            ),
+        ],
+        child: _SidebarCountPill(
+          label: _desktopSessionViewModeLabel(recentViewMode!),
+          icon: _desktopSessionViewModeIcon(recentViewMode!),
         ),
       );
+    } else {
+      final label = switch (section) {
+        _SidebarSection.inbox => '$inboxCount waiting',
+        _SidebarSection.hosts => '$hostCount saved',
+        _SidebarSection.recent => 'All sessions',
+      };
+      trailing = _SidebarCountPill(label: label);
     }
 
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        pill(
-          _SidebarSection.recent,
-          'Recent',
-          Icons.schedule_rounded,
-          badge: activeCount,
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: colors.textPrimary,
+                  fontWeight: AppWeights.title,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary,
+                  height: 1.25,
+                ),
+              ),
+            ],
+          ),
         ),
-        pill(
-          _SidebarSection.inbox,
-          'Inbox',
-          Icons.all_inbox_rounded,
-          badge: inboxCount,
-        ),
-        pill(_SidebarSection.hosts, 'Hosts', Icons.hub_rounded),
+        const SizedBox(width: 10),
+        trailing,
       ],
+    );
+  }
+}
+
+class _SidebarCountPill extends StatelessWidget {
+  const _SidebarCountPill({required this.label, this.icon});
+
+  final String label;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 13, color: colors.textSecondary),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: AppWeights.emphasis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SidebarFooterButton extends StatelessWidget {
+  const _SidebarFooterButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return TextButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 16, color: colors.textSecondary),
+      label: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: colors.textPrimary,
+          fontWeight: AppWeights.emphasis,
+        ),
+      ),
+      style: TextButton.styleFrom(
+        foregroundColor: colors.textPrimary,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
     );
   }
 }
@@ -1951,15 +2143,11 @@ class _SidebarSearchField extends StatefulWidget {
     required this.controller,
     required this.focusNode,
     required this.onClear,
-    this.viewMode,
-    this.onViewModeChanged,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final VoidCallback onClear;
-  final SessionViewMode? viewMode;
-  final ValueChanged<SessionViewMode>? onViewModeChanged;
 
   @override
   State<_SidebarSearchField> createState() => _SidebarSearchFieldState();
@@ -1991,134 +2179,73 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          decoration: BoxDecoration(
-            color: colors.composerBackground,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: _focused ? colors.accent : colors.border,
-              width: _focused ? 1.5 : 1,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 140),
+      decoration: BoxDecoration(
+        color: colors.composerBackground,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _focused ? colors.accent : colors.border,
+          width: _focused ? 1.5 : 1,
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Row(
+        children: [
+          Icon(
+            Icons.search_rounded,
+            size: 15,
+            color: _focused ? colors.accent : colors.textTertiary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: widget.controller,
+              focusNode: widget.focusNode,
+              style: TextStyle(fontSize: 12.5, color: colors.textPrimary),
+              cursorColor: colors.accent,
+              decoration: InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                disabledBorder: InputBorder.none,
+                errorBorder: InputBorder.none,
+                focusedErrorBorder: InputBorder.none,
+                filled: false,
+                hoverColor: Colors.transparent,
+                focusColor: Colors.transparent,
+                hintText: 'Search (⌘F)',
+                hintStyle: TextStyle(
+                  color: colors.textTertiary,
+                  fontSize: 12.5,
+                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 9),
+              ),
             ),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Row(
-            children: [
-              Icon(
-                Icons.search_rounded,
-                size: 15,
-                color: _focused ? colors.accent : colors.textTertiary,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: widget.controller,
-                  focusNode: widget.focusNode,
-                  style: TextStyle(fontSize: 12.5, color: colors.textPrimary),
-                  cursorColor: colors.accent,
-                  decoration: InputDecoration(
-                    isDense: true,
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    disabledBorder: InputBorder.none,
-                    errorBorder: InputBorder.none,
-                    focusedErrorBorder: InputBorder.none,
-                    filled: false,
-                    hoverColor: Colors.transparent,
-                    focusColor: Colors.transparent,
-                    hintText: 'Search (⌘F)',
-                    hintStyle: TextStyle(
-                      color: colors.textTertiary,
-                      fontSize: 12.5,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 9),
-                  ),
-                ),
-              ),
-              AnimatedBuilder(
-                animation: widget.controller,
-                builder: (context, _) {
-                  if (widget.controller.text.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-                  return InkWell(
-                    borderRadius: BorderRadius.circular(10),
-                    onTap: widget.onClear,
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(
-                        Icons.close_rounded,
-                        size: 14,
-                        color: colors.textTertiary,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-        if (widget.viewMode != null && widget.onViewModeChanged != null) ...[
-          const SizedBox(height: 8),
-          PopupMenuButton<SessionViewMode>(
-            tooltip: 'View mode',
-            onSelected: widget.onViewModeChanged,
-            itemBuilder: (context) => [
-              for (final mode in SessionViewMode.values)
-                PopupMenuItem(
-                  value: mode,
-                  child: Row(
-                    children: [
-                      Icon(_desktopSessionViewModeIcon(mode), size: 16),
-                      const SizedBox(width: 8),
-                      Text(_desktopSessionViewModeLabel(mode)),
-                      if (widget.viewMode == mode) ...[
-                        const SizedBox(width: 6),
-                        const Icon(Icons.check_rounded, size: 14),
-                      ],
-                    ],
-                  ),
-                ),
-            ],
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              decoration: BoxDecoration(
-                color: colors.canvas,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: colors.border),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _desktopSessionViewModeIcon(widget.viewMode!),
-                    size: 15,
-                    color: colors.textSecondary,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _desktopSessionViewModeLabel(widget.viewMode!),
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: colors.textPrimary,
-                      fontWeight: AppWeights.emphasis,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.expand_more_rounded,
-                    size: 15,
+          AnimatedBuilder(
+            animation: widget.controller,
+            builder: (context, _) {
+              if (widget.controller.text.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              return InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: widget.onClear,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 14,
                     color: colors.textTertiary,
                   ),
-                ],
-              ),
-            ),
+                ),
+              );
+            },
           ),
         ],
-      ],
+      ),
     );
   }
 }
