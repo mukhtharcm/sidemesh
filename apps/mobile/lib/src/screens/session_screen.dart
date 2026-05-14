@@ -731,12 +731,9 @@ class _BrowserDockCloseButton extends StatelessWidget {
 class _SessionScreenState extends State<SessionScreen>
     with WidgetsBindingObserver {
   static const _initialMessageLimit = 120;
-  // Activities are denser than messages: one user turn can produce many tool
-  // rows. Keep a deeper activity window so reloaded sessions still show the
-  // commands and file changes around the visible message history.
-  static const _initialActivityLimit = _initialMessageLimit * 3;
+  static const _initialActivityLimit = 80;
   static const _messagePageSize = 120;
-  static const _activityPageSize = _initialActivityLimit;
+  static const _activityPageSize = 80;
   static const _liveUpdateFlushInterval = Duration(milliseconds: 48);
   static const _sessionCacheWriteDebounce = Duration(milliseconds: 900);
   static const _failedSendRetryWindow = Duration(minutes: 10);
