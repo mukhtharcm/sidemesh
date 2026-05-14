@@ -551,8 +551,8 @@ class _SettingsContent extends StatelessWidget {
       children: [
         _SettingsSection(
           icon: Icons.palette_rounded,
-          title: 'Appearance & display',
-          subtitle: 'Theme, typography, and screen behavior.',
+          title: 'Appearance & device',
+          subtitle: 'Theme, text, and screen behavior.',
           children: [
             ListenableBuilder(
               listenable: themeController,
@@ -576,10 +576,10 @@ class _SettingsContent extends StatelessWidget {
                   icon: Icons.light_mode_rounded,
                   title: 'Display',
                   subtitle: enabled
-                      ? 'Screen stays awake while an agent is working.'
-                      : 'Screen can sleep normally.',
+                      ? 'This screen stays awake while an agent is working.'
+                      : 'This device can sleep normally.',
                   body:
-                      'Sidemesh keeps this device awake only while an agent session is active. The wake lock is released when the run ends, the app leaves the foreground, or this setting is turned off.',
+                      'Sidemesh only keeps this screen awake while an agent run is active. The wake lock ends when the run stops, the app leaves the foreground, or you turn this off.',
                   footer: _ToggleTile(
                     icon: Icons.screen_lock_portrait_rounded,
                     title: 'Keep screen awake while agent runs',
@@ -598,8 +598,8 @@ class _SettingsContent extends StatelessWidget {
         const SizedBox(height: AppSpacing.lg),
         _SettingsSection(
           icon: Icons.notifications_rounded,
-          title: 'Alerts & background',
-          subtitle: 'Approval alerts, polling, and live activities.',
+          title: 'Alerts',
+          subtitle: 'Notification permissions and background support.',
           children: [
             _SettingsCard(
               icon: Icons.notifications_rounded,
@@ -630,8 +630,8 @@ class _SettingsContent extends StatelessWidget {
                   ),
                   MeshPill(
                     label: BackgroundSyncService.instance.supportsBackgroundFetch
-                        ? 'background polling'
-                        : 'no background polling',
+                        ? 'background sync'
+                        : 'foreground only',
                     tone:
                         BackgroundSyncService.instance.supportsBackgroundFetch
                         ? MeshPillTone.info
@@ -640,7 +640,7 @@ class _SettingsContent extends StatelessWidget {
                   ),
                   if (liveActivitiesSupported)
                     const MeshPill(
-                      label: 'live activity supported',
+                      label: 'live activity',
                       tone: MeshPillTone.info,
                       icon: Icons.view_agenda_rounded,
                     ),
@@ -675,7 +675,7 @@ class _SettingsContent extends StatelessWidget {
         _SettingsSection(
           icon: Icons.rocket_launch_rounded,
           title: 'Session defaults',
-          subtitle: 'Seed values for new sessions before host overrides.',
+          subtitle: 'Starting values before host-specific overrides.',
           children: [
             ListenableBuilder(
               listenable: defaultsStore,
@@ -722,8 +722,8 @@ class _SettingsContent extends StatelessWidget {
         const SizedBox(height: AppSpacing.lg),
         _SettingsSection(
           icon: Icons.warning_amber_rounded,
-          title: 'Data & storage',
-          subtitle: 'Permanent actions — cannot be undone.',
+          title: 'Local data',
+          subtitle: 'Clear information saved only on this device.',
           children: [
             _SettingsCard(
               icon: Icons.storage_rounded,
@@ -847,7 +847,7 @@ class _SettingsContent extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Global app controls for appearance, display, defaults, storage, and notifications.',
+                      'Global app controls for appearance, alerts, defaults, and local data.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.textSecondary,
                       ),
@@ -992,8 +992,7 @@ class _AboutFooter extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Sidemesh on $platformLabel. Hosts, tokens, favorites, pins, '
-            'caches, and other local state stay inside this app install.',
+            'Sidemesh on $platformLabel. Hosts, tokens, favorites, caches, and other local state stay inside this app install.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colors.textSecondary,
               height: 1.35,

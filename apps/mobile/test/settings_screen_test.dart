@@ -48,13 +48,13 @@ void main() {
       await tester.pump();
 
       expect(find.text('Settings'), findsOneWidget);
-      expect(find.text('Appearance & display'), findsOneWidget);
+      expect(find.text('Appearance & device'), findsOneWidget);
       expect(find.text('Appearance'), findsOneWidget);
       expect(find.text('Display'), findsOneWidget);
       expect(find.text('Keep screen awake while agent runs'), findsOneWidget);
       expect(find.text('Notifications'), findsOneWidget);
       expect(find.text('New session defaults'), findsOneWidget);
-      expect(find.text('Data & storage'), findsOneWidget);
+      expect(find.text('Local data'), findsOneWidget);
       expect(find.text('About'), findsOneWidget);
     } finally {
       debugDefaultTargetPlatformOverride = null;
@@ -110,7 +110,7 @@ void main() {
 
       expect(find.byType(Dialog), findsOneWidget);
       expect(find.text('Settings'), findsOneWidget);
-      expect(find.text('Appearance & display'), findsOneWidget);
+      expect(find.text('Appearance & device'), findsOneWidget);
       expect(find.text('Replay onboarding'), findsNothing);
     } finally {
       debugDefaultTargetPlatformOverride = null;
