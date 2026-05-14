@@ -6897,6 +6897,9 @@ class _SessionScreenState extends State<SessionScreen>
                                             _openTerminal(cwdOverride: cwd),
                                           )
                                         : null,
+                                    opensFilesInInspector:
+                                        widget.desktopMode &&
+                                        _inspectorController != null,
                                   ),
                                   _TimelineEntryKind.providerWarning =>
                                     _ProviderWarningRow(
