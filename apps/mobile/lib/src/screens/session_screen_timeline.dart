@@ -4180,10 +4180,10 @@ _CommandTitleParts? _friendlySedCommandTitle(
       : 'lines $start-$end';
   final target = _firstCommandPath(words, pathStart);
   final command = target == null
-      ? lineLabel
-      : '${_friendlyPathLabel(target)} $lineLabel';
+      ? 'view $lineLabel'
+      : 'view ${_friendlyPathLabel(target)} $lineLabel';
   return _CommandTitleParts(
-    verb: _actionVerb(status, completed: 'viewed', progress: 'viewing'),
+    verb: _commandStatusVerb(status),
     command: command,
   );
 }
@@ -4234,8 +4234,8 @@ _CommandTitleParts? _friendlySearchCommandTitle(
   if ((query == null || query.trim().isEmpty) && sawFilesFlag) {
     final targetLabel = _friendlyTargetLabel(targets);
     return _CommandTitleParts(
-      verb: _actionVerb(status, completed: 'listed', progress: 'listing'),
-      command: targetLabel.isEmpty ? 'files' : 'files in $targetLabel',
+      verb: _commandStatusVerb(status),
+      command: targetLabel.isEmpty ? 'list files' : 'list files in $targetLabel',
     );
   }
   if (query == null || query.trim().isEmpty) {
@@ -4245,10 +4245,10 @@ _CommandTitleParts? _friendlySearchCommandTitle(
   final queryLabel = _friendlySnippet(query, 44);
   final targetLabel = _friendlyTargetLabel(targets);
   return _CommandTitleParts(
-    verb: _actionVerb(status, completed: 'searched', progress: 'searching'),
+    verb: _commandStatusVerb(status),
     command: targetLabel.isEmpty
-        ? 'for "$queryLabel"'
-        : 'for "$queryLabel" in $targetLabel',
+        ? 'search for "$queryLabel"'
+        : 'search for "$queryLabel" in $targetLabel',
   );
 }
 
@@ -4259,8 +4259,8 @@ _CommandTitleParts? _friendlyListCommandTitle(
   final targets = _commandPathArgs(words, start: 1);
   final targetLabel = _friendlyTargetLabel(targets);
   return _CommandTitleParts(
-    verb: _actionVerb(status, completed: 'listed', progress: 'listing'),
-    command: targetLabel.isEmpty ? 'files' : 'files in $targetLabel',
+    verb: _commandStatusVerb(status),
+    command: targetLabel.isEmpty ? 'list files' : 'list files in $targetLabel',
   );
 }
 
@@ -4273,22 +4273,9 @@ _CommandTitleParts? _friendlyCatCommandTitle(
     return null;
   }
   return _CommandTitleParts(
-    verb: _actionVerb(status, completed: 'viewed', progress: 'viewing'),
-    command: _friendlyPathLabel(target),
+    verb: _commandStatusVerb(status),
+    command: 'view ${_friendlyPathLabel(target)}',
   );
-}
-
-String _actionVerb(
-  String status, {
-  required String completed,
-  required String progress,
-}) {
-  return switch (status) {
-    'failed' => 'failed $progress',
-    'declined' => 'declined $progress',
-    'in_progress' => progress,
-    _ => completed,
-  };
 }
 
 String _commandProgramName(String value) {
