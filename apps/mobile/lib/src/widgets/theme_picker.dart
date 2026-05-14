@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_palettes.dart';
 import '../theme/theme_controller.dart';
-import 'mesh_widgets.dart';
 
 /// A horizontal scrollable theme-variant picker that previews each palette
 /// live and lets the user tap to select.
@@ -46,7 +45,6 @@ class ThemePicker extends StatelessWidget {
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   width: cardWidth,
-                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: palette.surface,
                     borderRadius: borderRadius,
@@ -54,53 +52,90 @@ class ThemePicker extends StatelessWidget {
                       color: isSelected ? palette.accent : palette.border,
                       width: isSelected ? 2 : 1,
                     ),
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                              color: palette.accent.withValues(alpha: 0.12),
-                              blurRadius: 14,
-                              spreadRadius: 1,
-                            ),
-                          ]
-                        : null,
                   ),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        children: [
-                          _ColorDot(color: palette.accent, border: palette.border),
-                          const SizedBox(width: 6),
-                          _ColorDot(color: palette.success, border: palette.border),
-                          const SizedBox(width: 6),
-                          _ColorDot(color: palette.danger, border: palette.border),
-                          const SizedBox(width: 6),
-                          _ColorDot(color: palette.info, border: palette.border),
-                        ],
-                      ),
-                      const Spacer(),
-                      Text(
-                        variant.label,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: palette.textPrimary,
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            Container(color: palette.canvas),
+                            Positioned(
+                              left: 12,
+                              right: 12,
+                              top: 12,
+                              child: Container(
+                                height: 42,
+                                decoration: BoxDecoration(
+                                  color: palette.surface,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: palette.border),
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              left: 12,
+                              bottom: 14,
+                              child: Container(
+                                width: 46,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  color: palette.accent,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              right: 12,
+                              bottom: 14,
+                              child: Container(
+                                width: 24,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  color: palette.surfaceElevated,
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(color: palette.border),
+                                ),
+                              ),
+                            ),
+                            if (isSelected)
+                              Positioned(
+                                right: 10,
+                                top: 10,
+                                child: Icon(
+                                  Icons.check_circle_rounded,
+                                  size: 18,
+                                  color: palette.accent,
+                                ),
+                              ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        variant.tagline,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: palette.textSecondary,
-                          height: 1.3,
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              variant.label,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: palette.textPrimary,
+                                  ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              variant.tagline,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: palette.textSecondary,
+                                    height: 1.3,
+                                  ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      if (isSelected)
-                        MeshPill(
-                          label: 'Selected',
-                          tone: MeshPillTone.accent,
-                          icon: Icons.check_rounded,
-                        ),
                     ],
                   ),
                 ),
@@ -108,29 +143,6 @@ class ThemePicker extends StatelessWidget {
             ),
           );
         },
-      ),
-    );
-  }
-}
-
-class _ColorDot extends StatelessWidget {
-  const _ColorDot({required this.color, required this.border});
-
-  final Color color;
-  final Color border;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 14,
-      height: 14,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: border.withValues(alpha: 0.8),
-          width: 1,
-        ),
       ),
     );
   }

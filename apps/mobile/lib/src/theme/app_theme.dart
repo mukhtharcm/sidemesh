@@ -81,7 +81,7 @@ ThemeData _buildTheme(
         color: palette.textPrimary,
         fontWeight: AppWeights.body,
       ),
-      elevation: 6,
+      elevation: 4,
       shape: RoundedRectangleBorder(
         borderRadius: AppShapes.input,
         side: BorderSide(color: palette.border),
@@ -91,8 +91,8 @@ ThemeData _buildTheme(
     popupMenuTheme: PopupMenuThemeData(
       color: palette.surfaceElevated,
       surfaceTintColor: Colors.transparent,
-      elevation: 10,
-      shadowColor: palette.textPrimary.withValues(alpha: 0.12),
+      elevation: 6,
+      shadowColor: palette.textPrimary.withValues(alpha: 0.08),
       shape: RoundedRectangleBorder(
         borderRadius: AppShapes.card,
         side: BorderSide(color: palette.border),
@@ -113,25 +113,23 @@ ThemeData _buildTheme(
         backgroundColor: WidgetStateProperty.all(palette.surfaceElevated),
         surfaceTintColor: WidgetStateProperty.all(Colors.transparent),
         shadowColor: WidgetStateProperty.all(
-          palette.textPrimary.withValues(alpha: 0.12),
+          palette.textPrimary.withValues(alpha: 0.08),
         ),
-        elevation: WidgetStateProperty.all(10),
+        elevation: WidgetStateProperty.all(6),
         shape: WidgetStateProperty.all(
           RoundedRectangleBorder(
             borderRadius: AppShapes.card,
             side: BorderSide(color: palette.border),
           ),
         ),
-        padding: WidgetStateProperty.all(const EdgeInsets.all(6)),
+        padding: WidgetStateProperty.all(const EdgeInsets.all(4)),
       ),
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: palette.surface,
       surfaceTintColor: Colors.transparent,
       indicatorColor: palette.accentMuted,
-      indicatorShape: RoundedRectangleBorder(
-        borderRadius: AppShapes.input,
-      ),
+      indicatorShape: RoundedRectangleBorder(borderRadius: AppShapes.input),
       iconTheme: WidgetStateProperty.resolveWith((states) {
         final selected = states.contains(WidgetState.selected);
         return IconThemeData(
@@ -143,8 +141,8 @@ ThemeData _buildTheme(
         final selected = states.contains(WidgetState.selected);
         return textTheme.labelMedium?.copyWith(
           color: selected ? palette.accent : palette.textSecondary,
-          fontWeight: AppWeights.title,
-          letterSpacing: AppLetterSpacing.caps,
+          fontWeight: AppWeights.emphasis,
+          letterSpacing: AppLetterSpacing.body,
         );
       }),
       height: 68,

@@ -403,11 +403,20 @@ class MeshStatusBadge extends StatelessWidget {
     };
     final horizontal = compact ? 7.0 : 9.0;
     final vertical = compact ? 3.0 : 4.0;
-    final textStyle = monoStyle(
-      color: fg,
-      fontSize: compact ? 10 : 10.8,
-      fontWeight: AppWeights.title,
-    ).copyWith(letterSpacing: AppLetterSpacing.caps);
+    final textStyle =
+        Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: fg,
+          fontSize: compact ? 10.2 : 11,
+          fontWeight: AppWeights.emphasis,
+          letterSpacing: AppLetterSpacing.body,
+          height: 1.1,
+        ) ??
+        TextStyle(
+          color: fg,
+          fontSize: compact ? 10.2 : 11,
+          fontWeight: AppWeights.emphasis,
+          height: 1.1,
+        );
 
     return Container(
       padding: EdgeInsets.symmetric(horizontal: horizontal, vertical: vertical),
