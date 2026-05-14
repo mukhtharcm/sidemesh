@@ -1652,11 +1652,8 @@ class _RecentPaneState extends State<RecentPane> {
           return const MeshLoader();
         }
         final sortedEntries = _sortEntries(_store.entries);
-        final groups = _groupEntries(sortedEntries);
-        final isGrouped = groups.isNotEmpty;
         // Pinned shelf: only surface it when it actively helps.
         final showPinnedShelf =
-            !isGrouped &&
             widget.viewMode == SessionViewMode.flat &&
             widget.query.trim().isEmpty &&
             !widget.filters.isAnyActive &&
@@ -1666,6 +1663,14 @@ class _RecentPaneState extends State<RecentPane> {
                   .where((e) => _localStore.isFavorite(e.host, e.session.id))
                   .toList(growable: false)
             : const <RemoteSessionEntry>[];
+        final listEntries =
+            showPinnedShelf && widget.dense && pinnedEntries.isNotEmpty
+            ? sortedEntries
+                  .where((e) => !_localStore.isFavorite(e.host, e.session.id))
+                  .toList(growable: false)
+            : sortedEntries;
+        final groups = _groupEntries(listEntries);
+        final isGrouped = groups.isNotEmpty;
         final hasCachedEntries =
             _store.entries.isNotEmpty &&
             _store.confirmedHostIds.length < widget.hosts.length;
@@ -1754,7 +1759,7 @@ class _RecentPaneState extends State<RecentPane> {
                       )
                     : ListView.separated(
                         padding: basePadding,
-                        itemCount: sortedEntries.length + leadingStrips,
+                        itemCount: listEntries.length + leadingStrips,
                         separatorBuilder: (_, _) =>
                             SizedBox(height: widget.dense ? 2 : AppSpacing.sm),
                         itemBuilder: (context, index) {
@@ -1778,7 +1783,7 @@ class _RecentPaneState extends State<RecentPane> {
                             }
                             offset += 1;
                           }
-                          final entry = sortedEntries[index - offset];
+                          final entry = listEntries[index - offset];
                           return _buildSessionRow(entry);
                         },
                       ),
@@ -1958,6 +1963,57 @@ class _FavoritesShelf extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final theme = Theme.of(context);
+    if (dense) {
+      final visibleRows = entries.length > 3 ? 3 : entries.length;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.push_pin_rounded, size: 13, color: colors.warning),
+                const SizedBox(width: 6),
+                Text(
+                  'Pinned',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: colors.textSecondary,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${entries.length}',
+                  style: monoStyle(
+                    color: colors.textTertiary,
+                    fontSize: 10,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: visibleRows * 48.0 + (visibleRows - 1) * 3.0,
+              child: ListView.separated(
+                padding: EdgeInsets.zero,
+                itemCount: entries.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 3),
+                itemBuilder: (context, index) {
+                  final entry = entries[index];
+                  return _FavoritePinnedRow(
+                    entry: entry,
+                    onTap: () => onOpen(entry.host, entry.session),
+                    onUnpin: () => onUnpin(entry.host, entry.session.id),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final horizontalPadding = dense ? 10.0 : 16.0;
     final chipWidth = dense ? 156.0 : 184.0;
     final listHeight = dense ? 68.0 : 74.0;
@@ -2018,6 +2074,96 @@ class _FavoritesShelf extends StatelessWidget {
         ),
         SizedBox(height: dense ? 2 : 6),
       ],
+    );
+  }
+}
+
+class _FavoritePinnedRow extends StatelessWidget {
+  const _FavoritePinnedRow({
+    required this.entry,
+    required this.onTap,
+    required this.onUnpin,
+  });
+
+  final RemoteSessionEntry entry;
+  final VoidCallback onTap;
+  final VoidCallback onUnpin;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final theme = Theme.of(context);
+    final running = entry.session.isActive;
+    return Tooltip(
+      message: entry.session.title,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          child: Container(
+            height: 48,
+            padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+            decoration: BoxDecoration(
+              color: colors.surfaceMuted,
+              borderRadius: BorderRadius.circular(AppRadii.control),
+              border: Border.all(color: colors.border),
+            ),
+            child: Row(
+              children: [
+                running
+                    ? LivePulse(color: colors.success)
+                    : Icon(
+                        Icons.push_pin_outlined,
+                        size: 14,
+                        color: colors.warning,
+                      ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.session.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.textPrimary,
+                          fontWeight: AppWeights.emphasis,
+                          height: 1.1,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        entry.host.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colors.textTertiary,
+                          height: 1.1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                InkWell(
+                  onTap: onUnpin,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(
+                      Icons.star_rounded,
+                      size: 15,
+                      color: colors.warning,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -5,7 +5,7 @@ part of 'session_screen.dart';
 // Three-zone layout:
 //   Zone 3 — Suggestion trays (skill / file, above the shelf, animated in/out)
 //   Zone 2 — Context shelf   (chips: images, skills, files – horizontal scroll)
-//   Zone 1 — The bar          (+ button | text pill | send button)
+//   Zone 1 — The bar          (context action | text field | model | send)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _Composer extends StatelessWidget {
@@ -29,7 +29,6 @@ class _Composer extends StatelessWidget {
     required this.supportsSkillInput,
     required this.supportsFileMentions,
     required this.onPickImages,
-    required this.onPasteImage,
     required this.onNativePaste,
     required this.onRemoveAttachment,
     required this.onSelectSkill,
@@ -75,7 +74,6 @@ class _Composer extends StatelessWidget {
   final bool supportsFileMentions;
 
   final VoidCallback onPickImages;
-  final Future<bool> Function() onPasteImage;
   final Future<bool> Function() onNativePaste;
   final ValueChanged<String> onRemoveAttachment;
   final ValueChanged<SkillSummary> onSelectSkill;
@@ -158,78 +156,72 @@ class _Composer extends StatelessWidget {
       );
     }
 
-    // ── Animated pill wrapper (focus-responsive border + padding) ───────────
-    final pill = AnimatedContainer(
+    // ── Zone 1: bar row ─────────────────────────────────────────────────────
+    final bool showPlusButton =
+        !isDesktop &&
+        (supportsImageInput || supportsSkillInput || supportsFileMentions);
+
+    final barRow = AnimatedContainer(
       duration: const Duration(milliseconds: 150),
-      curve: Curves.easeInOut,
+      curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
         color: colors.composerBackground,
-        borderRadius: AppShapes.input,
+        borderRadius: BorderRadius.circular(isDesktop ? 16 : AppRadii.control),
         border: Border.all(
           color: isFocused
               ? colors.accent.withValues(alpha: 0.65)
               : colors.border,
         ),
       ),
-      // Subtle vertical expansion on focus signals "ready to type".
-      padding: EdgeInsets.symmetric(
-        horizontal: 14,
-        vertical: isFocused ? 13 : 9,
-      ),
-      child: field,
-    );
-
-    // ── Zone 1: bar row ─────────────────────────────────────────────────────
-    final bool showPlusButton =
-        !isDesktop &&
-        (supportsImageInput || supportsSkillInput || supportsFileMentions);
-
-    final barRow = Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        // Desktop keeps dedicated attach + paste buttons (only when the
-        // current provider supports image input).
-        if (isDesktop && supportsImageInput) ...[
-          _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
-          const SizedBox(width: 4),
-          _ComposerPasteButton(
-            enabled: !sending,
-            onPressed: () => unawaited(onPasteImage()),
+      padding: EdgeInsets.fromLTRB(8, isDesktop ? 7 : 6, 8, isDesktop ? 7 : 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // Paste remains available through native shortcuts/menu; the visible
+          // action here is only for adding new context.
+          if (isDesktop && supportsImageInput) ...[
+            _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
+            const SizedBox(width: 6),
+          ] else if (showPlusButton) ...[
+            _ComposerPlusButton(
+              enabled: !sending,
+              supportsImageInput: supportsImageInput,
+              supportsSkillInput: supportsSkillInput,
+              supportsFileMentions: supportsFileMentions,
+              onPickImages: onPickImages,
+              onAddSkillTrigger: onAddSkillTrigger,
+              onAddFileTrigger: onAddFileTrigger,
+            ),
+            const SizedBox(width: 6),
+          ],
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: isDesktop ? 2 : 4,
+                vertical: isFocused ? 12 : 8,
+              ),
+              child: field,
+            ),
           ),
-          const SizedBox(width: 6),
-        ]
-        // Mobile: single + button that opens a context sheet.
-        else if (showPlusButton) ...[
-          _ComposerPlusButton(
-            enabled: !sending,
-            supportsImageInput: supportsImageInput,
-            supportsSkillInput: supportsSkillInput,
-            supportsFileMentions: supportsFileMentions,
-            onPickImages: onPickImages,
-            onAddSkillTrigger: onAddSkillTrigger,
-            onAddFileTrigger: onAddFileTrigger,
-          ),
-          const SizedBox(width: 6),
-        ],
-        Expanded(child: pill),
-        const SizedBox(width: 8),
-        if (isDesktop && modelLabel != null && onModelTap != null) ...[
-          _ComposerModelButton(
-            label: modelLabel!,
-            detail: modelDetail,
-            customized: modelCustomized,
-            onPressed: onModelTap!,
-          ),
+          if (isDesktop && modelLabel != null && onModelTap != null) ...[
+            const SizedBox(width: 8),
+            _ComposerModelButton(
+              label: modelLabel!,
+              detail: modelDetail,
+              customized: modelCustomized,
+              onPressed: onModelTap!,
+            ),
+          ],
           const SizedBox(width: 8),
+          _SendButton(
+            sending: sending,
+            controller: controller,
+            hasAttachments: attachments.isNotEmpty,
+            hasSkills: skills.isNotEmpty || files.isNotEmpty,
+            onSend: onSend,
+          ),
         ],
-        _SendButton(
-          sending: sending,
-          controller: controller,
-          hasAttachments: attachments.isNotEmpty,
-          hasSkills: skills.isNotEmpty || files.isNotEmpty,
-          onSend: onSend,
-        ),
-      ],
+      ),
     );
 
     final hasContext =
@@ -578,12 +570,13 @@ class _ComposerPlusButton extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: enabled ? () => _handleTap(context) : null,
-          child: Padding(
-            padding: const EdgeInsets.all(9),
+          child: SizedBox(
+            width: 34,
+            height: 34,
             child: Icon(
               Icons.add_rounded,
               color: enabled ? colors.accent : colors.textTertiary,
-              size: 22,
+              size: 21,
             ),
           ),
         ),
@@ -609,45 +602,13 @@ class _ComposerAttachButton extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: enabled ? onPressed : null,
-          child: Padding(
-            padding: const EdgeInsets.all(9),
+          child: SizedBox(
+            width: 34,
+            height: 34,
             child: Icon(
               Icons.add_photo_alternate_rounded,
               color: enabled ? colors.accent : colors.textTertiary,
-              size: 22,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Desktop-only: clipboard paste button.
-/// Not shown on mobile — the system long-press menu and PasteTextIntent
-/// already handle clipboard paste there without needing a dedicated button.
-class _ComposerPasteButton extends StatelessWidget {
-  const _ComposerPasteButton({required this.enabled, required this.onPressed});
-
-  final bool enabled;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Tooltip(
-      message: 'Paste image from clipboard',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: enabled ? onPressed : null,
-          child: Padding(
-            padding: const EdgeInsets.all(9),
-            child: Icon(
-              Icons.content_paste_rounded,
-              color: enabled ? colors.accent : colors.textTertiary,
-              size: 22,
+              size: 20,
             ),
           ),
         ),
@@ -673,7 +634,7 @@ class _ComposerModelButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Tooltip(
-      message: 'Model and session controls',
+      message: 'Choose model',
       child: Material(
         color: Colors.transparent,
         child: InkWell(

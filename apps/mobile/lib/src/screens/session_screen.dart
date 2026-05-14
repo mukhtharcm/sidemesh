@@ -5151,6 +5151,197 @@ class _SessionScreenState extends State<SessionScreen>
     return !_composerTurnConfig(session).isEmpty;
   }
 
+  String? _composerRuntimeModelProvider(SessionSummary session) {
+    final provider = _cleanComposerLabel(session.runtime?.modelProvider);
+    if (provider == null || provider == 'openai') {
+      return null;
+    }
+    return provider;
+  }
+
+  Future<void> _showComposerModelPicker(SessionSummary session) async {
+    await _turnConfigStore.ensureLoaded();
+    if (!mounted || _disposed) return;
+
+    NodeInfo? node = _nodeInfo;
+    if (node == null) {
+      try {
+        node = await widget.api.fetchNode(widget.host);
+        if (!mounted || _disposed) return;
+        setState(() => _nodeInfo = node);
+      } catch (_) {
+        // Model loading below will show the user-facing error if the host is
+        // unavailable. Capability checks are best-effort here.
+      }
+    }
+
+    final capabilities = node?.capabilitiesForProvider(session.provider);
+    if (capabilities != null &&
+        (!capabilities.supports('configuration', 'models') ||
+            !capabilities.supports('runtimeControls', 'model'))) {
+      showAppSnackBar(context, 'This agent does not offer model choices here.');
+      return;
+    }
+
+    final List<ModelCatalogEntry> models;
+    try {
+      models = [
+        ...await widget.api.fetchModels(
+          widget.host,
+          cwd: session.cwd,
+          agentProvider: session.provider,
+          provider: _composerRuntimeModelProvider(session),
+        ),
+      ];
+      models.sort(_compareModelEntries);
+    } catch (error) {
+      if (!mounted || _disposed) return;
+      showAppSnackBar(context, friendlyError(error));
+      return;
+    }
+
+    if (!mounted || _disposed) return;
+    if (models.isEmpty) {
+      showAppSnackBar(
+        context,
+        'No models are available from this host right now.',
+      );
+      return;
+    }
+
+    final turnConfig = _composerTurnConfig(session);
+    final defaultModel = models.firstWhere(
+      (model) => model.isDefault,
+      orElse: () => models.first,
+    );
+    final currentModel =
+        _cleanComposerLabel(turnConfig.model) ??
+        _cleanComposerLabel(session.runtime?.model) ??
+        defaultModel.model;
+    final selected = await _showComposerModelPickerSurface(
+      models: models,
+      currentModel: currentModel,
+      providerName: _composerRuntimeModelProvider(session),
+    );
+    if (!mounted || _disposed || selected == null) return;
+
+    final nextConfig = _composerConfigForSelectedModel(
+      session: session,
+      current: turnConfig,
+      selected: selected,
+      capabilities: capabilities,
+    );
+    if (_sameTurnConfig(nextConfig, turnConfig)) {
+      showAppSnackBar(context, 'This model is already selected.');
+      return;
+    }
+
+    await _turnConfigStore.setConfig(widget.host, session.id, nextConfig);
+    if (!mounted || _disposed) return;
+    showAppSnackBar(context, 'Model will change on the next reply.');
+  }
+
+  Future<ModelCatalogEntry?> _showComposerModelPickerSurface({
+    required List<ModelCatalogEntry> models,
+    required String currentModel,
+    required String? providerName,
+  }) {
+    final picker = _ModelPickerSheet(
+      models: models,
+      currentModel: currentModel,
+      providerName: providerName,
+    );
+    if (widget.desktopMode) {
+      return showDialog<ModelCatalogEntry>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.35),
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 48,
+            vertical: 48,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760, maxHeight: 640),
+            child: picker,
+          ),
+        ),
+      );
+    }
+    return showModalBottomSheet<ModelCatalogEntry>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => picker,
+    );
+  }
+
+  SessionTurnConfig _composerConfigForSelectedModel({
+    required SessionSummary session,
+    required SessionTurnConfig current,
+    required ModelCatalogEntry selected,
+    required ProviderCapabilities? capabilities,
+  }) {
+    final supportsReasoning =
+        capabilities?.supports('runtimeControls', 'reasoningEffort') ?? true;
+    final supportsFastMode =
+        capabilities?.supports('runtimeControls', 'fastMode') ?? true;
+    final runtimeModel = _cleanComposerLabel(session.runtime?.model);
+    final runtimeReasoning = _cleanComposerLabel(
+      session.runtime?.reasoningEffort,
+    );
+    final runtimeFast = session.runtime?.serviceTier == 'fast';
+    final supportedReasoning = selected.supportedReasoningEfforts
+        .map((option) => option.reasoningEffort)
+        .toSet();
+
+    final inheritsDefaultModel = runtimeModel == null && selected.isDefault;
+    final nextModel = runtimeModel == selected.model || inheritsDefaultModel
+        ? null
+        : selected.model;
+    var nextReasoning = _cleanComposerLabel(current.reasoningEffort);
+    final effectiveReasoning = nextReasoning ?? runtimeReasoning;
+    if (!supportsReasoning || selected.isAutoModel) {
+      nextReasoning = null;
+    } else if (effectiveReasoning != null &&
+        supportedReasoning.contains(effectiveReasoning)) {
+      nextReasoning = effectiveReasoning;
+    } else {
+      nextReasoning = selected.defaultReasoningEffort;
+    }
+
+    var nextFast = current.fastMode;
+    if (!supportsFastMode) {
+      nextFast = null;
+    } else if (!selected.supportsFastMode &&
+        (current.fastMode ?? runtimeFast)) {
+      nextFast = false;
+    }
+
+    if (nextModel == null &&
+        runtimeReasoning != null &&
+        nextReasoning == runtimeReasoning) {
+      nextReasoning = null;
+    }
+    if (nextModel == null &&
+        runtimeReasoning == null &&
+        current.reasoningEffort == null) {
+      nextReasoning = null;
+    }
+    if (nextModel == null && nextFast != null && nextFast == runtimeFast) {
+      nextFast = null;
+    }
+
+    return SessionTurnConfig(
+      model: nextModel,
+      mode: current.mode,
+      reasoningEffort: nextReasoning,
+      fastMode: nextFast,
+    );
+  }
+
   Future<void> _showSessionPolicySheet(SessionSummary session) async {
     await _policyStore.ensureLoaded();
     await _turnConfigStore.ensureLoaded();
@@ -6584,7 +6775,6 @@ class _SessionScreenState extends State<SessionScreen>
             supportsSkillInput: _supportsSkillInput,
             supportsFileMentions: _supportsFileMentions,
             onPickImages: _pickComposerImages,
-            onPasteImage: () => _pasteComposerImage(),
             onNativePaste: () => _pasteComposerImage(showEmptyFeedback: false),
             onRemoveAttachment: _removeDraftAttachment,
             onSelectSkill: _insertSkillMention,
@@ -6609,7 +6799,7 @@ class _SessionScreenState extends State<SessionScreen>
                 ? _composerModelCustomized(session)
                 : false,
             onModelTap: widget.desktopMode
-                ? () => _showSessionPolicySheet(session)
+                ? () => _showComposerModelPicker(session)
                 : null,
             submitOnEnter: widget.desktopMode,
           ),

@@ -68,6 +68,55 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('desktop composer model chip opens the model picker only', (
+    tester,
+  ) async {
+    final host = _host('session-model-picker');
+    final session = _session('model-picker-session', provider: 'fake');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    final modelButton = find.descendant(
+      of: find.byTooltip('Choose model'),
+      matching: find.byType(InkWell),
+    );
+    expect(modelButton, findsOneWidget);
+
+    await tester.tap(modelButton);
+    await _pumpFrames(tester);
+
+    expect(find.text('Choose a model'), findsOneWidget);
+    expect(find.text('Model and thinking'), findsNothing);
+    expect(find.text('Approvals'), findsNothing);
+
+    await tester.tap(find.text('Fake Balanced'));
+    await _pumpFrames(tester);
+
+    final config = SessionTurnConfigStore.instance.configFor(
+      host,
+      session.id,
+    );
+    expect(config.isEmpty, isTrue);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets(
     'session screen surfaces browser preview actions for preview-capable hosts',
     (tester) async {
@@ -715,7 +764,7 @@ HostProfile _host(String id) => HostProfile(
   token: 'test-token',
 );
 
-SessionSummary _session(String id) {
+SessionSummary _session(String id, {String? provider}) {
   final now = DateTime(2026, 1, 1, 12);
   return SessionSummary(
     id: id,
@@ -725,7 +774,7 @@ SessionSummary _session(String id) {
     createdAt: now,
     updatedAt: now,
     source: 'fake',
-    provider: null,
+    provider: provider,
     status: 'loaded',
     runtime: null,
     gitInfo: null,

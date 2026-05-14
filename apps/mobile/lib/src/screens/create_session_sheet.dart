@@ -984,12 +984,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     });
 
     try {
-      final models = await widget.api.fetchModels(
-        widget.host,
-        cwd: cwd,
-        profile: profile,
-        agentProvider: _selectedProviderKindOrDefault,
-      );
+      final models = [
+        ...await widget.api.fetchModels(
+          widget.host,
+          cwd: cwd,
+          profile: profile,
+          agentProvider: _selectedProviderKindOrDefault,
+        ),
+      ];
       models.sort(_compareModelEntries);
       if (!mounted) return;
       setState(() {
