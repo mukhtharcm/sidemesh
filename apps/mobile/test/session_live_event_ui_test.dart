@@ -1251,8 +1251,8 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('viewed '), findsOneWidget);
-    expect(find.text('session_screen.dart lines 1-80'), findsOneWidget);
+    expect(find.text('ran '), findsOneWidget);
+    expect(find.text('view session_screen.dart lines 1-80'), findsOneWidget);
     expect(
       find.text(
         "sed -n '1,80p' apps/mobile/lib/src/screens/session_screen.dart",
@@ -1261,7 +1261,7 @@ void main() {
     );
     expect(find.textContaining('/bin/bash'), findsNothing);
 
-    await tester.tap(find.text('session_screen.dart lines 1-80'));
+    await tester.tap(find.text('view session_screen.dart lines 1-80'));
     await _pumpFrames(tester);
 
     expect(find.text('Raw command'), findsOneWidget);
@@ -1304,9 +1304,9 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('searched '), findsOneWidget);
+    expect(find.text('ran '), findsOneWidget);
     expect(
-      find.text('for "parseCommandFunctionCall" in codex-history.ts'),
+      find.text('search for "parseCommandFunctionCall" in codex-history.ts'),
       findsOneWidget,
     );
     expect(
