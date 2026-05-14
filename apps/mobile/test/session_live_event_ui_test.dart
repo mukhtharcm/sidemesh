@@ -1163,11 +1163,12 @@ void main() {
 
       expect(find.text('Edited 1 file'), findsOneWidget);
       expect(find.text('FILE CHANGE'), findsNothing);
-      expect(find.text('ran npm run dev'), findsOneWidget);
+      expect(find.text('ran '), findsOneWidget);
+      expect(find.text('npm run dev'), findsOneWidget);
       expect(find.textContaining('/bin/bash'), findsNothing);
       expect(find.text('done'), findsNothing);
 
-      await tester.tap(find.text('ran npm run dev'));
+      await tester.tap(find.text('npm run dev'));
       await _pumpFrames(tester);
       await tester.tap(find.text('apps/web/src/main.dart'));
       await _pumpFrames(tester);
@@ -1178,6 +1179,42 @@ void main() {
       expect(find.text('Open file'), findsOneWidget);
     },
   );
+
+  testWidgets('session screen asks for a deeper persisted activity window', (
+    tester,
+  ) async {
+    final session = _session('persisted-activity-window');
+    final activities = <SessionActivity>[
+      for (var i = 0; i < 82; i += 1)
+        _fileChangeActivity(
+          id: 'noise-$i',
+          seq: i + 1,
+          path: '/repo/apps/mobile/lib/noise_$i.dart',
+        ),
+    ];
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: activities,
+      respectLogLimits: true,
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('persisted-activity-window'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(api.fetchLogActivityLimits, isNotEmpty);
+    expect(api.fetchLogActivityLimits.first, greaterThanOrEqualTo(240));
+    expect(api.lastReturnedActivityCount, activities.length);
+  });
 
   testWidgets('session screen groups adjacent file changes by turn', (
     tester,
@@ -1446,6 +1483,16 @@ SessionActivity _fileChangeActivity({
   );
 }
 
+List<T> _tail<T>(List<T> items, int? limit) {
+  if (limit == null || limit >= items.length) {
+    return items;
+  }
+  if (limit <= 0) {
+    return <T>[];
+  }
+  return items.sublist(items.length - limit);
+}
+
 NodeInfo _nodeInfo({
   Map<String, Object?> hostWorkspaceCapabilities = const {
     'filesystem': false,
@@ -1521,6 +1568,7 @@ class _RichEventFakeApi extends ApiClient {
     this.nodeInfo,
     this.sessionSummary,
     this.sessionStatus,
+    this.respectLogLimits = false,
   });
 
   final _ControllableWebSocketChannel _channel =
@@ -1535,6 +1583,9 @@ class _RichEventFakeApi extends ApiClient {
   final NodeInfo? nodeInfo;
   final SessionSummary? sessionSummary;
   final SessionStatus? sessionStatus;
+  final bool respectLogLimits;
+  final List<int?> fetchLogActivityLimits = <int?>[];
+  int lastReturnedActivityCount = 0;
   int stopSessionCalls = 0;
 
   @override
@@ -1547,23 +1598,31 @@ class _RichEventFakeApi extends ApiClient {
     int? messageLimit,
     int? activityLimit,
   }) async {
+    fetchLogActivityLimits.add(activityLimit);
     final blocker = fetchLogBlocker;
     if (blocker != null) {
       await blocker;
     }
+    final returnedMessages = respectLogLimits
+        ? _tail(messages, messageLimit)
+        : messages;
+    final returnedActivities = respectLogLimits
+        ? _tail(activities, activityLimit)
+        : activities;
+    lastReturnedActivityCount = returnedActivities.length;
     return SessionLog(
       session: sessionSummary ?? _session(sessionId),
-      messages: messages,
-      activities: activities,
+      messages: returnedMessages,
+      activities: returnedActivities,
       pendingAction: null,
       history:
           sessionLogHistory ??
           SessionLogHistorySummary(
             isTruncated: false,
             totalMessages: messages.length,
-            returnedMessages: messages.length,
+            returnedMessages: returnedMessages.length,
             totalActivities: activities.length,
-            returnedActivities: activities.length,
+            returnedActivities: returnedActivities.length,
           ),
       latestPlanUpdate: latestPlanUpdate,
     );

@@ -2155,34 +2155,15 @@ class _ActivityCardState extends State<_ActivityCard> {
   }) {
     final commandTitle = _activityCommandTitleParts(activity);
     final child = commandTitle != null
-        ? Text.rich(
+        ? Semantics(
             key: ValueKey('cmd:${commandTitle.plainText}:$_cardCollapsed'),
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: '${commandTitle.verb} ',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: context.colors.textPrimary,
-                    fontWeight: AppWeights.emphasis,
-                    height: 1.35,
-                  ),
-                ),
-                TextSpan(
-                  text: commandTitle.command,
-                  style: monoStyle(
-                    color: context.colors.textPrimary,
-                    fontSize: 13,
-                    fontWeight: AppWeights.emphasis,
-                  ).copyWith(
-                    backgroundColor:
-                        context.colors.accentMuted.withValues(alpha: 0.72),
-                    height: 1.35,
-                  ),
-                ),
-              ],
+            label: commandTitle.plainText,
+            child: ExcludeSemantics(
+              child: _CommandTitleChip(
+                parts: commandTitle,
+                collapsed: _cardCollapsed,
+              ),
             ),
-            maxLines: _cardCollapsed ? 1 : 3,
-            overflow: TextOverflow.ellipsis,
           )
         : Text(
             title,
@@ -2205,6 +2186,23 @@ class _ActivityCardState extends State<_ActivityCard> {
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeOutCubic,
       child: child,
+    );
+  }
+
+  Widget _activityDetailsPanel(BuildContext context, Widget child) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(left: 44, top: 6),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.surface.withValues(alpha: 0.78),
+          borderRadius: AppShapes.input,
+          border: Border.all(color: colors.border.withValues(alpha: 0.72)),
+        ),
+        child: child,
+      ),
     );
   }
 
@@ -2387,9 +2385,9 @@ class _ActivityCardState extends State<_ActivityCard> {
                 alignment: Alignment.topLeft,
                 child: _cardCollapsed
                     ? const SizedBox.shrink()
-                    : Padding(
-                        padding: const EdgeInsets.only(left: 44, top: 6),
-                        child: Column(
+                    : _activityDetailsPanel(
+                        context,
+                        Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             if (detailPills.isNotEmpty) ...[
@@ -2566,9 +2564,9 @@ class _ActivityCardState extends State<_ActivityCard> {
                 alignment: Alignment.topLeft,
                 child: _cardCollapsed
                     ? const SizedBox.shrink()
-                    : Padding(
-                        padding: const EdgeInsets.only(left: 44, top: 4),
-                        child: Column(
+                    : _activityDetailsPanel(
+                        context,
+                        Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             if (contextActions.isNotEmpty) ...[
@@ -3271,6 +3269,54 @@ class _ActivityCardState extends State<_ActivityCard> {
       label: label,
       expandedLabel: 'Hide diffs',
       onToggle: () => setState(() => _diffExpanded = true),
+    );
+  }
+}
+
+class _CommandTitleChip extends StatelessWidget {
+  const _CommandTitleChip({
+    required this.parts,
+    required this.collapsed,
+  });
+
+  final _CommandTitleParts parts;
+  final bool collapsed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final verbStyle = Theme.of(context).textTheme.titleSmall?.copyWith(
+      color: colors.textPrimary,
+      fontWeight: AppWeights.emphasis,
+      height: 1.35,
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('${parts.verb} ', style: verbStyle),
+        Flexible(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              color: colors.surfaceElevated,
+              borderRadius: BorderRadius.circular(AppRadii.badge),
+              border: Border.all(
+                color: colors.codeBorder.withValues(alpha: 0.92),
+              ),
+            ),
+            child: Text(
+              parts.command,
+              maxLines: collapsed ? 1 : 2,
+              overflow: TextOverflow.ellipsis,
+              style: monoStyle(
+                color: colors.codeForeground,
+                fontSize: 12.5,
+                fontWeight: AppWeights.emphasis,
+              ).copyWith(height: 1.25),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
