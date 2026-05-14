@@ -6089,11 +6089,12 @@ class _SessionScreenState extends State<SessionScreen>
 
     final messages = _messages.where((m) => m.isRenderable);
     final optimistic = _optimisticMessages.where((m) => m.isRenderable);
+    final visibleActivities = _groupFileChangeActivities(_activities);
     final entries =
         <_TimelineEntry>[
           ...messages.map(_TimelineEntry.message),
           ...optimistic.map(_TimelineEntry.message),
-          ..._activities.map(_TimelineEntry.activity),
+          ...visibleActivities.map(_TimelineEntry.activity),
           ..._timelineLiveEvents.map(_TimelineEntry.runtimeEvent),
           if (liveAssistant != null)
             _TimelineEntry.liveAssistant(liveAssistant),
@@ -6116,6 +6117,97 @@ class _SessionScreenState extends State<SessionScreen>
       _timelineRevision.value++;
     });
     return entries;
+  }
+
+  List<SessionActivity> _groupFileChangeActivities(
+    List<SessionActivity> activities,
+  ) {
+    final grouped = <SessionActivity>[];
+    var index = 0;
+    while (index < activities.length) {
+      final current = activities[index];
+      final key = _fileChangeGroupKey(current);
+      if (key == null) {
+        grouped.add(current);
+        index += 1;
+        continue;
+      }
+
+      final bucket = <SessionActivity>[current];
+      var nextIndex = index + 1;
+      while (nextIndex < activities.length &&
+          _fileChangeGroupKey(activities[nextIndex]) == key) {
+        bucket.add(activities[nextIndex]);
+        nextIndex += 1;
+      }
+      grouped.add(_aggregateFileChangeActivities(bucket));
+      index = nextIndex;
+    }
+    return grouped;
+  }
+
+  String? _fileChangeGroupKey(SessionActivity activity) {
+    if (!activity.isFileChange) return null;
+    final turnId = (activity.turnId ?? '').trim();
+    if (turnId.isEmpty) return null;
+    return turnId;
+  }
+
+  SessionActivity _aggregateFileChangeActivities(
+    List<SessionActivity> activities,
+  ) {
+    if (activities.length == 1) return activities.first;
+    final first = activities.first;
+    final changes = <SessionActivityChange>[
+      for (final activity in activities) ...activity.changes,
+    ];
+    return SessionActivity(
+      id:
+          'file-change-group:${first.turnId ?? first.id}:${activities.length}:${activities.last.id}',
+      type: first.type,
+      createdAt: first.createdAt,
+      seq: first.seq,
+      status: _aggregateFileChangeStatus(activities),
+      turnId: first.turnId,
+      command: first.command,
+      cwd: first.cwd,
+      output: first.output,
+      exitCode: first.exitCode,
+      durationMs: first.durationMs,
+      source: first.source,
+      processId: first.processId,
+      commandActions: first.commandActions,
+      terminalStatus: first.terminalStatus,
+      terminalInput: first.terminalInput,
+      toolName: first.toolName,
+      toolTitle: first.toolTitle,
+      toolArgs: first.toolArgs,
+      toolResult: first.toolResult,
+      toolError: first.toolError,
+      toolSemantic: first.toolSemantic,
+      changes: changes,
+      diff: first.diff,
+      query: first.query,
+      queries: first.queries,
+      targetUrl: first.targetUrl,
+      pattern: first.pattern,
+      revisedPrompt: first.revisedPrompt,
+      savedPath: first.savedPath,
+    );
+  }
+
+  String _aggregateFileChangeStatus(List<SessionActivity> activities) {
+    const terminal = {'completed', 'failed', 'declined'};
+    if (activities.any((activity) => !terminal.contains(activity.status))) {
+      return 'running';
+    }
+    if (activities.any((activity) => activity.status == 'failed')) {
+      return 'failed';
+    }
+    if (activities.any((activity) => activity.status == 'declined')) {
+      return 'declined';
+    }
+    return 'completed';
   }
 
   List<SearchRecord> _buildSearchRecords() {
@@ -6224,10 +6316,11 @@ class _SessionScreenState extends State<SessionScreen>
         final name = (activity.toolName ?? '').trim();
         return name.isEmpty ? 'Tool execution' : name;
       case 'file_change':
-        if (activity.changes.length == 1) {
+        final fileCount = _fileChangeFileCount(activity.changes);
+        if (fileCount == 1 && activity.changes.isNotEmpty) {
           return activity.changes.first.path;
         }
-        return 'Edited ${activity.changes.length} files';
+        return 'Edited $fileCount files';
       case 'turn_diff':
         return 'Turn diff';
       case 'web_search':

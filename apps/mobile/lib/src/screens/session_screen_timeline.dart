@@ -376,159 +376,219 @@ class _ProviderWarningRow extends StatelessWidget {
       _ => colors.warning,
     };
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: colors.surfaceMuted,
-          borderRadius: AppShapes.input,
-          border: Border.all(color: accent.withValues(alpha: 0.22)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, size: 16, color: accent),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(icon, size: 16, color: accent),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        MeshPill(label: 'Agent notice', tone: tone, icon: icon),
-                        if ((event.source ?? '').isNotEmpty)
-                          MeshPill(
-                            label: event.source!,
-                            tone: MeshPillTone.neutral,
-                            mono: true,
-                          ),
-                        if ((event.code ?? '').isNotEmpty)
-                          MeshPill(
-                            label: event.code!,
-                            tone: MeshPillTone.neutral,
-                            mono: true,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      event.message ?? '',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: FontWeight.w600,
-                        height: 1.35,
+                    MeshPill(label: 'Agent notice', tone: tone, icon: icon),
+                    if ((event.source ?? '').isNotEmpty)
+                      MeshPill(
+                        label: event.source!,
+                        tone: MeshPillTone.neutral,
+                        mono: true,
                       ),
-                    ),
+                    if ((event.code ?? '').isNotEmpty)
+                      MeshPill(
+                        label: event.code!,
+                        tone: MeshPillTone.neutral,
+                        mono: true,
+                      ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 6),
+                Text(
+                  event.message ?? '',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
-class _PlanUpdateCard extends StatelessWidget {
+class _PlanUpdateCard extends StatefulWidget {
   const _PlanUpdateCard({required this.event});
 
   final LiveEvent event;
 
   @override
+  State<_PlanUpdateCard> createState() => _PlanUpdateCardState();
+}
+
+class _PlanUpdateCardState extends State<_PlanUpdateCard> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final event = widget.event;
     final steps = event.plan ?? const <LiveEventPlanStep>[];
-    final completedCount = steps.where((step) => step.status == 'completed').length;
+    final completedCount = steps
+        .where((step) => step.status == 'completed')
+        .length;
+    final explanation = (event.explanation ?? '').trim();
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: MeshCard(
-        padding: EdgeInsets.zero,
-        tone: MeshCardTone.muted,
-        borderColor: colors.accent.withValues(alpha: 0.45),
-        child: Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
-            key: PageStorageKey<String>(
-              'plan:${event.turnId ?? event.itemId ?? event.explanation ?? steps.length}',
-            ),
-            tilePadding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-            childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-            iconColor: colors.textSecondary,
-            collapsedIconColor: colors.textSecondary,
-            initiallyExpanded: false,
-            title: Row(
-              children: [
-                Icon(Icons.route_rounded, size: 18, color: colors.accent),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Plan update',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: colors.textPrimary,
-                      fontWeight: AppWeights.title,
-                    ),
+      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 10),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => setState(() => _expanded = !_expanded),
+                borderRadius: AppShapes.input,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 7,
                   ),
-                ),
-                const SizedBox(width: 8),
-                MeshPill(
-                  label: '$completedCount/${steps.length} done',
-                  tone: MeshPillTone.accent,
-                  mono: true,
-                ),
-              ],
-            ),
-            subtitle: (event.explanation ?? '').isEmpty
-                ? null
-                : Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      event.explanation!,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-            children: [
-              for (var index = 0; index < steps.length; index += 1) ...[
-                if (index > 0) const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      _planStepIcon(steps[index].status),
-                      size: 18,
-                      color: _planStepColor(colors, steps[index].status),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        steps[index].step,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colors.textPrimary,
-                          fontWeight: FontWeight.w600,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: colors.surfaceMuted.withValues(alpha: 0.72),
+                          borderRadius: AppShapes.iconWell,
+                          border: Border.all(
+                            color: colors.border.withValues(alpha: 0.5),
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.route_rounded,
+                          size: 16,
+                          color: colors.textSecondary,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    MeshStatusBadge(
-                      label: _planStepLabel(steps[index].status),
-                      tone: _planStepTone(steps[index].status),
-                      icon: _planStepIcon(steps[index].status),
-                      compact: true,
-                    ),
-                  ],
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Plan update',
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(
+                                    color: colors.textPrimary,
+                                    fontWeight: AppWeights.emphasis,
+                                  ),
+                            ),
+                            if (explanation.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                explanation,
+                                maxLines: _expanded ? 3 : 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: colors.textSecondary,
+                                      fontWeight: AppWeights.body,
+                                    ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      MeshStatusBadge(
+                        label: '$completedCount/${steps.length} done',
+                        tone: MeshStatusTone.neutral,
+                        icon: Icons.checklist_rounded,
+                        compact: true,
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        _expanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        size: 18,
+                        color: colors.textTertiary,
+                      ),
+                    ],
+                  ),
                 ),
-              ],
-            ],
-          ),
+              ),
+            ),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topLeft,
+              child: _expanded
+                  ? Padding(
+                      padding: const EdgeInsets.only(left: 44, top: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (var index = 0;
+                              index < steps.length;
+                              index += 1) ...[
+                            if (index > 0) const SizedBox(height: 8),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  _planStepIcon(steps[index].status),
+                                  size: 17,
+                                  color: _planStepColor(
+                                    colors,
+                                    steps[index].status,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    steps[index].step,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          color: colors.textPrimary,
+                                          fontWeight: FontWeight.w600,
+                                          height: 1.35,
+                                        ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                MeshStatusBadge(
+                                  label: _planStepLabel(steps[index].status),
+                                  tone: _planStepTone(steps[index].status),
+                                  icon: _planStepIcon(steps[index].status),
+                                  compact: true,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
         ),
       ),
     );
@@ -959,28 +1019,31 @@ class _MessageBubble extends StatelessWidget {
       _ => colors.surfaceMuted,
     };
     final textColor = isUser ? colors.userBubbleOn : colors.textPrimary;
+    final messagePadding = isAssistant
+        ? const EdgeInsets.fromLTRB(4, 4, 4, 8)
+        : const EdgeInsets.fromLTRB(16, 12, 16, 14);
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+        padding: EdgeInsets.only(bottom: isAssistant ? 14 : 10),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
+          constraints: BoxConstraints(maxWidth: isAssistant ? 680 : 560),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: bubbleColor,
-              borderRadius: BorderRadius.circular(20),
+              color: isAssistant ? Colors.transparent : bubbleColor,
+              borderRadius: BorderRadius.circular(isAssistant ? 10 : 20),
               border: Border.all(
-                color: live
-                    ? colors.accent
-                    : (isUser
-                          ? colors.userBubble
-                          : colors.assistantBubbleBorder),
+                color: isAssistant && !live
+                    ? Colors.transparent
+                    : live
+                    ? colors.accent.withValues(alpha: isAssistant ? 0.34 : 1)
+                    : colors.userBubble,
                 width: live ? 1.4 : 1,
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              padding: messagePadding,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -3909,11 +3972,12 @@ String _activityFileSummary(
     return 'Waiting for file changes.';
   }
 
-  final labels = changes
+  final uniqueChanges = _uniqueFileChangePaths(changes);
+  final labels = uniqueChanges
       .take(3)
       .map((change) => _relativeSessionPath(change.path, sessionCwd))
       .toList();
-  final remainder = changes.length - labels.length;
+  final remainder = uniqueChanges.length - labels.length;
   if (remainder > 0) {
     labels.add('+$remainder more');
   }
@@ -3924,12 +3988,30 @@ String _fileChangeActivityTitle(
   SessionActivity activity, {
   required bool running,
 }) {
-  final count = activity.changes.length;
+  final count = _fileChangeFileCount(activity.changes);
   if (count == 0) {
     return running ? 'Editing files' : 'No file changes';
   }
   final noun = count == 1 ? 'file' : 'files';
   return '${running ? 'Editing' : 'Edited'} $count $noun';
+}
+
+int _fileChangeFileCount(List<SessionActivityChange> changes) {
+  return _uniqueFileChangePaths(changes).length;
+}
+
+List<SessionActivityChange> _uniqueFileChangePaths(
+  List<SessionActivityChange> changes,
+) {
+  final seen = <String>{};
+  final unique = <SessionActivityChange>[];
+  for (final change in changes) {
+    final key = change.path.trim();
+    if (key.isEmpty || seen.contains(key)) continue;
+    seen.add(key);
+    unique.add(change);
+  }
+  return unique;
 }
 
 String _formatDuration(int durationMs) {
