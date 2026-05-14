@@ -2551,8 +2551,8 @@ class _InboxPaneState extends State<InboxPane> {
             ? 'No enabled hosts'
             : 'Nothing needs attention',
         body: widget.hasSavedHosts
-            ? 'Enable a saved host from Hosts to receive pending approvals.'
-            : 'Add a host first. Pending approvals from every machine will show up here.',
+            ? 'Turn on a saved host to review approvals here.'
+            : 'Add a host to review approvals and stuck messages from anywhere.',
       );
     }
 
@@ -2606,11 +2606,10 @@ class _InboxPaneState extends State<InboxPane> {
           if (pending.isNotEmpty) ...[
             _InboxSectionHeader(
               icon: Icons.cloud_sync_rounded,
-              title: pending.length == 1
-                  ? '1 queued message'
-                  : '${pending.length} queued messages',
-              subtitle:
-                  'Messages Sidemesh is holding until delivery succeeds or you intervene.',
+              title: 'Queued',
+              subtitle: pending.length == 1
+                  ? '1 message waiting to send'
+                  : '${pending.length} messages waiting to send',
             ),
             cardSpacing,
             for (var index = 0; index < pending.length; index += 1) ...[
@@ -2622,11 +2621,10 @@ class _InboxPaneState extends State<InboxPane> {
           if (entries.isNotEmpty) ...[
             _InboxSectionHeader(
               icon: Icons.verified_user_rounded,
-              title: entries.length == 1
-                  ? '1 request pending'
-                  : '${entries.length} requests pending',
-              subtitle:
-                  'Approvals, questions, and form prompts waiting across your hosts.',
+              title: 'Needs review',
+              subtitle: entries.length == 1
+                  ? '1 item waiting for your reply'
+                  : '${entries.length} items waiting for your reply',
             ),
             cardSpacing,
             for (var index = 0; index < entries.length; index += 1) ...[
@@ -2686,27 +2684,17 @@ class _InboxSectionHeader extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: colors.accentMuted,
-            borderRadius: AppShapes.input,
-            border: Border.all(color: colors.accent.withValues(alpha: 0.25)),
-          ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 18, color: colors.accent),
-        ),
-        const SizedBox(width: 12),
+        Icon(icon, size: 16, color: colors.textTertiary),
+        const SizedBox(width: 8),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 title,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
                   color: colors.textPrimary,
-                  fontWeight: AppWeights.title,
+                  fontWeight: AppWeights.emphasis,
                 ),
               ),
               const SizedBox(height: 2),
@@ -2755,7 +2743,7 @@ class _PendingSendCard extends StatelessWidget {
     final colors = context.colors;
     final title = _pendingSendTitle(send);
     final detail = _pendingSendDetail(send, analysis);
-    final hostMeta = '${analysis.hostLabel} · ${send.sessionId}';
+    final hostMeta = analysis.hostLabel;
     final stateTone = _pendingSendStateTone(analysis.state);
     final stateLabel = _pendingSendStateLabel(analysis.state);
     final stateIcon = _pendingSendStateIcon(analysis.state);
@@ -2836,12 +2824,12 @@ class _PendingSendCard extends StatelessWidget {
                     label: 'Fix host',
                     onTap: onFixHost,
                   ),
-                if (onUseCurrentHost != null)
-                  _PendingSendActionChip(
-                    icon: Icons.link_rounded,
-                    label: 'Use current',
-                    onTap: onUseCurrentHost,
-                  ),
+              if (onUseCurrentHost != null)
+                _PendingSendActionChip(
+                  icon: Icons.link_rounded,
+                  label: 'Use current',
+                  onTap: onUseCurrentHost,
+                ),
                 if (onOpenSession != null)
                   _PendingSendActionChip(
                     icon: Icons.chat_bubble_outline_rounded,
@@ -2957,13 +2945,13 @@ class _PendingSendCard extends StatelessWidget {
               if (onOpenSession != null)
                 _PendingSendActionChip(
                   icon: Icons.chat_bubble_outline_rounded,
-                  label: 'Open session',
+                  label: 'Open',
                   onTap: onOpenSession,
                 ),
               if (onEditCopy != null)
                 _PendingSendActionChip(
                   icon: Icons.edit_rounded,
-                  label: 'Edit copy',
+                  label: 'Edit',
                   onTap: onEditCopy,
                 ),
               if (onRetryNow != null)
@@ -3079,7 +3067,7 @@ String _pendingSendDetail(
   final error = send.lastError?.trim();
   final reason = _pendingSendRecoveryMessage(analysis);
   if (analysis.needsAttention) {
-    return '$reason · ${_pendingSendPreview(send)}';
+    return '$reason ${_pendingSendPreview(send)}';
   }
   final suffix = error == null || error.isEmpty || error == reason
       ? ''
@@ -3089,18 +3077,17 @@ String _pendingSendDetail(
 
 String _pendingSendRecoveryMessage(PendingSendAnalysis analysis) {
   return switch (analysis.issue) {
-    PendingSendIssueKind.hostDisabled =>
-      'Host is disabled. Enable it before retrying.',
+    PendingSendIssueKind.hostDisabled => 'Turn this host back on before retrying.',
     PendingSendIssueKind.hostMissing =>
-      'The original host is gone. Discard or recreate the message.',
+      'The original host is gone. Discard this message or bind it again.',
     PendingSendIssueKind.hostChanged =>
-      'This host changed since the message was queued. Review its config first.',
+      'This host changed since the message was queued. Check it before retrying.',
     PendingSendIssueKind.unauthorized =>
-      'Host token is invalid. Fix the host credentials, then retry.',
+      'This host token is no longer valid. Fix the host, then retry.',
     PendingSendIssueKind.timeout => 'The host is taking too long to respond.',
-    PendingSendIssueKind.unreachable => "Couldn't reach the host.",
+    PendingSendIssueKind.unreachable => "Can't reach this host right now.",
     PendingSendIssueKind.server =>
-      'The host reported a temporary server error.',
+      'The host reported a temporary server problem.',
     PendingSendIssueKind.rateLimited => 'The host is rate limited right now.',
     PendingSendIssueKind.unknown =>
       analysis.send.lastError ??
@@ -3198,6 +3185,18 @@ String _truncateSingleLine(String value, int maxLength) {
   return '${normalized.substring(0, maxLength - 3)}...';
 }
 
+String _hostEndpointLabel(String baseUrl) {
+  final uri = Uri.tryParse(baseUrl.trim());
+  if (uri == null || uri.host.isEmpty) {
+    return baseUrl.trim();
+  }
+  final hasDefaultPort =
+      !uri.hasPort ||
+      (uri.scheme == 'http' && uri.port == 80) ||
+      (uri.scheme == 'https' && uri.port == 443);
+  return hasDefaultPort ? uri.host : '${uri.host}:${uri.port}';
+}
+
 class _InboxCard extends StatelessWidget {
   const _InboxCard({
     required this.entry,
@@ -3215,6 +3214,9 @@ class _InboxCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final action = entry.action;
+    final hostMeta = action.sessionTitle == null || action.sessionTitle!.isEmpty
+        ? entry.host.label
+        : '${entry.host.label} · ${action.sessionTitle}';
     if (dense) {
       // Compact row for the desktop sidebar — tap the row to open the
       // session; inline ✓/✕ buttons let the user resolve without leaving
@@ -3271,7 +3273,7 @@ class _InboxCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        '${entry.host.label} · ${action.sessionTitle ?? action.sessionId}',
+                        hostMeta,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: monoStyle(
@@ -3323,7 +3325,7 @@ class _InboxCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '${entry.host.label} · ${action.sessionTitle ?? action.sessionId}',
+            hostMeta,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: monoStyle(color: colors.textTertiary, fontSize: 11),
@@ -3389,8 +3391,8 @@ String _actionKindLabel(String kind) {
     'command' => 'command',
     'tool' => 'tool',
     'file_change' => 'files',
-    'permissions' => 'permissions',
-    'user_input' => 'question',
+    'permissions' => 'access',
+    'user_input' => 'reply',
     'elicitation' => 'form',
     _ => kind,
   };
@@ -3600,15 +3602,15 @@ class HostsPane extends StatelessWidget {
             children: [
               const MeshEmptyState(
                 icon: Icons.route_rounded,
-                title: 'No hosts yet',
+                title: 'No machines yet',
                 body:
-                    'Add a MacBook or VPS node by pasting its Tailscale address and shared token.',
+                    'Add a laptop, desktop, or server to reach it from here.',
               ),
               const SizedBox(height: 12),
               FilledButton.icon(
                 onPressed: onAddHost,
                 icon: const Icon(Icons.add_link_rounded),
-                label: const Text('Add your first host'),
+                label: const Text('Add a machine'),
               ),
             ],
           ),
@@ -3625,8 +3627,8 @@ class HostsPane extends StatelessWidget {
     if (visibleHosts.isEmpty) {
       return MeshEmptyState(
         icon: Icons.search_off_rounded,
-        title: 'No matching hosts',
-        body: 'No hosts match "${query.trim()}".',
+        title: 'No matching machines',
+        body: 'No machines match "${query.trim()}".',
       );
     }
     return ListView.separated(
@@ -3693,6 +3695,7 @@ class _HostRowCard extends StatelessWidget {
                 minimumVersion: node!.minimumMobileClientVersion,
               );
         final hostStatusBadge = _hostStatusBadge(status, host.enabled);
+        final endpointLabel = _hostEndpointLabel(host.baseUrl);
         if (dense) {
           return Material(
             color: Colors.transparent,
@@ -3761,7 +3764,7 @@ class _HostRowCard extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            host.enabled ? host.baseUrl : 'Disabled',
+                            host.enabled ? endpointLabel : 'Disabled',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: monoStyle(
@@ -3772,45 +3775,13 @@ class _HostRowCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    InkWell(
-                      onTap: onToggleEnabled,
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(
-                          host.enabled
-                              ? Icons.pause_circle_outline_rounded
-                              : Icons.play_circle_outline_rounded,
-                          size: 14,
-                          color: host.enabled
-                              ? colors.textTertiary
-                              : colors.accent,
-                        ),
-                      ),
-                    ),
-                    InkWell(
-                      onTap: onEdit,
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(
-                          Icons.edit_rounded,
-                          size: 14,
-                          color: colors.textTertiary,
-                        ),
-                      ),
-                    ),
-                    InkWell(
-                      onTap: onRemove,
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(
-                          Icons.delete_outline,
-                          size: 14,
-                          color: colors.textTertiary,
-                        ),
-                      ),
+                    const SizedBox(width: 8),
+                    _HostRowActionsMenu(
+                      hostEnabled: host.enabled,
+                      onToggleEnabled: onToggleEnabled,
+                      onEdit: onEdit,
+                      onRemove: onRemove,
+                      compact: true,
                     ),
                   ],
                 ),
@@ -3825,7 +3796,7 @@ class _HostRowCard extends StatelessWidget {
             MeshPill(
               label: node?.usesBleedingEdgeTrack == true
                   ? 'New commits'
-                  : 'Update available',
+                  : 'App update',
               icon: Icons.system_update_alt_rounded,
               tone: MeshPillTone.warning,
             ),
@@ -3833,7 +3804,7 @@ class _HostRowCard extends StatelessWidget {
               MobileClientCompatibilityLevel.required)
             MeshPill(
               label:
-                  'Mobile ${mobileClientVersionLabel(compatibility.targetVersion)} required',
+                  'Mobile ${mobileClientVersionLabel(compatibility.targetVersion)} needed',
               icon: Icons.phone_android_rounded,
               tone: MeshPillTone.danger,
             )
@@ -3919,7 +3890,7 @@ class _HostRowCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 5),
                         Text(
-                          host.baseUrl,
+                          endpointLabel,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: monoStyle(
@@ -3938,6 +3909,7 @@ class _HostRowCard extends StatelessWidget {
                     onToggleEnabled: onToggleEnabled,
                     onEdit: onEdit,
                     onRemove: onRemove,
+                    compact: false,
                   ),
                 ],
               ),
@@ -3984,7 +3956,7 @@ class _HostRowCard extends StatelessWidget {
   }
 
   String _statusLine(HostStatus status) {
-    if (!host.enabled) return 'Disabled';
+    if (!host.enabled) return 'This machine is turned off in Sidemesh.';
     switch (status.reachability) {
       case HostReachability.online:
         final last = status.lastEventAt ?? status.lastOnlineAt;
@@ -3992,11 +3964,11 @@ class _HostRowCard extends StatelessWidget {
           final elapsed = DateTime.now().difference(last);
           if (elapsed.inSeconds >= 5) {
             if (elapsed.inMinutes < 1) {
-              return 'Online · last event just now';
+              return 'Online. Activity seen just now.';
             } else if (elapsed.inHours < 1) {
-              return 'Online · last event ${elapsed.inMinutes}m ago';
+              return 'Online. Activity seen ${elapsed.inMinutes}m ago.';
             } else {
-              return 'Online · last event ${elapsed.inHours}h ago';
+              return 'Online. Activity seen ${elapsed.inHours}h ago.';
             }
           }
         }
@@ -4018,11 +3990,11 @@ class _HostRowCard extends StatelessWidget {
         }
         final err = status.lastError;
         if (err != null && err.isNotEmpty) {
-          return 'Offline · $err · $suffix';
+          return 'Offline. $err. $suffix.';
         }
-        return 'Offline · $suffix';
+        return 'Offline. $suffix.';
       case HostReachability.probing:
-        return 'Probing…';
+        return 'Checking connection...';
       case HostReachability.unknown:
         return '';
     }
@@ -4051,12 +4023,14 @@ class _HostRowActionsMenu extends StatelessWidget {
     required this.onToggleEnabled,
     required this.onEdit,
     required this.onRemove,
+    this.compact = false,
   });
 
   final bool hostEnabled;
   final VoidCallback onToggleEnabled;
   final VoidCallback onEdit;
   final VoidCallback onRemove;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -4112,11 +4086,11 @@ class _HostRowActionsMenu extends StatelessWidget {
         radius: AppRadii.control,
         tone: MeshSurfaceTone.muted,
         child: SizedBox(
-          width: 40,
-          height: 40,
+          width: compact ? 34 : 40,
+          height: compact ? 34 : 40,
           child: Icon(
             Icons.more_horiz_rounded,
-            size: 22,
+            size: compact ? 18 : 22,
             color: colors.textSecondary,
           ),
         ),
@@ -4405,8 +4379,8 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                               const SizedBox(height: 3),
                               Text(
                                 isEditing
-                                    ? 'Update this connection.'
-                                    : 'Pair a Mac, VPS, or local daemon.',
+                                    ? 'Update this machine connection.'
+                                    : 'Connect a laptop, desktop, or server.',
                                 style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(
                                       color: colors.textSecondary,
@@ -4431,9 +4405,9 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                         icon: Icons.qr_code_scanner_rounded,
                         title: isEditing
                             ? 'Replace from pairing QR'
-                            : 'Scan sidemesh pair QR',
+                            : 'Scan a pairing QR',
                         subtitle:
-                            'Fastest path: run sidemesh pair on the host and scan its code.',
+                            'Run sidemesh pair on the machine, then scan its code here.',
                         actionLabel: 'Scan',
                         onTap: _scanPairingQr,
                       ),
@@ -4441,7 +4415,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                     ],
                     _HostEditorFieldFrame(
                       icon: Icons.label_rounded,
-                      label: 'Label',
+                      label: 'Name',
                       child: TextField(
                         controller: _labelController,
                         textInputAction: TextInputAction.next,
@@ -4459,7 +4433,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                     const SizedBox(height: 10),
                     _HostEditorFieldFrame(
                       icon: Icons.link_rounded,
-                      label: 'Base URL',
+                      label: 'Address',
                       child: TextField(
                         controller: _baseUrlController,
                         textInputAction: TextInputAction.next,
