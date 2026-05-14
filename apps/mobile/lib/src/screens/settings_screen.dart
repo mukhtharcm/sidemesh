@@ -42,18 +42,12 @@ Future<void> openSettingsScreen(
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: colors.surfaceElevated,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: AppShapes.dialog,
               border: Border.all(color: colors.border),
-              boxShadow: [
-                BoxShadow(
-                  color: colors.textPrimary.withValues(alpha: 0.12),
-                  blurRadius: 28,
-                  offset: const Offset(0, 16),
-                ),
-              ],
+              boxShadow: AppShadows.dialog(colors.textPrimary),
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: AppShapes.dialog,
               child: SettingsScreen(
                 embedded: true,
                 onClose: () => Navigator.of(dialogContext).pop(),
@@ -1261,7 +1255,7 @@ class _ActionRow extends StatelessWidget {
         height: 32,
         decoration: BoxDecoration(
           color: iconBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: AppShapes.action,
           border: Border.all(color: iconBorder),
         ),
         alignment: Alignment.center,

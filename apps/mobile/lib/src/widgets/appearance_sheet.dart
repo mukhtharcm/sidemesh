@@ -24,15 +24,9 @@ Future<void> showAppearanceSheet(BuildContext context) {
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: colors.surfaceElevated,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: AppShapes.dialog,
               border: Border.all(color: colors.border),
-              boxShadow: [
-                BoxShadow(
-                  color: colors.textPrimary.withValues(alpha: 0.12),
-                  blurRadius: 28,
-                  offset: const Offset(0, 16),
-                ),
-              ],
+              boxShadow: AppShadows.dialog(colors.textPrimary),
             ),
             child: const _AppearanceSheet(embedded: true),
           ),
@@ -80,8 +74,8 @@ class _AppearanceSheet extends StatelessWidget {
             decoration: BoxDecoration(
               color: colors.surface,
               borderRadius: embedded
-                  ? BorderRadius.circular(18)
-                  : const BorderRadius.vertical(top: Radius.circular(20)),
+                  ? AppShapes.dialog
+                  : AppShapes.sheetTop,
               border: embedded
                   ? null
                   : Border(top: BorderSide(color: colors.border)),
@@ -293,14 +287,14 @@ class _BrightnessSegmented extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: AppShapes.action,
             onTap: () => controller.setMode(mode),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
               padding: const EdgeInsets.symmetric(vertical: 10),
               decoration: BoxDecoration(
                 color: selected ? colors.accentMuted : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: AppShapes.action,
                 border: Border.all(
                   color: selected ? colors.accent : Colors.transparent,
                   width: 1,
@@ -550,7 +544,7 @@ class _TypographyCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: AppShapes.dialog,
         border: Border.all(color: colors.border),
       ),
       child: Column(
@@ -847,14 +841,14 @@ class _SegmentedChoiceButton<T> extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: AppShapes.action,
         onTap: () => onSelected(value),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
             color: selected ? colors.accentMuted : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: AppShapes.action,
             border: Border.all(
               color: selected ? colors.accent : Colors.transparent,
             ),

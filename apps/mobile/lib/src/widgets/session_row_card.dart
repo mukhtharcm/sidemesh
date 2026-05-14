@@ -96,13 +96,13 @@ class SessionRowCard extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppShapes.badge,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             padding: const EdgeInsets.fromLTRB(10, 9, 8, 10),
             decoration: BoxDecoration(
               color: bgColor,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: AppShapes.badge,
               border: Border.all(color: borderColor),
             ),
             child: Row(
@@ -229,7 +229,7 @@ class SessionRowCard extends StatelessWidget {
                 ],
                 InkWell(
                   onTap: onToggleFavorite,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: AppShapes.badge,
                   child: SizedBox(
                     width: 30,
                     height: 30,

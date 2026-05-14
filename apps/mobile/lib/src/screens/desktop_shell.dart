@@ -79,7 +79,7 @@ class _OnboardingEmptyState extends StatelessWidget {
                 height: 72,
                 decoration: BoxDecoration(
                   color: colors.accentMuted,
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: AppShapes.sheet,
                   border: Border.all(
                     color: colors.accent.withValues(alpha: 0.4),
                   ),
@@ -122,7 +122,7 @@ class _OnboardingEmptyState extends StatelessWidget {
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
                   color: colors.surface,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: AppShapes.dialog,
                   border: Border.all(color: colors.border),
                 ),
                 child: Column(
@@ -573,7 +573,7 @@ class _DesktopShellState extends State<DesktopShell> {
                               ),
                               decoration: BoxDecoration(
                                 color: colors.surfaceMuted,
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: AppShapes.badge,
                                 border: Border.all(color: colors.border),
                               ),
                               child: Text(
@@ -1886,7 +1886,7 @@ class _RecentFilterToken extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: selected ? colors.accentMuted : colors.canvas,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: AppShapes.badge,
         border: Border.all(
           color: selected
               ? colors.accent.withValues(alpha: 0.34)
@@ -1916,7 +1916,7 @@ class _RecentFilterToken extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: AppShapes.badge,
         onTap: onTap,
         child: token,
       ),
@@ -1936,7 +1936,7 @@ class _SidebarCountPill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
         color: colors.canvas,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: AppShapes.badge,
         border: Border.all(color: colors.border),
       ),
       child: Row(
@@ -2307,14 +2307,14 @@ class _CloseSessionButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppShapes.badge,
           onTap: onClose,
           child: Container(
             width: 28,
             height: 28,
             decoration: BoxDecoration(
               color: colors.surface.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: AppShapes.badge,
               border: Border.all(color: colors.border),
             ),
             alignment: Alignment.center,
@@ -2375,7 +2375,7 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
       duration: const Duration(milliseconds: 140),
       decoration: BoxDecoration(
         color: colors.composerBackground,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: AppShapes.action,
         border: Border.all(
           color: _focused ? colors.accent : colors.border,
           width: _focused ? 1.5 : 1,
@@ -2423,7 +2423,7 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
                 return const SizedBox.shrink();
               }
               return InkWell(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: AppShapes.action,
                 onTap: widget.onClear,
                 child: Padding(
                   padding: const EdgeInsets.all(4),

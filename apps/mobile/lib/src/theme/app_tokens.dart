@@ -10,7 +10,7 @@ import 'package:flutter/material.dart';
 ///
 /// Rules of thumb:
 ///   * Use only the three weights in [AppWeights] for UI text.
-///   * Use only the four radii in [AppRadii] for UI shapes.
+///   * Use only the named radii in [AppRadii] for UI shapes.
 ///   * Use only the spacing values in [AppSpacing] for paddings/gaps.
 ///   * Prefer `*_rounded` Material icons everywhere.
 abstract final class AppSpacing {
@@ -25,12 +25,18 @@ abstract final class AppSpacing {
 abstract final class AppRadii {
   /// Badges, compact chips, and tiny action targets.
   static const double badge = 8;
+  /// Icon wells and compact square controls.
+  static const double iconWell = 9;
+  /// Primary square action buttons such as send controls.
+  static const double action = 10;
   /// Inputs, small buttons, and nested controls.
   static const double control = 12;
   /// App surfaces, list rows, and primary grouped content.
   static const double surface = 16;
-  /// Bottom sheets and modal dialogs.
-  static const double sheet = 24;
+  /// Centered modal dialogs and desktop floating panels.
+  static const double dialog = 18;
+  /// Bottom sheets and mobile modal surfaces.
+  static const double sheet = 20;
 
   /// Compact legacy chip radius. Prefer [badge] for new UI.
   static const double pill = badge;
@@ -61,14 +67,39 @@ abstract final class AppLetterSpacing {
 /// Shorthand helpers for common shapes — keeps allocation light by reusing
 /// the same `BorderRadius` values across rebuilds.
 abstract final class AppShapes {
+  static final BorderRadius badge = BorderRadius.circular(AppRadii.badge);
   static final BorderRadius pill = BorderRadius.circular(AppRadii.pill);
+  static final BorderRadius iconWell = BorderRadius.circular(
+    AppRadii.iconWell,
+  );
+  static final BorderRadius action = BorderRadius.circular(AppRadii.action);
   static final BorderRadius input = BorderRadius.circular(AppRadii.input);
   static final BorderRadius card = BorderRadius.circular(AppRadii.card);
+  static final BorderRadius dialog = BorderRadius.circular(AppRadii.dialog);
   static final BorderRadius sheet = BorderRadius.circular(AppRadii.sheet);
   /// Bottom sheets only round their top corners.
   static final BorderRadius sheetTop = const BorderRadius.vertical(
     top: Radius.circular(AppRadii.sheet),
   );
+}
+
+/// Shared elevation recipes for floating app-owned surfaces.
+abstract final class AppShadows {
+  static List<BoxShadow> dialog(Color source) => [
+    BoxShadow(
+      color: source.withValues(alpha: 0.12),
+      blurRadius: 28,
+      offset: const Offset(0, 16),
+    ),
+  ];
+
+  static List<BoxShadow> sheet(Color source) => [
+    BoxShadow(
+      color: source.withValues(alpha: 0.12),
+      blurRadius: 24,
+      offset: const Offset(0, 14),
+    ),
+  ];
 }
 
 /// Common edge insets built from [AppSpacing] tokens.
