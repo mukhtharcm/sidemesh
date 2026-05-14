@@ -59,10 +59,13 @@ class MarkdownContent extends StatelessWidget {
       },
       highlightBuilder: (context, hlText, style) {
         final isPath = onOpenFile != null && _looksLikeFilePath(hlText);
-        final displayStyle = monoStyle(color: colors.accent, fontSize: 12.5)
-            .copyWith(
+        final displayStyle =
+            monoStyle(
+              color: isPath ? colors.textPrimary : colors.textSecondary,
+              fontSize: 12.5,
+            ).copyWith(
               decoration: isPath ? TextDecoration.underline : null,
-              decorationColor: isPath ? colors.accent : null,
+              decorationColor: isPath ? colors.textSecondary : null,
             );
         if (isPath) {
           return GestureDetector(
