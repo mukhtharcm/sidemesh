@@ -34,6 +34,27 @@ String _hostEndpointLabel(String baseUrl) {
   return hasDefaultPort ? uri.host : '${uri.host}:${uri.port}';
 }
 
+String _agentAvailabilityLabel(int count) {
+  final noun = count == 1 ? 'agent' : 'agents';
+  return '$count $noun available';
+}
+
+String _agentInUseLabel(String displayName) => 'In use: $displayName';
+
+String _agentViewingLabel(String displayName) => 'Viewing: $displayName';
+
+String _agentCommandLabel(String command) => 'Command: $command';
+
+String _releaseTrackLabel(String value) {
+  return value == 'bleeding-edge' ? 'Early access' : 'Stable';
+}
+
+String _releaseTrackDetail(String value) {
+  return value == 'bleeding-edge'
+      ? 'Early access · newest changes'
+      : 'Stable · tagged releases';
+}
+
 class HostDetailScreen extends StatefulWidget {
   const HostDetailScreen({
     super.key,
@@ -408,8 +429,8 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                   const SizedBox(height: AppSpacing.xl),
                   _SectionHeader(
                     icon: Icons.medical_services_rounded,
-                    title: 'Host tools',
-                    subtitle: 'Updates, tools, and agent settings',
+                    title: 'Manage this machine',
+                    subtitle: 'Open tools, updates, and restart controls',
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   _HostManagementCard(
@@ -784,7 +805,7 @@ class HostProviderContractScreen extends StatelessWidget {
     final title = node.label.isNotEmpty ? node.label : node.hostname;
     return Scaffold(
       backgroundColor: colors.canvas,
-      appBar: AppBar(title: Text('Agent support')),
+      appBar: AppBar(title: Text('Agents on this machine')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [_ProviderContractDetailPanel(node: node, title: title)],
@@ -952,7 +973,7 @@ class _ProviderContractOverviewCard extends StatelessWidget {
             runSpacing: 8,
             children: [
               MeshPill(
-                label: 'Using ${node.providerDisplayName}',
+                label: _agentInUseLabel(node.providerDisplayName),
                 icon: Icons.radio_button_checked_rounded,
                 tone: isViewingActiveProvider
                     ? MeshPillTone.success
@@ -960,18 +981,18 @@ class _ProviderContractOverviewCard extends StatelessWidget {
               ),
               if (!isViewingActiveProvider)
                 MeshPill(
-                  label: 'Showing $selectedDisplayName',
+                  label: _agentViewingLabel(selectedDisplayName),
                   icon: Icons.visibility_rounded,
                   tone: MeshPillTone.accent,
                 ),
               if (selectedCommand != null)
                 MeshPill(
-                  label: 'Starts with $selectedCommand',
+                  label: _agentCommandLabel(selectedCommand!),
                   icon: Icons.terminal_rounded,
                   tone: MeshPillTone.neutral,
                 ),
               MeshPill(
-                label: '${node.supportedProviders.length} available',
+                label: _agentAvailabilityLabel(node.supportedProviders.length),
                 icon: Icons.extension_rounded,
                 tone: node.supportedProviders.isEmpty
                     ? MeshPillTone.warning
@@ -1099,7 +1120,7 @@ class _ProviderDefinitionRow extends StatelessWidget {
       subtitle: Text(
         [
           if (provider.version.trim().isNotEmpty) provider.version.trim(),
-          if (command.trim().isNotEmpty) 'Starts with $command',
+          if (command.trim().isNotEmpty) _agentCommandLabel(command.trim()),
           if (provider.version.trim().isEmpty && command.trim().isEmpty)
             provider.kind,
         ].join(' · '),
@@ -1400,8 +1421,7 @@ class _ProviderContractSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final supportedProviders = node.supportedProviders.length;
-    final providerCountLabel =
-        '$supportedProviders ${supportedProviders == 1 ? "agent" : "agents"}';
+    final providerCountLabel = _agentAvailabilityLabel(supportedProviders);
     return MeshCard(
       tone: MeshCardTone.muted,
       padding: EdgeInsets.zero,
@@ -1439,14 +1459,14 @@ class _ProviderContractSummaryCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Agent support',
+                        'Agents on this machine',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           fontWeight: AppWeights.title,
                         ),
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        'Using ${node.providerDisplayName}, $providerCountLabel available',
+                        '${node.providerDisplayName} in use, $providerCountLabel',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1537,7 +1557,7 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
             child: Icon(Icons.hub_rounded, color: colors.info, size: 16),
           ),
           title: Text(
-            'Agent support',
+            'Agents on this machine',
             style: Theme.of(
               context,
             ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.title),
@@ -1559,7 +1579,7 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
                 runSpacing: 8,
                 children: [
                   MeshPill(
-                    label: 'Using ${node.providerDisplayName}',
+                    label: _agentInUseLabel(node.providerDisplayName),
                     icon: Icons.radio_button_checked_rounded,
                     tone: isViewingActiveProvider
                         ? MeshPillTone.success
@@ -1567,18 +1587,18 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
                   ),
                   if (!isViewingActiveProvider)
                     MeshPill(
-                      label: 'Showing $selectedDisplayName',
+                      label: _agentViewingLabel(selectedDisplayName),
                       icon: Icons.visibility_rounded,
                       tone: MeshPillTone.accent,
                     ),
                   if (selectedCommand != null)
                     MeshPill(
-                      label: 'Starts with $selectedCommand',
+                      label: _agentCommandLabel(selectedCommand),
                       icon: Icons.terminal_rounded,
                       tone: MeshPillTone.neutral,
                     ),
                   MeshPill(
-                    label: '${supportedProviders.length} available',
+                    label: _agentAvailabilityLabel(supportedProviders.length),
                     icon: Icons.extension_rounded,
                     tone: supportedProviders.isEmpty
                         ? MeshPillTone.warning
@@ -1708,7 +1728,7 @@ class _ProviderDefinitionList extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Choose an agent to see what it supports.',
+          'Choose one to see what it can do.',
           style: Theme.of(
             context,
           ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
@@ -2201,7 +2221,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     try {
       await widget.api.restartProvider(widget.host, widget.node.provider);
       if (!mounted) return;
-      showAppSnackBar(context, '$_providerDisplayName restarting…');
+      showAppSnackBar(context, 'Restarting $_providerDisplayName…');
     } catch (e) {
       if (!mounted) return;
       showAppSnackBar(context, 'Restart failed: ${friendlyError(e)}');
@@ -2216,7 +2236,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     try {
       await widget.api.restartDaemon(widget.host);
       if (!mounted) return;
-      showAppSnackBar(context, 'Daemon restarting…');
+      showAppSnackBar(context, 'Restarting Sidemesh…');
     } catch (e) {
       if (!mounted) return;
       showAppSnackBar(context, 'Restart failed: ${friendlyError(e)}');
@@ -2237,9 +2257,9 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         final colors = context.colors;
         return MeshBottomSheetScaffold(
           icon: Icons.system_update_rounded,
-          title: 'Choose update channel',
+          title: 'Choose release track',
           description:
-              'Stable follows tagged releases. Bleeding edge tracks the latest commits from main.',
+              'Stable gets tagged releases. Early access gets the newest changes.',
           maxWidth: 560,
           maxHeightFactor: 0.44,
           child: ListView(
@@ -2263,8 +2283,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 dense: true,
                 radius: AppRadii.control,
                 leading: Icon(Icons.science_rounded, color: colors.accent),
-                title: const Text('Bleeding edge'),
-                subtitle: const Text('Latest commits from main'),
+                title: const Text('Early access'),
+                subtitle: const Text('Newest changes'),
                 trailing: _selectedUpdateChannel == 'bleeding-edge'
                     ? Icon(Icons.check_rounded, color: colors.accent)
                     : null,
@@ -2293,14 +2313,15 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       showAppSnackBar(
         context,
         refreshFailed
-            ? 'Update channel set, but refresh failed.'
-            : selected == 'bleeding-edge'
-            ? 'Update channel set to bleeding edge.'
-            : 'Update channel set to stable.',
+            ? 'Release track saved, but refresh failed.'
+            : 'Release track set to ${_releaseTrackLabel(selected)}.',
       );
     } catch (e) {
       if (!mounted) return;
-      showAppSnackBar(context, 'Update channel failed: ${friendlyError(e)}');
+      showAppSnackBar(
+        context,
+        'Could not save the release track: ${friendlyError(e)}',
+      );
     } finally {
       if (mounted) setState(() => _savingUpdateChannel = false);
     }
@@ -2308,7 +2329,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
   String get _updateDialogTitle {
     if (_useBleedingEdgeForNextUpdate) {
-      return 'Update to the latest development build?';
+      return 'Install the newest Early access build?';
     }
     final current = widget.node.packageVersion;
     final latest = widget.node.latestVersion;
@@ -2336,7 +2357,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
           icon: Icons.system_update_alt_rounded,
           title: _updateDialogTitle,
           description: _useBleedingEdgeForNextUpdate
-              ? 'This installs the newest development build of Sidemesh on this machine.'
+              ? 'This installs the newest Early access build of Sidemesh on this machine.'
               : 'This installs the latest available Sidemesh update on this machine.',
           actions: [
             TextButton(
@@ -2352,7 +2373,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Terminal sessions, port forwards, and browser previews will disconnect while the update starts.',
+                'Open terminals, forwarded ports, and browser previews disconnect while the update starts.',
                 style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
                   color: dialogContext.colors.textSecondary,
                   height: 1.4,
@@ -2405,7 +2426,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         _updateTargetLabel = _targetUpdateLabel();
         _updateChannelAtStart = _selectedUpdateChannel;
       });
-      showAppSnackBar(context, 'Updating Sidemesh…');
+      showAppSnackBar(context, 'Starting Sidemesh update…');
     } catch (e) {
       if (!mounted) return;
       showAppSnackBar(context, 'Update failed: ${friendlyError(e)}');
@@ -2431,8 +2452,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   String _targetUpdateLabel() {
     if (_useBleedingEdgeForNextUpdate) {
       return widget.node.shortLatestCommitSha == null
-          ? 'latest main'
-          : 'main@${widget.node.shortLatestCommitSha}';
+          ? 'latest Early access build'
+          : 'Early access build ${widget.node.shortLatestCommitSha}';
     }
     final latestVersion = widget.node.latestVersion;
     if (latestVersion != null && latestVersion.isNotEmpty) {
@@ -2443,9 +2464,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
   String _updateChannelDetail() {
     final configured = _selectedUpdateChannel == widget.node.updateChannel;
-    final base = _useBleedingEdgeForNextUpdate
-        ? 'Bleeding edge · latest commits on main'
-        : 'Stable · tagged releases';
+    final base = _releaseTrackDetail(_selectedUpdateChannel);
     return configured ? base : '$base · next update only';
   }
 
@@ -2454,7 +2473,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         HostStatusStore.instance.statusFor(widget.host.id).reachability ==
         HostReachability.offline;
     if (isOffline) {
-      return 'Host offline — cannot update';
+      return 'Machine offline, cannot update';
     }
     if (widget.checkingUpdateInfo) {
       return 'Checking for updates…';
@@ -2480,16 +2499,16 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
     if (!widget.node.updateAvailable) {
       if (hasCurrent) return 'Up to date · v$packageVersion';
-      return 'Up to date · Unknown version';
+      return 'Up to date · version unavailable';
     }
 
     if (hasCurrent && hasLatest) {
       return 'v$packageVersion → v$latestVersion';
     }
     if (hasCurrent) {
-      return 'Current: v$packageVersion';
+      return 'Current version: v$packageVersion';
     }
-    return 'Unknown version';
+    return 'Version unavailable';
   }
 
   IconData get _updateIcon {
@@ -2539,8 +2558,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               if (widget.node.supportsHostCapability('workspace', 'terminal'))
                 _ManagementRow(
                   icon: Icons.terminal_rounded,
-                  label: 'New terminal',
-                  detail: 'Open a shell on ${widget.host.label}.',
+                  label: 'Open terminal',
+                  detail: 'Open a shell on this machine.',
                   busy: false,
                   onTap: _openTerminal,
                 ),
@@ -2549,8 +2568,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               if (_supportsRestart)
                 _ManagementRow(
                   icon: Icons.refresh_rounded,
-                  label: 'Restart $_providerDisplayName provider',
-                  detail: 'Preserves terminals and port forwards.',
+                  label: 'Restart $_providerDisplayName',
+                  detail: 'Leaves terminals and forwarded ports running.',
                   busy: _restartingProvider,
                   onTap: _restartProvider,
                 ),
@@ -2559,7 +2578,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               if (_supportsChannelSelection)
                 _ManagementRow(
                   icon: Icons.alt_route_rounded,
-                  label: 'Update channel',
+                  label: 'Release track',
                   detail: _updateChannelDetail(),
                   busy: _savingUpdateChannel,
                   onTap: _pickUpdateChannel,
@@ -2580,8 +2599,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 Divider(height: 1, indent: 46, color: colors.border),
               _ManagementRow(
                 icon: Icons.restart_alt_rounded,
-                label: 'Restart Sidemesh daemon',
-                detail: 'Full process restart — reconnect automatically.',
+                label: 'Restart Sidemesh',
+                detail: 'Reconnects automatically after the restart.',
                 busy: _restartingDaemon,
                 onTap: _restartDaemon,
               ),
@@ -2649,7 +2668,9 @@ class _UpdateProgressBanner extends StatelessWidget {
   String _successLabel() {
     if (updateChannel == 'bleeding-edge') {
       final sha = currentNode.shortCurrentCommitSha;
-      return sha == null ? 'latest main' : 'main@$sha';
+      return sha == null
+          ? 'latest Early access build'
+          : 'Early access build $sha';
     }
     final version = currentNode.packageVersion;
     if (version != null && version.isNotEmpty) {
@@ -2664,8 +2685,8 @@ class _UpdateProgressBanner extends StatelessWidget {
       colors: colors,
       icon: Icons.update_rounded,
       iconColor: colors.accent,
-      title: 'Updating to ${targetLabel ?? 'latest'}…',
-      subtitle: 'This may take 20–45 seconds',
+      title: 'Installing ${targetLabel ?? 'latest update'}…',
+      subtitle: 'This usually takes 20 to 45 seconds',
       showSpinner: true,
     );
   }
@@ -2689,8 +2710,8 @@ class _UpdateProgressBanner extends StatelessWidget {
         colors: colors,
         icon: Icons.error_outline_rounded,
         iconColor: colors.danger,
-        title: 'Update failed',
-        subtitle: 'Tap to retry',
+        title: 'Update did not finish',
+        subtitle: 'Tap to try again',
         showDismiss: true,
       ),
     );

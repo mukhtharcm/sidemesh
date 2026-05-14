@@ -640,21 +640,21 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Agent support'), findsAtLeastNWidgets(1));
+    expect(find.text('Agents on this machine'), findsAtLeastNWidgets(1));
     expect(
-      find.text('Using Fake Test Provider, 2 agents available'),
+      find.text('Fake Test Provider in use, 2 agents available'),
       findsOneWidget,
     );
 
-    await tester.tap(find.text('Agent support'));
+    await tester.tap(find.text('Agents on this machine'));
     await _pumpFrames(tester);
 
-    expect(find.text('Agent support'), findsAtLeastNWidgets(1));
+    expect(find.text('Agents on this machine'), findsAtLeastNWidgets(1));
     expect(
       find.text('Fake Test Provider · fake-provider 1.0.0'),
       findsOneWidget,
     );
-    expect(find.text('Using Fake Test Provider'), findsOneWidget);
+    expect(find.text('In use: Fake Test Provider'), findsOneWidget);
     expect(find.text('Fake Test Provider'), findsOneWidget);
     expect(find.text('In use'), findsOneWidget);
     expect(find.text('Codex'), findsOneWidget);
@@ -668,8 +668,8 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Codex · codex-cli 0.125.0'), findsOneWidget);
-    expect(find.text('Showing Codex'), findsOneWidget);
-    expect(find.text('Starts with codex'), findsOneWidget);
+    expect(find.text('Viewing: Codex'), findsOneWidget);
+    expect(find.text('Command: codex'), findsOneWidget);
     expect(find.text('Fake Test Provider'), findsOneWidget);
     expect(find.text('2/5'), findsOneWidget);
     expect(find.text('1/4'), findsOneWidget);
