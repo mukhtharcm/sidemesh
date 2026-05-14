@@ -6068,9 +6068,9 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionActivity> _sortActivities(List<SessionActivity> activities) {
     final sorted = [...activities];
     sorted.sort((left, right) {
-      final bySeq = left.seq.compareTo(right.seq);
-      if (bySeq != 0) return bySeq;
-      return left.createdAt.compareTo(right.createdAt);
+      final byCreatedAt = left.createdAt.compareTo(right.createdAt);
+      if (byCreatedAt != 0) return byCreatedAt;
+      return left.seq.compareTo(right.seq);
     });
     return sorted;
   }
@@ -6099,9 +6099,9 @@ class _SessionScreenState extends State<SessionScreen>
           if (liveAssistant != null)
             _TimelineEntry.liveAssistant(liveAssistant),
         ]..sort((left, right) {
-          final bySeq = left.seq.compareTo(right.seq);
-          if (bySeq != 0) return bySeq;
-          return left.createdAt.compareTo(right.createdAt);
+          final byCreatedAt = left.createdAt.compareTo(right.createdAt);
+          if (byCreatedAt != 0) return byCreatedAt;
+          return left.seq.compareTo(right.seq);
         });
 
     _entriesMessagesRef = _messages;

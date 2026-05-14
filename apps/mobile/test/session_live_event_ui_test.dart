@@ -1261,6 +1261,61 @@ void main() {
     expect(find.textContaining('/bin/bash'), findsNothing);
   });
 
+  testWidgets('session screen orders command rows by timestamp before seq', (
+    tester,
+  ) async {
+    final session = _session('command-row-ordering');
+    final baseTime = DateTime(2026, 1, 1, 12);
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      messages: [
+        _assistantMessage(
+          id: 'after-command',
+          text: 'After command',
+          content: const [TextBlock('After command')],
+          seq: 12,
+          createdAt: baseTime.add(const Duration(minutes: 2)),
+        ),
+      ],
+      activities: [
+        _commandActivity(
+          id: 'live-command-high-seq',
+          seq: 60000,
+          command: "/bin/bash -lc 'npm test'",
+          cwd: '/repo',
+          output: 'ok',
+          createdAt: baseTime.add(const Duration(minutes: 1)),
+        ),
+        _fileChangeActivity(
+          id: 'later-file-change',
+          seq: 13,
+          path: '/repo/apps/mobile/lib/later.dart',
+          createdAt: baseTime.add(const Duration(minutes: 3)),
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('command-row-ordering'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    final commandY = tester.getTopLeft(find.text('npm test')).dy;
+    final messageY = tester.getTopLeft(find.text('After command')).dy;
+    final fileY = tester.getTopLeft(find.text('Edited 1 file')).dy;
+
+    expect(commandY, lessThan(messageY));
+    expect(messageY, lessThan(fileY));
+  });
+
   testWidgets('session screen avoids internal turn diff copy', (tester) async {
     final session = _session('turn-diff-copy');
     final api = _RichEventFakeApi(
@@ -1456,8 +1511,10 @@ SessionMessage _assistantMessage({
   required String id,
   required String text,
   required List<ContentBlock> content,
+  int seq = 1,
+  DateTime? createdAt,
 }) {
-  final now = DateTime(2026, 1, 1, 12);
+  final now = createdAt ?? DateTime(2026, 1, 1, 12);
   return SessionMessage(
     id: id,
     role: 'assistant',
@@ -1465,7 +1522,7 @@ SessionMessage _assistantMessage({
     content: content,
     attachments: const [],
     createdAt: now,
-    seq: 1,
+    seq: seq,
     phase: 'final_answer',
   );
 }
@@ -1476,8 +1533,10 @@ SessionActivity _commandActivity({
   required String command,
   required String cwd,
   required String output,
+  DateTime? createdAt,
 }) {
-  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  final now =
+      createdAt ?? DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
   return SessionActivity(
     id: id,
     type: 'command',
@@ -1517,8 +1576,10 @@ SessionActivity _fileChangeActivity({
   required int seq,
   required String path,
   String? turnId,
+  DateTime? createdAt,
 }) {
-  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  final now =
+      createdAt ?? DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
   return SessionActivity(
     id: id,
     type: 'file_change',
