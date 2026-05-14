@@ -9,8 +9,10 @@ import {
   buildFileChangeActivityFromRolloutEvent,
   buildImageGenerationActivityFromRolloutEvent,
   buildWebSearchActivityFromRolloutEvent,
+  mergeActivity,
 } from "./activity.js";
 import type {
+  CommandActivity,
   SessionLogSnapshot,
   SessionActivity,
   SessionMessageAttachment,
@@ -195,6 +197,10 @@ async function scanRolloutFile(
   let totalMessages = 0;
   let totalActivities = 0;
   let seq = 0;
+  const commandFunctionCalls = new Map<string, PendingCommandFunctionCall>();
+  const commandSessionCalls = new Map<string, PendingCommandFunctionCall>();
+  const stdinFunctionCalls = new Map<string, string>();
+  const countedActivityIds = new Set<string>();
   const file = createReadStream(rolloutPath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: file, crlfDelay: Infinity });
 
@@ -243,11 +249,61 @@ async function scanRolloutFile(
     }
 
     if (options.includeActivities) {
+      const commandFunctionCall = parseCommandFunctionCall(parsed, seq);
+      if (commandFunctionCall) {
+        commandFunctionCalls.set(commandFunctionCall.callId, commandFunctionCall);
+        const added = upsertBoundedActivity(
+          activities,
+          commandFunctionCall.activity,
+          options.activityLimit ?? null,
+        );
+        if (!countedActivityIds.has(commandFunctionCall.activity.id)) {
+          countedActivityIds.add(commandFunctionCall.activity.id);
+          totalActivities += 1;
+        }
+        if (added) {
+          seq += 1;
+        }
+        continue;
+      }
+
+      const stdinFunctionCall = parseStdinFunctionCall(parsed);
+      if (stdinFunctionCall) {
+        stdinFunctionCalls.set(stdinFunctionCall.callId, stdinFunctionCall.sessionId);
+        continue;
+      }
+
+      const commandFunctionOutput = parseCommandFunctionOutput(
+        parsed,
+        commandFunctionCalls,
+        commandSessionCalls,
+        stdinFunctionCalls,
+      );
+      if (commandFunctionOutput) {
+        const wasCounted = countedActivityIds.has(commandFunctionOutput.id);
+        const added = upsertBoundedActivity(
+          activities,
+          commandFunctionOutput,
+          options.activityLimit ?? null,
+        );
+        if (!wasCounted) {
+          countedActivityIds.add(commandFunctionOutput.id);
+          totalActivities += 1;
+        }
+        if (added && !wasCounted) {
+          seq += 1;
+        }
+        continue;
+      }
+
       const activity = parseActivity(parsed, seq);
       if (activity) {
-        totalActivities += 1;
-        seq += 1;
-        appendBounded(activities, activity, options.activityLimit ?? null);
+        upsertBoundedActivity(activities, activity, options.activityLimit ?? null);
+        if (!countedActivityIds.has(activity.id)) {
+          countedActivityIds.add(activity.id);
+          totalActivities += 1;
+          seq += 1;
+        }
       }
     }
   }
@@ -641,6 +697,210 @@ export function parseActivity(parsed: any, seq: number): SessionActivity | null 
     default:
       return null;
   }
+}
+
+type PendingCommandFunctionCall = {
+  callId: string;
+  activity: CommandActivity;
+  payload: Record<string, unknown>;
+};
+
+function parseCommandFunctionCall(
+  parsed: any,
+  seq: number,
+): PendingCommandFunctionCall | null {
+  if (parsed?.type !== "response_item" || parsed.payload?.type !== "function_call") {
+    return null;
+  }
+
+  const payload = parsed.payload as Record<string, unknown>;
+  const name = asOptionalString(payload.name);
+  if (name !== "exec_command" && name !== "functions.exec_command") {
+    return null;
+  }
+
+  const callId = asOptionalString(payload.call_id) ?? asOptionalString(payload.callId);
+  const args = parseFunctionArguments(payload.arguments);
+  const command = asOptionalString(args.cmd) ?? asOptionalString(args.command);
+  const cwd =
+    asOptionalString(args.workdir) ??
+    asOptionalString(args.cwd) ??
+    asOptionalString(args.workingDirectory);
+  if (!callId || !command || !cwd) {
+    return null;
+  }
+
+  const createdAt = parseTimestamp(parsed.timestamp);
+  const commandPayload: Record<string, unknown> = {
+    call_id: callId,
+    command,
+    cwd,
+    status: "in_progress",
+    source: "agent",
+  };
+  const activity = buildCommandActivityFromRolloutEvent(commandPayload, createdAt, seq);
+  if (!activity) {
+    return null;
+  }
+
+  return { callId, activity, payload: commandPayload };
+}
+
+function parseCommandFunctionOutput(
+  parsed: any,
+  pendingCalls: Map<string, PendingCommandFunctionCall>,
+  pendingSessions: Map<string, PendingCommandFunctionCall>,
+  stdinCalls: Map<string, string>,
+): SessionActivity | null {
+  if (
+    parsed?.type !== "response_item" ||
+    parsed.payload?.type !== "function_call_output"
+  ) {
+    return null;
+  }
+
+  const payload = parsed.payload as Record<string, unknown>;
+  const callId = asOptionalString(payload.call_id) ?? asOptionalString(payload.callId);
+  if (!callId) {
+    return null;
+  }
+  const stdinSessionId = stdinCalls.get(callId);
+  const pending = stdinSessionId
+    ? pendingSessions.get(stdinSessionId)
+    : pendingCalls.get(callId);
+  if (!pending) {
+    return null;
+  }
+  if (stdinSessionId) {
+    stdinCalls.delete(callId);
+  }
+
+  const output = asOptionalString(payload.output) ?? "";
+  const exitCode = parseCommandExitCode(output);
+  const processId = parseCommandSessionId(output);
+  const status = exitCode == null ? "in_progress" : exitCode === 0 ? "completed" : "failed";
+  const resolvedProcessId = processId ?? pending.activity.processId;
+  if (exitCode != null) {
+    pendingCalls.delete(pending.callId);
+    if (resolvedProcessId) {
+      pendingSessions.delete(resolvedProcessId);
+    }
+  } else if (resolvedProcessId) {
+    pendingSessions.set(resolvedProcessId, pending);
+  }
+
+  const activity = buildCommandActivityFromRolloutEvent(
+    {
+      ...pending.payload,
+      status,
+      aggregated_output: appendCommandOutput(pending.activity.output, output),
+      exit_code: exitCode,
+      duration_ms: parseCommandDurationMs(output),
+      process_id: resolvedProcessId,
+    },
+    pending.activity.createdAt,
+    pending.activity.seq,
+  );
+  if (activity) {
+    pending.activity = mergeActivity(pending.activity, activity) as CommandActivity;
+  }
+  return activity;
+}
+
+function parseStdinFunctionCall(
+  parsed: any,
+): { callId: string; sessionId: string } | null {
+  if (parsed?.type !== "response_item" || parsed.payload?.type !== "function_call") {
+    return null;
+  }
+
+  const payload = parsed.payload as Record<string, unknown>;
+  const name = asOptionalString(payload.name);
+  if (name !== "write_stdin" && name !== "functions.write_stdin") {
+    return null;
+  }
+
+  const callId = asOptionalString(payload.call_id) ?? asOptionalString(payload.callId);
+  const args = parseFunctionArguments(payload.arguments);
+  const sessionId = asOptionalIdString(args.session_id) ?? asOptionalIdString(args.sessionId);
+  if (!callId || !sessionId) {
+    return null;
+  }
+  return { callId, sessionId };
+}
+
+function upsertBoundedActivity(
+  activities: SessionActivity[],
+  activity: SessionActivity,
+  limit: number | null,
+): boolean {
+  const existingIndex = activities.findIndex((item) => item.id === activity.id);
+  if (existingIndex >= 0) {
+    activities[existingIndex] = mergeActivity(activities[existingIndex], activity);
+    return false;
+  }
+  appendBounded(activities, activity, limit);
+  return true;
+}
+
+function parseFunctionArguments(raw: unknown): Record<string, unknown> {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw !== "string" || !raw.trim()) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseCommandExitCode(output: string): number | null {
+  const match = /Process exited with code (-?\d+)/.exec(output);
+  if (!match) {
+    return null;
+  }
+  const exitCode = Number.parseInt(match[1], 10);
+  return Number.isFinite(exitCode) ? exitCode : null;
+}
+
+function parseCommandDurationMs(output: string): number | null {
+  const match = /Wall time: ([0-9.]+) seconds/.exec(output);
+  if (!match) {
+    return null;
+  }
+  const seconds = Number.parseFloat(match[1]);
+  return Number.isFinite(seconds) ? Math.round(seconds * 1000) : null;
+}
+
+function parseCommandSessionId(output: string): string | null {
+  const match = /Process running with session ID ([^\s]+)/.exec(output);
+  return match?.[1] ?? null;
+}
+
+function asOptionalIdString(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return undefined;
+}
+
+function appendCommandOutput(existing: string | null | undefined, next: string): string {
+  if (!existing) {
+    return next;
+  }
+  if (!next) {
+    return existing;
+  }
+  return `${existing}${existing.endsWith("\n") ? "" : "\n"}${next}`;
 }
 
 export function parseRuntime(parsed: any): SessionRuntimeSummary | null {
