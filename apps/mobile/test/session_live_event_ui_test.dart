@@ -1205,9 +1205,9 @@ void main() {
       await tester.tap(find.text('Stop agent').first);
       await _pumpFrames(tester);
 
-      expect(find.text('Stop agent?'), findsOneWidget);
+      expect(find.text('Stop the agent?'), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Stop'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Stop agent'));
       await _pumpFrames(tester);
 
       expect(api.stopSessionCalls, 1);
