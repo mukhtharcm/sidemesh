@@ -1281,7 +1281,7 @@ class _NavIconWithBadge extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
                 color: colors.danger,
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: AppShapes.iconWell,
                 border: Border.all(color: colors.canvas, width: 2),
               ),
               alignment: Alignment.center,
@@ -3110,7 +3110,7 @@ class _InboxCard extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onOpenSession,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: AppShapes.action,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(10, 9, 6, 10),
             child: Row(
@@ -3433,9 +3433,9 @@ class _MobileInboxAction extends StatelessWidget {
       message: tooltip,
       child: Material(
         color: background,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: AppShapes.action,
         child: InkWell(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: AppShapes.action,
           onTap: onTap,
           child: SizedBox(
             width: 40,
@@ -3608,7 +3608,7 @@ class _HostRowCard extends StatelessWidget {
                           height: 30,
                           decoration: BoxDecoration(
                             color: colors.accentMuted,
-                            borderRadius: BorderRadius.circular(9),
+                            borderRadius: AppShapes.iconWell,
                           ),
                           alignment: Alignment.center,
                           child: Icon(
@@ -4939,7 +4939,7 @@ class _MobileClientUpdateBanner extends StatelessWidget {
             height: 34,
             decoration: BoxDecoration(
               color: accent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: AppShapes.action,
               border: Border.all(color: accent.withValues(alpha: 0.28)),
             ),
             alignment: Alignment.center,

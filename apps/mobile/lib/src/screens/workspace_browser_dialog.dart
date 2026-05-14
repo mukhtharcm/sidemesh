@@ -4,6 +4,7 @@ import '../api_client.dart';
 import '../fs_models.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_tokens.dart';
 import '../widgets/mesh_widgets.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_pane.dart';
@@ -82,18 +83,12 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: colors.surfaceElevated,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: AppShapes.dialog,
             border: Border.all(color: colors.border),
-            boxShadow: [
-              BoxShadow(
-                color: colors.textPrimary.withValues(alpha: 0.12),
-                blurRadius: 28,
-                offset: const Offset(0, 16),
-              ),
-            ],
+            boxShadow: AppShadows.dialog(colors.textPrimary),
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: AppShapes.dialog,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -291,7 +286,7 @@ class _DialogPaneHeader extends StatelessWidget {
             height: 32,
             decoration: BoxDecoration(
               color: colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: AppShapes.action,
               border: Border.all(color: colors.border),
             ),
             alignment: Alignment.center,

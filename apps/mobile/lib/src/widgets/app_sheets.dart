@@ -41,18 +41,12 @@ class MeshBottomSheetScaffold extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: colors.surfaceElevated,
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: AppShapes.sheet,
                 border: Border.all(color: colors.border),
-                boxShadow: [
-                  BoxShadow(
-                    color: colors.textPrimary.withValues(alpha: 0.12),
-                    blurRadius: 24,
-                    offset: const Offset(0, 14),
-                  ),
-                ],
+                boxShadow: AppShadows.sheet(colors.textPrimary),
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: AppShapes.sheet,
                 child: Padding(
                   padding: padding,
                   child: Column(
@@ -77,7 +71,7 @@ class MeshBottomSheetScaffold extends StatelessWidget {
                             height: 34,
                             decoration: BoxDecoration(
                               color: colors.accentMuted,
-                              borderRadius: BorderRadius.circular(9),
+                              borderRadius: AppShapes.iconWell,
                               border: Border.all(
                                 color: colors.accent.withValues(alpha: 0.24),
                               ),

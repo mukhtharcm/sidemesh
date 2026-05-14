@@ -46,18 +46,12 @@ class MeshDialogScaffold extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: colors.surfaceElevated,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: AppShapes.dialog,
             border: Border.all(color: colors.border),
-            boxShadow: [
-              BoxShadow(
-                color: colors.textPrimary.withValues(alpha: 0.12),
-                blurRadius: 28,
-                offset: const Offset(0, 16),
-              ),
-            ],
+            boxShadow: AppShadows.dialog(colors.textPrimary),
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: AppShapes.dialog,
             child: Padding(
               padding: padding,
               child: LayoutBuilder(
@@ -75,7 +69,7 @@ class MeshDialogScaffold extends StatelessWidget {
                             height: 36,
                             decoration: BoxDecoration(
                               color: muted,
-                              borderRadius: BorderRadius.circular(9),
+                              borderRadius: AppShapes.iconWell,
                               border: Border.all(
                                 color: accent.withValues(alpha: 0.24),
                               ),

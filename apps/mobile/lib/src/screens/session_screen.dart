@@ -5243,20 +5243,14 @@ class _SessionScreenState extends State<SessionScreen>
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: dialogContext.colors.surfaceElevated,
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: AppShapes.dialog,
                 border: Border.all(color: dialogContext.colors.border),
-                boxShadow: [
-                  BoxShadow(
-                    color: dialogContext.colors.textPrimary.withValues(
-                      alpha: 0.12,
-                    ),
-                    blurRadius: 28,
-                    offset: const Offset(0, 16),
-                  ),
-                ],
+                boxShadow: AppShadows.dialog(
+                  dialogContext.colors.textPrimary,
+                ),
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: AppShapes.dialog,
                 child: sheet,
               ),
             ),

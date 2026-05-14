@@ -603,14 +603,14 @@ class _ComposerPlusButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppShapes.badge,
           onTap: enabled ? () => _handleTap(context) : null,
           child: Container(
             width: 40,
             height: 40,
             decoration: BoxDecoration(
               color: colors.surfaceMuted.withValues(alpha: 0.56),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: AppShapes.badge,
               border: Border.all(color: colors.border),
             ),
             child: Icon(
@@ -640,7 +640,7 @@ class _ComposerAttachButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppShapes.badge,
           onTap: enabled ? onPressed : null,
           child: SizedBox(
             width: 34,
@@ -682,7 +682,7 @@ class _ComposerModelButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppShapes.badge,
           onTap: onPressed,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 140),
@@ -699,7 +699,7 @@ class _ComposerModelButton extends StatelessWidget {
               color: customized
                   ? colors.accentMuted
                   : colors.surfaceMuted.withValues(alpha: 0.56),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: AppShapes.badge,
               border: Border.all(
                 color: customized
                     ? colors.accent.withValues(alpha: 0.38)
@@ -776,7 +776,7 @@ class _SendButton extends StatelessWidget {
             ? colors.surfaceMuted
             : (canSend ? colors.accent : colors.surfaceMuted);
         final size = compact ? 36.0 : 40.0;
-        final radius = compact ? 9.0 : 10.0;
+        final radius = compact ? AppRadii.iconWell : AppRadii.action;
         return Material(
           color: Colors.transparent,
           child: InkWell(
@@ -935,7 +935,7 @@ class _ComposerSkillSuggestionTrayState
         height: 28,
         decoration: BoxDecoration(
           color: colors.surfaceMuted,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: AppShapes.action,
           border: Border.all(color: colors.border),
         ),
         alignment: Alignment.center,
