@@ -122,6 +122,46 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('mobile composer model chip opens the model picker only', (
+    tester,
+  ) async {
+    final host = _host('mobile-session-model-picker');
+    final session = _session('mobile-model-picker-session', provider: 'fake');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(host: host, session: session, api: api),
+      size: const Size(390, 840),
+    );
+    await _pumpFrames(tester);
+
+    final modelTooltip = find.byWidgetPredicate(
+      (widget) =>
+          widget is Tooltip &&
+          widget.message?.startsWith('Choose model') == true,
+    );
+    final modelButton = find.descendant(
+      of: modelTooltip,
+      matching: find.byType(InkWell),
+    );
+    expect(modelButton, findsOneWidget);
+
+    await tester.tap(modelButton);
+    await _pumpFrames(tester);
+
+    expect(find.text('Choose a model'), findsOneWidget);
+    expect(find.text('Model and thinking'), findsNothing);
+    expect(find.text('Approvals'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets(
     'session screen surfaces browser preview actions for preview-capable hosts',
     (tester) async {

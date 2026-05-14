@@ -58,6 +58,7 @@ import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../windowing.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/app_dialogs.dart';
 import '../widgets/app_sheets.dart';
 import '../widgets/composer_paste_text_action.dart';
 import '../widgets/markdown_content.dart';
@@ -873,6 +874,10 @@ class _SessionScreenState extends State<SessionScreen>
 
   bool get _supportsProviderRestart =>
       _supportsProviderCapability('lifecycle', 'restart');
+
+  bool get _supportsComposerModelPicker =>
+      _supportsProviderCapability('configuration', 'models') &&
+      _supportsProviderCapability('runtimeControls', 'model');
 
   bool _supportsGitDiffKind(String kind) {
     if (kind == 'remote') {
@@ -4430,101 +4435,15 @@ class _SessionScreenState extends State<SessionScreen>
     required String confirmLabel,
     bool danger = false,
   }) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        final colors = dialogContext.colors;
-        final accent = danger ? colors.danger : colors.accent;
-        final muted = danger ? colors.dangerMuted : colors.accentMuted;
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 28,
-            vertical: 24,
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: MeshCard(
-              tone: MeshCardTone.surface,
-              padding: const EdgeInsets.all(18),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final compact = constraints.maxWidth < 360;
-                  final confirmButton = FilledButton(
-                    style: danger
-                        ? FilledButton.styleFrom(
-                            backgroundColor: colors.danger,
-                            foregroundColor: colors.accentOn,
-                          )
-                        : null,
-                    onPressed: () => Navigator.of(dialogContext).pop(true),
-                    child: Text(confirmLabel),
-                  );
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: muted,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: accent.withValues(alpha: 0.24),
-                          ),
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(icon, size: 20, color: accent),
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        title,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: AppWeights.title,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        body,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.4,
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      if (compact) ...[
-                        SizedBox(width: double.infinity, child: confirmButton),
-                        const SizedBox(height: 8),
-                        Center(
-                          child: TextButton(
-                            onPressed: () =>
-                                Navigator.of(dialogContext).pop(false),
-                            child: const Text('Cancel'),
-                          ),
-                        ),
-                      ] else
-                        Row(
-                          children: [
-                            TextButton(
-                              onPressed: () =>
-                                  Navigator.of(dialogContext).pop(false),
-                              child: const Text('Cancel'),
-                            ),
-                            const Spacer(),
-                            confirmButton,
-                          ],
-                        ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ),
-        );
-      },
+    return showMeshConfirmDialog(
+      context,
+      icon: icon,
+      title: title,
+      description: body,
+      confirmLabel: confirmLabel,
+      danger: danger,
+      maxWidth: 420,
     );
-    return confirmed == true;
   }
 
   Future<String?> _promptSessionName(String current) async {
@@ -4533,83 +4452,28 @@ class _SessionScreenState extends State<SessionScreen>
     final nextName = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
-        final colors = dialogContext.colors;
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 28,
-            vertical: 24,
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460),
-            child: MeshCard(
-              tone: MeshCardTone.surface,
-              padding: const EdgeInsets.all(18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: colors.accentMuted,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: colors.accent.withValues(alpha: 0.24),
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      Icons.edit_outlined,
-                      size: 20,
-                      color: colors.accent,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'Rename session',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: AppWeights.title,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Choose the name you want to see in Sidemesh for this session.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: colors.textSecondary,
-                      height: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: controller,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Session name',
-                    ),
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (value) =>
-                        Navigator.of(dialogContext).pop(value),
-                  ),
-                  const SizedBox(height: 18),
-                  Row(
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        child: const Text('Cancel'),
-                      ),
-                      const Spacer(),
-                      FilledButton(
-                        onPressed: () =>
-                            Navigator.of(dialogContext).pop(controller.text),
-                        child: const Text('Save name'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+        return MeshDialogScaffold(
+          icon: Icons.edit_outlined,
+          title: 'Rename session',
+          description: 'Choose the name shown in Sidemesh.',
+          maxWidth: 460,
+          showCloseButton: true,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
             ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+              child: const Text('Save name'),
+            ),
+          ],
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Session name'),
+            textInputAction: TextInputAction.done,
+            onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
           ),
         );
       },
@@ -5369,17 +5233,33 @@ class _SessionScreenState extends State<SessionScreen>
         context: context,
         barrierColor: Colors.black.withValues(alpha: 0.35),
         builder: (dialogContext) => Dialog(
-          backgroundColor: context.colors.surface,
+          backgroundColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 48,
             vertical: 48,
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
-            child: sheet,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: dialogContext.colors.surfaceElevated,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: dialogContext.colors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: dialogContext.colors.textPrimary.withValues(
+                      alpha: 0.12,
+                    ),
+                    blurRadius: 28,
+                    offset: const Offset(0, 16),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: sheet,
+              ),
+            ),
           ),
         ),
       );
@@ -6755,54 +6635,56 @@ class _SessionScreenState extends State<SessionScreen>
         _ComposerStatusStrip(thinking: _thinkingNotifier),
         ListenableBuilder(
           listenable: _turnConfigStore,
-          builder: (context, _) => _Composer(
-            controller: _composerController,
-            focusNode: _composerFocusNode,
-            isFocused: _composerFocused,
-            attachments: _draftAttachments,
-            skills: _draftSkillMentions,
-            files: _draftFileMentions,
-            activeSkillQuery: _activeSkillQuery?.query,
-            skillSuggestions: _skillSuggestions,
-            loadingSkills: _loadingSkills,
-            skillError: _skillsError,
-            activeFileQuery: _activeFileQuery?.query,
-            fileSuggestions: _fileSuggestions,
-            loadingFileSearch: _loadingFileSearch,
-            fileError: _fileSearchError,
-            sending: _sending,
-            supportsImageInput: _supportsImageInput,
-            supportsSkillInput: _supportsSkillInput,
-            supportsFileMentions: _supportsFileMentions,
-            onPickImages: _pickComposerImages,
-            onNativePaste: () => _pasteComposerImage(showEmptyFeedback: false),
-            onRemoveAttachment: _removeDraftAttachment,
-            onSelectSkill: _insertSkillMention,
-            onRemoveSkill: _removeDraftSkillMention,
-            onSelectFile: _insertFileMention,
-            onRemoveFile: _removeDraftFileMention,
-            onSend: _sendInput,
-            onDismiss: _dismissKeyboard,
-            onAddSkillTrigger: _supportsSkillInput
-                ? _addSkillTriggerToComposer
-                : null,
-            onAddFileTrigger: _supportsFileMentions
-                ? _addFileTriggerToComposer
-                : null,
-            modelLabel: widget.desktopMode
-                ? _composerModelLabel(session)
-                : null,
-            modelDetail: widget.desktopMode
-                ? _composerModelDetail(session)
-                : null,
-            modelCustomized: widget.desktopMode
-                ? _composerModelCustomized(session)
-                : false,
-            onModelTap: widget.desktopMode
-                ? () => _showComposerModelPicker(session)
-                : null,
-            submitOnEnter: widget.desktopMode,
-          ),
+          builder: (context, _) {
+            final showModelPicker = _supportsComposerModelPicker;
+            return _Composer(
+              controller: _composerController,
+              focusNode: _composerFocusNode,
+              isFocused: _composerFocused,
+              attachments: _draftAttachments,
+              skills: _draftSkillMentions,
+              files: _draftFileMentions,
+              activeSkillQuery: _activeSkillQuery?.query,
+              skillSuggestions: _skillSuggestions,
+              loadingSkills: _loadingSkills,
+              skillError: _skillsError,
+              activeFileQuery: _activeFileQuery?.query,
+              fileSuggestions: _fileSuggestions,
+              loadingFileSearch: _loadingFileSearch,
+              fileError: _fileSearchError,
+              sending: _sending,
+              supportsImageInput: _supportsImageInput,
+              supportsSkillInput: _supportsSkillInput,
+              supportsFileMentions: _supportsFileMentions,
+              onPickImages: _pickComposerImages,
+              onNativePaste: () =>
+                  _pasteComposerImage(showEmptyFeedback: false),
+              onRemoveAttachment: _removeDraftAttachment,
+              onSelectSkill: _insertSkillMention,
+              onRemoveSkill: _removeDraftSkillMention,
+              onSelectFile: _insertFileMention,
+              onRemoveFile: _removeDraftFileMention,
+              onSend: _sendInput,
+              onDismiss: _dismissKeyboard,
+              onAddSkillTrigger: _supportsSkillInput
+                  ? _addSkillTriggerToComposer
+                  : null,
+              onAddFileTrigger: _supportsFileMentions
+                  ? _addFileTriggerToComposer
+                  : null,
+              modelLabel: showModelPicker ? _composerModelLabel(session) : null,
+              modelDetail: showModelPicker
+                  ? _composerModelDetail(session)
+                  : null,
+              modelCustomized: showModelPicker
+                  ? _composerModelCustomized(session)
+                  : false,
+              onModelTap: showModelPicker
+                  ? () => _showComposerModelPicker(session)
+                  : null,
+              submitOnEnter: widget.desktopMode,
+            );
+          },
         ),
       ],
     );

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
-import 'mesh_widgets.dart';
 
 class MeshDialogScaffold extends StatelessWidget {
   const MeshDialogScaffold({
@@ -15,6 +14,8 @@ class MeshDialogScaffold extends StatelessWidget {
     this.maxWidth = 440,
     this.danger = false,
     this.padding = const EdgeInsets.all(18),
+    this.showCloseButton = false,
+    this.onClose,
   });
 
   final IconData icon;
@@ -25,66 +26,138 @@ class MeshDialogScaffold extends StatelessWidget {
   final double maxWidth;
   final bool danger;
   final EdgeInsetsGeometry padding;
+  final bool showCloseButton;
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final accent = danger ? colors.danger : colors.accent;
     final muted = danger ? colors.dangerMuted : colors.accentMuted;
+    final narrowScreen = MediaQuery.sizeOf(context).width < 420;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: narrowScreen ? 18 : 32,
+        vertical: 24,
+      ),
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
-        child: MeshCard(
-          tone: MeshCardTone.surface,
-          padding: padding,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: muted,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: accent.withValues(alpha: 0.24)),
-                ),
-                alignment: Alignment.center,
-                child: Icon(icon, size: 20, color: accent),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.surfaceElevated,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: colors.border),
+            boxShadow: [
+              BoxShadow(
+                color: colors.textPrimary.withValues(alpha: 0.12),
+                blurRadius: 28,
+                offset: const Offset(0, 16),
               ),
-              const SizedBox(height: 14),
-              Text(
-                title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: AppWeights.title),
-              ),
-              if (description != null) ...[
-                const SizedBox(height: 6),
-                Text(
-                  description!,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.4,
-                  ),
-                ),
-              ],
-              if (child != null) ...[const SizedBox(height: 16), child!],
-              if (actions.isNotEmpty) ...[
-                const SizedBox(height: 18),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Wrap(
-                    spacing: AppSpacing.sm,
-                    runSpacing: AppSpacing.sm,
-                    alignment: WrapAlignment.end,
-                    children: actions,
-                  ),
-                ),
-              ],
             ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: Padding(
+              padding: padding,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final compactActions = constraints.maxWidth < 380;
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: muted,
+                              borderRadius: BorderRadius.circular(9),
+                              border: Border.all(
+                                color: accent.withValues(alpha: 0.24),
+                              ),
+                            ),
+                            alignment: Alignment.center,
+                            child: Icon(icon, size: 18, color: accent),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  title,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(
+                                        color: colors.textPrimary,
+                                        fontWeight: AppWeights.title,
+                                        letterSpacing: -0.2,
+                                      ),
+                                ),
+                                if (description != null) ...[
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    description!,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: colors.textSecondary,
+                                          height: 1.38,
+                                        ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          if (showCloseButton) ...[
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.close_rounded, size: 18),
+                              tooltip: 'Close',
+                              visualDensity: VisualDensity.compact,
+                              onPressed:
+                                  onClose ??
+                                  () => Navigator.of(context).maybePop(),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (child != null) ...[const SizedBox(height: 16), child!],
+                      if (actions.isNotEmpty) ...[
+                        const SizedBox(height: 18),
+                        if (compactActions)
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (final action in actions.reversed) ...[
+                                SizedBox(width: double.infinity, child: action),
+                                if (action != actions.first)
+                                  const SizedBox(height: AppSpacing.sm),
+                              ],
+                            ],
+                          )
+                        else
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: Wrap(
+                              spacing: AppSpacing.sm,
+                              runSpacing: AppSpacing.sm,
+                              alignment: WrapAlignment.end,
+                              children: actions,
+                            ),
+                          ),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
         ),
       ),

@@ -41,18 +41,18 @@ class MeshBottomSheetScaffold extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: colors.surfaceElevated,
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: colors.border),
                 boxShadow: [
                   BoxShadow(
                     color: colors.textPrimary.withValues(alpha: 0.12),
-                    blurRadius: 32,
-                    offset: const Offset(0, 18),
+                    blurRadius: 24,
+                    offset: const Offset(0, 14),
                   ),
                 ],
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: BorderRadius.circular(20),
                 child: Padding(
                   padding: padding,
                   child: Column(
@@ -60,7 +60,7 @@ class MeshBottomSheetScaffold extends StatelessWidget {
                     children: [
                       Center(
                         child: Container(
-                          width: 38,
+                          width: 34,
                           height: 4,
                           decoration: BoxDecoration(
                             color: colors.borderStrong.withValues(alpha: 0.55),
@@ -73,11 +73,11 @@ class MeshBottomSheetScaffold extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
-                            width: 38,
-                            height: 38,
+                            width: 34,
+                            height: 34,
                             decoration: BoxDecoration(
                               color: colors.accentMuted,
-                              borderRadius: AppShapes.input,
+                              borderRadius: BorderRadius.circular(9),
                               border: Border.all(
                                 color: colors.accent.withValues(alpha: 0.24),
                               ),
