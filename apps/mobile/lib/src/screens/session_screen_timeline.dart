@@ -977,6 +977,15 @@ MeshPillTone _pendingSendStateTone(PendingSendDisplayState state) {
   };
 }
 
+class _CommandTitleParts {
+  const _CommandTitleParts({required this.verb, required this.command});
+
+  final String verb;
+  final String command;
+
+  String get plainText => '$verb $command';
+}
+
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.host,
@@ -1014,26 +1023,43 @@ class _MessageBubble extends StatelessWidget {
       _ => colors.surfaceMuted,
     };
     final textColor = isUser ? colors.userBubbleOn : colors.textPrimary;
-    final messagePadding = const EdgeInsets.fromLTRB(16, 12, 16, 14);
+    final messagePadding = isAssistant
+        ? const EdgeInsets.fromLTRB(16, 13, 16, 14)
+        : const EdgeInsets.fromLTRB(16, 12, 16, 14);
+    final bubbleBorderColor = isAssistant
+        ? live
+              ? colors.accent.withValues(alpha: 0.36)
+              : colors.assistantBubbleBorder
+        : live
+        ? colors.accent
+        : colors.userBubble;
+    final phaseLabel = live
+        ? 'Writing'
+        : message.phase == 'commentary'
+        ? 'Progress'
+        : null;
 
-    if (isAssistant) {
-      final phaseLabel = live
-          ? 'Writing'
-          : message.phase == 'commentary'
-          ? 'Progress'
-          : null;
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 700),
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: isAssistant ? 14 : 10),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: isAssistant ? 680 : 560),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: bubbleColor,
+              borderRadius: BorderRadius.circular(isAssistant ? 16 : 20),
+              border: Border.all(
+                color: bubbleBorderColor,
+                width: live ? 1.4 : 1,
+              ),
+            ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
+              padding: messagePadding,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (phaseLabel != null)
+                  if (phaseLabel != null && hasAnswer)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Row(
@@ -1046,7 +1072,9 @@ class _MessageBubble extends StatelessWidget {
                             phaseLabel,
                             style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
-                                  color: colors.textTertiary,
+                                  color: isAssistant
+                                      ? colors.textTertiary
+                                      : textColor.withValues(alpha: 0.68),
                                   fontWeight: AppWeights.title,
                                   letterSpacing: 0.2,
                                 ),
@@ -1054,104 +1082,6 @@ class _MessageBubble extends StatelessWidget {
                         ],
                       ),
                     ),
-                  for (final block in message.content)
-                    if (block is ThinkingBlock)
-                      Padding(
-                        padding: EdgeInsets.only(bottom: hasAnswer ? 10 : 0),
-                        child: _ReasoningBlock(
-                          reasoning: block.thinking,
-                          live: live,
-                          collapsedByDefault: hasAnswer,
-                          onOpenFile: onOpenFile,
-                        ),
-                      )
-                    else if (block is TextBlock)
-                      _MarkdownMessageBody(
-                        text: block.text,
-                        textColor: textColor,
-                        onOpenFile: onOpenFile,
-                      ),
-                  if (message.attachments.isNotEmpty) ...[
-                    _MessageAttachmentsSection(
-                      host: host,
-                      api: api,
-                      attachments: message.attachments,
-                    ),
-                    if (!hasTextBlocks && hasText)
-                      const SizedBox(height: 10),
-                  ],
-                  if (!hasTextBlocks && hasText)
-                    _MarkdownMessageBody(
-                      text: message.text,
-                      textColor: textColor,
-                      onOpenFile: onOpenFile,
-                    ),
-                  if (canPin || hasText)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              _formatMessageTime(message.createdAt),
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: colors.textTertiary,
-                                    fontSize: 10.5,
-                                    fontFeatures: const [
-                                      FontFeature.tabularFigures(),
-                                    ],
-                                  ),
-                            ),
-                            if (canPin)
-                              _MessagePinButton(
-                                pinned: pinned,
-                                tone: colors.textSecondary,
-                                accent: colors.warning,
-                                onTap: onTogglePin!,
-                              ),
-                            if (hasText)
-                              _MessageCopyButton(
-                                text: message.text,
-                                tone: colors.textSecondary,
-                                accent: colors.accent,
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: bubbleColor,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: live ? colors.accent : colors.userBubble,
-                width: live ? 1.4 : 1,
-              ),
-            ),
-            child: Padding(
-              padding: messagePadding,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
                   for (final block in message.content)
                     if (block is ThinkingBlock)
                       Padding(
@@ -2203,6 +2133,81 @@ class _ActivityCardState extends State<_ActivityCard> {
     return pills;
   }
 
+  _CommandTitleParts? _activityCommandTitleParts(SessionActivity activity) {
+    final command = activity.isCommand
+        ? _displayCommandText(activity.command ?? '')
+        : activity.isTool && activity.toolCategory == 'command'
+        ? _displayCommandText(_toolCommandText(activity))
+        : '';
+    if (command.isEmpty) {
+      return null;
+    }
+    return _CommandTitleParts(
+      verb: _commandStatusVerb(activity.status),
+      command: command,
+    );
+  }
+
+  Widget _buildActivityTitle(
+    BuildContext context, {
+    required SessionActivity activity,
+    required String title,
+  }) {
+    final commandTitle = _activityCommandTitleParts(activity);
+    final child = commandTitle != null
+        ? Text.rich(
+            key: ValueKey('cmd:${commandTitle.plainText}:$_cardCollapsed'),
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: '${commandTitle.verb} ',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: context.colors.textPrimary,
+                    fontWeight: AppWeights.emphasis,
+                    height: 1.35,
+                  ),
+                ),
+                TextSpan(
+                  text: commandTitle.command,
+                  style: monoStyle(
+                    color: context.colors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: AppWeights.emphasis,
+                  ).copyWith(
+                    backgroundColor:
+                        context.colors.accentMuted.withValues(alpha: 0.72),
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+            maxLines: _cardCollapsed ? 1 : 3,
+            overflow: TextOverflow.ellipsis,
+          )
+        : Text(
+            title,
+            key: ValueKey('title:$title:$_cardCollapsed'),
+            maxLines: _cardCollapsed ? 1 : 3,
+            overflow: TextOverflow.ellipsis,
+            style:
+                (activity.isTool
+                        ? monoStyle(
+                            color: context.colors.textPrimary,
+                            fontSize: 13,
+                          )
+                        : Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: AppWeights.emphasis,
+                          ))
+                    ?.copyWith(height: 1.35),
+          );
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 160),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeOutCubic,
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final activity = widget.activity;
@@ -2219,7 +2224,7 @@ class _ActivityCardState extends State<_ActivityCard> {
         activity.changes.length == 1
             ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
             : 'Edited ${activity.changes.length} files',
-      'turn_diff' => 'Live turn diff',
+      'turn_diff' => _turnDiffActivityTitle(activity),
       'web_search' => _webSearchTitle(activity),
       'image_generation' => 'Generated image',
       'context_compaction' => 'Context compacted',
@@ -2230,7 +2235,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'command' => _relativeSessionPath(activity.cwd ?? sessionCwd, sessionCwd),
       'tool' => _toolActivitySubtitle(activity, sessionCwd),
       'file_change' => _activityFileSummary(activity.changes, sessionCwd),
-      'turn_diff' => 'Aggregated patch snapshot for this turn',
+      'turn_diff' => null,
       'web_search' => _webSearchSubtitle(activity),
       'image_generation' =>
         (activity.savedPath ?? '').isNotEmpty
@@ -2242,10 +2247,10 @@ class _ActivityCardState extends State<_ActivityCard> {
     };
 
     final activityLabel = switch (activity.type) {
-      'command' => 'Command',
+      'command' => null,
       'tool' => _toolActivityLabel(activity),
       'file_change' => 'File edit',
-      'turn_diff' => 'Live diff',
+      'turn_diff' => null,
       'web_search' => 'Web search',
       'image_generation' => 'Image',
       'context_compaction' => 'Context',
@@ -2277,7 +2282,14 @@ class _ActivityCardState extends State<_ActivityCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Material(
-                color: Colors.transparent,
+                color: colors.surfaceMuted.withValues(alpha: 0.48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: AppShapes.input,
+                  side: BorderSide(
+                    color: colors.border.withValues(alpha: 0.62),
+                  ),
+                ),
+                clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: () {
                     setState(() {
@@ -2288,8 +2300,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                   borderRadius: AppShapes.input,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 7,
+                      horizontal: 10,
+                      vertical: 8,
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -2311,7 +2323,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                             activityIcon,
                             size: 16,
                             color: activity.isCommand || activity.isTool
-                                ? colors.textSecondary
+                                ? colors.textPrimary
                                 : colors.accent,
                           ),
                         ),
@@ -2320,32 +2332,22 @@ class _ActivityCardState extends State<_ActivityCard> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                activityLabel,
-                                style: Theme.of(context).textTheme.labelSmall
-                                    ?.copyWith(
-                                      color: colors.textTertiary,
-                                      fontWeight: AppWeights.title,
-                                      letterSpacing: 0.2,
-                                    ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                title,
-                                maxLines: _cardCollapsed ? 1 : 3,
-                                overflow: TextOverflow.ellipsis,
-                                style:
-                                    (activity.isCommand || activity.isTool
-                                            ? monoStyle(
-                                                color: colors.textPrimary,
-                                                fontSize: 13,
-                                              )
-                                            : Theme.of(
-                                                context,
-                                              ).textTheme.titleSmall?.copyWith(
-                                                fontWeight: AppWeights.emphasis,
-                                              ))
-                                        ?.copyWith(height: 1.35),
+                              if (activityLabel != null) ...[
+                                Text(
+                                  activityLabel,
+                                  style: Theme.of(context).textTheme.labelSmall
+                                      ?.copyWith(
+                                        color: colors.textTertiary,
+                                        fontWeight: AppWeights.title,
+                                        letterSpacing: 0.2,
+                                      ),
+                                ),
+                                const SizedBox(height: 2),
+                              ],
+                              _buildActivityTitle(
+                                context,
+                                activity: activity,
+                                title: title,
                               ),
                               if (!_cardCollapsed &&
                                   subtitle != null &&
@@ -2467,7 +2469,14 @@ class _ActivityCardState extends State<_ActivityCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Material(
-                color: Colors.transparent,
+                color: colors.surfaceMuted.withValues(alpha: 0.48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: AppShapes.input,
+                  side: BorderSide(
+                    color: colors.border.withValues(alpha: 0.62),
+                  ),
+                ),
+                clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: () {
                     setState(() {
@@ -2478,8 +2487,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                   borderRadius: AppShapes.input,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 7,
+                      horizontal: 10,
+                      vertical: 8,
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -2972,7 +2981,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     return name.isNotEmpty ? name : null;
   }
 
-  String _toolActivityLabel(SessionActivity activity) {
+  String? _toolActivityLabel(SessionActivity activity) {
     if (activity.toolAction == 'mode_change') {
       return 'Mode';
     }
@@ -2989,7 +2998,7 @@ class _ActivityCardState extends State<_ActivityCard> {
         'search' => 'Web search',
         _ => 'Network',
       },
-      'command' => 'Command',
+      'command' => null,
       'session' => 'Session',
       'memory' => 'Memory',
       'task' => 'Task',
@@ -3193,11 +3202,6 @@ class _ActivityCardState extends State<_ActivityCard> {
         ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
       ),
     );
-  }
-
-  int _diffLineCount(String diff) {
-    if (diff.isEmpty) return 0;
-    return '\n'.allMatches(diff).length + 1;
   }
 
   Widget _buildLazyDiff(
@@ -3986,22 +3990,26 @@ String _commandActivityTitle(SessionActivity activity) {
   return _commandStatusTitle(activity.status, command);
 }
 
+String _commandStatusVerb(String status) {
+  return switch (status) {
+    'failed' => 'failed',
+    'declined' => 'declined',
+    'in_progress' => 'running',
+    _ => 'ran',
+  };
+}
+
 String _commandStatusTitle(String status, String command) {
+  final verb = _commandStatusVerb(status);
   final target = command.trim();
   if (target.isEmpty) {
     return switch (status) {
-      'failed' => 'Command failed',
-      'declined' => 'Command declined',
-      'in_progress' => 'Running command',
-      _ => 'Ran command',
+      'failed' => 'command failed',
+      'declined' => 'command declined',
+      _ => '$verb command',
     };
   }
-  return switch (status) {
-    'failed' => 'Failed $target',
-    'declined' => 'Declined $target',
-    'in_progress' => 'Running $target',
-    _ => 'Ran $target',
-  };
+  return '$verb $target';
 }
 
 String _displayCommandText(String raw) {
@@ -4090,6 +4098,23 @@ List<String> _splitShellWords(String input) {
   }
   flush();
   return words;
+}
+
+String _turnDiffActivityTitle(SessionActivity activity) {
+  final diff = (activity.diff ?? '').trim();
+  if (diff.isEmpty) {
+    return activity.status == 'completed'
+        ? 'no live diff captured'
+        : 'tracking live diff';
+  }
+  final lines = _diffLineCount(diff);
+  final noun = lines == 1 ? 'line' : 'lines';
+  return 'live diff · $lines $noun';
+}
+
+int _diffLineCount(String diff) {
+  if (diff.isEmpty) return 0;
+  return '\n'.allMatches(diff).length + 1;
 }
 
 String _fileChangeActivityTitle(
