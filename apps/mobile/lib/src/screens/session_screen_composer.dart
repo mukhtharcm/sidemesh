@@ -43,6 +43,10 @@ class _Composer extends StatelessWidget {
     this.modelDetail,
     this.modelCustomized = false,
     this.onModelTap,
+    this.thinkingLabel,
+    this.thinkingDetail,
+    this.thinkingCustomized = false,
+    this.onThinkingTap,
     this.submitOnEnter = false,
   });
 
@@ -93,6 +97,10 @@ class _Composer extends StatelessWidget {
   final String? modelDetail;
   final bool modelCustomized;
   final VoidCallback? onModelTap;
+  final String? thinkingLabel;
+  final String? thinkingDetail;
+  final bool thinkingCustomized;
+  final VoidCallback? onThinkingTap;
 
   final bool submitOnEnter;
 
@@ -161,7 +169,31 @@ class _Composer extends StatelessWidget {
         !isDesktop &&
         (supportsImageInput || supportsSkillInput || supportsFileMentions);
     final bool showModelButton = modelLabel != null && onModelTap != null;
-    final bool showMobileModelButton = !isDesktop && showModelButton;
+    final bool showThinkingButton =
+        thinkingLabel != null && onThinkingTap != null;
+    final bool showMobileControlStrip =
+        !isDesktop && (showModelButton || showThinkingButton);
+
+    final modelControlButton = showModelButton
+        ? _ComposerModelButton(
+            label: modelLabel!,
+            detail: modelDetail,
+            customized: modelCustomized,
+            icon: Icons.memory_rounded,
+            tooltipLabel: 'Choose model',
+            onPressed: onModelTap!,
+          )
+        : null;
+    final thinkingControlButton = showThinkingButton
+        ? _ComposerModelButton(
+            label: thinkingLabel!,
+            detail: thinkingDetail,
+            customized: thinkingCustomized,
+            icon: Icons.psychology_alt_rounded,
+            tooltipLabel: 'Choose thinking level',
+            onPressed: onThinkingTap!,
+          )
+        : null;
 
     final inputRow = Row(
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -192,14 +224,13 @@ class _Composer extends StatelessWidget {
             child: field,
           ),
         ),
-        if (isDesktop && showModelButton) ...[
+        if (isDesktop && modelControlButton != null) ...[
           const SizedBox(width: 8),
-          _ComposerModelButton(
-            label: modelLabel!,
-            detail: modelDetail,
-            customized: modelCustomized,
-            onPressed: onModelTap!,
-          ),
+          modelControlButton,
+        ],
+        if (isDesktop && thinkingControlButton != null) ...[
+          const SizedBox(width: 6),
+          thinkingControlButton,
         ],
         const SizedBox(width: 6),
         _SendButton(
@@ -213,24 +244,40 @@ class _Composer extends StatelessWidget {
       ],
     );
 
-    final barContent = showMobileModelButton
+    final barContent = showMobileControlStrip
         ? Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Flexible(
-                    child: _ComposerModelButton(
-                      label: modelLabel!,
-                      detail: modelDetail,
-                      customized: modelCustomized,
-                      onPressed: onModelTap!,
-                      compact: true,
-                    ),
-                  ),
-                  const Spacer(),
-                ],
+              Align(
+                alignment: Alignment.centerRight,
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    if (modelControlButton != null)
+                      _ComposerModelButton(
+                        label: modelLabel!,
+                        detail: modelDetail,
+                        customized: modelCustomized,
+                        icon: Icons.memory_rounded,
+                        tooltipLabel: 'Choose model',
+                        onPressed: onModelTap!,
+                        compact: true,
+                      ),
+                    if (thinkingControlButton != null)
+                      _ComposerModelButton(
+                        label: thinkingLabel!,
+                        detail: thinkingDetail,
+                        customized: thinkingCustomized,
+                        icon: Icons.psychology_alt_rounded,
+                        tooltipLabel: 'Choose thinking level',
+                        onPressed: onThinkingTap!,
+                        compact: true,
+                      ),
+                  ],
+                ),
               ),
               const SizedBox(height: 7),
               Container(
@@ -662,6 +709,8 @@ class _ComposerModelButton extends StatelessWidget {
     required this.label,
     required this.detail,
     required this.customized,
+    required this.icon,
+    required this.tooltipLabel,
     required this.onPressed,
     this.compact = false,
   });
@@ -669,6 +718,8 @@ class _ComposerModelButton extends StatelessWidget {
   final String label;
   final String? detail;
   final bool customized;
+  final IconData icon;
+  final String tooltipLabel;
   final VoidCallback onPressed;
   final bool compact;
 
@@ -678,7 +729,7 @@ class _ComposerModelButton extends StatelessWidget {
     final maxWidth = compact ? 220.0 : 162.0;
     final minHeight = compact ? 32.0 : 36.0;
     return Tooltip(
-      message: detail == null ? 'Choose model' : 'Choose model: $detail',
+      message: detail == null ? tooltipLabel : '$tooltipLabel: $detail',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
@@ -710,7 +761,7 @@ class _ComposerModelButton extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  Icons.memory_rounded,
+                  icon,
                   size: compact ? 14 : 15,
                   color: customized ? colors.accent : colors.textSecondary,
                 ),

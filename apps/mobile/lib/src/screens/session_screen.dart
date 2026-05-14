@@ -138,27 +138,20 @@ class _DockedBrowserPreview {
 
 class _DesktopSessionTitle extends StatelessWidget {
   const _DesktopSessionTitle({
-    required this.host,
     required this.session,
     required this.running,
-    required this.gitStatus,
-    required this.showGit,
     required this.canRename,
     required this.onRename,
   });
 
-  final HostProfile host;
   final SessionSummary session;
   final bool running;
-  final SessionGitStatus? gitStatus;
-  final bool showGit;
   final bool canRename;
   final VoidCallback onRename;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final gitLabel = showGit ? _gitHeaderLabel(session, gitStatus) : null;
     final title = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -181,75 +174,61 @@ class _DesktopSessionTitle extends StatelessWidget {
       ],
     );
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Row(
-          children: [
-            if (running) ...[const LivePulse(), const SizedBox(width: 9)],
-            Expanded(
-              child: canRename
-                  ? GestureDetector(
-                      onTap: onRename,
-                      behavior: HitTestBehavior.opaque,
-                      child: title,
-                    )
-                  : title,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              running ? 'running' : 'idle',
-              style: monoStyle(
-                color: running ? colors.success : colors.textSecondary,
-                fontSize: 10.5,
-              ),
-            ),
-          ],
+        if (running) ...[const LivePulse(), const SizedBox(width: 9)],
+        Expanded(
+          child: canRename
+              ? GestureDetector(
+                  onTap: onRename,
+                  behavior: HitTestBehavior.opaque,
+                  child: title,
+                )
+              : title,
         ),
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            Flexible(
-              child: Text(
-                host.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: colors.textSecondary,
-                  fontWeight: AppWeights.emphasis,
-                ),
-              ),
-            ),
-            if (session.provider != null) ...[
-              const SizedBox(width: 8),
-              AgentProviderBadge(providerKind: session.provider, compact: true),
-            ],
-            if (gitLabel != null) ...[
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  gitLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textSecondary, fontSize: 11),
-                ),
-              ),
-            ],
-            if (session.cwd.trim().isNotEmpty) ...[
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  session.cwd,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textTertiary, fontSize: 11),
-                ),
-              ),
-            ],
-          ],
-        ),
+        const SizedBox(width: 8),
+        if (session.provider != null) ...[
+          AgentProviderBadge(providerKind: session.provider, compact: true),
+          const SizedBox(width: 8),
+        ],
+        _DesktopSessionStatusBadge(running: running),
       ],
+    );
+  }
+}
+
+class _DesktopSessionStatusBadge extends StatelessWidget {
+  const _DesktopSessionStatusBadge({required this.running});
+
+  final bool running;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final color = running ? colors.success : colors.textSecondary;
+    return Container(
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: running ? 0.1 : 0.06),
+        borderRadius: AppShapes.badge,
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _HeaderStatusDot(color: color),
+          const SizedBox(width: 5),
+          Text(
+            running ? 'running' : 'idle',
+            style: monoStyle(
+              color: color,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -878,6 +857,10 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsComposerModelPicker =>
       _supportsProviderCapability('configuration', 'models') &&
       _supportsProviderCapability('runtimeControls', 'model');
+
+  bool get _supportsComposerThinkingPicker =>
+      _supportsComposerModelPicker &&
+      _supportsProviderCapability('runtimeControls', 'reasoningEffort');
 
   bool _supportsGitDiffKind(String kind) {
     if (kind == 'remote') {
@@ -4995,10 +4978,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   String _composerModelDetail(SessionSummary session) {
     final turnConfig = _composerTurnConfig(session);
-    if (_cleanComposerLabel(turnConfig.model) != null ||
-        _cleanComposerLabel(turnConfig.reasoningEffort) != null ||
-        _cleanComposerLabel(turnConfig.mode) != null ||
-        turnConfig.fastMode != null) {
+    if (_cleanComposerLabel(turnConfig.model) != null) {
       return 'Next reply';
     }
     if (_cleanComposerLabel(session.runtime?.model) != null) {
@@ -5012,7 +4992,38 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   bool _composerModelCustomized(SessionSummary session) {
-    return !_composerTurnConfig(session).isEmpty;
+    return _cleanComposerLabel(_composerTurnConfig(session).model) != null;
+  }
+
+  String _composerThinkingLabel(SessionSummary session) {
+    final turnConfig = _composerTurnConfig(session);
+    final override = _cleanComposerLabel(turnConfig.reasoningEffort);
+    if (override != null) {
+      return _reasoningEffortLabel(override);
+    }
+    final runtime = _cleanComposerLabel(session.runtime?.reasoningEffort);
+    if (runtime != null) {
+      return _reasoningEffortLabel(runtime);
+    }
+    return 'Auto';
+  }
+
+  String _composerThinkingDetail(SessionSummary session) {
+    final turnConfig = _composerTurnConfig(session);
+    if (_cleanComposerLabel(turnConfig.reasoningEffort) != null) {
+      return 'Next reply';
+    }
+    if (_cleanComposerLabel(session.runtime?.reasoningEffort) != null) {
+      return 'Current thinking';
+    }
+    return 'Thinking';
+  }
+
+  bool _composerThinkingCustomized(SessionSummary session) {
+    return _cleanComposerLabel(
+          _composerTurnConfig(session).reasoningEffort,
+        ) !=
+        null;
   }
 
   String? _composerRuntimeModelProvider(SessionSummary session) {
@@ -5023,33 +5034,28 @@ class _SessionScreenState extends State<SessionScreen>
     return provider;
   }
 
-  Future<void> _showComposerModelPicker(SessionSummary session) async {
-    await _turnConfigStore.ensureLoaded();
-    if (!mounted || _disposed) return;
-
+  Future<ProviderCapabilities?> _loadComposerCapabilities(
+    SessionSummary session,
+  ) async {
     NodeInfo? node = _nodeInfo;
     if (node == null) {
       try {
         node = await widget.api.fetchNode(widget.host);
-        if (!mounted || _disposed) return;
+        if (!mounted || _disposed) return null;
         setState(() => _nodeInfo = node);
       } catch (_) {
         // Model loading below will show the user-facing error if the host is
         // unavailable. Capability checks are best-effort here.
       }
     }
+    return node?.capabilitiesForProvider(session.provider);
+  }
 
-    final capabilities = node?.capabilitiesForProvider(session.provider);
-    if (capabilities != null &&
-        (!capabilities.supports('configuration', 'models') ||
-            !capabilities.supports('runtimeControls', 'model'))) {
-      showAppSnackBar(context, 'This agent does not offer model choices here.');
-      return;
-    }
-
-    final List<ModelCatalogEntry> models;
+  Future<List<ModelCatalogEntry>?> _fetchComposerModels(
+    SessionSummary session,
+  ) async {
     try {
-      models = [
+      final models = [
         ...await widget.api.fetchModels(
           widget.host,
           cwd: session.cwd,
@@ -5058,13 +5064,30 @@ class _SessionScreenState extends State<SessionScreen>
         ),
       ];
       models.sort(_compareModelEntries);
+      return models;
     } catch (error) {
-      if (!mounted || _disposed) return;
+      if (!mounted || _disposed) return null;
       showAppSnackBar(context, friendlyError(error));
+      return null;
+    }
+  }
+
+  Future<void> _showComposerModelPicker(SessionSummary session) async {
+    await _turnConfigStore.ensureLoaded();
+    if (!mounted || _disposed) return;
+
+    final capabilities = await _loadComposerCapabilities(session);
+    if (!mounted || _disposed) return;
+    if (capabilities != null &&
+        (!capabilities.supports('configuration', 'models') ||
+            !capabilities.supports('runtimeControls', 'model'))) {
+      showAppSnackBar(context, 'This agent does not offer model choices here.');
       return;
     }
 
+    final models = await _fetchComposerModels(session);
     if (!mounted || _disposed) return;
+    if (models == null) return;
     if (models.isEmpty) {
       showAppSnackBar(
         context,
@@ -5105,6 +5128,109 @@ class _SessionScreenState extends State<SessionScreen>
     showAppSnackBar(context, 'Model will change on the next reply.');
   }
 
+  Future<void> _showComposerThinkingPicker(SessionSummary session) async {
+    await _turnConfigStore.ensureLoaded();
+    if (!mounted || _disposed) return;
+
+    final capabilities = await _loadComposerCapabilities(session);
+    if (!mounted || _disposed) return;
+    if (capabilities != null &&
+        (!capabilities.supports('configuration', 'models') ||
+            !capabilities.supports('runtimeControls', 'model') ||
+            !capabilities.supports('runtimeControls', 'reasoningEffort'))) {
+      showAppSnackBar(
+        context,
+        'This agent does not offer thinking choices here.',
+      );
+      return;
+    }
+
+    final models = await _fetchComposerModels(session);
+    if (!mounted || _disposed) return;
+    if (models == null) return;
+    if (models.isEmpty) {
+      showAppSnackBar(
+        context,
+        'No models are available from this host right now.',
+      );
+      return;
+    }
+
+    final turnConfig = _composerTurnConfig(session);
+    final defaultModel = models.firstWhere(
+      (model) => model.isDefault,
+      orElse: () => models.first,
+    );
+    final currentModel =
+        _cleanComposerLabel(turnConfig.model) ??
+        _cleanComposerLabel(session.runtime?.model) ??
+        defaultModel.model;
+    final selectedModel = models.firstWhere(
+      (model) => model.model == currentModel,
+      orElse: () => defaultModel,
+    );
+    if (selectedModel.isAutoModel) {
+      showAppSnackBar(
+        context,
+        'This model manages thinking automatically.',
+      );
+      return;
+    }
+    final options = selectedModel.supportedReasoningEfforts;
+    if (options.isEmpty) {
+      showAppSnackBar(
+        context,
+        'This model does not expose adjustable thinking effort.',
+      );
+      return;
+    }
+
+    final supportedReasoning = options
+        .map((option) => option.reasoningEffort)
+        .toSet();
+    final rawCurrentReasoning =
+        _cleanComposerLabel(turnConfig.reasoningEffort) ??
+        _cleanComposerLabel(session.runtime?.reasoningEffort) ??
+        selectedModel.defaultReasoningEffort;
+    final currentReasoning = supportedReasoning.contains(rawCurrentReasoning)
+        ? rawCurrentReasoning
+        : selectedModel.defaultReasoningEffort;
+    final selected = await _showComposerThinkingPickerSurface(
+      options: options,
+      currentReasoning: currentReasoning,
+      defaultReasoning: selectedModel.defaultReasoningEffort,
+      modelLabel: selectedModel.displayName,
+    );
+    if (!mounted || _disposed || selected == null) return;
+
+    final runtimeModel = _cleanComposerLabel(session.runtime?.model);
+    final runtimeReasoning = _cleanComposerLabel(
+      session.runtime?.reasoningEffort,
+    );
+    final inheritsCurrentModel =
+        _cleanComposerLabel(turnConfig.model) == null ||
+        _cleanComposerLabel(turnConfig.model) == runtimeModel;
+    String? nextReasoning = selected;
+    if (inheritsCurrentModel &&
+        runtimeReasoning != null &&
+        selected == runtimeReasoning) {
+      nextReasoning = null;
+    } else if (inheritsCurrentModel &&
+        runtimeReasoning == null &&
+        selected == selectedModel.defaultReasoningEffort) {
+      nextReasoning = null;
+    }
+    final nextConfig = turnConfig.copyWith(reasoningEffort: nextReasoning);
+    if (_sameTurnConfig(nextConfig, turnConfig)) {
+      showAppSnackBar(context, 'This thinking level is already selected.');
+      return;
+    }
+
+    await _turnConfigStore.setConfig(widget.host, session.id, nextConfig);
+    if (!mounted || _disposed) return;
+    showAppSnackBar(context, 'Thinking level will change on the next reply.');
+  }
+
   Future<ModelCatalogEntry?> _showComposerModelPickerSurface({
     required List<ModelCatalogEntry> models,
     required String currentModel,
@@ -5133,6 +5259,45 @@ class _SessionScreenState extends State<SessionScreen>
       );
     }
     return showModalBottomSheet<ModelCatalogEntry>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => picker,
+    );
+  }
+
+  Future<String?> _showComposerThinkingPickerSurface({
+    required List<ModelReasoningEffortOption> options,
+    required String currentReasoning,
+    required String defaultReasoning,
+    required String modelLabel,
+  }) {
+    final picker = _ReasoningPickerSheet(
+      options: options,
+      currentReasoning: currentReasoning,
+      defaultReasoning: defaultReasoning,
+      modelLabel: modelLabel,
+    );
+    if (widget.desktopMode) {
+      return showDialog<String>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.35),
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 48,
+            vertical: 48,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 520),
+            child: picker,
+          ),
+        ),
+      );
+    }
+    return showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
       showDragHandle: false,
@@ -6333,26 +6498,53 @@ class _SessionScreenState extends State<SessionScreen>
     required bool searchOpen,
     required bool resourcesOpen,
   }) async {
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.28),
-      showDragHandle: false,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (context) => _SessionActionSheet(
-        session: session,
-        groups: _sessionActionGroups(
-          favorite: favorite,
-          gitAvailable: gitAvailable,
-          gitDirty: gitDirty,
-          terminalOpen: terminalOpen,
-          portsOpen: portsOpen,
-          searchOpen: searchOpen,
-          resourcesOpen: resourcesOpen,
-        ),
-      ),
+    final groups = _sessionActionGroups(
+      favorite: favorite,
+      gitAvailable: gitAvailable,
+      gitDirty: gitDirty,
+      terminalOpen: terminalOpen,
+      portsOpen: portsOpen,
+      searchOpen: searchOpen,
+      resourcesOpen: resourcesOpen,
     );
+    final String? selected;
+    if (widget.desktopMode) {
+      selected = await showDialog<String>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.32),
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 48,
+            vertical: 48,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: 520,
+              maxHeight: 660,
+            ),
+            child: _SessionActionSheet(
+              session: session,
+              groups: groups,
+              desktop: true,
+            ),
+          ),
+        ),
+      );
+    } else {
+      selected = await showModalBottomSheet<String>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        barrierColor: Colors.black.withValues(alpha: 0.28),
+        showDragHandle: false,
+        useSafeArea: true,
+        isScrollControlled: true,
+        builder: (context) => _SessionActionSheet(
+          session: session,
+          groups: groups,
+        ),
+      );
+    }
     if (!mounted || selected == null) {
       return;
     }
@@ -6631,6 +6823,7 @@ class _SessionScreenState extends State<SessionScreen>
           listenable: _turnConfigStore,
           builder: (context, _) {
             final showModelPicker = _supportsComposerModelPicker;
+            final showThinkingPicker = _supportsComposerThinkingPicker;
             return _Composer(
               controller: _composerController,
               focusNode: _composerFocusNode,
@@ -6676,6 +6869,18 @@ class _SessionScreenState extends State<SessionScreen>
               onModelTap: showModelPicker
                   ? () => _showComposerModelPicker(session)
                   : null,
+              thinkingLabel: showThinkingPicker
+                  ? _composerThinkingLabel(session)
+                  : null,
+              thinkingDetail: showThinkingPicker
+                  ? _composerThinkingDetail(session)
+                  : null,
+              thinkingCustomized: showThinkingPicker
+                  ? _composerThinkingCustomized(session)
+                  : false,
+              onThinkingTap: showThinkingPicker
+                  ? () => _showComposerThinkingPicker(session)
+                  : null,
               submitOnEnter: widget.desktopMode,
             );
           },
@@ -6716,11 +6921,8 @@ class _SessionScreenState extends State<SessionScreen>
             : null,
         title: widget.desktopMode
             ? _DesktopSessionTitle(
-                host: widget.host,
                 session: session,
                 running: _running,
-                gitStatus: _gitStatus,
-                showGit: _supportsGitStatus,
                 canRename: _supportsSessionRename,
                 onRename: () => unawaited(_renameSession()),
               )
@@ -6993,161 +7195,27 @@ class _SessionScreenState extends State<SessionScreen>
                   ),
                 );
               }
-              return PopupMenuButton<String>(
-                tooltip: 'Session actions',
-                constraints: const BoxConstraints(minWidth: 280, maxWidth: 360),
-                icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
-                onSelected: (value) => _handleSessionAction(value, session),
-                itemBuilder: (context) => [
-                  if (_supportsSessionResources)
-                    const PopupMenuItem<String>(
-                      value: 'resources',
-                      child: Row(
-                        children: [
-                          Icon(Icons.perm_media_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Resources'),
-                        ],
-                      ),
-                    ),
-                  PopupMenuItem<String>(
-                    value: 'favorite',
-                    child: Row(
-                      children: [
-                        Icon(
-                          favorite
-                              ? Icons.star_rounded
-                              : Icons.star_outline_rounded,
-                          size: 18,
-                          color: favorite ? colors.warning : null,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(favorite ? 'Remove favorite' : 'Add favorite'),
-                      ],
+              return Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: MeshIconButton(
+                  icon: Icons.more_horiz_rounded,
+                  tooltip: _running
+                      ? 'Session actions (agent running)'
+                      : 'Session actions',
+                  color: _running ? colors.warning : colors.textSecondary,
+                  onTap: () => unawaited(
+                    _showSessionActionsSheet(
+                      session: session,
+                      favorite: favorite,
+                      gitAvailable: gitAvailable && showGitInMenu,
+                      gitDirty: gitDirty,
+                      terminalOpen: terminalOpenInInspector,
+                      portsOpen: portsOpenInInspector,
+                      searchOpen: searchOpenInInspector,
+                      resourcesOpen: resourcesOpenInInspector,
                     ),
                   ),
-                  const PopupMenuItem<String>(
-                    value: 'unread',
-                    child: Row(
-                      children: [
-                        Icon(Icons.flag_rounded, size: 18),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'Flag for follow-up',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (showGitInMenu)
-                    const PopupMenuItem<String>(
-                      value: 'git',
-                      child: Row(
-                        children: [
-                          Icon(Icons.account_tree_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Git details'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsSessionCompact)
-                    const PopupMenuItem<String>(
-                      value: 'compact',
-                      child: Row(
-                        children: [
-                          Icon(Icons.compress_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Compact context'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsFilesystem)
-                    const PopupMenuItem<String>(
-                      value: 'browse',
-                      child: Row(
-                        children: [
-                          Icon(Icons.folder_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Browse files'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsBrowserPreview)
-                    const PopupMenuItem<String>(
-                      value: 'preview',
-                      child: Row(
-                        children: [
-                          Icon(Icons.open_in_browser_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Open browser preview',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (_supportsConnections)
-                    const PopupMenuItem<String>(
-                      value: 'connections',
-                      child: Row(
-                        children: [
-                          Icon(Icons.open_in_browser_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Manage browser previews',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (widget.topPadding != null &&
-                      SidemeshSessionWindowManager.instance.isSupported)
-                    const PopupMenuItem<String>(
-                      value: 'popout',
-                      child: Row(
-                        children: [
-                          Icon(Icons.open_in_new_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Open in new window',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (_supportsSessionRename || _supportsSessionArchive)
-                    const PopupMenuDivider(),
-                  if (_supportsSessionRename)
-                    const PopupMenuItem<String>(
-                      value: 'rename',
-                      child: Row(
-                        children: [
-                          Icon(Icons.drive_file_rename_outline, size: 18),
-                          SizedBox(width: 10),
-                          Text('Rename'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsSessionArchive)
-                    const PopupMenuItem<String>(
-                      value: 'archive',
-                      child: Row(
-                        children: [
-                          Icon(Icons.archive_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Archive'),
-                        ],
-                      ),
-                    ),
-                ],
+                ),
               );
             },
           ),
