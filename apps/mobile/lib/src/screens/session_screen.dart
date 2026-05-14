@@ -6089,8 +6089,12 @@ class _SessionScreenState extends State<SessionScreen>
     };
     var changed = false;
     for (final activity in _activities) {
-      if (byId.containsKey(activity.id) ||
-          !_shouldPreserveLocalCommandActivity(activity)) {
+      if (!_shouldPreserveLocalCommandActivity(activity)) {
+        continue;
+      }
+      final snapshotActivity = byId[activity.id];
+      if (snapshotActivity != null &&
+          _snapshotKeepsReadableCommandActivity(snapshotActivity)) {
         continue;
       }
       byId[activity.id] = activity;
@@ -6102,6 +6106,11 @@ class _SessionScreenState extends State<SessionScreen>
     return _sortActivities(byId.values.toList());
   }
 
+  bool _snapshotKeepsReadableCommandActivity(SessionActivity activity) {
+    return _shouldPreserveLocalCommandActivity(activity) &&
+        _activityHasReadableCommand(activity);
+  }
+
   bool _shouldPreserveLocalCommandActivity(SessionActivity activity) {
     if (activity.isCommand) {
       return true;
@@ -6110,6 +6119,19 @@ class _SessionScreenState extends State<SessionScreen>
       return false;
     }
     if (activity.toolCategory == 'command') {
+      return true;
+    }
+    for (final target in activity.toolSemanticTargets) {
+      if (target.type == 'command' &&
+          ((target.command ?? target.value) ?? '').trim().isNotEmpty) {
+        return true;
+      }
+    }
+    return _toolArgsContainCommand(activity.toolArgs);
+  }
+
+  bool _activityHasReadableCommand(SessionActivity activity) {
+    if ((activity.command ?? '').trim().isNotEmpty) {
       return true;
     }
     for (final target in activity.toolSemanticTargets) {
