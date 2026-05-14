@@ -6,7 +6,6 @@ import '../api_client.dart';
 import '../fs_models.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../workspace_live_store.dart';
 import 'file_viewer_pane.dart';
 import 'file_viewer_screen.dart';
@@ -169,10 +168,12 @@ class FileBrowserScreen extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              root,
+              'Files on ${host.label}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: monoStyle(color: colors.textTertiary, fontSize: 11),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+              ),
             ),
           ],
         ),

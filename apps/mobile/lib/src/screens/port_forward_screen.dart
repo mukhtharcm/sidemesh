@@ -320,8 +320,8 @@ class _PortForwardPaneState extends State<PortForwardPane> {
           if (!widget.supportsBrowserPreview)
             const MeshEmptyState(
               icon: Icons.open_in_browser_rounded,
-              title: 'Browser previews unavailable',
-              body: 'This host does not expose browser preview support yet.',
+              title: 'Previews unavailable',
+              body: 'This host does not support browser previews yet.',
             )
           else ...[
             MeshCard(
@@ -339,7 +339,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Open browser preview',
+                          'Open a preview',
                           style: Theme.of(context).textTheme.titleSmall?.copyWith(
                             color: colors.textPrimary,
                             fontWeight: AppWeights.title,
@@ -360,7 +360,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                         label: Text(
                           _showAdvancedLauncherOptions
                               ? 'Less'
-                              : 'Advanced',
+                              : 'More options',
                         ),
                       ),
                     ],
@@ -368,8 +368,8 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                   const SizedBox(height: 8),
                   Text(
                     inlineManager
-                        ? 'Open a live preview for a localhost app from this workspace.'
-                        : 'Open a live preview for a localhost web app running on ${widget.host.label}.',
+                        ? 'Open a live preview for a local app from this workspace.'
+                        : 'Open a live preview for a local web app running on ${widget.host.label}.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colors.textSecondary,
                       height: 1.35,
@@ -406,7 +406,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                                     ),
                                   )
                                 : const Icon(Icons.open_in_browser_rounded),
-                            label: const Text('Open preview'),
+                            label: const Text('Open'),
                           ),
                         ),
                       ],
@@ -441,7 +441,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                                   ),
                                 )
                               : const Icon(Icons.open_in_browser_rounded),
-                          label: const Text('Open preview'),
+                          label: const Text('Open'),
                         ),
                       ],
                     ),
@@ -495,7 +495,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                             child: TextField(
                               controller: _labelController,
                               decoration: const InputDecoration(
-                                labelText: 'Label',
+                                labelText: 'Name',
                                 hintText: 'Vite app',
                               ),
                             ),
@@ -508,7 +508,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                                   : Icons.lock_reset_rounded,
                               size: 17,
                             ),
-                            label: const Text('Remember browser logins'),
+                            label: const Text('Keep browser sign-ins'),
                             onSelected: (selected) =>
                                 setState(() => _rememberBrowserLogins = selected),
                           ),
@@ -528,21 +528,20 @@ class _PortForwardPaneState extends State<PortForwardPane> {
             else if (_error != null)
               MeshEmptyState(
                 icon: Icons.warning_amber_rounded,
-                title: 'Could not load browser previews',
+                title: 'Could not load previews',
                 body: _error!,
               )
             else if (browserPreviews.isEmpty)
               MeshEmptyState(
                 icon: Icons.open_in_browser_rounded,
-                title: 'No active browser previews',
-                body:
-                    'Open a browser preview for a localhost app on ${widget.host.label}.',
+                title: 'No previews open',
+                body: 'Open a preview for a local app on ${widget.host.label}.',
               )
             else ...[
               const _SectionHeading(
                 icon: Icons.open_in_browser_rounded,
-                title: 'Active browser previews',
-                subtitle: 'Live previews running for this session',
+                title: 'Open previews',
+                subtitle: 'Previews running for this session',
               ),
               for (final preview in browserPreviews)
                 Padding(
