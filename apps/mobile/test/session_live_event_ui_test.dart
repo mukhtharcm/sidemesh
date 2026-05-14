@@ -1163,11 +1163,11 @@ void main() {
 
       expect(find.text('Edited 1 file'), findsOneWidget);
       expect(find.text('FILE CHANGE'), findsNothing);
-      expect(find.text('Ran npm run dev'), findsOneWidget);
+      expect(find.text('ran npm run dev'), findsOneWidget);
       expect(find.textContaining('/bin/bash'), findsNothing);
       expect(find.text('done'), findsNothing);
 
-      await tester.tap(find.text('Ran npm run dev'));
+      await tester.tap(find.text('ran npm run dev'));
       await _pumpFrames(tester);
       await tester.tap(find.text('apps/web/src/main.dart'));
       await _pumpFrames(tester);
@@ -1196,6 +1196,12 @@ void main() {
           id: 'file-change-b',
           seq: 2,
           path: '/repo/apps/mobile/lib/b.dart',
+          turnId: 'turn-file-group',
+        ),
+        _fileChangeActivity(
+          id: 'file-change-a-later',
+          seq: 3,
+          path: '/repo/apps/mobile/lib/a.dart',
           turnId: 'turn-file-group',
         ),
       ],

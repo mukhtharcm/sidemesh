@@ -6158,9 +6158,7 @@ class _SessionScreenState extends State<SessionScreen>
   ) {
     if (activities.length == 1) return activities.first;
     final first = activities.first;
-    final changes = <SessionActivityChange>[
-      for (final activity in activities) ...activity.changes,
-    ];
+    final changes = _aggregateFileChangeChanges(activities);
     return SessionActivity(
       id:
           'file-change-group:${first.turnId ?? first.id}:${activities.length}:${activities.last.id}',
@@ -6194,6 +6192,20 @@ class _SessionScreenState extends State<SessionScreen>
       revisedPrompt: first.revisedPrompt,
       savedPath: first.savedPath,
     );
+  }
+
+  List<SessionActivityChange> _aggregateFileChangeChanges(
+    List<SessionActivity> activities,
+  ) {
+    final byPath = <String, SessionActivityChange>{};
+    for (final activity in activities) {
+      for (final change in activity.changes) {
+        final key = change.path.trim();
+        if (key.isEmpty) continue;
+        byPath[key] = change;
+      }
+    }
+    return byPath.values.toList(growable: false);
   }
 
   String _aggregateFileChangeStatus(List<SessionActivity> activities) {
