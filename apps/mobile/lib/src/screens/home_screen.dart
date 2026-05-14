@@ -274,6 +274,13 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     });
   }
 
+  void _toggleRecentFavoritesOnly(bool enabled) {
+    if (_recentFilters.favoritesOnly == enabled) return;
+    setState(() {
+      _recentFilters = _recentFilters.copyWith(favoritesOnly: enabled);
+    });
+  }
+
   Future<void> _refreshHosts() async {
     final hosts = await _store.loadHosts();
     if (!mounted) {
@@ -580,6 +587,9 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               onUnreadOnlyChanged: _tabIndex == 0
                   ? _toggleRecentUnreadOnly
                   : null,
+              onFavoritesOnlyChanged: _tabIndex == 0
+                  ? _toggleRecentFavoritesOnly
+                  : null,
               onRefresh: _refreshHosts,
               onOpenSettings: _openSettings,
             ),
@@ -719,17 +729,24 @@ class RecentSessionFilters {
   const RecentSessionFilters({
     this.runningOnly = false,
     this.unreadOnly = false,
+    this.favoritesOnly = false,
   });
 
   final bool runningOnly;
   final bool unreadOnly;
+  final bool favoritesOnly;
 
-  bool get isAnyActive => runningOnly || unreadOnly;
+  bool get isAnyActive => runningOnly || unreadOnly || favoritesOnly;
 
-  RecentSessionFilters copyWith({bool? runningOnly, bool? unreadOnly}) {
+  RecentSessionFilters copyWith({
+    bool? runningOnly,
+    bool? unreadOnly,
+    bool? favoritesOnly,
+  }) {
     return RecentSessionFilters(
       runningOnly: runningOnly ?? this.runningOnly,
       unreadOnly: unreadOnly ?? this.unreadOnly,
+      favoritesOnly: favoritesOnly ?? this.favoritesOnly,
     );
   }
 }
@@ -771,6 +788,7 @@ class _HomeStickyHeader extends StatelessWidget {
     required this.recentFilters,
     required this.onRunningOnlyChanged,
     required this.onUnreadOnlyChanged,
+    required this.onFavoritesOnlyChanged,
     required this.onRefresh,
     required this.onOpenSettings,
   });
@@ -784,6 +802,7 @@ class _HomeStickyHeader extends StatelessWidget {
   final RecentSessionFilters? recentFilters;
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
+  final ValueChanged<bool>? onFavoritesOnlyChanged;
   final VoidCallback onRefresh;
   final VoidCallback onOpenSettings;
 
@@ -902,6 +921,7 @@ class _HomeStickyHeader extends StatelessWidget {
                     recentFilters: recentFilters,
                     onRunningOnlyChanged: onRunningOnlyChanged,
                     onUnreadOnlyChanged: onUnreadOnlyChanged,
+                    onFavoritesOnlyChanged: onFavoritesOnlyChanged,
                   )
                 : const SizedBox(key: ValueKey('no-search'), height: 0),
           ),
@@ -920,6 +940,7 @@ class _HomeSearchField extends StatelessWidget {
     this.recentFilters,
     this.onRunningOnlyChanged,
     this.onUnreadOnlyChanged,
+    this.onFavoritesOnlyChanged,
   });
 
   final TextEditingController controller;
@@ -929,6 +950,7 @@ class _HomeSearchField extends StatelessWidget {
   final RecentSessionFilters? recentFilters;
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
+  final ValueChanged<bool>? onFavoritesOnlyChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -991,7 +1013,8 @@ class _HomeSearchField extends StatelessWidget {
             if (viewMode != null ||
                 (filters != null &&
                     (onRunningOnlyChanged != null ||
-                        onUnreadOnlyChanged != null))) ...[
+                        onUnreadOnlyChanged != null ||
+                        onFavoritesOnlyChanged != null))) ...[
               const SizedBox(height: AppSpacing.sm),
               Wrap(
                 spacing: AppSpacing.sm,
@@ -1056,17 +1079,23 @@ class _HomeSearchField extends StatelessWidget {
                       ),
                     ),
                   if (filters != null) ...[
-                    FilterChip(
-                      label: const Text('Running'),
+                    _HomeSearchFilterToken(
+                      icon: Icons.star_rounded,
+                      label: 'Favorites',
+                      selected: filters.favoritesOnly,
+                      onSelected: onFavoritesOnlyChanged,
+                    ),
+                    _HomeSearchFilterToken(
+                      icon: Icons.play_circle_outline_rounded,
+                      label: 'Running',
                       selected: filters.runningOnly,
                       onSelected: onRunningOnlyChanged,
-                      visualDensity: VisualDensity.compact,
                     ),
-                    FilterChip(
-                      label: const Text('Unread'),
+                    _HomeSearchFilterToken(
+                      icon: Icons.mark_chat_unread_rounded,
+                      label: 'Unread',
                       selected: filters.unreadOnly,
                       onSelected: onUnreadOnlyChanged,
-                      visualDensity: VisualDensity.compact,
                     ),
                   ],
                 ],
@@ -1075,6 +1104,64 @@ class _HomeSearchField extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _HomeSearchFilterToken extends StatelessWidget {
+  const _HomeSearchFilterToken({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final ValueChanged<bool>? onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final enabled = onSelected != null;
+    final foreground = selected ? colors.accent : colors.textSecondary;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        onTap: enabled ? () => onSelected!(!selected) : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? colors.accentMuted : colors.surface,
+            borderRadius: BorderRadius.circular(AppRadii.control),
+            border: Border.all(
+              color: selected
+                  ? colors.accent.withValues(alpha: 0.34)
+                  : colors.border,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 15, color: foreground),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: selected ? colors.textPrimary : colors.textSecondary,
+                  fontWeight: selected
+                      ? AppWeights.title
+                      : AppWeights.emphasis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1520,6 +1607,10 @@ class _RecentPaneState extends State<RecentPane> {
 
   bool _matchesRecentFilters(RemoteSessionEntry entry) {
     final filters = widget.filters;
+    if (filters.favoritesOnly &&
+        !_localStore.isFavorite(entry.host, entry.session.id)) {
+      return false;
+    }
     if (filters.runningOnly && !entry.session.isActive) {
       return false;
     }
@@ -1537,14 +1628,13 @@ class _RecentPaneState extends State<RecentPane> {
     if (widget.query.trim().isNotEmpty) {
       return 'No matches';
     }
-    if (widget.filters.runningOnly && widget.filters.unreadOnly) {
-      return 'No running unread sessions';
-    }
-    if (widget.filters.runningOnly) {
-      return 'No running sessions';
-    }
-    if (widget.filters.unreadOnly) {
-      return 'No unread sessions';
+    if (widget.filters.isAnyActive) {
+      final labels = [
+        if (widget.filters.favoritesOnly) 'favorite',
+        if (widget.filters.runningOnly) 'running',
+        if (widget.filters.unreadOnly) 'unread',
+      ];
+      return 'No ${labels.join(' ')} sessions';
     }
     return 'No reachable sessions';
   }
@@ -1556,14 +1646,11 @@ class _RecentPaneState extends State<RecentPane> {
       }
       return 'No sessions match "${widget.query.trim()}". Clear the filter to see everything.';
     }
-    if (widget.filters.runningOnly && widget.filters.unreadOnly) {
-      return 'No sessions are both active and unread right now.';
+    if (widget.filters.favoritesOnly) {
+      return 'Star sessions from the list to keep them in Favorites.';
     }
-    if (widget.filters.runningOnly) {
-      return 'No agents are active right now.';
-    }
-    if (widget.filters.unreadOnly) {
-      return 'Everything in recents has already been read on this device.';
+    if (widget.filters.isAnyActive) {
+      return 'No sessions match the active filters right now.';
     }
     return 'Saved hosts look fine, but none returned recent sessions right now.';
   }
@@ -1652,24 +1739,7 @@ class _RecentPaneState extends State<RecentPane> {
           return const MeshLoader();
         }
         final sortedEntries = _sortEntries(_store.entries);
-        // Pinned shelf: only surface it when it actively helps.
-        final showPinnedShelf =
-            widget.viewMode == SessionViewMode.flat &&
-            widget.query.trim().isEmpty &&
-            !widget.filters.isAnyActive &&
-            _searchEntries == null;
-        final pinnedEntries = showPinnedShelf
-            ? sortedEntries
-                  .where((e) => _localStore.isFavorite(e.host, e.session.id))
-                  .toList(growable: false)
-            : const <RemoteSessionEntry>[];
-        final listEntries =
-            showPinnedShelf && widget.dense && pinnedEntries.isNotEmpty
-            ? sortedEntries
-                  .where((e) => !_localStore.isFavorite(e.host, e.session.id))
-                  .toList(growable: false)
-            : sortedEntries;
-        final groups = _groupEntries(listEntries);
+        final groups = _groupEntries(sortedEntries);
         final isGrouped = groups.isNotEmpty;
         final hasCachedEntries =
             _store.entries.isNotEmpty &&
@@ -1734,14 +1804,6 @@ class _RecentPaneState extends State<RecentPane> {
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
               ),
-            if (showPinnedShelf && pinnedEntries.isNotEmpty)
-              _FavoritesShelf(
-                entries: pinnedEntries,
-                onOpen: widget.onOpenSession,
-                onUnpin: (host, sessionId) =>
-                    _localStore.toggleFavorite(host, sessionId),
-                dense: widget.dense,
-              ),
             SizedBox(height: widget.dense ? 4 : 8),
             Expanded(
               child: RefreshIndicator(
@@ -1759,7 +1821,7 @@ class _RecentPaneState extends State<RecentPane> {
                       )
                     : ListView.separated(
                         padding: basePadding,
-                        itemCount: listEntries.length + leadingStrips,
+                        itemCount: sortedEntries.length + leadingStrips,
                         separatorBuilder: (_, _) =>
                             SizedBox(height: widget.dense ? 2 : AppSpacing.sm),
                         itemBuilder: (context, index) {
@@ -1783,7 +1845,7 @@ class _RecentPaneState extends State<RecentPane> {
                             }
                             offset += 1;
                           }
-                          final entry = listEntries[index - offset];
+                          final entry = sortedEntries[index - offset];
                           return _buildSessionRow(entry);
                         },
                       ),
@@ -1938,337 +2000,6 @@ class _RecentPaneState extends State<RecentPane> {
       onToggleFavorite: () {
         _localStore.toggleFavorite(entry.host, entry.session.id);
       },
-    );
-  }
-}
-
-// ── Pinned / Favourites Shelf ────────────────────────────────────────────────
-
-/// Compact horizontal strip of pinned sessions rendered above the recents list.
-/// Only shown when there are pins to surface.
-class _FavoritesShelf extends StatelessWidget {
-  const _FavoritesShelf({
-    required this.entries,
-    required this.onOpen,
-    required this.onUnpin,
-    this.dense = false,
-  });
-
-  final List<RemoteSessionEntry> entries;
-  final void Function(HostProfile, SessionSummary) onOpen;
-  final void Function(HostProfile host, String sessionId) onUnpin;
-  final bool dense;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final theme = Theme.of(context);
-    if (dense) {
-      final visibleRows = entries.length > 3 ? 3 : entries.length;
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.push_pin_rounded, size: 13, color: colors.warning),
-                const SizedBox(width: 6),
-                Text(
-                  'Pinned',
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: colors.textSecondary,
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '${entries.length}',
-                  style: monoStyle(
-                    color: colors.textTertiary,
-                    fontSize: 10,
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            SizedBox(
-              height: visibleRows * 48.0 + (visibleRows - 1) * 3.0,
-              child: ListView.separated(
-                padding: EdgeInsets.zero,
-                itemCount: entries.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 3),
-                itemBuilder: (context, index) {
-                  final entry = entries[index];
-                  return _FavoritePinnedRow(
-                    entry: entry,
-                    onTap: () => onOpen(entry.host, entry.session),
-                    onUnpin: () => onUnpin(entry.host, entry.session.id),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-    final horizontalPadding = dense ? 10.0 : 16.0;
-    final chipWidth = dense ? 156.0 : 184.0;
-    final listHeight = dense ? 68.0 : 74.0;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Padding(
-          padding: EdgeInsets.fromLTRB(
-            horizontalPadding,
-            dense ? 6 : 10,
-            horizontalPadding,
-            4,
-          ),
-          child: Row(
-            children: [
-              Text(
-                'Pinned',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: colors.textSecondary,
-                  fontWeight: AppWeights.emphasis,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '${entries.length} ${entries.length == 1 ? "session" : "sessions"}',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colors.textTertiary,
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(
-          height: listHeight,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: EdgeInsets.fromLTRB(
-              horizontalPadding,
-              0,
-              horizontalPadding,
-              dense ? 6 : 8,
-            ),
-            itemCount: entries.length,
-            separatorBuilder: (_, _) => SizedBox(width: dense ? 8 : 10),
-            itemBuilder: (context, index) {
-              final entry = entries[index];
-              return _FavoriteChip(
-                entry: entry,
-                width: chipWidth,
-                dense: dense,
-                onTap: () => onOpen(entry.host, entry.session),
-                onUnpin: () => onUnpin(entry.host, entry.session.id),
-              );
-            },
-          ),
-        ),
-        SizedBox(height: dense ? 2 : 6),
-      ],
-    );
-  }
-}
-
-class _FavoritePinnedRow extends StatelessWidget {
-  const _FavoritePinnedRow({
-    required this.entry,
-    required this.onTap,
-    required this.onUnpin,
-  });
-
-  final RemoteSessionEntry entry;
-  final VoidCallback onTap;
-  final VoidCallback onUnpin;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final theme = Theme.of(context);
-    final running = entry.session.isActive;
-    return Tooltip(
-      message: entry.session.title,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(AppRadii.control),
-          child: Container(
-            height: 48,
-            padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
-            decoration: BoxDecoration(
-              color: colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(AppRadii.control),
-              border: Border.all(color: colors.border),
-            ),
-            child: Row(
-              children: [
-                running
-                    ? LivePulse(color: colors.success)
-                    : Icon(
-                        Icons.push_pin_outlined,
-                        size: 14,
-                        color: colors.warning,
-                      ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        entry.session.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.textPrimary,
-                          fontWeight: AppWeights.emphasis,
-                          height: 1.1,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        entry.host.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: colors.textTertiary,
-                          height: 1.1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                InkWell(
-                  onTap: onUnpin,
-                  borderRadius: BorderRadius.circular(8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Icon(
-                      Icons.star_rounded,
-                      size: 15,
-                      color: colors.warning,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FavoriteChip extends StatelessWidget {
-  const _FavoriteChip({
-    required this.entry,
-    required this.width,
-    required this.dense,
-    required this.onTap,
-    required this.onUnpin,
-  });
-
-  final RemoteSessionEntry entry;
-  final double width;
-  final bool dense;
-  final VoidCallback onTap;
-  final VoidCallback onUnpin;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final theme = Theme.of(context);
-    final running = entry.session.isActive;
-    return Tooltip(
-      message:
-          '${entry.session.title}\n${entry.host.label}\n'
-          'Long-press to remove from pinned',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onUnpin,
-          borderRadius: BorderRadius.circular(16),
-          child: Ink(
-            width: width,
-            padding: EdgeInsets.symmetric(
-              horizontal: dense ? 12 : 14,
-              vertical: dense ? 8 : 9,
-            ),
-            decoration: BoxDecoration(
-              color: running ? colors.successMuted : colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: running
-                    ? colors.success.withValues(alpha: 0.32)
-                    : colors.border,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    if (running)
-                      LivePulse(color: colors.success)
-                    else
-                      Icon(
-                        Icons.push_pin_outlined,
-                        size: 14,
-                        color: colors.textTertiary,
-                      ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        entry.session.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colors.textPrimary,
-                          fontWeight: AppWeights.emphasis,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 3),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        entry.host.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      sessionTimeLabel(entry.session.updatedAt),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: colors.textTertiary,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

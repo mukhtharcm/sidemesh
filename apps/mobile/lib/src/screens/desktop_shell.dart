@@ -350,6 +350,13 @@ class _DesktopShellState extends State<DesktopShell> {
     });
   }
 
+  void _setRecentFavoritesOnly(bool enabled) {
+    if (_recentFilters.favoritesOnly == enabled) return;
+    setState(() {
+      _recentFilters = _recentFilters.copyWith(favoritesOnly: enabled);
+    });
+  }
+
   Future<void> _checkOnboarding() async {
     final completed = await OnboardingStore.instance.isCompleted;
     if (!mounted) return;
@@ -1105,6 +1112,8 @@ class _DesktopShellState extends State<DesktopShell> {
                                         _setRecentRunningOnly,
                                     onRecentUnreadOnlyChanged:
                                         _setRecentUnreadOnly,
+                                    onRecentFavoritesOnlyChanged:
+                                        _setRecentFavoritesOnly,
                                   ),
                                 ),
                               ),
@@ -1519,6 +1528,7 @@ class _Sidebar extends StatelessWidget {
     this.onRecentViewModeChanged,
     this.onRecentRunningOnlyChanged,
     this.onRecentUnreadOnlyChanged,
+    this.onRecentFavoritesOnlyChanged,
   });
 
   final double titlebarInset;
@@ -1551,6 +1561,7 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<SessionViewMode>? onRecentViewModeChanged;
   final ValueChanged<bool>? onRecentRunningOnlyChanged;
   final ValueChanged<bool>? onRecentUnreadOnlyChanged;
+  final ValueChanged<bool>? onRecentFavoritesOnlyChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1608,6 +1619,7 @@ class _Sidebar extends StatelessWidget {
                   onChanged: onRecentViewModeChanged!,
                   onRunningOnlyChanged: onRecentRunningOnlyChanged,
                   onUnreadOnlyChanged: onRecentUnreadOnlyChanged,
+                  onFavoritesOnlyChanged: onRecentFavoritesOnlyChanged,
                 ),
               ),
             if (!canStartSession && section == _SidebarSection.recent)
@@ -1776,6 +1788,7 @@ class _RecentControlsBar extends StatelessWidget {
     required this.onChanged,
     required this.onRunningOnlyChanged,
     required this.onUnreadOnlyChanged,
+    required this.onFavoritesOnlyChanged,
   });
 
   final SessionViewMode value;
@@ -1783,6 +1796,7 @@ class _RecentControlsBar extends StatelessWidget {
   final ValueChanged<SessionViewMode> onChanged;
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
+  final ValueChanged<bool>? onFavoritesOnlyChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1817,6 +1831,14 @@ class _RecentControlsBar extends StatelessWidget {
             selected: true,
             trailingIcon: Icons.expand_more_rounded,
           ),
+        ),
+        _RecentFilterToken(
+          icon: Icons.star_rounded,
+          label: 'Favorites',
+          selected: filters.favoritesOnly,
+          onTap: onFavoritesOnlyChanged == null
+              ? null
+              : () => onFavoritesOnlyChanged!(!filters.favoritesOnly),
         ),
         _RecentFilterToken(
           icon: Icons.play_circle_outline_rounded,
@@ -1864,7 +1886,7 @@ class _RecentFilterToken extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: selected ? colors.accentMuted : colors.canvas,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: selected
               ? colors.accent.withValues(alpha: 0.34)
@@ -1894,7 +1916,7 @@ class _RecentFilterToken extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(8),
         onTap: onTap,
         child: token,
       ),
@@ -1914,7 +1936,7 @@ class _SidebarCountPill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
         color: colors.canvas,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: colors.border),
       ),
       child: Row(

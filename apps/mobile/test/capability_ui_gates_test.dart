@@ -91,8 +91,13 @@ void main() {
     );
     await _pumpFrames(tester);
 
+    final modelTooltip = find.byWidgetPredicate(
+      (widget) =>
+          widget is Tooltip &&
+          widget.message?.startsWith('Choose model') == true,
+    );
     final modelButton = find.descendant(
-      of: find.byTooltip('Choose model'),
+      of: modelTooltip,
       matching: find.byType(InkWell),
     );
     expect(modelButton, findsOneWidget);
