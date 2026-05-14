@@ -248,6 +248,7 @@ class _DesktopShellState extends State<DesktopShell> {
   int _sessionOpenSerial = 0;
   String _query = '';
   SessionViewMode _recentViewMode = SessionViewMode.flat;
+  RecentSessionFilters _recentFilters = const RecentSessionFilters();
   double _sidebarWidth = _defaultSidebarWidth;
   Timer? _searchDebounce;
   // Used to trigger refresh of sidebar panes after a host/session mutation.
@@ -333,6 +334,20 @@ class _DesktopShellState extends State<DesktopShell> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('sidemesh_recent_view_mode', mode.name);
     } catch (_) {}
+  }
+
+  void _setRecentRunningOnly(bool enabled) {
+    if (_recentFilters.runningOnly == enabled) return;
+    setState(() {
+      _recentFilters = _recentFilters.copyWith(runningOnly: enabled);
+    });
+  }
+
+  void _setRecentUnreadOnly(bool enabled) {
+    if (_recentFilters.unreadOnly == enabled) return;
+    setState(() {
+      _recentFilters = _recentFilters.copyWith(unreadOnly: enabled);
+    });
   }
 
   Future<void> _checkOnboarding() async {
@@ -1083,8 +1098,13 @@ class _DesktopShellState extends State<DesktopShell> {
                                       setState(() => _inboxCount = n);
                                     },
                                     recentViewMode: _recentViewMode,
+                                    recentFilters: _recentFilters,
                                     onRecentViewModeChanged:
                                         _setRecentViewMode,
+                                    onRecentRunningOnlyChanged:
+                                        _setRecentRunningOnly,
+                                    onRecentUnreadOnlyChanged:
+                                        _setRecentUnreadOnly,
                                   ),
                                 ),
                               ),
@@ -1495,7 +1515,10 @@ class _Sidebar extends StatelessWidget {
     required this.onActiveCountChanged,
     required this.onInboxCountChanged,
     this.recentViewMode,
+    this.recentFilters = const RecentSessionFilters(),
     this.onRecentViewModeChanged,
+    this.onRecentRunningOnlyChanged,
+    this.onRecentUnreadOnlyChanged,
   });
 
   final double titlebarInset;
@@ -1524,7 +1547,10 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<int> onActiveCountChanged;
   final ValueChanged<int> onInboxCountChanged;
   final SessionViewMode? recentViewMode;
+  final RecentSessionFilters recentFilters;
   final ValueChanged<SessionViewMode>? onRecentViewModeChanged;
+  final ValueChanged<bool>? onRecentRunningOnlyChanged;
+  final ValueChanged<bool>? onRecentUnreadOnlyChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1576,9 +1602,12 @@ class _Sidebar extends StatelessWidget {
                 onRecentViewModeChanged != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
-                child: _SessionViewModeBar(
+                child: _RecentControlsBar(
                   value: recentViewMode!,
+                  filters: recentFilters,
                   onChanged: onRecentViewModeChanged!,
+                  onRunningOnlyChanged: onRecentRunningOnlyChanged,
+                  onUnreadOnlyChanged: onRecentUnreadOnlyChanged,
                 ),
               ),
             if (!canStartSession && section == _SidebarSection.recent)
@@ -1620,6 +1649,7 @@ class _Sidebar extends StatelessWidget {
                       onInboxCountChanged: onInboxCountChanged,
                       onToggleHostEnabled: onToggleHostEnabled,
                       recentViewMode: recentViewMode,
+                      recentFilters: recentFilters,
                       onRecentViewModeChanged: onRecentViewModeChanged,
                     ),
             ),
@@ -1739,97 +1769,134 @@ class _ListPaneActionButton extends StatelessWidget {
   }
 }
 
-class _SessionViewModeBar extends StatelessWidget {
-  const _SessionViewModeBar({
+class _RecentControlsBar extends StatelessWidget {
+  const _RecentControlsBar({
     required this.value,
+    required this.filters,
     required this.onChanged,
+    required this.onRunningOnlyChanged,
+    required this.onUnreadOnlyChanged,
   });
 
   final SessionViewMode value;
+  final RecentSessionFilters filters;
   final ValueChanged<SessionViewMode> onChanged;
+  final ValueChanged<bool>? onRunningOnlyChanged;
+  final ValueChanged<bool>? onUnreadOnlyChanged;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: colors.canvas,
-        borderRadius: BorderRadius.circular(AppRadii.control),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        children: [
-          for (final mode in SessionViewMode.values)
-            Expanded(
-              child: _SessionViewModeButton(
-                mode: mode,
-                selected: mode == value,
-                onTap: () => onChanged(mode),
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        PopupMenuButton<SessionViewMode>(
+          tooltip: 'Session view',
+          onSelected: onChanged,
+          itemBuilder: (context) => [
+            for (final mode in SessionViewMode.values)
+              PopupMenuItem(
+                value: mode,
+                child: Row(
+                  children: [
+                    Icon(_desktopSessionViewModeIcon(mode), size: 17),
+                    const SizedBox(width: 10),
+                    Text(_desktopSessionViewModeLabel(mode)),
+                    if (value == mode) ...[
+                      const SizedBox(width: 8),
+                      const Icon(Icons.check_rounded, size: 16),
+                    ],
+                  ],
+                ),
               ),
-            ),
-        ],
-      ),
+          ],
+          child: _RecentFilterToken(
+            icon: _desktopSessionViewModeIcon(value),
+            label: _desktopSessionViewModeLabel(value),
+            selected: true,
+            trailingIcon: Icons.expand_more_rounded,
+          ),
+        ),
+        _RecentFilterToken(
+          icon: Icons.play_circle_outline_rounded,
+          label: 'Running',
+          selected: filters.runningOnly,
+          onTap: onRunningOnlyChanged == null
+              ? null
+              : () => onRunningOnlyChanged!(!filters.runningOnly),
+        ),
+        _RecentFilterToken(
+          icon: Icons.mark_chat_unread_rounded,
+          label: 'Unread',
+          selected: filters.unreadOnly,
+          onTap: onUnreadOnlyChanged == null
+              ? null
+              : () => onUnreadOnlyChanged!(!filters.unreadOnly),
+        ),
+      ],
     );
   }
 }
 
-class _SessionViewModeButton extends StatelessWidget {
-  const _SessionViewModeButton({
-    required this.mode,
+class _RecentFilterToken extends StatelessWidget {
+  const _RecentFilterToken({
+    required this.icon,
+    required this.label,
     required this.selected,
-    required this.onTap,
+    this.trailingIcon,
+    this.onTap,
   });
 
-  final SessionViewMode mode;
+  final IconData icon;
+  final String label;
   final bool selected;
-  final VoidCallback onTap;
+  final IconData? trailingIcon;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final foreground = selected ? colors.accent : colors.textSecondary;
+    final token = AnimatedContainer(
+      duration: const Duration(milliseconds: 140),
+      curve: Curves.easeOutCubic,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: selected ? colors.accentMuted : colors.canvas,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: selected
+              ? colors.accent.withValues(alpha: 0.34)
+              : colors.border,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: foreground),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: selected ? colors.textPrimary : colors.textSecondary,
+              fontWeight: selected ? AppWeights.title : AppWeights.emphasis,
+            ),
+          ),
+          if (trailingIcon != null) ...[
+            const SizedBox(width: 4),
+            Icon(trailingIcon, size: 15, color: colors.textTertiary),
+          ],
+        ],
+      ),
+    );
+    if (onTap == null) return token;
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(999),
         onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-          decoration: BoxDecoration(
-            color: selected ? colors.surface : Colors.transparent,
-            borderRadius: BorderRadius.circular(9),
-            border: Border.all(
-              color: selected ? colors.border : Colors.transparent,
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                _desktopSessionViewModeIcon(mode),
-                size: 14,
-                color: selected ? colors.accent : colors.textTertiary,
-              ),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  _desktopSessionViewModeLabel(mode),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: selected ? colors.textPrimary : colors.textSecondary,
-                    fontWeight: selected
-                        ? AppWeights.title
-                        : AppWeights.emphasis,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+        child: token,
       ),
     );
   }
@@ -1886,6 +1953,7 @@ class _SidebarPane extends StatelessWidget {
     required this.onActiveCountChanged,
     required this.onInboxCountChanged,
     this.recentViewMode,
+    this.recentFilters = const RecentSessionFilters(),
     this.onRecentViewModeChanged,
   });
 
@@ -1906,6 +1974,7 @@ class _SidebarPane extends StatelessWidget {
   final ValueChanged<int> onActiveCountChanged;
   final ValueChanged<int> onInboxCountChanged;
   final SessionViewMode? recentViewMode;
+  final RecentSessionFilters recentFilters;
   final ValueChanged<SessionViewMode>? onRecentViewModeChanged;
 
   @override
@@ -1926,6 +1995,7 @@ class _SidebarPane extends StatelessWidget {
           hasSavedHosts: hosts.isNotEmpty,
           screenAwakeSourceKey: 'desktop-recent-sessions',
           viewMode: recentViewMode ?? SessionViewMode.flat,
+          filters: recentFilters,
           onViewModeChanged: onRecentViewModeChanged,
         );
       case _SidebarSection.inbox:

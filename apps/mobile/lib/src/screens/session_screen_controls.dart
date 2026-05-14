@@ -409,12 +409,14 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     });
 
     try {
-      final models = await widget.api.fetchModels(
-        widget.host,
-        cwd: widget.session.cwd,
-        agentProvider: widget.session.provider,
-        provider: _runtimeModelProvider,
-      );
+      final models = [
+        ...await widget.api.fetchModels(
+          widget.host,
+          cwd: widget.session.cwd,
+          agentProvider: widget.session.provider,
+          provider: _runtimeModelProvider,
+        ),
+      ];
       models.sort(_compareModelEntries);
       if (!mounted) {
         return;
