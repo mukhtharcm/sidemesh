@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../widgets/mesh_widgets.dart';
 
 enum ImageViewerPresentation { auto, route, dialog }
@@ -606,13 +605,7 @@ class ImageViewerPaneState extends State<ImageViewerPane>
         child: ClipRRect(
           borderRadius: panelRadius,
           child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [colors.surfaceElevated, colors.surfaceMuted],
-              ),
-            ),
+            decoration: BoxDecoration(color: colors.surfaceMuted),
             child: _buildInteractiveViewport(context),
           ),
         ),
@@ -661,7 +654,7 @@ class ImageViewerActions extends StatelessWidget {
             icon: Icon(Icons.add_rounded, size: iconSize),
           ),
           IconButton(
-            tooltip: 'Reset zoom',
+            tooltip: 'Actual size',
             color: foreground,
             visualDensity: compact ? VisualDensity.compact : null,
             onPressed: s?.canReset == true ? s?.reset : null,
@@ -809,12 +802,12 @@ class _ImageViewerDialogState extends State<_ImageViewerDialog> {
                     ),
                     if (widget.sources.length > 1) ...[
                       IconButton(
-                        tooltip: 'Previous image',
+                        tooltip: 'Previous',
                         onPressed: _canGoPrevious ? _goPrevious : null,
                         icon: const Icon(Icons.chevron_left_rounded, size: 20),
                       ),
                       IconButton(
-                        tooltip: 'Next image',
+                        tooltip: 'Next',
                         onPressed: _canGoNext ? _goNext : null,
                         icon: const Icon(Icons.chevron_right_rounded, size: 20),
                       ),
@@ -1083,7 +1076,9 @@ class _ImageViewerHeaderText extends StatelessWidget {
             subtitleText,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: monoStyle(color: colors.textTertiary, fontSize: 11),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textTertiary,
+            ),
           ),
         ],
       ],
@@ -1129,7 +1124,7 @@ class _ImageViewerErrorState extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            title,
+            'Try opening it again.',
             textAlign: TextAlign.center,
             style: Theme.of(
               context,

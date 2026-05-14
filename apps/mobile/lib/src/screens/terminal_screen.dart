@@ -51,12 +51,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
           children: [
             Text(widget.title ?? 'Terminal'),
             Text(
-              widget.cwd,
+              _terminalLocationLabel(widget.host.label, widget.cwd),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: colors.textSecondary,
-                fontFamily: 'SpaceMono',
               ),
             ),
           ],
@@ -122,7 +121,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       onOutput: _sendInput,
       onResize: _handleResize,
     );
-    _terminal.write('Opening Sidemesh terminal...\r\n');
+    _terminal.write('Opening terminal...\r\n');
     HostReconnectScheduler.instance.registerSlot(
       widget.host.id,
       _reconnectSlotId,
@@ -160,7 +159,7 @@ class _TerminalPaneState extends State<TerminalPane> {
     _channel = null;
     _terminalInfo = null;
     _lastSeq = -1;
-    _terminal.write('\r\nOpening Sidemesh terminal...\r\n');
+    _terminal.write('\r\nOpening terminal...\r\n');
     unawaited(_startTerminal(reuseExisting: widget.reuseExisting));
   }
 
@@ -209,7 +208,7 @@ class _TerminalPaneState extends State<TerminalPane> {
         _starting = false;
         _error = message;
       });
-      _terminal.write('\r\n[terminal error] $message\r\n');
+      _terminal.write('\r\nCould not open terminal: $message\r\n');
     }
   }
 
@@ -283,7 +282,7 @@ class _TerminalPaneState extends State<TerminalPane> {
     }
     setState(() {
       _connecting = false;
-      _error = 'Terminal disconnected. Reconnecting...';
+      _error = 'Connection lost. Connecting again...';
     });
     HostReconnectScheduler.instance.markDisconnected(
       widget.host.id,
@@ -351,7 +350,7 @@ class _TerminalPaneState extends State<TerminalPane> {
             );
           }
         });
-        _terminal.write('\r\n[terminal exited]\r\n');
+        _terminal.write('\r\nTerminal closed.\r\n');
         return;
       case 'replace':
         final seq = _intOrNull(frame['seq']);
@@ -368,7 +367,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       case 'error':
         final message = frame['message']?.toString() ?? 'Terminal error';
         setState(() => _error = message);
-        _terminal.write('\r\n[terminal error] $message\r\n');
+        _terminal.write('\r\nTerminal error: $message\r\n');
         return;
     }
   }
@@ -412,7 +411,9 @@ class _TerminalPaneState extends State<TerminalPane> {
       _lastSeq = -1;
       _error = null;
     });
-    _terminal.write('\r\n[terminal restarted from another device]\r\n');
+    _terminal.write(
+      '\r\nThis terminal was reopened on another device. Reconnecting...\r\n',
+    );
     _connectLive();
   }
 
@@ -460,7 +461,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       _lastSeq = -1;
       _error = null;
     });
-    _terminal.write('\r\nStarting a new Sidemesh terminal...\r\n');
+    _terminal.write('\r\nOpening a new terminal...\r\n');
     await _startTerminal(reuseExisting: false, replaceExisting: true);
   }
 
@@ -609,14 +610,14 @@ class _TerminalStatusStrip extends StatelessWidget {
     final baseLabel =
         error ??
         (starting
-            ? 'Starting terminal'
+            ? 'Opening terminal'
             : connecting
             ? 'Connecting'
             : running
             ? limitedBackend
-                  ? 'Live terminal (limited fallback)'
-                  : 'Live terminal'
-            : 'Terminal stopped');
+                  ? 'Connected (basic mode)'
+                  : 'Connected'
+            : 'Terminal closed');
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
@@ -672,7 +673,7 @@ class _TerminalStatusStrip extends StatelessWidget {
               child: Tooltip(
                 message: terminal!.cwd,
                 child: Text(
-                  '${terminal!.backend} ${terminal!.cols}x${terminal!.rows} · ${_basename(terminal!.cwd)}',
+                  _terminalSummaryLabel(terminal!),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -694,7 +695,7 @@ class _TerminalStatusStrip extends StatelessWidget {
             const SizedBox(width: 8),
             MeshIconButton(
               icon: Icons.restart_alt_rounded,
-              tooltip: 'Start new terminal',
+              tooltip: 'Open new terminal',
               color: colors.accent,
               onTap: onRestart,
             ),
@@ -723,6 +724,24 @@ String _basename(String path) {
   return index >= 0
       ? withoutTrailingSlash.substring(index + 1)
       : withoutTrailingSlash;
+}
+
+String _terminalLocationLabel(String hostLabel, String cwd) {
+  final trimmed = cwd.trim();
+  if (trimmed.isEmpty) return hostLabel;
+  final folder = _basename(trimmed);
+  if (folder.isEmpty) return '$hostLabel · $trimmed';
+  return '$hostLabel · $folder';
+}
+
+String _terminalSummaryLabel(HostTerminalInfo terminal) {
+  final folder = _basename(terminal.cwd);
+  if (folder.isNotEmpty) return folder;
+  final trimmed = terminal.cwd.trim();
+  if (trimmed.isNotEmpty) return trimmed;
+  final title = terminal.title.trim();
+  if (title.isNotEmpty) return title;
+  return 'Shell';
 }
 
 int? _intOrNull(Object? value) {

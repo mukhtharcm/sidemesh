@@ -4,7 +4,6 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../pairing.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../widgets/mesh_widgets.dart';
 
 bool get canScanPairingQr {
@@ -62,7 +61,9 @@ class _PairScannerSheetState extends State<PairScannerSheet> {
       }
     }
     if (mounted) {
-      setState(() => _message = 'That QR is not a Sidemesh pairing code.');
+      setState(() {
+        _message = 'This code does not work for Sidemesh pairing.';
+      });
     }
   }
 
@@ -88,12 +89,12 @@ class _PairScannerSheetState extends State<PairScannerSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Scan pairing QR',
+                        'Scan a pairing code',
                         style: Theme.of(context).textTheme.titleLarge
                             ?.copyWith(fontWeight: FontWeight.w800),
                       ),
                       Text(
-                        'Run `sidemesh pair` on the host, then point here.',
+                        'On the machine you want to connect, run `sidemesh pair`, then scan the code here.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: colors.textSecondary,
                         ),
@@ -102,7 +103,7 @@ class _PairScannerSheetState extends State<PairScannerSheet> {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Close',
+                  tooltip: 'Close scanner',
                   onPressed: () => Navigator.of(context).pop(),
                   icon: const Icon(Icons.close_rounded),
                 ),
@@ -134,9 +135,8 @@ class _PairScannerSheetState extends State<PairScannerSheet> {
               const SizedBox(height: 12),
               Text(
                 _message!,
-                style: monoStyle(
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colors.warning,
-                  fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -181,7 +181,7 @@ class _ScannerError extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       alignment: Alignment.center,
       child: Text(
-        'Camera unavailable: ${error.errorCode.name}',
+        _cameraErrorMessage(error),
         textAlign: TextAlign.center,
         style: TextStyle(
           color: colors.textSecondary,
@@ -190,6 +190,14 @@ class _ScannerError extends StatelessWidget {
       ),
     );
   }
+}
+
+String _cameraErrorMessage(MobileScannerException error) {
+  final code = error.errorCode.name.toLowerCase();
+  if (code.contains('permission')) {
+    return 'Camera access is turned off. Check permissions and try again.';
+  }
+  return 'Camera is unavailable right now. Check camera access and try again.';
 }
 
 class _ScanFramePainter extends CustomPainter {

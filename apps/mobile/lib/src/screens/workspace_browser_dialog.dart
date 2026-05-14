@@ -5,7 +5,6 @@ import '../fs_languages.dart';
 import '../fs_models.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../widgets/mesh_widgets.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_pane.dart';
@@ -22,7 +21,7 @@ Future<void> showWorkspaceBrowserDialog(
 }) {
   return showDialog<void>(
     context: context,
-    barrierColor: Colors.black.withValues(alpha: 0.4),
+    barrierColor: Colors.black.withValues(alpha: 0.32),
     builder: (dialogContext) => _WorkspaceBrowserDialog(
       host: host,
       api: api,
@@ -124,8 +123,9 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                         ? Center(
                             child: MeshEmptyState(
                               icon: Icons.description_rounded,
-                              title: 'Select a file',
-                              body: 'Pick a file on the left to view or edit.',
+                              title: 'Open a file',
+                              body:
+                                  'Choose a file on the left to view or edit it here.',
                             ),
                           )
                         : FileViewerPane(
@@ -186,7 +186,7 @@ class _DialogHeader extends StatelessWidget {
               children: [
                 Text(
                   selectedPath == null
-                      ? baseName(root)
+                      ? 'Workspace files'
                       : baseName(selectedPath),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -207,12 +207,13 @@ class _DialogHeader extends StatelessWidget {
                     ],
                     Flexible(
                       child: Text(
-                        selectedPath ?? '$root • ${host.label}',
+                        selectedPath == null
+                            ? 'Files on ${host.label} · ${baseName(root).isEmpty ? root : baseName(root)}'
+                            : '${host.label} · $selectedPath',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
+                        style: theme.textTheme.bodySmall?.copyWith(
                           color: colors.textTertiary,
-                          fontSize: 11,
                         ),
                       ),
                     ),
@@ -228,7 +229,7 @@ class _DialogHeader extends StatelessWidget {
                   FileViewerActions(state: viewerKey.currentState),
             ),
           IconButton(
-            tooltip: 'Close',
+            tooltip: 'Close files',
             onPressed: onClose,
             icon: const Icon(Icons.close_rounded, size: 20),
           ),
