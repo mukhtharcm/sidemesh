@@ -115,10 +115,7 @@ class SessionComposerSeed {
 }
 
 class _DockedBrowserPreview {
-  const _DockedBrowserPreview({
-    required this.preview,
-    this.expanded = true,
-  });
+  const _DockedBrowserPreview({required this.preview, this.expanded = true});
 
   final HostBrowserPreviewInfo preview;
   final bool expanded;
@@ -192,11 +189,11 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                          MeshPill(
-                            label: 'paused',
-                            tone: MeshPillTone.warning,
-                            icon: Icons.pause_rounded,
-                            mono: true,
+                      MeshPill(
+                        label: 'paused',
+                        tone: MeshPillTone.warning,
+                        icon: Icons.pause_rounded,
+                        mono: true,
                       ),
                     ],
                   ),
@@ -800,7 +797,7 @@ class _SessionScreenState extends State<SessionScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    
+
     _pinsStore.ensureLoaded();
     _pinsStore.addListener(_handlePinsChanged);
     _sendOutbox.addListener(_handleSendOutboxChanged);
@@ -1728,10 +1725,10 @@ class _SessionScreenState extends State<SessionScreen>
         : null;
     final nextDraftFileMentions = _supportsFileMentions
         ? _draftFileMentions
-            .where(
-              (item) => _composerController.text.contains(item.tokenText),
-            )
-            .toList(growable: false)
+              .where(
+                (item) => _composerController.text.contains(item.tokenText),
+              )
+              .toList(growable: false)
         : const <_ComposerFileMention>[];
     final fileQueryChanged =
         nextFileQuery?.start != _activeFileQuery?.start ||
@@ -1795,8 +1792,7 @@ class _SessionScreenState extends State<SessionScreen>
     final offset = sel.isValid ? sel.end : text.length;
     final needsSpace = offset > 0 && text[offset - 1] != ' ';
     final insert = needsSpace ? r' $' : r'$';
-    final newText =
-        text.substring(0, offset) + insert + text.substring(offset);
+    final newText = text.substring(0, offset) + insert + text.substring(offset);
     _composerController.value = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(offset: offset + insert.length),
@@ -1812,8 +1808,7 @@ class _SessionScreenState extends State<SessionScreen>
     final offset = sel.isValid ? sel.end : text.length;
     final needsSpace = offset > 0 && text[offset - 1] != ' ';
     final insert = needsSpace ? ' @' : '@';
-    final newText =
-        text.substring(0, offset) + insert + text.substring(offset);
+    final newText = text.substring(0, offset) + insert + text.substring(offset);
     _composerController.value = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(offset: offset + insert.length),
@@ -2715,7 +2710,8 @@ class _SessionScreenState extends State<SessionScreen>
             final hasThinkingBlocks = message.content.any(
               (b) => b is ThinkingBlock,
             );
-            final liveThinking = committedLive != null &&
+            final liveThinking =
+                committedLive != null &&
                 committedLive.reasoning.trim().isNotEmpty;
             if (!hasThinkingBlocks && liveThinking) {
               final reasoning = committedLive.reasoning.trimRight();
@@ -2905,10 +2901,9 @@ class _SessionScreenState extends State<SessionScreen>
       event: event,
       createdAt: createdAt ?? DateTime.now(),
       seq: seqOverride ?? event.seq ?? _nextTimelineSeq(),
-      keyId:
-          replaceSemanticKey == null
-              ? '${kind.name}:${event.seq ?? DateTime.now().microsecondsSinceEpoch}'
-              : '${kind.name}:$replaceSemanticKey',
+      keyId: replaceSemanticKey == null
+          ? '${kind.name}:${event.seq ?? DateTime.now().microsecondsSinceEpoch}'
+          : '${kind.name}:$replaceSemanticKey',
       semanticKey: replaceSemanticKey,
     );
     final existingIndex = replaceSemanticKey == null
@@ -2918,8 +2913,9 @@ class _SessionScreenState extends State<SessionScreen>
           );
     if (existingIndex == -1) {
       final next = [..._timelineLiveEvents, record];
-      _timelineLiveEvents =
-          next.length > 16 ? next.sublist(next.length - 16) : next;
+      _timelineLiveEvents = next.length > 16
+          ? next.sublist(next.length - 16)
+          : next;
       return;
     }
     final updated = [..._timelineLiveEvents];
@@ -3679,8 +3675,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _insertFileMention(FsSearchResult file) {
     final active =
-        _activeFileQuery ??
-        _extractActiveFileQuery(_composerController.value);
+        _activeFileQuery ?? _extractActiveFileQuery(_composerController.value);
     if (active == null) {
       return;
     }
@@ -3698,9 +3693,7 @@ class _SessionScreenState extends State<SessionScreen>
 
     final nextMentions = List<_ComposerFileMention>.from(_draftFileMentions);
     if (!nextMentions.any((item) => item.file.path == file.path)) {
-      nextMentions.add(
-        _ComposerFileMention(file: file, tokenText: tokenText),
-      );
+      nextMentions.add(_ComposerFileMention(file: file, tokenText: tokenText));
     }
 
     HapticFeedback.selectionClick();
@@ -4092,7 +4085,10 @@ class _SessionScreenState extends State<SessionScreen>
     final draftFileMentions = List<_ComposerFileMention>.from(
       _draftFileMentions.where((item) => text.contains(item.tokenText)),
     );
-    if ((text.isEmpty && draftAttachments.isEmpty && draftFileMentions.isEmpty) || _sending) {
+    if ((text.isEmpty &&
+            draftAttachments.isEmpty &&
+            draftFileMentions.isEmpty) ||
+        _sending) {
       return;
     }
 
@@ -4312,35 +4308,215 @@ class _SessionScreenState extends State<SessionScreen>
     _failedSendRetryExpiresAt = null;
   }
 
+  Future<bool> _showSessionConfirmDialog({
+    required IconData icon,
+    required String title,
+    required String body,
+    required String confirmLabel,
+    bool danger = false,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final colors = dialogContext.colors;
+        final accent = danger ? colors.danger : colors.accent;
+        final muted = danger ? colors.dangerMuted : colors.accentMuted;
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 28,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: MeshCard(
+              tone: MeshCardTone.surface,
+              padding: const EdgeInsets.all(18),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final compact = constraints.maxWidth < 360;
+                  final confirmButton = FilledButton(
+                    style: danger
+                        ? FilledButton.styleFrom(
+                            backgroundColor: colors.danger,
+                            foregroundColor: colors.accentOn,
+                          )
+                        : null,
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    child: Text(confirmLabel),
+                  );
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: muted,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: accent.withValues(alpha: 0.24),
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(icon, size: 20, color: accent),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: AppWeights.title,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        body,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colors.textSecondary,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      if (compact) ...[
+                        SizedBox(width: double.infinity, child: confirmButton),
+                        const SizedBox(height: 8),
+                        Center(
+                          child: TextButton(
+                            onPressed: () =>
+                                Navigator.of(dialogContext).pop(false),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                      ] else
+                        Row(
+                          children: [
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.of(dialogContext).pop(false),
+                              child: const Text('Cancel'),
+                            ),
+                            const Spacer(),
+                            confirmButton,
+                          ],
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    return confirmed == true;
+  }
+
+  Future<String?> _promptSessionName(String current) async {
+    final controller = TextEditingController(text: current)
+      ..selection = TextSelection(baseOffset: 0, extentOffset: current.length);
+    final nextName = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        final colors = dialogContext.colors;
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 28,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: MeshCard(
+              tone: MeshCardTone.surface,
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: colors.accentMuted,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: colors.accent.withValues(alpha: 0.24),
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      Icons.edit_outlined,
+                      size: 20,
+                      color: colors.accent,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Rename session',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: AppWeights.title,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Choose the name you want to see in Sidemesh for this session.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colors.textSecondary,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Session name',
+                    ),
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (value) =>
+                        Navigator.of(dialogContext).pop(value),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                      const Spacer(),
+                      FilledButton(
+                        onPressed: () =>
+                            Navigator.of(dialogContext).pop(controller.text),
+                        child: const Text('Save name'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    controller.dispose();
+    return nextName;
+  }
+
   Future<void> _stopSession() async {
     if (!_supportsSessionInterrupt) {
       showAppSnackBar(context, 'This provider cannot stop the agent yet.');
       return;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Stop agent?'),
-        content: const Text(
-          'The current task will stop. Any tools mid-run may not finish cleanly.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: context.colors.danger,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Stop'),
-          ),
-        ],
-      ),
+    final confirmed = await _showSessionConfirmDialog(
+      icon: Icons.stop_circle_outlined,
+      title: 'Stop the agent?',
+      body:
+          'The current task will stop. Any tools that are still running may not finish cleanly.',
+      confirmLabel: 'Stop agent',
+      danger: true,
     );
-    if (confirmed != true) return;
+    if (!confirmed) return;
     if (!mounted) return;
     try {
       await widget.api.stopSession(widget.host, widget.session.id);
@@ -4380,26 +4556,14 @@ class _SessionScreenState extends State<SessionScreen>
       showAppSnackBar(context, 'Wait for the current turn to finish first.');
       return;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Compact session?'),
-        content: const Text(
-          'The provider will summarize older context so future turns can use fewer tokens. Recent messages remain visible in Sidemesh.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Compact'),
-          ),
-        ],
-      ),
+    final confirmed = await _showSessionConfirmDialog(
+      icon: Icons.compress_rounded,
+      title: 'Compact this session?',
+      body:
+          'Older context will be summarized so future replies can use fewer tokens. Recent messages stay visible in Sidemesh.',
+      confirmLabel: 'Start compaction',
     );
-    if (confirmed != true || !mounted) {
+    if (!confirmed || !mounted) {
       return;
     }
     try {
@@ -4430,32 +4594,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     final current = (_session ?? widget.session).title;
-    final controller = TextEditingController(text: current)
-      ..selection = TextSelection(baseOffset: 0, extentOffset: current.length);
-    final newName = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Rename session'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Session name'),
-          textInputAction: TextInputAction.done,
-          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
+    final newName = await _promptSessionName(current);
     final trimmed = newName?.trim();
     if (trimmed == null || trimmed.isEmpty || trimmed == current) {
       return;
@@ -4485,26 +4624,14 @@ class _SessionScreenState extends State<SessionScreen>
       showAppSnackBar(context, 'This provider does not support archiving.');
       return;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Archive session?'),
-        content: const Text(
-          'Archived sessions are hidden from Recent. You can unarchive them from the host.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Archive'),
-          ),
-        ],
-      ),
+    final confirmed = await _showSessionConfirmDialog(
+      icon: Icons.archive_outlined,
+      title: 'Archive this session?',
+      body:
+          'Archived sessions disappear from Recent. You can still restore them later from the host.',
+      confirmLabel: 'Archive session',
     );
-    if (confirmed != true) {
+    if (!confirmed) {
       return;
     }
     try {
@@ -4602,7 +4729,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (action == null) {
       return;
     }
-    HapticFeedback.mediumImpact();   // immediate tactile confirmation
+    HapticFeedback.mediumImpact(); // immediate tactile confirmation
     try {
       await widget.api.respondToAction(
         widget.host,
@@ -4701,6 +4828,29 @@ class _SessionScreenState extends State<SessionScreen>
     final gitLabel = _supportsGitStatus
         ? _gitHeaderLabel(session, _gitStatus)
         : null;
+    Widget sectionLabel(String title, String subtitle) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: AppWeights.title,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+              height: 1.35,
+            ),
+          ),
+        ],
+      );
+    }
+
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: colors.surface,
@@ -4737,17 +4887,71 @@ class _SessionScreenState extends State<SessionScreen>
                 const SizedBox(height: 8),
                 MeshCard(
                   tone: MeshCardTone.muted,
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        session.title,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: AppWeights.title),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Running on ${widget.host.label}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          MeshPill(
+                            label: _running ? 'running' : 'idle',
+                            icon: _running
+                                ? Icons.play_circle_outline_rounded
+                                : Icons.pause_circle_outline_rounded,
+                            tone: _running
+                                ? MeshPillTone.success
+                                : MeshPillTone.neutral,
+                          ),
+                          MeshPill(
+                            label: session.source,
+                            icon: Icons.route_rounded,
+                            tone: MeshPillTone.neutral,
+                          ),
+                          if (gitLabel != null)
+                            MeshPill(
+                              label: gitLabel,
+                              icon: Icons.account_tree_rounded,
+                              tone: MeshPillTone.info,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                sectionLabel(
+                  'Overview',
+                  'Where this session is running and how it started.',
+                ),
+                const SizedBox(height: 8),
+                MeshCard(
+                  tone: MeshCardTone.muted,
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _DetailRow(label: 'Host', value: widget.host.label),
-                      _DetailRow(label: 'Working dir', value: session.cwd),
+                      _DetailRow(label: 'Folder', value: session.cwd),
                       _DetailRow(
                         label: 'Status',
                         value: _running ? 'Running' : 'Idle',
                       ),
-                      _DetailRow(label: 'Source', value: session.source),
+                      _DetailRow(label: 'Started from', value: session.source),
                       if (gitLabel != null)
                         _DetailRow(label: 'Git', value: gitLabel),
                     ],
@@ -4755,17 +4959,22 @@ class _SessionScreenState extends State<SessionScreen>
                 ),
                 if (gitLabel != null) ...[
                   const SizedBox(height: 8),
-                  TextButton.icon(
+                  OutlinedButton.icon(
                     onPressed: () {
                       Navigator.of(context).pop();
                       unawaited(_showGitSheet(session));
                     },
                     icon: const Icon(Icons.account_tree_rounded, size: 18),
-                    label: const Text('Open Git details'),
+                    label: const Text('View Git details'),
                   ),
                 ],
                 if (session.runtime != null) ...[
                   const SizedBox(height: 14),
+                  sectionLabel(
+                    'Runtime now',
+                    'Live settings reported by the provider for the current session.',
+                  ),
+                  const SizedBox(height: 8),
                   _SessionRuntimeDetails(runtime: session.runtime!),
                 ],
               ],
@@ -4895,9 +5104,7 @@ class _SessionScreenState extends State<SessionScreen>
     return collectBrowserPreviewCandidates(_activities);
   }
 
-  Future<void> _openBrowserPreviewLauncher({
-    bool openInWindow = false,
-  }) async {
+  Future<void> _openBrowserPreviewLauncher({bool openInWindow = false}) async {
     if (!_supportsBrowserPreview) {
       showAppSnackBar(context, 'This host does not expose browser previews.');
       return;
@@ -4915,9 +5122,8 @@ class _SessionScreenState extends State<SessionScreen>
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) => _PreviewTargetPickerSheet(
-        suggestions: suggestions,
-      ),
+      builder: (sheetContext) =>
+          _PreviewTargetPickerSheet(suggestions: suggestions),
     );
     if (!mounted || selected == null) {
       return;
@@ -4926,8 +5132,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _openBrowserPreviewTarget(
-    BrowserPreviewTargetCandidate candidate,
-    {
+    BrowserPreviewTargetCandidate candidate, {
     bool openInWindow = false,
   }) async {
     if (!_supportsBrowserPreview) {
@@ -4980,10 +5185,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _openConnections() async {
     if (!_supportsConnections) {
-      showAppSnackBar(
-        context,
-        'This host does not expose browser previews.',
-      );
+      showAppSnackBar(context, 'This host does not expose browser previews.');
       return;
     }
     final session = _session ?? widget.session;
@@ -5075,9 +5277,7 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
-  Future<void> _openBrowserPreviewWindow(
-    HostBrowserPreviewInfo preview,
-  ) async {
+  Future<void> _openBrowserPreviewWindow(HostBrowserPreviewInfo preview) async {
     _detachCurrentBrowserPreviewSurface(preview);
     final opened = await SidemeshBrowserPreviewWindowManager.instance
         .openOrFocusBrowserPreviewWindow(host: widget.host, preview: preview);
@@ -5279,9 +5479,7 @@ class _SessionScreenState extends State<SessionScreen>
         reasoning: delta,
       );
     }
-    return current.copyWith(
-      reasoning: '${current.reasoning}$delta',
-    );
+    return current.copyWith(reasoning: '${current.reasoning}$delta');
   }
 
   int _nextTimelineSeq() {
@@ -5859,7 +6057,9 @@ class _SessionScreenState extends State<SessionScreen>
             ),
         ],
       ),
-      if (_supportsProviderRestart || _supportsSessionRename || _supportsSessionArchive)
+      if (_supportsProviderRestart ||
+          _supportsSessionRename ||
+          _supportsSessionArchive)
         _SessionActionGroup(
           label: 'Manage',
           actions: [
@@ -5941,10 +6141,8 @@ class _SessionScreenState extends State<SessionScreen>
     final freshnessMode = _transcriptFreshnessMode;
     final showHistoryBanner =
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
-    final showStopPill =
-        isCompact && _running && _supportsSessionInterrupt;
-    final showWaitingState =
-        !_loading && timelineEntries.isEmpty && _running;
+    final showStopPill = isCompact && _running && _supportsSessionInterrupt;
+    final showWaitingState = !_loading && timelineEntries.isEmpty && _running;
     final bodyContent = Column(
       children: [
         if (!isCompact)
@@ -6028,7 +6226,12 @@ class _SessionScreenState extends State<SessionScreen>
                               if (showHistoryBanner &&
                                   index == visibleTimelineEntries.length) {
                                 return Padding(
-                                  padding: const EdgeInsets.fromLTRB(0, 10, 0, 6),
+                                  padding: const EdgeInsets.fromLTRB(
+                                    0,
+                                    10,
+                                    0,
+                                    6,
+                                  ),
                                   child: _HistoryTruncationCard(
                                     history: _history!,
                                     loading: _loadingOlderHistory,
@@ -6221,10 +6424,12 @@ class _SessionScreenState extends State<SessionScreen>
           onRemoveFile: _removeDraftFileMention,
           onSend: _sendInput,
           onDismiss: _dismissKeyboard,
-          onAddSkillTrigger:
-              _supportsSkillInput ? _addSkillTriggerToComposer : null,
-          onAddFileTrigger:
-              _supportsFileMentions ? _addFileTriggerToComposer : null,
+          onAddSkillTrigger: _supportsSkillInput
+              ? _addSkillTriggerToComposer
+              : null,
+          onAddFileTrigger: _supportsFileMentions
+              ? _addFileTriggerToComposer
+              : null,
           submitOnEnter: widget.desktopMode,
         ),
       ],
@@ -6410,7 +6615,10 @@ class _SessionScreenState extends State<SessionScreen>
               child: ListenableBuilder(
                 listenable: Listenable.merge([_policyStore, _turnConfigStore]),
                 builder: (context, _) {
-                  final policy = _policyStore.policyFor(widget.host, session.id);
+                  final policy = _policyStore.policyFor(
+                    widget.host,
+                    session.id,
+                  );
                   final turnConfig = _turnConfigStore.configFor(
                     widget.host,
                     session.id,
@@ -6481,8 +6689,7 @@ class _SessionScreenState extends State<SessionScreen>
                             ? Icons.star_rounded
                             : Icons.star_outline_rounded,
                         tooltip: favorite ? 'Unpin session' : 'Pin session',
-                        color:
-                            favorite ? colors.warning : colors.textSecondary,
+                        color: favorite ? colors.warning : colors.textSecondary,
                         onTap: _toggleFavorite,
                       ),
                       const SizedBox(width: AppSpacing.xs),
@@ -6491,8 +6698,7 @@ class _SessionScreenState extends State<SessionScreen>
                         tooltip: _running
                             ? 'Session actions (agent running)'
                             : 'Session actions',
-                        color:
-                            _running ? colors.warning : colors.textPrimary,
+                        color: _running ? colors.warning : colors.textPrimary,
                         onTap: () => unawaited(
                           _showSessionActionsSheet(
                             session: session,
