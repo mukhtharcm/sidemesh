@@ -161,6 +161,8 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Appearance'), findsOneWidget);
+        expect(find.text('Changes the app look only.'), findsOneWidget);
+        expect(find.text('Color mode'), findsOneWidget);
         expect(tester.takeException(), isNull);
       } finally {
         debugDefaultTargetPlatformOverride = null;

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/app_tokens.dart';
 import '../theme/app_palettes.dart';
 import '../theme/theme_controller.dart';
 import 'mesh_widgets.dart';
@@ -132,11 +133,20 @@ class _AppearanceSheet extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 18),
-                      _SectionLabel(text: 'Color mode'),
+                      _AppearanceSummaryCard(controller: controller),
+                      const SizedBox(height: 18),
+                      const _SectionLabel(
+                        text: 'Color mode',
+                        subtitle: 'Pick how bright the app should be.',
+                      ),
                       const SizedBox(height: 8),
                       _BrightnessSegmented(controller: controller),
                       const SizedBox(height: 22),
-                      _SectionLabel(text: 'Accent'),
+                      const _SectionLabel(
+                        text: 'Accent',
+                        subtitle:
+                            'Choose the palette used for highlights and status accents.',
+                      ),
                       const SizedBox(height: 10),
                       _SwatchGrid(
                         controller: controller,
@@ -144,7 +154,11 @@ class _AppearanceSheet extends StatelessWidget {
                         compact: compactThemeGrid,
                       ),
                       SizedBox(height: compactThemeGrid ? 16 : 22),
-                      _SectionLabel(text: 'Text'),
+                      const _SectionLabel(
+                        text: 'Text',
+                        subtitle:
+                            'Adjust the app font and reading size without changing session content.',
+                      ),
                       const SizedBox(height: 10),
                       _TypographyCard(controller: controller),
                       const SizedBox(height: 8),
@@ -172,20 +186,98 @@ class _AppearanceSheet extends StatelessWidget {
 }
 
 class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({required this.text});
+  const _SectionLabel({required this.text, this.subtitle});
   final String text;
+  final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Text(
-      text,
-      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-        color: colors.textSecondary,
-        fontWeight: FontWeight.w700,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          text,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: colors.textSecondary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 3),
+          Text(
+            subtitle!,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textTertiary,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _AppearanceSummaryCard extends StatelessWidget {
+  const _AppearanceSummaryCard({required this.controller});
+
+  final ThemeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Changes the app look only.',
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Session content, code, and terminal output stay the same.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: context.colors.textSecondary,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              MeshPill(
+                label: _themeModeLabel(controller.mode),
+                icon: Icons.brightness_6_rounded,
+              ),
+              MeshPill(
+                label: controller.variant.label,
+                icon: Icons.palette_outlined,
+              ),
+              MeshPill(
+                label: controller.typography.interfaceScale.label,
+                icon: Icons.format_size_rounded,
+                tone: MeshPillTone.neutral,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
+}
+
+String _themeModeLabel(ThemeMode mode) {
+  return switch (mode) {
+    ThemeMode.system => 'System mode',
+    ThemeMode.light => 'Light mode',
+    ThemeMode.dark => 'Dark mode',
+  };
 }
 
 class _BrightnessSegmented extends StatelessWidget {
