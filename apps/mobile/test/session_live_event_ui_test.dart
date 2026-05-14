@@ -1060,7 +1060,7 @@ void main() {
         .firstWhere((widget) => widget.text.toPlainText() == 'Working notes');
     expect(
       (reasoningLabel.text as TextSpan).style?.color,
-      ThemeVariant.codexAmber.light.textPrimary,
+      ThemeVariant.codexAmber.light.textSecondary,
     );
 
     await tester.tap(find.text('Working notes'));
@@ -1136,7 +1136,7 @@ void main() {
           _commandActivity(
             id: 'cmd-preview',
             seq: 2,
-            command: 'npm run dev',
+            command: "/bin/bash -lc 'npm run dev'",
             cwd: '/repo/apps/web',
             output: 'Local: http://localhost:3000',
           ),
@@ -1163,8 +1163,11 @@ void main() {
 
       expect(find.text('Edited 1 file'), findsOneWidget);
       expect(find.text('FILE CHANGE'), findsNothing);
+      expect(find.text('Ran npm run dev'), findsOneWidget);
+      expect(find.textContaining('/bin/bash'), findsNothing);
+      expect(find.text('done'), findsNothing);
 
-      await tester.tap(find.text('npm run dev'));
+      await tester.tap(find.text('Ran npm run dev'));
       await _pumpFrames(tester);
       await tester.tap(find.text('apps/web/src/main.dart'));
       await _pumpFrames(tester);
