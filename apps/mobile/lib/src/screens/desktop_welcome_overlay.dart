@@ -15,7 +15,7 @@ enum _OnboardingTab { welcome, setup, shortcuts, theme }
 /// A desktop welcome center with tabbed sections.
 ///
 /// Covers the window with a blurred backdrop and a wide card.
-/// Users can explore Welcome, Setup, Shortcuts, and Theme tabs.
+/// Users can explore Welcome, Setup, Shortcuts, and Appearance tabs.
 /// Non-blocking — dismiss via the close button or clicking outside.
 class DesktopWelcomeOverlay extends StatefulWidget {
   const DesktopWelcomeOverlay({
@@ -238,7 +238,7 @@ class _TabBar extends StatelessWidget {
       (_OnboardingTab.welcome, 'Welcome', Icons.waving_hand_rounded),
       (_OnboardingTab.setup, 'Setup', Icons.terminal_rounded),
       (_OnboardingTab.shortcuts, 'Shortcuts', Icons.keyboard_rounded),
-      (_OnboardingTab.theme, 'Theme', Icons.palette_rounded),
+      (_OnboardingTab.theme, 'Appearance', Icons.palette_rounded),
     ];
     return Row(
       children: tabs.map((entry) {
@@ -312,7 +312,7 @@ class _WelcomeTab extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Your coding agents, in your pocket.',
+          'Keep your coding agents within reach.',
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
             fontWeight: FontWeight.w800,
             color: colors.textPrimary,
@@ -324,7 +324,7 @@ class _WelcomeTab extends StatelessWidget {
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: Text(
-            'Run a small daemon on your machine, then control it remotely from this desktop app. Chat, approve changes, inspect files, and monitor sessions — all from one place.',
+            'Run a small daemon on your machine, then keep an eye on sessions, approvals, files, and terminals from this desktop app.',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
               height: 1.5,
@@ -634,7 +634,7 @@ class _ThemeTab extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Pick your vibe',
+          'Choose an appearance',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.w800,
             color: colors.textPrimary,
@@ -642,7 +642,7 @@ class _ThemeTab extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Choose a palette. You can change this anytime in Settings.',
+          'Pick a calmer or stronger palette. You can change this anytime in Settings.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
             color: colors.textSecondary,
           ),
