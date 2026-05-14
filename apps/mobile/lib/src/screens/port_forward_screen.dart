@@ -16,7 +16,7 @@ String portForwardScreenTitle({
   required bool supportsBrowserPreview,
   required bool supportsPortForwarding,
 }) {
-  return 'Browser previews';
+  return 'Preview apps';
 }
 
 class PortForwardScreen extends StatelessWidget {
@@ -48,7 +48,7 @@ class PortForwardScreen extends StatelessWidget {
       backgroundColor: colors.canvas,
       appBar: AppBar(
         backgroundColor: colors.canvas,
-        title: const Text('Browser previews'),
+        title: const Text('Preview apps'),
       ),
       body: PortForwardPane(
         host: host,
@@ -154,7 +154,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
 
   Future<void> _createBrowserPreviewFromInputs() async {
     if (!widget.supportsBrowserPreview) {
-      showAppSnackBar(context, 'This host does not expose browser previews.');
+      showAppSnackBar(context, 'This machine cannot open previews yet.');
       return;
     }
     final targetPort = int.tryParse(_portController.text.trim());
@@ -167,10 +167,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
         : _hostController.text.trim();
     final targetHost = normalizeBrowserPreviewHost(rawHost);
     if (targetHost == null) {
-      showAppSnackBar(
-        context,
-        'Browser previews only support localhost targets.',
-      );
+      showAppSnackBar(context, 'Previews only work with localhost addresses.');
       return;
     }
     setState(() => _creatingPreview = true);
@@ -194,7 +191,8 @@ class _PortForwardPaneState extends State<PortForwardPane> {
       );
       if (!mounted) return;
       final viewport = MediaQuery.sizeOf(context);
-      final preview = existing ??
+      final preview =
+          existing ??
           await widget.api.createBrowserPreview(
             widget.host,
             targetPort: targetPort,
@@ -225,12 +223,14 @@ class _PortForwardPaneState extends State<PortForwardPane> {
       setState(() => _creatingPreview = false);
       showAppSnackBar(
         context,
-        'Could not open browser preview: ${friendlyError(error)}',
+        'Could not start preview: ${friendlyError(error)}',
       );
     }
   }
 
-  Future<void> _openExistingBrowserPreview(HostBrowserPreviewInfo preview) async {
+  Future<void> _openExistingBrowserPreview(
+    HostBrowserPreviewInfo preview,
+  ) async {
     _openBrowserPreview(preview);
   }
 
@@ -267,7 +267,10 @@ class _PortForwardPaneState extends State<PortForwardPane> {
 
   Future<void> _stopBrowserPreview(HostBrowserPreviewInfo preview) async {
     try {
-      final stopped = await widget.api.stopBrowserPreview(widget.host, preview.id);
+      final stopped = await widget.api.stopBrowserPreview(
+        widget.host,
+        preview.id,
+      );
       if (!mounted) return;
       setState(() {
         _inlineBrowserPreview = null;
@@ -279,7 +282,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
       if (!mounted) return;
       showAppSnackBar(
         context,
-        'Could not stop browser preview: ${friendlyError(error)}',
+        'Could not stop preview: ${friendlyError(error)}',
       );
     }
   }
@@ -321,7 +324,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
             const MeshEmptyState(
               icon: Icons.open_in_browser_rounded,
               title: 'Previews unavailable',
-              body: 'This host does not support browser previews yet.',
+              body: 'This machine does not support previews yet.',
             )
           else ...[
             MeshCard(
@@ -339,11 +342,12 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Open a preview',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            color: colors.textPrimary,
-                            fontWeight: AppWeights.title,
-                          ),
+                          'Start a preview',
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                color: colors.textPrimary,
+                                fontWeight: AppWeights.title,
+                              ),
                         ),
                       ),
                       TextButton.icon(
@@ -358,9 +362,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                           size: 16,
                         ),
                         label: Text(
-                          _showAdvancedLauncherOptions
-                              ? 'Less'
-                              : 'More options',
+                          _showAdvancedLauncherOptions ? 'Less' : 'Details',
                         ),
                       ),
                     ],
@@ -368,8 +370,8 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                   const SizedBox(height: 8),
                   Text(
                     inlineManager
-                        ? 'Open a live preview for a local app from this workspace.'
-                        : 'Open a live preview for a local web app running on ${widget.host.label}.',
+                        ? 'Open a local app from this folder in a browser.'
+                        : 'Open a local app running on ${widget.host.label} in a browser.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colors.textSecondary,
                       height: 1.35,
@@ -406,7 +408,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                                     ),
                                   )
                                 : const Icon(Icons.open_in_browser_rounded),
-                            label: const Text('Open'),
+                            label: const Text('Start preview'),
                           ),
                         ),
                       ],
@@ -441,7 +443,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                                   ),
                                 )
                               : const Icon(Icons.open_in_browser_rounded),
-                          label: const Text('Open'),
+                          label: const Text('Start preview'),
                         ),
                       ],
                     ),
@@ -508,9 +510,10 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                                   : Icons.lock_reset_rounded,
                               size: 17,
                             ),
-                            label: const Text('Keep browser sign-ins'),
-                            onSelected: (selected) =>
-                                setState(() => _rememberBrowserLogins = selected),
+                            label: const Text('Keep sign-ins'),
+                            onSelected: (selected) => setState(
+                              () => _rememberBrowserLogins = selected,
+                            ),
                           ),
                         ],
                       ),
@@ -534,21 +537,23 @@ class _PortForwardPaneState extends State<PortForwardPane> {
             else if (browserPreviews.isEmpty)
               MeshEmptyState(
                 icon: Icons.open_in_browser_rounded,
-                title: 'No previews open',
-                body: 'Open a preview for a local app on ${widget.host.label}.',
+                title: 'No previews yet',
+                body:
+                    'Start a preview for a local app on ${widget.host.label}.',
               )
             else ...[
               const _SectionHeading(
                 icon: Icons.open_in_browser_rounded,
-                title: 'Open previews',
-                subtitle: 'Previews running for this session',
+                title: 'Running previews',
+                subtitle: 'Opened from this session',
               ),
               for (final preview in browserPreviews)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: _BrowserPreviewCard(
                     preview: preview,
-                    onOpen: () => unawaited(_openExistingBrowserPreview(preview)),
+                    onOpen: () =>
+                        unawaited(_openExistingBrowserPreview(preview)),
                     onStop: () => unawaited(_stopBrowserPreview(preview)),
                   ),
                 ),
@@ -660,9 +665,8 @@ class _BrowserPreviewCard extends StatelessWidget {
                 ),
               ),
               MeshPill(
-                label: running ? 'LIVE' : preview.status.toUpperCase(),
+                label: running ? 'Open' : _previewStatusLabel(preview.status),
                 tone: running ? MeshPillTone.success : MeshPillTone.neutral,
-                mono: true,
               ),
             ],
           ),
@@ -692,7 +696,7 @@ class _BrowserPreviewCard extends StatelessWidget {
               TextButton.icon(
                 onPressed: onStop,
                 icon: const Icon(Icons.stop_circle_rounded),
-                label: const Text('Stop'),
+                label: const Text('Stop preview'),
               ),
             ],
           ),
@@ -700,4 +704,17 @@ class _BrowserPreviewCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String _previewStatusLabel(String status) {
+  return switch (status) {
+    'starting' => 'Starting',
+    'running' => 'Open',
+    'stopped' => 'Stopped',
+    'error' => 'Error',
+    _ =>
+      status.isEmpty
+          ? 'Unknown'
+          : status[0].toUpperCase() + status.substring(1),
+  };
 }

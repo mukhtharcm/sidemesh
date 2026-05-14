@@ -54,9 +54,9 @@ class _TerminalScreenState extends State<TerminalScreen> {
               _terminalLocationLabel(widget.host.label, widget.cwd),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: colors.textSecondary,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: colors.textSecondary),
             ),
           ],
         ),
@@ -121,7 +121,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       onOutput: _sendInput,
       onResize: _handleResize,
     );
-    _terminal.write('Opening terminal...\r\n');
+    _terminal.write('Starting terminal...\r\n');
     HostReconnectScheduler.instance.registerSlot(
       widget.host.id,
       _reconnectSlotId,
@@ -159,7 +159,7 @@ class _TerminalPaneState extends State<TerminalPane> {
     _channel = null;
     _terminalInfo = null;
     _lastSeq = -1;
-    _terminal.write('\r\nOpening terminal...\r\n');
+    _terminal.write('\r\nStarting terminal...\r\n');
     unawaited(_startTerminal(reuseExisting: widget.reuseExisting));
   }
 
@@ -208,7 +208,7 @@ class _TerminalPaneState extends State<TerminalPane> {
         _starting = false;
         _error = message;
       });
-      _terminal.write('\r\nCould not open terminal: $message\r\n');
+      _terminal.write('\r\nCould not start terminal: $message\r\n');
     }
   }
 
@@ -282,7 +282,7 @@ class _TerminalPaneState extends State<TerminalPane> {
     }
     setState(() {
       _connecting = false;
-      _error = 'Connection lost. Connecting again...';
+      _error = 'Connection lost. Reconnecting...';
     });
     HostReconnectScheduler.instance.markDisconnected(
       widget.host.id,
@@ -350,7 +350,7 @@ class _TerminalPaneState extends State<TerminalPane> {
             );
           }
         });
-        _terminal.write('\r\nTerminal closed.\r\n');
+        _terminal.write('\r\nTerminal stopped.\r\n');
         return;
       case 'replace':
         final seq = _intOrNull(frame['seq']);
@@ -365,9 +365,9 @@ class _TerminalPaneState extends State<TerminalPane> {
         }
         return;
       case 'error':
-        final message = frame['message']?.toString() ?? 'Terminal error';
+        final message = frame['message']?.toString() ?? 'Something went wrong';
         setState(() => _error = message);
-        _terminal.write('\r\nTerminal error: $message\r\n');
+        _terminal.write('\r\nSomething went wrong: $message\r\n');
         return;
     }
   }
@@ -412,7 +412,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       _error = null;
     });
     _terminal.write(
-      '\r\nThis terminal was reopened on another device. Reconnecting...\r\n',
+      '\r\nThis terminal moved to another device. Reconnecting...\r\n',
     );
     _connectLive();
   }
@@ -461,7 +461,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       _lastSeq = -1;
       _error = null;
     });
-    _terminal.write('\r\nOpening a new terminal...\r\n');
+    _terminal.write('\r\nStarting a new terminal...\r\n');
     await _startTerminal(reuseExisting: false, replaceExisting: true);
   }
 
@@ -492,9 +492,9 @@ class _TerminalPaneState extends State<TerminalPane> {
                 borderRadius: BorderRadius.circular(widget.compact ? 12 : 16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 18,
-                    offset: const Offset(0, 10),
+                    color: colors.canvas.withValues(alpha: 0.08),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
                   ),
                 ],
               ),
@@ -515,10 +515,7 @@ class _TerminalPaneState extends State<TerminalPane> {
             ),
           ),
         ),
-        TerminalKeyBar(
-          compact: widget.compact,
-          onAction: _onKeyBarAction,
-        ),
+        TerminalKeyBar(compact: widget.compact, onAction: _onKeyBarAction),
       ],
     );
   }
@@ -574,7 +571,7 @@ xterm.TerminalTheme _terminalTheme(AppColors colors) {
 }
 
 Color _brightTerminalColor(Color color) =>
-    Color.lerp(color, Colors.white, 0.2)!;
+    Color.lerp(color, const Color(0xFFD8D8D8), 0.18)!;
 
 class _TerminalStatusStrip extends StatelessWidget {
   const _TerminalStatusStrip({
@@ -610,14 +607,14 @@ class _TerminalStatusStrip extends StatelessWidget {
     final baseLabel =
         error ??
         (starting
-            ? 'Opening terminal'
+            ? 'Starting terminal'
             : connecting
             ? 'Connecting'
             : running
             ? limitedBackend
-                  ? 'Connected (basic mode)'
+                  ? 'Connected, limited controls'
                   : 'Connected'
-            : 'Terminal closed');
+            : 'Stopped');
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
@@ -695,7 +692,7 @@ class _TerminalStatusStrip extends StatelessWidget {
             const SizedBox(width: 8),
             MeshIconButton(
               icon: Icons.restart_alt_rounded,
-              tooltip: 'Open new terminal',
+              tooltip: 'Start a new terminal',
               color: colors.accent,
               onTap: onRestart,
             ),
@@ -710,9 +707,9 @@ class _TerminalStatusStrip extends StatelessWidget {
     if (last == null) return null;
     final elapsed = DateTime.now().difference(last);
     if (elapsed.inSeconds < 5) return null;
-    if (elapsed.inMinutes < 1) return 'last output ${elapsed.inSeconds}s ago';
-    if (elapsed.inHours < 1) return 'last output ${elapsed.inMinutes}m ago';
-    return 'last output ${elapsed.inHours}h ago';
+    if (elapsed.inMinutes < 1) return 'updated ${elapsed.inSeconds}s ago';
+    if (elapsed.inHours < 1) return 'updated ${elapsed.inMinutes}m ago';
+    return 'updated ${elapsed.inHours}h ago';
   }
 }
 
