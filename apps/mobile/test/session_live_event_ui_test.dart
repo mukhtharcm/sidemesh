@@ -1176,6 +1176,51 @@ void main() {
     },
   );
 
+  testWidgets('session screen groups adjacent file changes by turn', (
+    tester,
+  ) async {
+    final session = _session('grouped-file-changes');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        _fileChangeActivity(
+          id: 'file-change-a',
+          seq: 1,
+          path: '/repo/apps/mobile/lib/a.dart',
+          turnId: 'turn-file-group',
+        ),
+        _fileChangeActivity(
+          id: 'file-change-b',
+          seq: 2,
+          path: '/repo/apps/mobile/lib/b.dart',
+          turnId: 'turn-file-group',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('grouped-file-changes'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Edited 2 files'), findsOneWidget);
+    expect(find.text('FILE CHANGE'), findsNothing);
+
+    await tester.tap(find.text('Edited 2 files'));
+    await _pumpFrames(tester);
+
+    expect(find.text('apps/mobile/lib/a.dart'), findsOneWidget);
+    expect(find.text('apps/mobile/lib/b.dart'), findsOneWidget);
+  });
+
   testWidgets(
     'mobile running session shows stop pill and stops after confirmation',
     (tester) async {
@@ -1349,6 +1394,7 @@ SessionActivity _fileChangeActivity({
   required String id,
   required int seq,
   required String path,
+  String? turnId,
 }) {
   final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
   return SessionActivity(
@@ -1357,7 +1403,7 @@ SessionActivity _fileChangeActivity({
     createdAt: now,
     seq: seq,
     status: 'completed',
-    turnId: 'turn-$seq',
+    turnId: turnId ?? 'turn-$seq',
     command: null,
     cwd: '/repo',
     output: null,
