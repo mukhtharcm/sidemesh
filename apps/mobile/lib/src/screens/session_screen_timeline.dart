@@ -228,8 +228,8 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final title = widget.live
-        ? (_expanded ? 'Thinking' : 'Thinking...')
-        : 'Reasoning';
+        ? (_expanded ? 'Working' : 'Working...')
+        : 'Working notes';
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -399,7 +399,7 @@ class _ProviderWarningRow extends StatelessWidget {
                       runSpacing: 6,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        MeshPill(label: 'Provider warning', tone: tone, icon: icon),
+                        MeshPill(label: 'Agent notice', tone: tone, icon: icon),
                         if ((event.source ?? '').isNotEmpty)
                           MeshPill(
                             label: event.source!,
@@ -476,7 +476,7 @@ class _PlanUpdateCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 MeshPill(
-                  label: '$completedCount/${steps.length} complete',
+                  label: '$completedCount/${steps.length} done',
                   tone: MeshPillTone.accent,
                   mono: true,
                 ),
@@ -2277,7 +2277,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                     else
                       _waitingText(context, 'Waiting for turn diff.'),
                   ] else if (activity.changes.isEmpty) ...[
-                    _waitingText(context, 'Waiting for patch details.'),
+                    _waitingText(context, 'Waiting for file changes.'),
                   ] else ...[
                     _buildLazyFileChanges(
                       context,
@@ -3290,9 +3290,9 @@ class _SessionRuntimeDetails extends StatelessWidget {
       (label: 'Model', value: runtimeValue(runtime.model)),
       if ((runtime.modelProvider ?? '').isNotEmpty &&
           runtime.modelProvider != 'openai')
-        (label: 'Provider', value: runtime.modelProvider!),
+        (label: 'Service', value: runtime.modelProvider!),
       (label: 'Speed', value: runtimeServiceTierValue(runtime.serviceTier)),
-      (label: 'Reasoning', value: runtimeValue(runtime.reasoningEffort)),
+      (label: 'Thinking', value: runtimeValue(runtime.reasoningEffort)),
       (label: 'Approval', value: runtimeValue(runtime.approvalPolicy)),
       (label: 'Sandbox', value: runtimeValue(runtime.sandboxMode)),
       (label: 'Network', value: runtimeNetworkValue(runtime.networkAccess)),
@@ -3345,7 +3345,7 @@ class _SessionRuntimeDetails extends StatelessWidget {
               (label: 'Output', value: '${telemetry.lastUsage!.outputTokens}'),
             if (telemetry.lastUsage!.reasoningTokens != null)
               (
-                label: 'Reasoning',
+                label: 'Thinking',
                 value: '${telemetry.lastUsage!.reasoningTokens}',
               ),
             if (telemetry.lastUsage!.durationMs != null)
@@ -3614,7 +3614,7 @@ String _activityFileSummary(
   String sessionCwd,
 ) {
   if (changes.isEmpty) {
-    return 'Waiting for patch details.';
+    return 'Waiting for file changes.';
   }
 
   final labels = changes
@@ -3640,8 +3640,8 @@ String _commandSourceLabel(String source) {
   return switch (source) {
     'agent' => 'agent',
     'userShell' => 'shell',
-    'unifiedExecStartup' => 'exec start',
-    'unifiedExecInteraction' => 'exec input',
+    'unifiedExecStartup' => 'command start',
+    'unifiedExecInteraction' => 'command input',
     _ => source,
   };
 }
@@ -3769,16 +3769,17 @@ class _SessionWaitingState extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Your prompt was sent. The agent is starting.',
+            'Your message was sent. The agent is starting.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colors.textTertiary,
             ),
           ),
-          if (onStop != null) ...[            const SizedBox(height: AppSpacing.lg),
+          if (onStop != null) ...[
+            const SizedBox(height: AppSpacing.lg),
             OutlinedButton.icon(
               onPressed: onStop,
               icon: const Icon(Icons.stop_circle_rounded, size: 17),
-              label: const Text('Interrupt agent'),
+              label: const Text('Stop agent'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: colors.danger,
                 side: BorderSide(

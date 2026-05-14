@@ -28,7 +28,7 @@ class _StopAgentPill extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               Text(
-                'Interrupt agent',
+                'Stop agent',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: colors.userBubbleOn,
                   fontWeight: FontWeight.w700,
@@ -77,7 +77,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
   void _submitManual() {
     final port = int.tryParse(_portController.text.trim());
     if (port == null || port < 1 || port > 65535) {
-      showAppSnackBar(context, 'Enter a valid localhost port between 1 and 65535.');
+      showAppSnackBar(context, 'Enter a port between 1 and 65535.');
       return;
     }
     Navigator.of(context).pop(
@@ -85,7 +85,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
         host: '127.0.0.1',
         port: port,
         scheme: _scheme,
-        sourceLabel: 'Preview localhost:$port',
+        sourceLabel: 'Port $port',
       ),
     );
   }
@@ -130,7 +130,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Preview web app',
+                        'Open a preview',
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: AppWeights.title,
                         ),
@@ -140,7 +140,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Pick a localhost web port from this session or enter one manually. Browser previews run remotely on the host so modern dev servers stay fast.',
+                  'Choose one of the web ports from this session, or enter one yourself.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: colors.textSecondary,
                     height: 1.4,
@@ -149,7 +149,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
                 if (widget.suggestions.isNotEmpty) ...[
                   const SizedBox(height: 18),
                   Text(
-                    'Suggested ports',
+                    'Detected ports',
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
                       color: colors.textSecondary,
                       letterSpacing: 0.4,
@@ -164,7 +164,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
                 ],
                 const SizedBox(height: 18),
                 Text(
-                  'Manual port',
+                  'Enter a port',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
                     color: colors.textSecondary,
                     letterSpacing: 0.4,
@@ -208,7 +208,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
                     FilledButton.icon(
                       onPressed: _submitManual,
                       icon: const Icon(Icons.open_in_browser_rounded),
-                      label: const Text('Open preview'),
+                      label: const Text('Open'),
                     ),
                   ],
                 ),

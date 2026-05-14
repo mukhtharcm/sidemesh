@@ -1054,17 +1054,17 @@ void main() {
 
     expect(find.text('Step one.'), findsNothing);
     expect(find.text('Final answer.'), findsOneWidget);
-    expect(find.text('Reasoning'), findsOneWidget);
+    expect(find.text('Working notes'), findsOneWidget);
 
     final reasoningLabel = tester
         .widgetList<RichText>(find.byType(RichText))
-        .firstWhere((widget) => widget.text.toPlainText() == 'Reasoning');
+        .firstWhere((widget) => widget.text.toPlainText() == 'Working notes');
     expect(
       (reasoningLabel.text as TextSpan).style?.color,
       ThemeVariant.codexAmber.light.textPrimary,
     );
 
-    await tester.tap(find.text('Reasoning'));
+    await tester.tap(find.text('Working notes'));
     await _pumpFrames(tester);
 
     expect(find.text('Step one.'), findsOneWidget);
@@ -1104,10 +1104,10 @@ void main() {
       await _pumpFrames(tester);
 
       expect(find.text('Visible answer.'), findsOneWidget);
-      expect(find.text('Reasoning'), findsOneWidget);
+      expect(find.text('Working notes'), findsOneWidget);
       expect(find.textContaining('Troubleshooting'), findsNothing);
 
-      await tester.tap(find.text('Reasoning'));
+      await tester.tap(find.text('Working notes'));
       await _pumpFrames(tester);
 
       expect(find.textContaining('Troubleshooting'), findsOneWidget);
@@ -1200,19 +1200,19 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      expect(find.text('Interrupt agent'), findsWidgets);
+      expect(find.text('Stop agent'), findsWidgets);
 
-      await tester.tap(find.text('Interrupt agent').first);
+      await tester.tap(find.text('Stop agent').first);
       await _pumpFrames(tester);
 
-      expect(find.text('Interrupt agent?'), findsOneWidget);
+      expect(find.text('Stop agent?'), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Interrupt'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Stop'));
       await _pumpFrames(tester);
 
       expect(api.stopSessionCalls, 1);
-      expect(find.text('Interrupt agent'), findsNothing);
-      expect(find.text('Agent interrupted.'), findsOneWidget);
+      expect(find.text('Stop agent'), findsNothing);
+      expect(find.text('Agent stopped.'), findsOneWidget);
     },
   );
 }
