@@ -166,7 +166,7 @@ class _Composer extends StatelessWidget {
       curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
         color: colors.composerBackground,
-        borderRadius: BorderRadius.circular(isDesktop ? 16 : AppRadii.control),
+        borderRadius: BorderRadius.circular(isDesktop ? 10 : AppRadii.control),
         border: Border.all(
           color: isFocused
               ? colors.accent.withValues(alpha: 0.65)
@@ -219,6 +219,7 @@ class _Composer extends StatelessWidget {
             hasAttachments: attachments.isNotEmpty,
             hasSkills: skills.isNotEmpty || files.isNotEmpty,
             onSend: onSend,
+            compact: isDesktop,
           ),
         ],
       ),
@@ -571,8 +572,8 @@ class _ComposerPlusButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           onTap: enabled ? () => _handleTap(context) : null,
           child: SizedBox(
-            width: 34,
-            height: 34,
+            width: 40,
+            height: 40,
             child: Icon(
               Icons.add_rounded,
               color: enabled ? colors.accent : colors.textTertiary,
@@ -634,20 +635,22 @@ class _ComposerModelButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Tooltip(
-      message: 'Choose model',
+      message: detail == null ? 'Choose model' : 'Choose model: $detail',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadii.control),
+          borderRadius: BorderRadius.circular(8),
           onTap: onPressed,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 140),
             curve: Curves.easeOutCubic,
-            constraints: const BoxConstraints(maxWidth: 172, minHeight: 44),
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+            constraints: const BoxConstraints(maxWidth: 162, minHeight: 36),
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
             decoration: BoxDecoration(
-              color: customized ? colors.accentMuted : colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(AppRadii.control),
+              color: customized
+                  ? colors.accentMuted
+                  : colors.surfaceMuted.withValues(alpha: 0.56),
+              borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: customized
                     ? colors.accent.withValues(alpha: 0.38)
@@ -662,38 +665,20 @@ class _ComposerModelButton extends StatelessWidget {
                   size: 15,
                   color: customized ? colors.accent : colors.textSecondary,
                 ),
-                const SizedBox(width: 7),
+                const SizedBox(width: 6),
                 Flexible(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
-                          color: colors.textPrimary,
-                          fontSize: 11.5,
-                          fontWeight: AppWeights.title,
-                        ),
-                      ),
-                      if (detail != null)
-                        Text(
-                          detail!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(
-                                color: colors.textSecondary,
-                                fontWeight: AppWeights.emphasis,
-                                height: 1.1,
-                              ),
-                        ),
-                    ],
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: monoStyle(
+                      color: colors.textPrimary,
+                      fontSize: 11.5,
+                      fontWeight: AppWeights.title,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 5),
+                const SizedBox(width: 4),
                 Icon(
                   Icons.expand_more_rounded,
                   size: 16,
@@ -719,6 +704,7 @@ class _SendButton extends StatelessWidget {
     required this.hasAttachments,
     required this.hasSkills,
     required this.onSend,
+    this.compact = false,
   });
 
   final bool sending;
@@ -726,6 +712,7 @@ class _SendButton extends StatelessWidget {
   final bool hasAttachments;
   final bool hasSkills;
   final VoidCallback onSend;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -739,18 +726,19 @@ class _SendButton extends StatelessWidget {
         final bgColor = sending
             ? colors.surfaceMuted
             : (canSend ? colors.accent : colors.surfaceMuted);
+        final size = compact ? 36.0 : 44.0;
         return Material(
           color: Colors.transparent,
           child: InkWell(
-            customBorder: const CircleBorder(),
+            borderRadius: BorderRadius.circular(compact ? 9 : 999),
             onTap: canSend ? onSend : null,
             child: Container(
-              width: 44,
-              height: 44,
+              width: size,
+              height: size,
               decoration: BoxDecoration(
                 color: bgColor,
-                shape: BoxShape.circle,
-                boxShadow: showActive && canSend
+                borderRadius: BorderRadius.circular(compact ? 9 : 999),
+                boxShadow: !compact && showActive && canSend
                     ? [
                         BoxShadow(
                           color: colors.accent.withValues(alpha: 0.3),
@@ -772,6 +760,7 @@ class _SendButton extends StatelessWidget {
                     )
                   : Icon(
                       Icons.arrow_upward_rounded,
+                      size: compact ? 19 : 24,
                       color: canSend ? colors.accentOn : colors.textTertiary,
                     ),
             ),

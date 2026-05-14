@@ -102,9 +102,7 @@ void main() {
     expect(binding.calls, <bool>[true, false]);
   });
 
-  testWidgets('renders favorites in a separate recent-pane section', (
-    tester,
-  ) async {
+  testWidgets('filters favorites in the recent list', (tester) async {
     final favorite = _summary('favorite', status: 'idle');
     final recent = _summary('recent', status: 'idle');
     await tester.runAsync(() async {
@@ -125,15 +123,15 @@ void main() {
       api: _FakeApiClient.sessions([favorite, recent]),
       controller: controller,
       hosts: const [host],
+      filters: const RecentSessionFilters(favoritesOnly: true),
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     await controller.waitForIdle();
     await tester.pump();
 
-    expect(find.text('Pinned'), findsOneWidget);
-    expect(find.text('Session favorite'), findsWidgets);
-    expect(find.text('Session recent'), findsOneWidget);
+    expect(find.text('Session favorite'), findsOneWidget);
+    expect(find.text('Session recent'), findsNothing);
   });
 }
 
@@ -142,6 +140,7 @@ Future<void> _pumpRecentPane(
   required ApiClient api,
   required ScreenAwakeController controller,
   required List<HostProfile> hosts,
+  RecentSessionFilters filters = const RecentSessionFilters(),
 }) async {
   final themeController = await ThemeController.load();
   final palette = ThemeVariant.codexAmber;
@@ -164,6 +163,7 @@ Future<void> _pumpRecentPane(
             hasSavedHosts: hosts.isNotEmpty,
             screenAwakeSourceKey: 'recent-test',
             screenAwakeController: controller,
+            filters: filters,
             onOpenSession: (_, _) {},
             onActiveCountChanged: (_) {},
           ),
