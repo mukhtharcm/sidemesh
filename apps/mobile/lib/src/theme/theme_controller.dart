@@ -19,9 +19,9 @@ enum InterfaceFontFamily {
 
   String get description => switch (this) {
     InterfaceFontFamily.spaceGrotesk =>
-      'Expressive and branded. Keeps the current Sidemesh voice.',
+      'Adds extra character for users who prefer a branded look.',
     InterfaceFontFamily.systemSans =>
-      'Uses the platform default UI font for a more native feel.',
+      'Uses the platform UI font for a calmer, more native feel.',
   };
 
   String? get fontFamily => switch (this) {
@@ -31,7 +31,7 @@ enum InterfaceFontFamily {
 
   static InterfaceFontFamily fromId(
     String? id, {
-    InterfaceFontFamily fallback = InterfaceFontFamily.spaceGrotesk,
+    InterfaceFontFamily fallback = InterfaceFontFamily.systemSans,
   }) {
     for (final family in values) {
       if (family.id == id) return family;
@@ -83,7 +83,7 @@ enum TextSizePreset {
 @immutable
 class AppTypographyPreferences {
   const AppTypographyPreferences({
-    this.interfaceFont = InterfaceFontFamily.spaceGrotesk,
+    this.interfaceFont = InterfaceFontFamily.systemSans,
     this.interfaceScale = TextSizePreset.standard,
   });
 

@@ -118,7 +118,7 @@ class SidemeshApp extends StatelessWidget {
                 ? const DesktopShell()
                 : onboardingCompleted
                     ? const SidemeshHomeScreen()
-                    : OnboardingScreen(themeController: themeController),
+                    : const OnboardingScreen(),
             SidemeshWindowKind.session => SessionWindowScreen(
               arguments: launchState.arguments,
               windowId: launchState.windowId,

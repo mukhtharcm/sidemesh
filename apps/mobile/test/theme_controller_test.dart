@@ -12,7 +12,7 @@ void main() {
 
     expect(
       controller.typography.interfaceFont,
-      InterfaceFontFamily.spaceGrotesk,
+      InterfaceFontFamily.systemSans,
     );
     expect(controller.typography.interfaceScale, TextSizePreset.standard);
   });

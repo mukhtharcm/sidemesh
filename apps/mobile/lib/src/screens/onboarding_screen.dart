@@ -11,27 +11,20 @@ import '../pairing.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
-import '../theme/theme_controller.dart';
 import '../widgets/mesh_widgets.dart';
-import '../widgets/theme_picker.dart';
 import 'home_screen.dart';
 import 'pair_scanner_sheet.dart';
 
-Future<void> showOnboardingScreen(
-  BuildContext context, {
-  required ThemeController themeController,
-}) {
+Future<void> showOnboardingScreen(BuildContext context) {
   return Navigator.of(context).pushReplacement(
     MaterialPageRoute<void>(
-      builder: (_) => OnboardingScreen(themeController: themeController),
+      builder: (_) => const OnboardingScreen(),
     ),
   );
 }
 
 class OnboardingScreen extends StatefulWidget {
-  const OnboardingScreen({super.key, required this.themeController});
-
-  final ThemeController themeController;
+  const OnboardingScreen({super.key});
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -40,7 +33,7 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final PageController _pageController = PageController();
   int _pageIndex = 0;
-  static const int _pageCount = 5;
+  static const int _pageCount = 4;
   PairingPayload? _pairingSuccess;
 
   @override
@@ -151,10 +144,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   _WelcomePage(colors: colors),
                   _HowItWorksPage(colors: colors),
                   _ActionsPage(colors: colors),
-                  _ThemePage(
-                    colors: colors,
-                    themeController: widget.themeController,
-                  ),
                   _pairingSuccess != null
                       ? _PairingSuccessPage(
                           colors: colors,
@@ -273,7 +262,7 @@ class _WelcomePage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Logo container with glow
+          // Logo container
           Container(
             width: 120,
             height: 120,
@@ -283,13 +272,6 @@ class _WelcomePage extends StatelessWidget {
               border: Border.all(
                 color: colors.accent.withValues(alpha: 0.4),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: colors.accent.withValues(alpha: 0.15),
-                  blurRadius: 40,
-                  spreadRadius: 4,
-                ),
-              ],
             ),
             child: Icon(
               Icons.hub_rounded,
@@ -299,7 +281,7 @@ class _WelcomePage extends StatelessWidget {
           ),
           const SizedBox(height: 40),
           Text(
-            'Your coding agents,\nin your pocket.',
+            'Keep your coding agents\nwithin reach.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineMedium?.copyWith(
               fontWeight: FontWeight.w800,
@@ -310,7 +292,7 @@ class _WelcomePage extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'Control your fleet from anywhere.',
+            'Check sessions, review approvals, and get back to work when you are away from your desk.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
@@ -527,7 +509,6 @@ class _MeshDiagramPainter extends CustomPainter {
       color: colors.textTertiary,
       fontSize: 11,
       fontWeight: FontWeight.w600,
-      fontFamily: 'SpaceGrotesk',
     );
     final labels = ['Your machine', 'Daemon', 'Phone'];
     for (var i = 0; i < nodes.length; i++) {
@@ -570,7 +551,7 @@ class _ActionsPage extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            'Chat, approve, inspect.',
+            'Review sessions and take action.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w800,
@@ -580,7 +561,7 @@ class _ActionsPage extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Everything you need to steer your agents remotely.',
+            'Stay on top of changes, approvals, files, and terminals from one place.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
@@ -621,19 +602,19 @@ class _ActionsPage extends StatelessWidget {
                     children: [
                       _FakeDiffLine(
                         prefix: '+',
-                        text: '  const greeting = "Hello, fleet";',
+                        text: '  const retryDelayMs = 2500;',
                         prefixColor: colors.diffAddGlyph,
                         lineColor: colors.diffAddLine,
                       ),
                       _FakeDiffLine(
                         prefix: '+',
-                        text: '  console.log(greeting);',
+                        text: '  await reconnectHost(hostId);',
                         prefixColor: colors.diffAddGlyph,
                         lineColor: colors.diffAddLine,
                       ),
                       _FakeDiffLine(
                         prefix: '-',
-                        text: '  // old code removed',
+                        text: '  await reconnectHost();',
                         prefixColor: colors.diffDelGlyph,
                         lineColor: colors.diffDelLine,
                       ),
@@ -775,52 +756,7 @@ class _FeatureChip extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Page 4: Pick your vibe
-// ---------------------------------------------------------------------------
-
-class _ThemePage extends StatelessWidget {
-  const _ThemePage({
-    required this.colors,
-    required this.themeController,
-  });
-
-  final AppColors colors;
-  final ThemeController themeController;
-
-  @override
-  Widget build(BuildContext context) {
-    return _OnboardingPageShell(
-      horizontalPadding: 24,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            'Pick your vibe',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: colors.textPrimary,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Choose a palette. You can always change it later.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: colors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 32),
-          ThemePicker(controller: themeController),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Page 5: Set up & connect
+// Page 4: Set up & connect
 // ---------------------------------------------------------------------------
 
 class _ConnectPage extends StatelessWidget {
