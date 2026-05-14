@@ -15,9 +15,7 @@ void main() {
       MaterialApp(
         theme: buildLightTheme(ThemeVariant.codexAmber.light),
         home: Scaffold(
-          body: TerminalKeyBar(
-            onAction: (action) => firedAction = action,
-          ),
+          body: TerminalKeyBar(onAction: (action) => firedAction = action),
         ),
       ),
     );
@@ -55,9 +53,7 @@ void main() {
       MaterialApp(
         theme: buildLightTheme(ThemeVariant.codexAmber.light),
         home: Scaffold(
-          body: TerminalKeyBar(
-            onAction: (action) => firedAction = action,
-          ),
+          body: TerminalKeyBar(onAction: (action) => firedAction = action),
         ),
       ),
     );
@@ -88,11 +84,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: buildLightTheme(ThemeVariant.codexAmber.light),
-        home: Scaffold(
-          body: TerminalKeyBar(
-            onAction: (_) {},
-          ),
-        ),
+        home: Scaffold(body: TerminalKeyBar(onAction: (_) {})),
       ),
     );
 
@@ -100,9 +92,9 @@ void main() {
     await tester.pumpAndSettle();
 
     // The sheet should show category labels and additional keys.
-    expect(find.text('Nav'), findsOneWidget);
-    expect(find.text('Sym'), findsOneWidget);
-    expect(find.text('Fn'), findsOneWidget);
+    expect(find.text('Navigation'), findsOneWidget);
+    expect(find.text('Symbols'), findsOneWidget);
+    expect(find.text('Function'), findsOneWidget);
     expect(find.text('Ctrl+C'), findsOneWidget);
   });
 }

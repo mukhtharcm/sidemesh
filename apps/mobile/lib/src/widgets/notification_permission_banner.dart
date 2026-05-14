@@ -70,7 +70,7 @@ class _NotificationPermissionBannerState
     if (!mounted) return;
     showAppSnackBar(
       context,
-      'Notifications were not enabled. You can turn them on later in system settings.',
+      'Notifications are still off. You can turn them on later in system settings.',
     );
   }
 
@@ -129,7 +129,7 @@ class _BannerBody extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Enable approval alerts',
+                'Turn on alerts',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   color: colors.textPrimary,
                   fontWeight: FontWeight.w800,
@@ -137,7 +137,7 @@ class _BannerBody extends StatelessWidget {
               ),
               const SizedBox(height: 3),
               Text(
-                'Get notified when an agent session is waiting for permission.',
+                'Get a notification when an agent is waiting for approval.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colors.textSecondary,
                   height: 1.25,
@@ -189,7 +189,7 @@ class _CompactBannerBody extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Enable approval alerts',
+                'Turn on alerts',
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
                   color: colors.textPrimary,
                   fontWeight: FontWeight.w800,
@@ -209,7 +209,7 @@ class _CompactBannerBody extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Notify me when an agent needs approval.',
+          'Get a notification when an agent is waiting for approval.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             color: colors.textSecondary,
             height: 1.25,
@@ -274,7 +274,7 @@ class _EnableButton extends StatelessWidget {
               ),
             )
           : const Icon(Icons.notifications_rounded, size: 16),
-      label: Text(requesting ? 'Opening...' : 'Enable'),
+      label: Text(requesting ? 'Opening...' : 'Turn on'),
     );
   }
 }
