@@ -581,7 +581,7 @@ void main() {
 
     expect(find.text('Approve file edit'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Reload session'));
+    await _tapDesktopReload(tester);
     await _pumpFrames(tester);
 
     expect(find.text('Approve file edit'), findsNothing);
@@ -616,8 +616,7 @@ void main() {
     await _pumpFrames(tester);
 
     api.fetchLogBlocker = snapshotReady.future;
-    await tester.tap(find.byTooltip('Reload session'));
-    await tester.pump();
+    await _tapDesktopReload(tester);
 
     api.emit({
       'type': 'action_opened',
@@ -1221,6 +1220,13 @@ Future<void> _pumpFrames(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 50));
   await tester.pump(const Duration(milliseconds: 250));
+  await tester.pump();
+}
+
+Future<void> _tapDesktopReload(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('Session actions'));
+  await _pumpFrames(tester);
+  await tester.tap(find.text('Reload'));
   await tester.pump();
 }
 

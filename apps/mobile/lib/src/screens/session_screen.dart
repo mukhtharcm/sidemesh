@@ -174,18 +174,31 @@ class _DesktopSessionTitle extends StatelessWidget {
       ],
     );
 
+    final titleContent = canRename
+        ? Tooltip(
+            message: 'Rename session',
+            child: Semantics(
+              button: true,
+              label: 'Rename session',
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: AppShapes.badge,
+                  onTap: onRename,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 5),
+                    child: title,
+                  ),
+                ),
+              ),
+            ),
+          )
+        : title;
+
     return Row(
       children: [
         if (running) ...[const LivePulse(), const SizedBox(width: 9)],
-        Expanded(
-          child: canRename
-              ? GestureDetector(
-                  onTap: onRename,
-                  behavior: HitTestBehavior.opaque,
-                  child: title,
-                )
-              : title,
-        ),
+        Expanded(child: titleContent),
         const SizedBox(width: 8),
         if (session.provider != null) ...[
           AgentProviderBadge(providerKind: session.provider, compact: true),
@@ -193,6 +206,103 @@ class _DesktopSessionTitle extends StatelessWidget {
         ],
         _DesktopSessionStatusBadge(running: running),
       ],
+    );
+  }
+}
+
+class _DesktopSessionCommandBar extends StatelessWidget {
+  const _DesktopSessionCommandBar({
+    required this.running,
+    required this.canStop,
+    required this.onStop,
+    required this.onNewSession,
+    required this.onMore,
+  });
+
+  final bool running;
+  final bool canStop;
+  final VoidCallback onStop;
+  final VoidCallback onNewSession;
+  final VoidCallback onMore;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (running && canStop) ...[
+          MeshIconButton(
+            icon: Icons.stop_circle_rounded,
+            tooltip: 'Stop agent',
+            color: colors.danger,
+            onTap: onStop,
+            semanticLabel: 'Stop agent',
+          ),
+          const SizedBox(width: 6),
+        ],
+        _DesktopHeaderTextButton(
+          icon: Icons.add_rounded,
+          label: 'New session',
+          onTap: onNewSession,
+        ),
+        const SizedBox(width: 6),
+        MeshIconButton(
+          icon: Icons.more_horiz_rounded,
+          tooltip: running
+              ? 'Session actions (agent running)'
+              : 'Session actions',
+          color: colors.textSecondary,
+          onTap: onMore,
+        ),
+      ],
+    );
+  }
+}
+
+class _DesktopHeaderTextButton extends StatelessWidget {
+  const _DesktopHeaderTextButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        label: label,
+        child: MeshSurface(
+          onTap: onTap,
+          radius: AppRadii.control,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          child: SizedBox(
+            height: 44,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 17, color: colors.textSecondary),
+                const SizedBox(width: 7),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.title,
+                    letterSpacing: -0.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -6219,6 +6329,9 @@ class _SessionScreenState extends State<SessionScreen>
       case 'reload':
         _reloadSnapshot();
         break;
+      case 'controls':
+        _showSessionPolicySheet(session);
+        break;
       case 'new':
         _startSessionFromCurrent();
         break;
@@ -6287,11 +6400,15 @@ class _SessionScreenState extends State<SessionScreen>
     required bool portsOpen,
     required bool searchOpen,
     required bool resourcesOpen,
+    bool includeStop = true,
+    bool includeNew = true,
+    bool includeControls = false,
+    bool controlsCustomized = false,
   }) {
     return [
       // When the agent is running, surface the stop action at the top so
       // it's immediately reachable without scrolling the sheet.
-      if (_running && _supportsSessionInterrupt)
+      if (includeStop && _running && _supportsSessionInterrupt)
         const _SessionActionGroup(
           label: 'LIVE',
           actions: [
@@ -6407,18 +6524,32 @@ class _SessionScreenState extends State<SessionScreen>
       _SessionActionGroup(
         label: 'Session',
         actions: [
-          const _SessionActionSpec(
-            value: 'new',
-            label: 'New session',
-            detail: 'Start beside this working directory.',
-            icon: Icons.add_circle_outline_rounded,
-          ),
+          if (includeNew)
+            const _SessionActionSpec(
+              value: 'new',
+              label: 'New session',
+              detail: 'Start beside this working directory.',
+              icon: Icons.add_circle_outline_rounded,
+            ),
           const _SessionActionSpec(
             value: 'reload',
             label: 'Reload',
             detail: 'Refresh this transcript from the host.',
             icon: Icons.refresh_rounded,
           ),
+          if (includeControls)
+            _SessionActionSpec(
+              value: 'controls',
+              label: controlsCustomized
+                  ? 'Session controls changed'
+                  : 'Session controls',
+              detail: 'Model, thinking, permissions, and access.',
+              icon: Icons.tune_rounded,
+              tone: controlsCustomized
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: controlsCustomized,
+            ),
           _SessionActionSpec(
             value: 'favorite',
             label: favorite ? 'Remove favorite' : 'Add favorite',
@@ -6497,6 +6628,11 @@ class _SessionScreenState extends State<SessionScreen>
     required bool portsOpen,
     required bool searchOpen,
     required bool resourcesOpen,
+    BuildContext? anchorContext,
+    bool includeStop = true,
+    bool includeNew = true,
+    bool includeControls = false,
+    bool controlsCustomized = false,
   }) async {
     final groups = _sessionActionGroups(
       favorite: favorite,
@@ -6506,30 +6642,57 @@ class _SessionScreenState extends State<SessionScreen>
       portsOpen: portsOpen,
       searchOpen: searchOpen,
       resourcesOpen: resourcesOpen,
+      includeStop: includeStop,
+      includeNew: includeNew,
+      includeControls: includeControls,
+      controlsCustomized: controlsCustomized,
     );
     final String? selected;
     if (widget.desktopMode) {
+      final anchorRect = _desktopPopoverAnchorRect(anchorContext);
       selected = await showDialog<String>(
         context: context,
         barrierColor: Colors.black.withValues(alpha: 0.32),
-        builder: (dialogContext) => Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 48,
-            vertical: 48,
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: 520,
-              maxHeight: 660,
-            ),
-            child: _SessionActionSheet(
-              session: session,
-              groups: groups,
-              desktop: true,
-            ),
-          ),
-        ),
+        useSafeArea: false,
+        builder: (dialogContext) {
+          final size = MediaQuery.sizeOf(dialogContext);
+          final padding = MediaQuery.paddingOf(dialogContext);
+          final availableHeight = math.max(
+            240.0,
+            size.height - padding.top - 24,
+          );
+          final maxHeight = math.min(660.0, availableHeight);
+          final anchor = anchorRect;
+          final topLimit = math.max(
+            padding.top + 12.0,
+            size.height - maxHeight - 12,
+          );
+          final top = anchor == null
+              ? padding.top + 12
+              : math.min(anchor.bottom + 8, topLimit);
+          final right = anchor == null
+              ? 16.0
+              : math.max(12.0, size.width - anchor.right);
+          return Stack(
+            children: [
+              Positioned(
+                top: top,
+                right: right,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: 520,
+                    maxHeight: maxHeight,
+                  ),
+                  child: _SessionActionSheet(
+                    session: session,
+                    groups: groups,
+                    desktop: true,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       );
     } else {
       selected = await showModalBottomSheet<String>(
@@ -6549,6 +6712,23 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     _handleSessionAction(selected, session);
+  }
+
+  Rect? _desktopPopoverAnchorRect(BuildContext? anchorContext) {
+    final anchorObject = anchorContext?.findRenderObject();
+    final overlay = Overlay.maybeOf(context);
+    final overlayObject = overlay?.context.findRenderObject();
+    if (anchorObject is! RenderBox ||
+        overlayObject is! RenderBox ||
+        !anchorObject.attached ||
+        !overlayObject.attached) {
+      return null;
+    }
+    final topLeft = anchorObject.localToGlobal(
+      Offset.zero,
+      ancestor: overlayObject,
+    );
+    return topLeft & anchorObject.size;
   }
 
   @override
@@ -6966,7 +7146,7 @@ class _SessionScreenState extends State<SessionScreen>
         actions: [
           // Reserve a permanent slot for interrupt — this prevents all other
           // action buttons from jumping left/right when the agent starts/stops.
-          if (!isCompact && _supportsSessionInterrupt)
+          if (!isCompact && !widget.desktopMode && _supportsSessionInterrupt)
             Padding(
               padding: const EdgeInsets.only(right: 4),
               child: AnimatedOpacity(
@@ -6984,7 +7164,7 @@ class _SessionScreenState extends State<SessionScreen>
                 ),
               ),
             ),
-          if (!isCompact)
+          if (!isCompact && !widget.desktopMode)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -6994,30 +7174,17 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: _reloadSnapshot,
               ),
             ),
-          if (!isCompact)
+          if (!isCompact && !widget.desktopMode)
             Padding(
               padding: const EdgeInsets.only(right: 6),
-              child: widget.desktopMode
-                  ? FilledButton.tonalIcon(
-                      onPressed: _startSessionFromCurrent,
-                      icon: const Icon(Icons.add_rounded, size: 18),
-                      label: const Text('New session'),
-                      style: FilledButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
-                        ),
-                      ),
-                    )
-                  : MeshIconButton(
-                      icon: Icons.add_circle_outline_rounded,
-                      tooltip: 'New session',
-                      color: colors.textSecondary,
-                      onTap: _startSessionFromCurrent,
-                    ),
+              child: MeshIconButton(
+                icon: Icons.add_circle_outline_rounded,
+                tooltip: 'New session',
+                color: colors.textSecondary,
+                onTap: _startSessionFromCurrent,
+              ),
             ),
-          if (!isCompact && _supportsTerminal)
+          if (!isCompact && !widget.desktopMode && _supportsTerminal)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -7031,7 +7198,7 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: () => unawaited(_openTerminal()),
               ),
             ),
-          if (!isCompact && _supportsConnections)
+          if (!isCompact && !widget.desktopMode && _supportsConnections)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -7046,6 +7213,7 @@ class _SessionScreenState extends State<SessionScreen>
               ),
             ),
           if (!isCompact &&
+              !widget.desktopMode &&
               _supportsGitStatus &&
               _gitHeaderLabel(session, _gitStatus) != null &&
               (_gitStatus?.dirty ?? false))
@@ -7072,7 +7240,7 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: _toggleSearchPanel,
               ),
             ),
-          if (!isCompact && _supportsSessionResources)
+          if (!isCompact && !widget.desktopMode && _supportsSessionResources)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -7088,7 +7256,7 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: _openResourcesPanel,
               ),
             ),
-          if (!isCompact)
+          if (!isCompact && !widget.desktopMode)
             Padding(
               padding: const EdgeInsets.only(right: 10),
               child: ListenableBuilder(
@@ -7148,6 +7316,9 @@ class _SessionScreenState extends State<SessionScreen>
               // icon (dirty state). Keep it hidden entirely if there is no
               // git info to show.
               final showGitInMenu = gitAvailable && !gitDirty;
+              final menuGitAvailable = widget.desktopMode
+                  ? gitAvailable
+                  : showGitInMenu;
               if (isCompact) {
                 return Padding(
                   padding: const EdgeInsets.only(right: AppSpacing.sm),
@@ -7195,6 +7366,36 @@ class _SessionScreenState extends State<SessionScreen>
                   ),
                 );
               }
+              if (widget.desktopMode) {
+                return Builder(
+                  builder: (buttonContext) => Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: _DesktopSessionCommandBar(
+                      running: _running,
+                      canStop: _supportsSessionInterrupt,
+                      onStop: _stopSession,
+                      onNewSession: _startSessionFromCurrent,
+                      onMore: () => unawaited(
+                        _showSessionActionsSheet(
+                          session: session,
+                          favorite: favorite,
+                          gitAvailable: menuGitAvailable,
+                          gitDirty: gitDirty,
+                          terminalOpen: terminalOpenInInspector,
+                          portsOpen: portsOpenInInspector,
+                          searchOpen: searchOpenInInspector,
+                          resourcesOpen: resourcesOpenInInspector,
+                          anchorContext: buttonContext,
+                          includeStop: false,
+                          includeNew: false,
+                          includeControls: true,
+                          controlsCustomized: sessionControlsCustomized,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }
               return Padding(
                 padding: const EdgeInsets.only(right: 10),
                 child: MeshIconButton(
@@ -7207,7 +7408,7 @@ class _SessionScreenState extends State<SessionScreen>
                     _showSessionActionsSheet(
                       session: session,
                       favorite: favorite,
-                      gitAvailable: gitAvailable && showGitInMenu,
+                      gitAvailable: menuGitAvailable,
                       gitDirty: gitDirty,
                       terminalOpen: terminalOpenInInspector,
                       portsOpen: portsOpenInInspector,
