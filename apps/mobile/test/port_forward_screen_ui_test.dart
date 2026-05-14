@@ -28,14 +28,14 @@ void main() {
       await _pumpFrames(tester);
 
       expect(find.text('Browser previews'), findsOneWidget);
-      expect(find.text('Open browser preview'), findsOneWidget);
+      expect(find.text('Open a preview'), findsOneWidget);
       expect(
-        find.textContaining('Open a live preview for a localhost web app'),
+        find.textContaining('Open a live preview for a local web app'),
         findsOneWidget,
       );
-      expect(find.widgetWithText(FilledButton, 'Open preview'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Open'), findsOneWidget);
       expect(find.text('Get local URL'), findsNothing);
-      expect(find.text('No active browser previews'), findsOneWidget);
+      expect(find.text('No previews open'), findsOneWidget);
     },
   );
 
@@ -60,12 +60,12 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Browser previews'), findsOneWidget);
-    expect(find.text('Browser previews unavailable'), findsOneWidget);
+    expect(find.text('Previews unavailable'), findsOneWidget);
     expect(
-      find.textContaining('does not expose browser preview support yet'),
+      find.textContaining('does not support browser previews yet'),
       findsOneWidget,
     );
-    expect(find.text('Open preview'), findsNothing);
+    expect(find.text('Open'), findsNothing);
     expect(find.text('Get local URL'), findsNothing);
     expect(find.text('No active connections'), findsNothing);
   });

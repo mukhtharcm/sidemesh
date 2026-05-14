@@ -158,7 +158,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
       builder: (context) {
         final colors = context.colors;
         return AlertDialog(
-          title: const Text('Save file?'),
+          title: const Text('Save changes?'),
           content: Text(
             widget.path,
             style: monoStyle(color: colors.textSecondary, fontSize: 12),
@@ -193,13 +193,13 @@ class FileViewerPaneState extends State<FileViewerPane> {
         _editing = false;
       });
       _bump();
-      showAppSnackBar(context, 'Saved ${baseName(widget.path)}');
+      showAppSnackBar(context, 'Saved changes');
       await _load(silent: true);
     } catch (error) {
       if (!mounted) return;
       setState(() => _saving = false);
       _bump();
-      showAppSnackBar(context, 'Save failed: ${friendlyError(error)}');
+      showAppSnackBar(context, 'Could not save file: ${friendlyError(error)}');
     }
   }
 
@@ -251,7 +251,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
     if (file == null) return;
     await Clipboard.setData(ClipboardData(text: file.contents));
     if (!mounted) return;
-    showAppSnackBar(context, 'Copied');
+    showAppSnackBar(context, 'Copied text');
   }
 
   bool get editing => _editing;
@@ -276,7 +276,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
         padding: const EdgeInsets.all(24),
         child: MeshEmptyState(
           icon: Icons.error_outline_rounded,
-          title: "Couldn't open file",
+          title: "Couldn't open this file",
           body: friendlyError(_error!),
         ),
       );
@@ -370,8 +370,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Preview truncated at 2 MiB — file is '
-                        '${formatBytes(file.size)}.',
+                        'Showing the first 2 MiB of a ${formatBytes(file.size)} file.',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -441,7 +440,7 @@ class FileViewerActions extends StatelessWidget {
                 : const Icon(Icons.save_rounded, size: 20),
           ),
         IconButton(
-          tooltip: editing ? 'Stop editing' : 'Edit',
+          tooltip: editing ? 'Done editing' : 'Edit',
           onPressed: canUseTextContents ? () => s?.toggleEdit() : null,
           icon: Icon(
             editing ? Icons.visibility_rounded : Icons.edit_rounded,
@@ -449,13 +448,13 @@ class FileViewerActions extends StatelessWidget {
           ),
         ),
         IconButton(
-          tooltip: 'Copy contents',
+          tooltip: 'Copy text',
           onPressed: canUseTextContents ? () => s?.copyContents() : null,
           icon: const Icon(Icons.content_copy_rounded, size: 18),
         ),
         if (canPreviewMarkdown)
           IconButton(
-            tooltip: markdownPreview ? 'View source' : 'Preview markdown',
+            tooltip: markdownPreview ? 'Show source' : 'Read markdown',
             onPressed: hasFile && !editing
                 ? () => s?.toggleMarkdownPreview()
                 : null,
@@ -466,7 +465,7 @@ class FileViewerActions extends StatelessWidget {
           ),
         if (canPreviewImage)
           IconButton(
-            tooltip: imagePreview ? 'Hide image preview' : 'Preview image',
+            tooltip: imagePreview ? 'Show file' : 'Show image',
             onPressed: hasFile && !editing ? () => s?.toggleImagePreview() : null,
             icon: Icon(
               imagePreview ? Icons.description_rounded : Icons.image_rounded,
