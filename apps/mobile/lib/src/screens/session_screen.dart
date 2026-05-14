@@ -2339,14 +2339,11 @@ class _SessionScreenState extends State<SessionScreen>
       // we'll replay them after the snapshot setState so they aren't clobbered.
       final bufferedEvents = List<LiveEvent>.from(_pendingLiveEvents);
       _pendingLiveEvents.clear();
-      final snapshotActivities = _mergeSnapshotActivitiesWithLocalCommands(
-        log.activities,
-      );
       setState(() {
         _session = log.session;
         _messages = log.messages;
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
-        _activities = snapshotActivities;
+        _activities = _sortActivities(log.activities);
         _history = log.history;
         _messageLimit = resolvedMessageLimit;
         _activityLimit = resolvedActivityLimit;
@@ -2379,7 +2376,7 @@ class _SessionScreenState extends State<SessionScreen>
         for (final m in log.messages) {
           if (m.seq > highestSeq) highestSeq = m.seq;
         }
-        for (final a in snapshotActivities) {
+        for (final a in log.activities) {
           if (a.seq > highestSeq) highestSeq = a.seq;
         }
         if (restoredPlanSeq != null && restoredPlanSeq > highestSeq) {
@@ -6076,62 +6073,6 @@ class _SessionScreenState extends State<SessionScreen>
       return left.seq.compareTo(right.seq);
     });
     return sorted;
-  }
-
-  List<SessionActivity> _mergeSnapshotActivitiesWithLocalCommands(
-    List<SessionActivity> snapshotActivities,
-  ) {
-    if (_activities.isEmpty) {
-      return _sortActivities(snapshotActivities);
-    }
-    final byId = <String, SessionActivity>{
-      for (final activity in snapshotActivities) activity.id: activity,
-    };
-    var changed = false;
-    for (final activity in _activities) {
-      if (byId.containsKey(activity.id) ||
-          !_shouldPreserveLocalCommandActivity(activity)) {
-        continue;
-      }
-      byId[activity.id] = activity;
-      changed = true;
-    }
-    if (!changed) {
-      return _sortActivities(snapshotActivities);
-    }
-    return _sortActivities(byId.values.toList());
-  }
-
-  bool _shouldPreserveLocalCommandActivity(SessionActivity activity) {
-    if (activity.isCommand) {
-      return true;
-    }
-    if (!activity.isTool) {
-      return false;
-    }
-    if (activity.toolCategory == 'command') {
-      return true;
-    }
-    for (final target in activity.toolSemanticTargets) {
-      if (target.type == 'command' &&
-          ((target.command ?? target.value) ?? '').trim().isNotEmpty) {
-        return true;
-      }
-    }
-    return _toolArgsContainCommand(activity.toolArgs);
-  }
-
-  bool _toolArgsContainCommand(Object? value) {
-    if (value is! Map) {
-      return false;
-    }
-    for (final key in const ['command', 'cmd', 'fullCommandText']) {
-      final raw = value[key];
-      if (raw is String && raw.trim().isNotEmpty) {
-        return true;
-      }
-    }
-    return value.values.any(_toolArgsContainCommand);
   }
 
   List<_TimelineEntry> _buildTimelineEntries() {
