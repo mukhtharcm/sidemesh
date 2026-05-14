@@ -715,6 +715,72 @@ void main() {
     expect(find.text('before.txt'), findsNothing);
   });
 
+  testWidgets('snapshot reload preserves locally seen command rows', (
+    tester,
+  ) async {
+    final host = _host('cached-command-preserve');
+    final session = _session('cached-command-preserve');
+    final cachedCommand = _commandActivity(
+      id: 'cached-command',
+      seq: 10,
+      command: 'npm test',
+      cwd: '/repo',
+      output: 'ok',
+    );
+    final freshFile = _fileChangeActivity(
+      id: 'fresh-file',
+      seq: 11,
+      path: '/repo/fresh-from-snapshot.txt',
+    );
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [freshFile],
+      eventsDelta: SessionEventsDelta(
+        sessionId: session.id,
+        since: 10,
+        nextSeq: 10,
+        messages: const [],
+        activities: const [],
+        latestPlanUpdate: null,
+        pendingAction: null,
+        session: session,
+      ),
+    );
+    addTearDown(api.dispose);
+
+    await SessionLocalStore.instance.saveSessionLog(
+      host,
+      SessionLog(
+        session: session,
+        messages: const [],
+        activities: [cachedCommand],
+        pendingAction: null,
+        history: const SessionLogHistorySummary(
+          isTruncated: false,
+          totalMessages: 0,
+          returnedMessages: 0,
+          totalActivities: 1,
+          returnedActivities: 1,
+        ),
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('npm test'), findsOneWidget);
+    expect(find.text('fresh-from-snapshot.txt'), findsOneWidget);
+  });
+
   testWidgets('delta replay refreshes cached history metadata without manual reload', (
     tester,
   ) async {
