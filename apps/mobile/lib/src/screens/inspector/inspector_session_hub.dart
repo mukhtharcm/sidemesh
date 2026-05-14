@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_colors.dart';
-import '../../theme/app_theme.dart';
 import '../../theme/app_tokens.dart';
 import '../../widgets/mesh_widgets.dart';
 import 'inspector_controller.dart';
@@ -29,7 +28,7 @@ InspectorSurface buildInspectorSessionHubSurface({
   return InspectorSurface(
     kind: InspectorSurfaceKind.sessionHub,
     ownerKey: ownerKey,
-    title: 'Session tools',
+    title: 'Tools',
     icon: Icons.widgets_rounded,
     bodyBuilder: (context) => _SessionHubBody(
       onOpenSearch: onOpenSearch,
@@ -65,39 +64,39 @@ class _SessionHubBody extends StatelessWidget {
       _HubTool(
         icon: Icons.terminal_rounded,
         label: 'Terminal',
-        description: 'Open a shell in this workspace.',
+        description: 'Open a command line on this machine.',
         onTap: onOpenTerminal,
       ),
       _HubTool(
         icon: Icons.folder_rounded,
         label: 'Files',
-        description: 'Browse the current workspace.',
+        description: 'Browse files for this session.',
         onTap: onOpenFiles,
       ),
       _HubTool(
         icon: Icons.open_in_browser_rounded,
-        label: 'Browser preview',
-        description: 'Open and manage browser previews.',
+        label: 'Previews',
+        description: 'Open sites running on this machine.',
         onTap: onOpenPorts,
       ),
     ];
     final sessionTools = [
       _HubTool(
         icon: Icons.search_rounded,
-        label: 'Search transcript',
-        description: 'Find text across loaded messages.',
+        label: 'Search',
+        description: 'Search this conversation.',
         onTap: onOpenSearch,
       ),
       _HubTool(
         icon: Icons.push_pin_rounded,
-        label: 'Pinned messages',
-        description: 'Review saved excerpts from this session.',
+        label: 'Saved messages',
+        description: 'Jump back to messages you pinned.',
         onTap: onOpenPinned,
       ),
       _HubTool(
         icon: Icons.perm_media_rounded,
         label: 'Resources',
-        description: 'Open generated files and attachments.',
+        description: 'Open images, links, and files from this session.',
         onTap: onOpenResources,
       ),
     ];
@@ -108,12 +107,12 @@ class _SessionHubBody extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _HubSection(
-            label: 'WORKSPACE',
+            label: 'On this machine',
             tools: workspaceTools,
           ),
           const SizedBox(height: AppSpacing.md),
           _HubSection(
-            label: 'SESSION',
+            label: 'This session',
             tools: sessionTools,
           ),
         ],
@@ -138,11 +137,11 @@ class _HubSection extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
           child: Text(
             label,
-            style: monoStyle(
-              color: colors.textTertiary,
-              fontSize: 10.5,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: colors.textSecondary,
               fontWeight: AppWeights.emphasis,
-            ).copyWith(letterSpacing: AppLetterSpacing.caps),
+              letterSpacing: 0.2,
+            ),
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
