@@ -443,16 +443,33 @@ class _DesktopShellState extends State<DesktopShell> {
     showDialog<void>(
       context: context,
       builder: (dialogContext) {
-        final entries = <({String keys, String label})>[
-          (keys: '⌘F', label: 'Focus search'),
-          (keys: '⌘R', label: 'Refresh'),
-          (keys: '⌘W', label: 'Close active session'),
-          (keys: '⌘1 / ⌘2 / ⌘3', label: 'Recent / Inbox / Hosts'),
-          (keys: '⌘/', label: 'Show this help'),
-          (keys: 'Enter', label: 'Send message'),
-          (keys: 'Shift+Enter', label: 'Newline in composer'),
-          (keys: 'Long-press', label: 'Copy message to clipboard'),
-        ];
+        final sections =
+            <({String title, List<({String keys, String label})> items})>[
+              (
+                title: 'Move around',
+                items: [
+                  (
+                    keys: '⌘1 / ⌘2 / ⌘3',
+                    label: 'Switch between Recent, Inbox, and Hosts',
+                  ),
+                  (keys: '⌘F', label: 'Focus search'),
+                  (keys: '⌘R', label: 'Refresh the current list'),
+                  (keys: '⌘W', label: 'Close the current session'),
+                ],
+              ),
+              (
+                title: 'Write messages',
+                items: [
+                  (keys: 'Enter', label: 'Send the current message'),
+                  (keys: 'Shift+Enter', label: 'Start a new line'),
+                  (keys: 'Long-press', label: 'Copy a message'),
+                ],
+              ),
+              (
+                title: 'Help',
+                items: [(keys: '⌘/', label: 'Open this shortcut list')],
+              ),
+            ];
         return Dialog(
           backgroundColor: colors.surface,
           shape: RoundedRectangleBorder(
@@ -496,41 +513,61 @@ class _DesktopShellState extends State<DesktopShell> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  for (final e in entries)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              e.label,
-                              style: TextStyle(
-                                color: colors.textPrimary,
-                                fontSize: 13,
-                              ),
-                            ),
+                  Text(
+                    'Use these desktop shortcuts to move faster through the home surfaces.',
+                    style: Theme.of(dialogContext).textTheme.bodySmall
+                        ?.copyWith(color: colors.textSecondary, height: 1.35),
+                  ),
+                  const SizedBox(height: 14),
+                  for (final section in sections) ...[
+                    Text(
+                      section.title,
+                      style: Theme.of(dialogContext).textTheme.labelLarge
+                          ?.copyWith(
+                            color: colors.textSecondary,
+                            fontWeight: FontWeight.w700,
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: colors.surfaceMuted,
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: colors.border),
-                            ),
-                            child: Text(
-                              e.keys,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
                     ),
+                    const SizedBox(height: 8),
+                    for (final e in section.items)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                e.label,
+                                style: TextStyle(
+                                  color: colors.textPrimary,
+                                  fontSize: 13,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: colors.surfaceMuted,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: colors.border),
+                              ),
+                              child: Text(
+                                e.keys,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (section != sections.last) const SizedBox(height: 8),
+                  ],
                 ],
               ),
             ),

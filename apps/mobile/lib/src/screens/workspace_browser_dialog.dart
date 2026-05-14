@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../api_client.dart';
-import '../fs_languages.dart';
 import '../fs_models.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
@@ -87,9 +86,6 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
             _DialogHeader(
               host: widget.host,
               root: widget.root,
-              selected: _selected,
-              viewerObservable: _viewerObservable,
-              viewerKey: _viewerKey,
               onClose: () => Navigator.of(context).pop(),
             ),
             Divider(height: 1, color: colors.border),
@@ -101,43 +97,86 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                     width: 300,
                     child: Container(
                       color: colors.surfaceElevated,
-                      child: FileBrowserTree(
-                        host: widget.host,
-                        api: widget.api,
-                        root: widget.root,
-                        agentProvider: widget.agentProvider,
-                        sessionId: widget.sessionId,
-                        selectedPath: _selected,
-                        onOpenFile: (path, liveStream) {
-                          setState(() {
-                            _selected = path;
-                            _liveStream = liveStream;
-                          });
-                        },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _DialogPaneHeader(
+                            icon: Icons.folder_copy_rounded,
+                            title: 'Folders',
+                            subtitle: baseName(widget.root).isEmpty
+                                ? widget.root
+                                : baseName(widget.root),
+                          ),
+                          Divider(height: 1, color: colors.border),
+                          Expanded(
+                            child: FileBrowserTree(
+                              host: widget.host,
+                              api: widget.api,
+                              root: widget.root,
+                              agentProvider: widget.agentProvider,
+                              sessionId: widget.sessionId,
+                              selectedPath: _selected,
+                              onOpenFile: (path, liveStream) {
+                                setState(() {
+                                  _selected = path;
+                                  _liveStream = liveStream;
+                                });
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                   VerticalDivider(width: 1, color: colors.border),
                   Expanded(
-                    child: _selected == null
-                        ? Center(
-                            child: MeshEmptyState(
-                              icon: Icons.description_rounded,
-                              title: 'Choose a file',
-                              body: 'Pick a file on the left to open it here.',
-                            ),
-                          )
-                        : FileViewerPane(
-                            key: _viewerKey,
-                            host: widget.host,
-                            api: widget.api,
-                            path: _selected!,
-                            agentProvider: widget.agentProvider,
-                            sessionId: widget.sessionId,
-                            observable: _viewerObservable,
-                            dense: true,
-                            liveStream: _liveStream,
-                          ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _DialogPaneHeader(
+                          icon: _selected == null
+                              ? Icons.description_rounded
+                              : Icons.insert_drive_file_rounded,
+                          title: _selected == null
+                              ? 'Preview'
+                              : baseName(_selected!),
+                          subtitle: _selected == null
+                              ? 'Choose a file to open it here.'
+                              : _selected!,
+                          trailing: _selected == null
+                              ? null
+                              : ListenableBuilder(
+                                  listenable: _viewerObservable,
+                                  builder: (context, _) => FileViewerActions(
+                                    state: _viewerKey.currentState,
+                                  ),
+                                ),
+                        ),
+                        Divider(height: 1, color: colors.border),
+                        Expanded(
+                          child: _selected == null
+                              ? const Center(
+                                  child: MeshEmptyState(
+                                    icon: Icons.description_rounded,
+                                    title: 'Choose a file',
+                                    body:
+                                        'Pick a file on the left to open it here.',
+                                  ),
+                                )
+                              : FileViewerPane(
+                                  key: _viewerKey,
+                                  host: widget.host,
+                                  api: widget.api,
+                                  path: _selected!,
+                                  agentProvider: widget.agentProvider,
+                                  sessionId: widget.sessionId,
+                                  observable: _viewerObservable,
+                                  dense: true,
+                                  liveStream: _liveStream,
+                                ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -153,24 +192,18 @@ class _DialogHeader extends StatelessWidget {
   const _DialogHeader({
     required this.host,
     required this.root,
-    required this.selected,
-    required this.viewerObservable,
-    required this.viewerKey,
     required this.onClose,
   });
 
   final HostProfile host;
   final String root;
-  final String? selected;
-  final ValueNotifier<int> viewerObservable;
-  final GlobalKey<FileViewerPaneState> viewerKey;
   final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final theme = Theme.of(context);
-    final selectedPath = selected;
+    final rootLabel = baseName(root).isEmpty ? root : baseName(root);
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
       child: Row(
@@ -184,9 +217,7 @@ class _DialogHeader extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  selectedPath == null
-                      ? 'Files'
-                      : baseName(selectedPath),
+                  'Browse files',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleMedium?.copyWith(
@@ -194,44 +225,88 @@ class _DialogHeader extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Row(
-                  children: [
-                    if (selectedPath != null &&
-                        languageForPath(selectedPath) != null) ...[
-                      MeshPill(
-                        label: languageForPath(selectedPath)!,
-                        mono: true,
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    Flexible(
-                      child: Text(
-                        selectedPath == null
-                            ? '${host.label} · ${baseName(root).isEmpty ? root : baseName(root)}'
-                            : '${host.label} · $selectedPath',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.textTertiary,
-                        ),
-                      ),
-                    ),
-                  ],
+                Text(
+                  '${host.label} · $rootLabel',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colors.textTertiary,
+                  ),
                 ),
               ],
             ),
           ),
-          if (selectedPath != null)
-            ListenableBuilder(
-              listenable: viewerObservable,
-              builder: (context, _) =>
-                  FileViewerActions(state: viewerKey.currentState),
-            ),
           IconButton(
             tooltip: 'Close',
             onPressed: onClose,
             icon: const Icon(Icons.close_rounded, size: 20),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DialogPaneHeader extends StatelessWidget {
+  const _DialogPaneHeader({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: colors.surfaceMuted,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: colors.border),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 17, color: colors.accent),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: colors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (trailing != null) ...[const SizedBox(width: 8), trailing!],
         ],
       ),
     );
